@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Social QA Auto-Responder (Tourism Edition)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+  <style>
+    :root {
+      --canvas-white: #F9FAFB;
+      --pure-surface: #FFFFFF;
+      --charcoal-ink: #18181B;
+      --muted-steel: #71717A;
+      --whisper-border: rgba(226, 232, 240, 0.8);
+      --sapphire-accent: #2563EB;
+      --alert-crimson: #DC2626;
+      --safe-emerald: #16A34A;
+      --dark-sidebar: #18181B;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Geist', sans-serif; }
+    body { display: flex; height: 100vh; background-color: var(--canvas-white); color: var(--charcoal-ink); overflow: hidden; }
+
+    /* 80px Fixed Sidebar */
+    .sidebar { width: 80px; background-color: var(--dark-sidebar); border-right: 1px solid var(--whisper-border); display: flex; flex-direction: column; align-items: center; padding: 24px 0; z-index: 100; }
+    .app-logo { width: 44px; height: 44px; background: rgba(37, 99, 235, 0.15); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--sapphire-accent); margin-bottom: 32px; }
+    .nav-item { width: 64px; padding: 10px 0; margin-bottom: 16px; border-radius: 10px; display: flex; flex-direction: column; align-items: center; cursor: pointer; color: var(--muted-steel); transition: all 0.2s ease; }
+    .nav-item.active { background-color: var(--sapphire-accent); color: #FFFFFF; }
+    .nav-item .material-symbols-outlined { font-size: 24px; margin-bottom: 4px; }
+    .nav-item span.label { font-size: 10px; font-weight: 500; }
+
+    /* Main Container */
+    .main-content { flex: 1; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    .tab-page { display: none; width: 100%; height: 100%; }
+    .tab-page.active { display: flex; }
+
+    /* Page 1: Chat Dashboard (3 Columns 20% - 50% - 30%) */
+    .dashboard-container { display: flex; width: 100%; height: 100%; }
+    .col-inbox { width: 20%; background: var(--pure-surface); border-right: 1px solid var(--whisper-border); display: flex; flex-direction: column; }
+    .col-chat { width: 50%; display: flex; flex-direction: column; background: var(--canvas-white); }
+    .col-control { width: 30%; background: var(--pure-surface); border-left: 1px solid var(--whisper-border); padding: 20px; overflow-y: auto; }
+
+    .header-title { padding: 18px 20px; font-size: 15px; font-weight: 700; border-bottom: 1px solid var(--whisper-border); display: flex; justify-content: space-between; align-items: center; }
+    .chat-item { padding: 14px 16px; border-bottom: 1px solid var(--whisper-border); cursor: pointer; display: flex; gap: 12px; align-items: center; }
+    .chat-item.active { background: rgba(37, 99, 235, 0.08); }
+    .avatar { width: 40px; height: 40px; border-radius: 50%; background: #E4E4E7; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+    .chat-meta { flex: 1; overflow: hidden; }
+    .chat-name { font-size: 14px; font-weight: 600; display: flex; justify-content: space-between; }
+    .platform-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 600; background: rgba(37, 99, 235, 0.1); color: var(--sapphire-accent); }
+
+    .chat-header { padding: 16px 20px; background: var(--pure-surface); border-bottom: 1px solid var(--whisper-border); display: flex; justify-content: space-between; align-items: center; }
+    .model-selector { padding: 6px 12px; background: rgba(37, 99, 235, 0.1); border: 1px solid rgba(37, 99, 235, 0.3); border-radius: 8px; color: var(--sapphire-accent); font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; cursor: pointer; }
+
+    .chat-thread { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+    .msg-group { display: flex; flex-direction: column; }
+    .msg-group.user { align-items: flex-start; }
+    .msg-group.ai, .msg-group.human { align-items: flex-end; }
+    .msg-bubble { max-width: 420px; padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.5; }
+    .user .msg-bubble { background: var(--pure-surface); border: 1px solid var(--whisper-border); color: var(--charcoal-ink); }
+    .ai .msg-bubble { background: var(--sapphire-accent); color: #FFFFFF; }
+    .human .msg-bubble { background: var(--alert-crimson); color: #FFFFFF; }
+    .confidence-badge { font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 2px 8px; border-radius: 12px; margin-bottom: 4px; font-weight: 600; }
+    .conf-high { background: rgba(22, 163, 74, 0.12); color: var(--safe-emerald); }
+    .conf-low { background: rgba(220, 38, 38, 0.12); color: var(--alert-crimson); }
+    .msg-time { font-size: 10px; color: var(--muted-steel); margin-top: 4px; }
+
+    .chat-input-bar { padding: 16px; background: var(--pure-surface); border-top: 1px solid var(--whisper-border); display: flex; gap: 12px; }
+    .chat-input { flex: 1; padding: 12px 16px; border: 1px solid var(--whisper-border); border-radius: 8px; outline: none; font-size: 14px; }
+    .chat-input:focus { border-color: var(--sapphire-accent); }
+    .btn-send { padding: 12px 20px; background: var(--sapphire-accent); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+
+    /* Control Panel Cards */
+    .card { background: var(--pure-surface); border: 1px solid var(--whisper-border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .takeover-card { border: 1.5px solid var(--sapphire-accent); background: rgba(37, 99, 235, 0.05); }
+    .takeover-card.active { border-color: var(--alert-crimson); background: rgba(220, 38, 38, 0.05); }
+    .switch-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .switch-title { font-size: 13px; font-weight: 700; }
+    .toggle-switch { position: relative; width: 44px; height: 24px; appearance: none; background: #CBD5E1; border-radius: 12px; cursor: pointer; outline: none; transition: 0.3s; }
+    .toggle-switch:checked { background: var(--alert-crimson); }
+    .toggle-switch::before { content: ''; position: absolute; width: 20px; height: 20px; border-radius: 50%; background: white; top: 2px; left: 2px; transition: 0.3s; }
+    .toggle-switch:checked::before { left: 22px; }
+
+    /* Empty State Container */
+    .empty-container { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 32px; background: var(--pure-surface); }
+    .empty-icon { width: 64px; height: 64px; border-radius: 50%; background: rgba(220,38,38,0.1); color: var(--alert-crimson); display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
+    .empty-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; color: var(--charcoal-ink); }
+    .empty-desc { font-size: 13px; color: var(--muted-steel); max-width: 440px; margin-bottom: 20px; line-height: 1.5; }
+
+    /* Modal Dialog */
+    .modal-backdrop { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 1000; }
+    .modal-backdrop.active { display: flex; }
+    .modal-box { background: white; border-radius: 12px; width: 480px; max-width: 90%; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
+    .modal-title { font-size: 18px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; }
+
+    /* Page 2 & 3 Settings Standard Layout */
+    .settings-page { padding: 32px; overflow-y: auto; width: 100%; }
+    .page-header { margin-bottom: 24px; }
+    .page-title { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+    .page-sub { font-size: 13px; color: var(--muted-steel); }
+
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group label { font-size: 12px; font-weight: 600; color: var(--muted-steel); }
+    .form-group input, .form-group textarea { padding: 10px 14px; border: 1px solid var(--whisper-border); border-radius: 8px; font-size: 14px; outline: none; }
+
+    /* Accordion Item */
+    .accordion-item { border: 1px solid var(--whisper-border); border-radius: 10px; background: var(--pure-surface); margin-bottom: 12px; overflow: hidden; }
+    .accordion-header { padding: 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
+    .accordion-body { padding: 16px; border-top: 1px solid var(--whisper-border); display: none; background: #FAFBFD; }
+    .accordion-item.expanded .accordion-body { display: block; }
+    .status-pill { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+    .pill-active { background: rgba(22, 163, 74, 0.1); color: var(--safe-emerald); }
+    .pill-expired { background: rgba(220, 38, 38, 0.1); color: var(--alert-crimson); }
+  </style>
+</head>
+<body>
+
+  <!-- Navigation Sidebar -->
+  <div class="sidebar">
+    <div class="app-logo">
+      <span class="material-symbols-outlined">auto_awesome</span>
+    </div>
+    <div class="nav-item active" onclick="switchTab('chat')" id="nav-chat">
+      <span class="material-symbols-outlined">chat_bubble</span>
+      <span class="label">Chat</span>
+    </div>
+    <div class="nav-item" onclick="switchTab('knowledge')" id="nav-knowledge">
+      <span class="material-symbols-outlined">dataset</span>
+      <span class="label">Knowledge</span>
+    </div>
+    <div class="nav-item" onclick="switchTab('channels')" id="nav-channels">
+      <span class="material-symbols-outlined">tune</span>
+      <span class="label">Channels</span>
+    </div>
+  </div>
+
+  <div class="main-content">
+    
+    <!-- PAGE 1: CHAT DASHBOARD -->
+    <div class="tab-page active" id="page-chat">
+      <div class="dashboard-container" id="chat-dashboard-container">
+        <!-- Rendered dynamically depending on connected channels -->
+      </div>
+    </div>
+
+    <!-- PAGE 2: KNOWLEDGE BASE -->
+    <div class="tab-page" id="page-knowledge">
+      <div class="settings-page">
+        <div class="page-header">
+          <div class="page-title">Knowledge Base & Persona Management</div>
+          <div class="page-sub">Quản lý thông tin Persona đóng vai cho AI và kho dữ liệu Tour/Ưu đãi du lịch thực tế.</div>
+        </div>
+
+        <!-- Persona Form -->
+        <div class="card" style="margin-bottom:32px;">
+          <div style="display:flex; align-items:center; gap:8px; font-size:16px; font-weight:700; margin-bottom:16px;">
+            <span class="material-symbols-outlined" style="color:var(--sapphire-accent);">psychology</span>
+            Persona Roleplay Configuration
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Agent Name (Tên hiển thị)</label>
+              <input type="text" value="Nguyễn Văn A" id="persona-name">
+            </div>
+            <div class="form-group">
+              <label>Job Title / Experience</label>
+              <input type="text" value="Chuyên viên tư vấn Tour Chuyên nghiệp (5 năm EXP)" id="persona-title">
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom:16px;">
+            <label>Tone of Voice (Giọng điệu tư vấn)</label>
+            <textarea rows="2" id="persona-tone">Lịch sự, nhiệt tình, tư vấn chi tiết lịch trình, xưng em gọi anh/chị</textarea>
+          </div>
+          <button style="padding:10px 20px; background:var(--sapphire-accent); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer; float:right;" onclick="savePersona()">Save Persona</button>
+          <div style="clear:both;"></div>
+        </div>
+
+        <!-- Accordion List -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <div style="font-size:16px; font-weight:700;">Tours & Promotions Database (Live RAG Store)</div>
+          <button style="padding:8px 16px; background:var(--pure-surface); border:1px solid var(--whisper-border); color:var(--sapphire-accent); border-radius:8px; font-weight:600; cursor:pointer;" onclick="openAddTourModal()">+ Thêm Tour Mới</button>
+        </div>
+
+        <div id="accordion-list">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE 3: CHANNEL INTEGRATION -->
+    <div class="tab-page" id="page-channels">
+      <div class="settings-page">
+        <div class="page-header">
+          <div class="page-title">Social Channel Integration Settings</div>
+          <div class="page-sub">Cấu hình kết nối API cho các kênh tư vấn mạng xã hội để AI phản hồi tự động.</div>
+        </div>
+
+        <div id="channels-list">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- MODAL DIALOGS -->
+  <div class="modal-backdrop" id="modal-telegram">
+    <div class="modal-box">
+      <div class="modal-title">
+        <span class="material-symbols-outlined" style="color:#0284C7;">send</span>
+        Ủy Quyền Telegram Bot Token
+      </div>
+      <div style="font-size:13px; color:var(--muted-steel); margin-bottom:16px;">
+        Nhập HTTP API Bot Token được cấp từ <b>@BotFather</b> trên Telegram để đăng ký Webhook tự động:
+      </div>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label>Telegram Bot Token</label>
+        <input type="text" id="telegram-token-input" placeholder="VD: 7192830192:AAHgXyZ-90123841029481920">
+      </div>
+      <div class="modal-footer">
+        <button style="padding:8px 16px; background:transparent; border:none; color:var(--muted-steel); font-weight:600; cursor:pointer;" onclick="closeModal('modal-telegram')">Hủy</button>
+        <button style="padding:8px 18px; background:var(--sapphire-accent); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;" onclick="submitTelegramAuth()">Xác Nhận & Kết Nối</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-add-tour">
+    <div class="modal-box" style="width:540px;">
+      <div class="modal-title">
+        <span class="material-symbols-outlined" style="color:var(--sapphire-accent);">add_location_alt</span>
+        Thêm Tour / Ưu Đãi Mới (Live RAG)
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Tên Tour / Chương trình ưu đãi</label>
+        <input type="text" id="new-tour-title" placeholder="VD: Tour Nha Trang - Đảo Điệp Sơn 3N2Đ">
+      </div>
+      <div class="form-grid">
+        <div class="form-group"><label>Giá tiền</label><input type="text" id="new-tour-price" placeholder="VD: 4,500,000 VNĐ"></div>
+        <div class="form-group"><label>Ngày hết hạn</label><input type="text" id="new-tour-expiry" value="2026-12-31"></div>
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Chi tiết lịch trình / dịch vụ bao gồm</label>
+        <textarea rows="3" id="new-tour-content" placeholder="Bao gồm vé máy bay khứ hồi + Khách sạn 4 sao sát biển + Lặn ngắm san hô..."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button style="padding:8px 16px; background:transparent; border:none; color:var(--muted-steel); font-weight:600; cursor:pointer;" onclick="closeModal('modal-add-tour')">Hủy</button>
+        <button style="padding:8px 18px; background:var(--sapphire-accent); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;" onclick="submitAddTour()">Lưu & Cập Nhật RAG</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // LIVE REACTIVE STATE STORE
+    let toursState = [
+      {
+        id: 'tour-1',
+        title: 'Tour Đà Nẵng - Hội An - Bà Nà Hills 3N2Đ',
+        price: '5,990,000 VNĐ',
+        expiryDate: '2026-09-30',
+        content: 'Trọn gói vé máy bay khứ hồi + Khách sạn 4 sao biển Mỹ Khê + Vé cáp treo Bà Nà Hills + Ăn 5 bữa chính.',
+        isActive: true
+      },
+      {
+        id: 'tour-2',
+        title: 'Voucher Giảm 20% Tour Phú Quốc 4N3Đ Combo VinWonders',
+        price: '7,200,000 VNĐ',
+        expiryDate: '2026-10-15',
+        content: 'Bao gồm 3 đêm tại Vinholidays Fiesta Phú Quốc + Vé vui chơi không giới hạn VinWonders & Safari + Xe đón tiễn sân bay.',
+        isActive: true
+      },
+      {
+        id: 'tour-3',
+        title: 'Tour Du Thuyền Hạ Long 5 Sao 2N1Đ Đêm Gala Dinner',
+        price: '3,850,000 VNĐ',
+        expiryDate: '2026-08-01',
+        content: 'Trải nghiệm du thuyền cao cấp 5 sao trên vịnh Hạ Long, chèo thuyền Kayak thăm hang Sang Sáng.',
+        isActive: false
+      }
+    ];
+
+    let channelsState = [
+      { id: 'zalo_oa', name: 'Zalo Official Account', account: 'Zalo OA #84930291', platformKey: 'zalo oa', isAuthorized: true, expiresText: 'Access Token tự động làm mới qua CronJob ngầm', icon: 'chat_bubble', color: '#2563EB' },
+      { id: 'fb_messenger', name: 'Facebook Messenger', account: 'Page: Du Lịch Việt Nam Fans', platformKey: 'messenger', isAuthorized: true, expiresText: 'Token vĩnh viễn (Page Token)', icon: 'facebook', color: '#4F46E5' },
+      { id: 'telegram_bot', name: 'Telegram Bot', account: 'Chưa liên kết', platformKey: 'telegram', isAuthorized: false, expiresText: 'Cần nhập Bot Token từ @BotFather', icon: 'send', color: '#0284C7' },
+      { id: 'instagram_direct', name: 'Instagram Direct', account: 'Chưa liên kết', platformKey: 'instagram', isAuthorized: false, expiresText: 'Cần cấp quyền Meta Business Graph API', icon: 'camera_alt', color: '#DB2777' }
+    ];
+
+    let allConversations = [
+      { id: 'chat-1', name: 'Nguyễn Văn Minh', platform: 'Zalo OA', platformKey: 'zalo oa', preview: 'Tour Đà Nẵng 3N2Đ giá bao nhiêu...', time: '10:42 AM' },
+      { id: 'chat-2', name: 'Trần Thị Thu Hà', platform: 'Messenger', platformKey: 'messenger', preview: 'Voucher Phú Quốc còn hạn không...', time: '09:15 AM' },
+      { id: 'chat-3', name: 'Lê Hoàng Nam', platform: 'Telegram', platformKey: 'telegram', preview: 'Cho mình xin thêm thông tin Phú Quốc...', time: 'Hôm qua' }
+    ];
+
+    let selectedChatId = 'chat-1';
+    let personaState = {
+      name: 'Nguyễn Văn A',
+      title: 'Chuyên viên tư vấn Tour Chuyên nghiệp (5 năm EXP)',
+      tone: 'Lịch sự, nhiệt tình, tư vấn chi tiết lịch trình, xưng em gọi anh/chị'
+    };
+
+    let isHumanTakeover = false;
+
+    function initPage() {
+      renderTours();
+      renderChannels();
+      renderChatDashboard();
+    }
+
+    function switchTab(tab) {
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-page').forEach(el => el.classList.remove('active'));
+
+      document.getElementById('nav-' + tab).classList.add('active');
+      document.getElementById('page-' + tab).classList.add('active');
+    }
+
+    // RENDER CHAT DASHBOARD (DYNAMIC CHANNEL GATED)
+    function renderChatDashboard() {
+      const container = document.getElementById('chat-dashboard-container');
+      
+      // Filter conversations by active/authorized channels
+      const authorizedKeys = channelsState.filter(c => c.isAuthorized).map(c => c.platformKey);
+      const filteredConvs = allConversations.filter(c => authorizedKeys.includes(c.platformKey));
+
+      if (filteredConvs.length === 0) {
+        // EMPTY STATE WHEN 0 CHANNELS ARE AUTHORIZED
+        container.innerHTML = `
+          <div class="empty-container">
+            <div class="empty-icon"><span class="material-symbols-outlined" style="font-size:36px;">comments_disabled</span></div>
+            <div class="empty-title">Chưa Có Kênh Mạng Xã Hội Nào Được Kết Nối</div>
+            <div class="empty-desc">
+              Tin nhắn chỉ hiển thị cho các kênh đã được ủy quyền (Connected). Hiện tại chưa có kênh nào kết nối. Vui lòng sang tab <b>Channels</b> để ủy quyền Zalo OA, Messenger, Telegram hoặc Instagram.
+            </div>
+            <button style="padding:12px 24px; background:var(--sapphire-accent); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;" onclick="switchTab('channels')">
+              👉 Sang Trang Cài Đặt Channels
+            </button>
+          </div>
+        `;
+        return;
+      }
+
+      // Ensure active chat is in filtered list
+      if (!filteredConvs.find(c => c.id === selectedChatId)) {
+        selectedChatId = filteredConvs[0].id;
+      }
+      const activeChat = filteredConvs.find(c => c.id === selectedChatId) || filteredConvs[0];
+
+      let inboxItemsHtml = '';
+      filteredConvs.forEach(c => {
+        const isSel = c.id === activeChat.id ? ' active' : '';
+        inboxItemsHtml += `
+          <div class="chat-item${isSel}" id="chat-item-${c.id}" onclick="selectChat('${c.id}')">
+            <div class="avatar">${c.name[0]}</div>
+            <div class="chat-meta">
+              <div class="chat-name">${c.name} <span class="platform-badge">${c.platform}</span></div>
+              <div style="font-size:12px; color:var(--muted-steel); margin-top:2px;">${c.preview}</div>
+            </div>
+          </div>
+        `;
+      });
+
+      container.innerHTML = `
+        <!-- Col 1: Omnichannel Inbox -->
+        <div class="col-inbox">
+          <div class="header-title">
+            <span>Omnichannel Inbox (${filteredConvs.length})</span>
+            <span style="font-size:10px; padding:2px 6px; background:rgba(22,163,74,0.1); color:var(--safe-emerald); border-radius:4px; font-weight:600;">Connected</span>
+          </div>
+          <div style="overflow-y:auto; flex:1;">
+            ${inboxItemsHtml}
+          </div>
+        </div>
+
+        <!-- Col 2: Active Chat Thread -->
+        <div class="col-chat">
+          <div class="chat-header">
+            <div>
+              <span style="font-size:16px; font-weight:700;">${activeChat.name}</span>
+              <span style="margin-left:8px; font-size:11px; padding:2px 8px; border-radius:12px; background:rgba(22,163,74,0.1); color:var(--safe-emerald); font-weight:600;">Online</span>
+              <span style="margin-left:6px; font-size:11px; color:var(--muted-steel);">• Kênh ${activeChat.platform}</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-size:11px; padding:4px 8px; border-radius:12px; background:rgba(22,163,74,0.1); color:var(--safe-emerald); font-weight:600; display:flex; align-items:center; gap:4px;">
+                <span class="material-symbols-outlined" style="font-size:14px;">lock</span> Secure Proxy Active (0% Key Exposure)
+              </span>
+              <select class="model-selector" id="model-select">
+                <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                <option value="gemini-3.6-flash">gemini-3.6-flash</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="chat-thread" id="chat-thread">
+            <div class="msg-group user">
+              <div class="msg-bubble">Chào em, tour Đà Nẵng 3N2Đ đợt này giá thế nào vậy?</div>
+              <div class="msg-time">Khách hàng • 10:40 AM</div>
+            </div>
+            <div class="msg-group ai">
+              <div class="confidence-badge conf-high">Score: 0.95</div>
+              <div class="msg-bubble">Dạ em chào anh ${activeChat.name.split(' ').pop()}! Tour Đà Nẵng - Hội An - Bà Nà Hills 3 ngày 2 đêm bên em đang có giá khuyến mãi chỉ 5.990.000 VNĐ/khách (áp dụng đến 30/09). Giá đã bao gồm vé máy bay và khách sạn 4 sao ạ!</div>
+              <div class="msg-time">AI Bot (gemini-2.0-flash) • 10:41 AM</div>
+            </div>
+          </div>
+
+          <div class="chat-input-bar">
+            <input type="text" class="chat-input" id="chat-input-field" placeholder="Gõ câu hỏi từ khách hàng (AI Gemini sẽ tự truy xuất RAG thực tế)..." onkeypress="if(event.key==='Enter') sendUserMsg()" />
+            <button class="btn-send" onclick="sendUserMsg()">
+              <span class="material-symbols-outlined" style="font-size:18px;">send</span> Gửi
+            </button>
+          </div>
+        </div>
+
+        <!-- Col 3: Agent Control Panel -->
+        <div class="col-control">
+          <div style="font-size:16px; font-weight:700; margin-bottom:16px;">Agent Control Panel</div>
+          
+          <!-- Takeover Card -->
+          <div class="card takeover-card${isHumanTakeover ? ' active' : ''}" id="takeover-card">
+            <div class="switch-row">
+              <span class="switch-title" id="takeover-status-title" style="color:${isHumanTakeover ? 'var(--alert-crimson)' : 'var(--sapphire-accent)'};">${isHumanTakeover ? 'HUMAN TAKEOVER MODE' : 'AI AUTO-REPLY MODE'}</span>
+              <input type="checkbox" class="toggle-switch" id="takeover-toggle" ${isHumanTakeover ? 'checked' : ''} onchange="toggleTakeover(this.checked)">
+            </div>
+            <div style="font-size:12px; color:var(--muted-steel);" id="takeover-desc">
+              ${isHumanTakeover ? 'AI đã tạm dừng trả lời khách hàng này. Nhân viên đang kiểm soát hoàn toàn phiên chat.' : 'AI đang tự động truy xuất tri thức và tư vấn cho khách hàng theo Persona.'}
+            </div>
+          </div>
+
+          <!-- Customer Summary Card -->
+          <div class="card">
+            <div style="font-size:13px; font-weight:700; margin-bottom:8px;">Tóm Tắt Khách Hàng</div>
+            <div style="font-size:12px; margin-bottom:4px;">👤 Họ tên: ${activeChat.name}</div>
+            <div style="font-size:12px; margin-bottom:4px;">🌐 Kênh liên hệ: ${activeChat.platform}</div>
+            <div style="font-size:12px; color:var(--muted-steel);">📞 SĐT: 098****321</div>
+          </div>
+
+          <!-- Webhook Simulator Button -->
+          <div class="card" style="background:rgba(37,99,235,0.05); border:1px solid rgba(37,99,235,0.3);">
+            <div style="font-size:12px; font-weight:700; color:var(--sapphire-accent); margin-bottom:6px;">⚡ Webhook Event Simulator</div>
+            <button style="width:100%; padding:8px; background:var(--sapphire-accent); color:white; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer;" onclick="simulateIncomingWebhook('${activeChat.platform}')">⚡ Giả Lập Webhook Nhận Tin Nhắn Đến</button>
+          </div>
+
+          <!-- RAG Retrieved Context -->
+          <div style="font-size:14px; font-weight:700; margin-bottom:12px;">Retrieved Knowledge Context (RAG)</div>
+          <div id="rag-context-container">
+            <div class="card">
+              <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:600;">
+                <span>${toursState[0] ? toursState[0].title : 'Tour Đà Nẵng 3N2Đ'}</span>
+                <span style="font-family:'JetBrains Mono'; color:var(--sapphire-accent);">95% Match</span>
+              </div>
+              <div style="font-size:12px; color:var(--muted-steel); margin:4px 0;">Giá: ${toursState[0] ? toursState[0].price : '5,990,000 VNĐ'}</div>
+              <div style="font-size:12px;">${toursState[0] ? toursState[0].content : 'Bao gồm vé máy bay + khách sạn 4 sao.'}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function selectChat(id) {
+      selectedChatId = id;
+      renderChatDashboard();
+    }
+
+    // RENDER KNOWLEDGE BASE TOURS
+    function renderTours() {
+      const container = document.getElementById('accordion-list');
+      if (!container) return;
+      container.innerHTML = '';
+
+      const today = new Date().toISOString().split('T')[0];
+
+      toursState.forEach((t, idx) => {
+        const isExpired = t.expiryDate < today || !t.isActive;
+        const statusBadge = isExpired ? '<span class="status-pill pill-expired">Expired</span>' : '<span class="status-pill pill-active">Active</span>';
+
+        const item = document.createElement('div');
+        item.className = 'accordion-item' + (idx === 0 ? ' expanded' : '');
+        item.id = 'acc-' + t.id;
+        item.innerHTML = `
+          <div class="accordion-header" onclick="toggleAcc('${t.id}')">
+            <span style="font-weight:600;">${t.title}</span>
+            <span style="font-weight:700; color:var(--sapphire-accent);">${t.price}</span>
+            <span style="font-size:12px; color:var(--muted-steel);">Hạn: ${t.expiryDate}</span>
+            ${statusBadge}
+          </div>
+          <div class="accordion-body">
+            <div class="form-group" style="margin-bottom:12px;">
+              <label>Chi tiết lịch trình / Nội dung ưu đãi</label>
+              <textarea rows="3" id="edit-content-${t.id}">${t.content}</textarea>
+            </div>
+            <div class="form-grid">
+              <div class="form-group"><label>Giá tiền</label><input type="text" id="edit-price-${t.id}" value="${t.price}"></div>
+              <div class="form-group"><label>Ngày hết hạn</label><input type="text" id="edit-expiry-${t.id}" value="${t.expiryDate}"></div>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:12px;">
+              <button style="padding:8px 16px; border:1px solid var(--alert-crimson); color:var(--alert-crimson); background:transparent; border-radius:8px; font-weight:600; cursor:pointer;" onclick="deleteTour('${t.id}')">Xóa Tour</button>
+              <button style="padding:8px 16px; background:var(--sapphire-accent); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;" onclick="saveTourEdit('${t.id}')">Save Changes</button>
+            </div>
+          </div>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    function toggleAcc(id) {
+      document.getElementById('acc-' + id).classList.toggle('expanded');
+    }
+
+    function savePersona() {
+      personaState.name = document.getElementById('persona-name').value;
+      personaState.title = document.getElementById('persona-title').value;
+      personaState.tone = document.getElementById('persona-tone').value;
+      alert('Đã lưu cấu hình Persona thành công! AI sẽ phản hồi theo tên: ' + personaState.name);
+    }
+
+    function saveTourEdit(id) {
+      const tour = toursState.find(t => t.id === id);
+      if (tour) {
+        tour.content = document.getElementById('edit-content-' + id).value;
+        tour.price = document.getElementById('edit-price-' + id).value;
+        tour.expiryDate = document.getElementById('edit-expiry-' + id).value;
+        renderTours();
+        alert('Đã lưu thay đổi cho tour: ' + tour.title + '\nTrạng thái RAG Search đã cập nhật!');
+      }
+    }
+
+    function deleteTour(id) {
+      toursState = toursState.filter(t => t.id !== id);
+      renderTours();
+      alert('Đã xóa tour khỏi hệ thống!');
+    }
+
+    function openAddTourModal() {
+      document.getElementById('modal-add-tour').classList.add('active');
+    }
+
+    function submitAddTour() {
+      const title = document.getElementById('new-tour-title').value.trim();
+      const price = document.getElementById('new-tour-price').value.trim();
+      const expiry = document.getElementById('new-tour-expiry').value.trim();
+      const content = document.getElementById('new-tour-content').value.trim();
+
+      if (!title || !price) {
+        alert('Vui lòng nhập tên tour và giá!');
+        return;
+      }
+
+      const newTour = {
+        id: 'tour-' + Date.now(),
+        title,
+        price,
+        expiryDate: expiry || '2026-12-31',
+        content: content || 'Chưa cập nhật chi tiết',
+        isActive: true
+      };
+
+      toursState.push(newTour);
+      renderTours();
+      closeModal('modal-add-tour');
+      alert('Đã thêm tour mới thành công! RAG Search hiện đã nhận thông tin tour mới.');
+    }
+
+    // RENDER SOCIAL CHANNELS
+    function renderChannels() {
+      const container = document.getElementById('channels-list');
+      if (!container) return;
+      container.innerHTML = '';
+
+      channelsState.forEach(c => {
+        const item = document.createElement('div');
+        item.className = 'card';
+        item.style.display = 'flex';
+        item.style.justifyContent = 'space-between';
+        item.style.alignItems = 'center';
+
+        const badge = c.isAuthorized 
+          ? '<span style="font-size:11px; padding:2px 8px; border-radius:12px; background:rgba(22,163,74,0.1); color:var(--safe-emerald); margin-left:8px;">Connected</span>'
+          : '<span style="font-size:11px; padding:2px 8px; border-radius:12px; background:rgba(220,38,38,0.1); color:var(--alert-crimson); margin-left:8px;">Disconnected</span>';
+
+        const actionBtn = c.isAuthorized
+          ? `<button style="padding:10px 18px; border:1px solid var(--alert-crimson); color:var(--alert-crimson); background:transparent; border-radius:8px; font-weight:600; cursor:pointer;" onclick="toggleChannelAuth('${c.id}', false)">Disconnect</button>`
+          : `<button style="padding:10px 18px; background:var(--sapphire-accent); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;" onclick="openAuthModal('${c.id}')">Authorize</button>`;
+
+        item.innerHTML = `
+          <div style="display:flex; gap:16px; align-items:center;">
+            <div style="width:48px; height:48px; border-radius:10px; background:rgba(37,99,235,0.1); color:${c.color}; display:flex; align-items:center; justify-content:center;">
+              <span class="material-symbols-outlined">${c.icon}</span>
+            </div>
+            <div>
+              <div style="font-size:15px; font-weight:700;">${c.name} ${badge}</div>
+              <div style="font-size:12px; font-family:'JetBrains Mono'; color:var(--muted-steel); margin-top:2px;">${c.account}</div>
+              <div style="font-size:11px; color:${c.isAuthorized ? 'var(--muted-steel)' : 'var(--alert-crimson)'};">${c.expiresText}</div>
+            </div>
+          </div>
+          ${actionBtn}
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    function openAuthModal(id) {
+      if (id === 'telegram_bot') {
+        document.getElementById('modal-telegram').classList.add('active');
+      } else {
+        toggleChannelAuth(id, true);
+      }
+    }
+
+    function closeModal(modalId) {
+      document.getElementById(modalId).classList.remove('active');
+    }
+
+    function submitTelegramAuth() {
+      const token = document.getElementById('telegram-token-input').value.trim();
+      if (!token) {
+        alert('Vui lòng nhập Telegram Bot Token!');
+        return;
+      }
+      const tg = channelsState.find(c => c.id === 'telegram_bot');
+      if (tg) {
+        tg.isAuthorized = true;
+        tg.account = 'Bot Token: ' + token.substring(0, 10) + '...';
+        tg.expiresText = 'Webhook Telegram Active';
+      }
+      renderChannels();
+      renderChatDashboard();
+      closeModal('modal-telegram');
+      alert('Ủy quyền thành công Telegram Bot! Tin nhắn từ Telegram đã được mở khóa hiển thị trên Chat Dashboard.');
+    }
+
+    function toggleChannelAuth(id, isAuth) {
+      const channel = channelsState.find(c => c.id === id);
+      if (channel) {
+        channel.isAuthorized = isAuth;
+        if (isAuth) {
+          channel.expiresText = 'Ủy quyền thành công';
+          if (id === 'telegram_bot') channel.account = 'Bot Token Connected';
+          if (id === 'instagram_direct') channel.account = 'Account: @travel_insta_official';
+          alert('Đã ủy quyền kết nối thành công với ' + channel.name);
+        } else {
+          channel.expiresText = 'Chưa liên kết tài khoản';
+          alert('Đã ngắt kết nối với ' + channel.name + '!\nTin nhắn của kênh này đã ẩn khỏi Chat Dashboard.');
+        }
+        renderChannels();
+        renderChatDashboard();
+      }
+    }
+
+    function toggleTakeover(checked) {
+      isHumanTakeover = checked;
+      renderChatDashboard();
+    }
+
+    function simulateIncomingWebhook(platform) {
+      const thread = document.getElementById('chat-thread');
+      if (!thread) return;
+
+      const sampleQueries = [
+        "Anh/chị ơi tour Đà Nẵng có còn suất khởi hành tháng 9 không?",
+        "Tư vấn cho mình giá tour Phú Quốc 4N3Đ với!",
+        "Cho mình xin chính sách trẻ em tour du thuyền Hạ Long nhé."
+      ];
+      const q = sampleQueries[Math.floor(Math.random() * sampleQueries.length)];
+
+      thread.innerHTML += `
+        <div class="msg-group user">
+          <div class="msg-bubble">${q}</div>
+          <div class="msg-time">Khách hàng (${platform} Webhook) • Just now</div>
+        </div>
+      `;
+      thread.scrollTop = thread.scrollHeight;
+
+      if (!isHumanTakeover) {
+        setTimeout(() => {
+          thread.innerHTML += `
+            <div class="msg-group ai">
+              <div class="confidence-badge conf-high">Score: 0.94</div>
+              <div class="msg-bubble">Dạ em chào anh/chị! Em là ${personaState.name} (${personaState.title}). Webhook ${platform} vừa nhận được câu hỏi của anh/chị: "${q}". Bên em có các gói tour ưu đãi hấp dẫn đã được cập nhật ạ!</div>
+              <div class="msg-time">AI Bot (gemini-2.0-flash) • Just now</div>
+            </div>
+          `;
+          thread.scrollTop = thread.scrollHeight;
+        }, 600);
+      }
+    }
+
+    // LIVE RAG SEARCH & CHAT ENGINE
+    function sendUserMsg() {
+      const input = document.getElementById('chat-input-field');
+      const val = input.value.trim();
+      if (!val) return;
+
+      const thread = document.getElementById('chat-thread');
+      const model = document.getElementById('model-select').value;
+
+      if (isHumanTakeover) {
+        thread.innerHTML += `
+          <div class="msg-group human">
+            <div class="msg-bubble">${val}</div>
+            <div class="msg-time">Nhân viên (Human Takeover) • Just now</div>
+          </div>
+        `;
+        input.value = '';
+        thread.scrollTop = thread.scrollHeight;
+      } else {
+        thread.innerHTML += `
+          <div class="msg-group user">
+            <div class="msg-bubble">${val}</div>
+            <div class="msg-time">Khách hàng • Just now</div>
+          </div>
+        `;
+        input.value = '';
+        thread.scrollTop = thread.scrollHeight;
+
+        // Perform Live RAG Search over toursState
+        const queryLower = val.toLowerCase();
+        let matchedTour = toursState.find(t => 
+          t.title.toLowerCase().includes(queryLower) || 
+          queryLower.includes(t.title.toLowerCase().split(' ')[1] || '---') ||
+          (queryLower.includes('đà nẵng') && t.title.toLowerCase().includes('đà nẵng')) ||
+          (queryLower.includes('phú quốc') && t.title.toLowerCase().includes('phú quốc')) ||
+          (queryLower.includes('nha trang') && t.title.toLowerCase().includes('nha trang')) ||
+          (queryLower.includes('hạ long') && t.title.toLowerCase().includes('hạ long'))
+        );
+
+        if (!matchedTour && toursState.length > 0) {
+          matchedTour = toursState[0];
+        }
+
+        // Update RAG Context UI in Column 3
+        const ragContainer = document.getElementById('rag-context-container');
+        if (matchedTour) {
+          ragContainer.innerHTML = `
+            <div class="card">
+              <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:600;">
+                <span>${matchedTour.title}</span>
+                <span style="font-family:'JetBrains Mono'; color:var(--sapphire-accent);">94% Match</span>
+              </div>
+              <div style="font-size:12px; color:var(--muted-steel); margin:4px 0;">Giá: ${matchedTour.price}</div>
+              <div style="font-size:12px;">${matchedTour.content}</div>
+            </div>
+          `;
+        }
+
+        // AI Response Generation
+        setTimeout(() => {
+          let aiText = '';
+          if (matchedTour) {
+            aiText = `Dạ em chào anh/chị! Em là ${personaState.name} (${personaState.title}). Về thông tin tour, bên em có "${matchedTour.title}" giá chỉ ${matchedTour.price}. Chi tiết: ${matchedTour.content}`;
+          } else {
+            aiText = `Dạ em chào anh/chị! Em là ${personaState.name}. Hiện tại thông tin tour này đang được cập nhật, anh/chị để lại SĐT để em hỗ trợ tư vấn trực tiếp nhé!`;
+          }
+
+          thread.innerHTML += `
+            <div class="msg-group ai">
+              <div class="confidence-badge conf-high">Score: 0.94</div>
+              <div class="msg-bubble">${aiText}</div>
+              <div class="msg-time">AI Bot (${model}) • Just now</div>
+            </div>
+          `;
+          thread.scrollTop = thread.scrollHeight;
+        }, 500);
+      }
+    }
+
+    window.onload = initPage;
+  </script>
+</body>
+</html>

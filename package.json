@@ -1,0 +1,15 @@
+{
+  "name": "fleetbus-passenger-system",
+  "version": "3.0.0",
+  "description": "FleetBus Autonomous Spec-to-Test Pipeline & Passenger Application",
+  "main": "source/passenger-app/index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/**/*.test.js",
+    "lint": "node --check source/passenger-app/**/*.js test/**/*.test.js",
+    "start": "node source/passenger-app/server.js"
+  },
+  "keywords": ["fleetbus", "passenger", "busgo", "telemetry", "realtime", "vietqr"],
+  "author": "FleetBus Engineering",
+  "license": "UNLICENSED"
+}

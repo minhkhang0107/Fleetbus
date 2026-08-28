@@ -1,0 +1,57 @@
+name: Autonomous Build, Test & Firebase Deploy
+
+on:
+  push:
+    branches:
+      - master
+      - develop
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build-and-test:
+    name: Self-Test & Build Web
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          flutter-version: '3.24.x'
+          cache: true
+
+      - name: Install Melos & Dependencies
+        run: |
+          dart pub global activate melos
+          flutter pub get
+          melos bootstrap
+
+      - name: Run Self-Tests (Unit & Integration Tests)
+        run: |
+          cd domain && flutter test
+          cd ../data && flutter test
+
+      - name: Build Web Target
+        run: |
+          cd app
+          flutter build web --release
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_SOCIAL_QA }}'
+          channelId: live
+          projectId: social-qa-auto-responder
+        continue-on-error: true

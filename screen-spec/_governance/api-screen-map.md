@@ -1,0 +1,101 @@
+# BusGo Screen-to-API Mapping Matrix
+
+**Document Version:** 1.0  
+**Scope:** Complete mapping of screens across Passenger, Driver, and Manager apps to backend REST & Realtime endpoints.
+
+---
+
+## 1. Passenger App Screen API Mapping
+
+| Screen ID | Screen Name | Endpoint | Method | Auth | Idempotency | Primary Purpose |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **PAX-001** | Splash | `GET /api/v1/app/config` | `GET` | Public | No | Fetch remote flags, minimal version, payment channels |
+| **PAX-002** | Login | `POST /api/v1/auth/passenger/otp/request` | `POST` | Public | Yes (`Idempotency-Key`) | Request SMS OTP for phone authentication |
+| **PAX-003** | OTP Verification | `POST /api/v1/auth/passenger/otp/verify` | `POST` | Public | Yes (`Idempotency-Key`) | Exchange OTP for JWT Access + Refresh Token |
+| **PAX-004** | Home | `GET /api/v1/passenger/home-feed` | `GET` | Bearer/Public | No | Active ticket banner, popular corridors, announcements |
+| **PAX-005** | Location Picker | `GET /api/v1/routes/stops/search` | `GET` | Public | No | Search bus stops / provinces / pickup points |
+| **PAX-006** | Search Results | `GET /api/v1/trips/search` | `GET` | Public | No | Query trips by origin, destination, date, vehicle type |
+| **PAX-007** | Trip Detail | `GET /api/v1/trips/{tripId}` | `GET` | Public | No | Retrieve trip metadata, stop timeline, policies, vehicle info |
+| **PAX-008** | Pickup/Dropoff | `GET /api/v1/trips/{tripId}/stops` | `GET` | Public | No | Query selectable pickup & dropoff points for segment |
+| **PAX-009** | Seat Map | `GET /api/v1/trips/{tripId}/seat-map` | `GET` | Public | No | Query 2D seat matrix and segment occupancy |
+| **PAX-010** | Seat Hold | `POST /api/v1/trips/{tripId}/seats/hold` | `POST` | Bearer | Yes (`Idempotency-Key`) | Acquire 600s Redis distributed seat lock |
+| **PAX-010** | Seat Release | `DELETE /api/v1/trips/{tripId}/seats/hold` | `DELETE` | Bearer | Yes | Explicitly release temporary hold before expiry |
+| **PAX-011** | Passenger Info | `GET /api/v1/passenger/saved-travelers` | `GET` | Bearer | No | Fetch saved traveler profiles for fast form autofill |
+| **PAX-012** | Checkout | `POST /api/v1/bookings/create` | `POST` | Bearer | Yes (`Idempotency-Key`) | Create formal Booking record in `PENDING_PAYMENT` state |
+| **PAX-013** | Payment Processing| `POST /api/v1/payments/initiate` | `POST` | Bearer | Yes (`Idempotency-Key`) | Generate Gateway URL (VNPAY/MoMo) or Dynamic VietQR |
+| **PAX-014** | Payment Result | `GET /api/v1/payments/{paymentId}/status` | `GET` | Bearer | No | Poll payment authoritative state from PostgreSQL |
+| **PAX-015** | Booking Success| `GET /api/v1/bookings/{bookingId}` | `GET` | Bearer | No | Fetch confirmed PNR details and ticket summaries |
+| **PAX-016** | My Tickets | `GET /api/v1/passenger/tickets` | `GET` | Bearer | No | Query upcoming, historical, and cancelled tickets |
+| **PAX-017** | Ticket QR | `GET /api/v1/tickets/{ticketId}` | `GET` | Bearer | No | Fetch ticket boarding pass & signed QR payload |
+| **PAX-018** | Live Tracking | `GET /api/v1/trips/{tripId}/tracking` | `GET` | Bearer/Public | No | Fetch initial tracking snapshot; WS room `trip:{tripId}` |
+| **PAX-019** | ETA Detail | `GET /api/v1/trips/{tripId}/eta` | `GET` | Bearer/Public | No | Fetch per-stop map-matched ETA predictions |
+| **PAX-020** | Notifications | `GET /api/v1/passenger/notifications` | `GET` | Bearer | No | Paginated operational and marketing push notifications |
+| **PAX-021** | Cancel / Refund | `POST /api/v1/bookings/{bookingId}/cancel` | `POST` | Bearer | Yes (`Idempotency-Key`) | Request booking cancellation and policy refund calculation |
+| **PAX-022** | Profile | `GET /api/v1/passenger/profile` | `GET` | Bearer | No | User profile details, loyalty points, preferences |
+| **PAX-023** | Saved Contacts | `POST /api/v1/passenger/saved-travelers` | `POST` | Bearer | Yes | Create / update saved travelers |
+| **PAX-024** | Replacement Notice| `GET /api/v1/trips/{tripId}/replacement-info` | `GET` | Bearer | No | Query updated vehicle specs and seat reassignment details |
+| **PAX-025** | Trip Delay Notice| `GET /api/v1/trips/{tripId}/disruptions` | `GET` | Bearer | No | Query delay cause, updated departure ETA, alternatives |
+
+---
+
+## 2. Driver App Screen API & Telemetry Mapping
+
+| Screen ID | Screen Name | Protocol / Endpoint | Method | Auth | Idempotency | Primary Purpose |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **DRI-001** | Driver Login | `POST /api/v1/auth/driver/login` | `POST` | Public | Yes | Driver Staff credentials authentication & device binding |
+| **DRI-002** | Today's Trips | `GET /api/v1/driver/trips/today` | `GET` | Bearer (Driver) | No | Query assigned trips, vehicles, and schedules for shift |
+| **DRI-003** | Pre-start Detail | `GET /api/v1/driver/trips/{tripId}` | `GET` | Bearer (Driver) | No | Query route snapshot, passenger manifest summary, stops |
+| **DRI-004** | Readiness Checklist | `POST /api/v1/driver/trips/{tripId}/readiness` | `POST` | Bearer (Driver) | Yes | Submit vehicle inspection & safety verification checklist |
+| **DRI-005** | Start Trip | `POST /api/v1/driver/trips/{tripId}/start` | `POST` | Bearer (Driver) | Yes (`Idempotency-Key`) | Transition trip to `IN_TRANSIT`; activate GPS service |
+| **DRI-006** | Active Cockpit | `MQTT: busgo/telemetry/{vehicleId}` | `PUB` | MQTT Token | Sequence | Publish high-frequency (3-5s) telemetry stream |
+| **DRI-007** | Manifest | `GET /api/v1/driver/trips/{tripId}/manifest` | `GET` | Bearer (Driver) | No | Retrieve authoritative passenger list grouped by stops |
+| **DRI-008** | Stop Detail | `POST /api/v1/driver/trips/{tripId}/stops/{stopId}/arrive` | `POST` | Bearer (Driver) | Yes | Confirm vehicle arrival at stop geofence |
+| **DRI-009** | QR Scanner | `Offline Cryptographic Signature Verify` | N/A | Local Key | Yes | Verify ticket HMAC-SHA256 offline |
+| **DRI-009** | Boarding Event | `POST /api/v1/driver/trips/{tripId}/boarding` | `POST` | Bearer (Driver) | Yes (`Idempotency-Key`) | Submit boarded ticket status (direct or via sync outbox) |
+| **DRI-010** | Manual Boarding | `POST /api/v1/driver/trips/{tripId}/boarding/manual` | `POST` | Bearer (Driver) | Yes | Board passenger by PNR or verified phone lookup |
+| **DRI-011** | Mark No-Show | `POST /api/v1/driver/trips/{tripId}/tickets/{ticketId}/no-show` | `POST` | Bearer (Driver) | Yes | Mark absent passenger after grace period expiry |
+| **DRI-012** | COD Collection | `POST /api/v1/driver/trips/{tripId}/payments/cod-collect` | `POST` | Bearer (Driver) | Yes (`Idempotency-Key`) | Confirm cash received and issue electronic receipt |
+| **DRI-013** | Navigation | `GET /api/v1/routes/{routeId}/geometry` | `GET` | Bearer (Driver) | No | Fetch detailed road polyline for turn-by-turn guidance |
+| **DRI-014** | GPS Health | `Local Android Sensor / Battery Status` | N/A | System | No | Monitor foreground service health & GPS accuracy |
+| **DRI-015** | Sync Center | `POST /api/v1/driver/telemetry/batch-replay` | `POST` | Bearer (Driver) | Yes | Flush SQLite buffered offline telemetry & boarding events |
+| **DRI-016** | Diagnostics | `GET /api/v1/driver/system/diagnostics-ping` | `GET` | Bearer (Driver) | No | Measure round-trip ping to API gateway and MQTT broker |
+| **DRI-017** | End Trip | `POST /api/v1/driver/trips/{tripId}/end` | `POST` | Bearer (Driver) | Yes (`Idempotency-Key`) | Submit final odometer, reconcile manifest, stop GPS |
+| **DRI-018** | Driver Profile | `GET /api/v1/driver/profile` | `GET` | Bearer (Driver) | No | Fetch driver license status, shift metrics, ratings |
+| **DRI-019** | Incident Report | `POST /api/v1/driver/trips/{tripId}/incidents` | `POST` | Bearer (Driver) | Yes | Submit emergency SOS, breakdown, or severe delay report |
+
+---
+
+## 3. Manager Portal Screen API Mapping
+
+| Screen ID | Screen Name | Endpoint | Method | Auth | Idempotency | Primary Purpose |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **MGR-001** | Staff Login | `POST /api/v1/auth/staff/login` | `POST` | Public | Yes | Staff email/password + 2FA token exchange |
+| **MGR-002** | Dashboard | `GET /api/v1/ops/dashboard/kpis` | `GET` | Bearer (Staff) | No | Live operational KPIs (active trips, revenue, load factor) |
+| **MGR-003** | Live Radar | `GET /api/v1/ops/fleet/live-positions` | `GET` | Bearer (Staff) | No | Query latest vehicle coordinates; WS room `ops:fleet` |
+| **MGR-004** | Vehicle Live Detail| `GET /api/v1/ops/vehicles/{id}/telemetry-trail` | `GET` | Bearer (Staff) | No | Historical breadcrumbs, speed chart, CAN bus status |
+| **MGR-005** | Vehicle List | `GET /api/v1/ops/vehicles` | `GET` | Bearer (Staff) | No | Paginated fleet inventory with filter by model/status |
+| **MGR-006** | Vehicle Create/Edit| `POST / PUT /api/v1/ops/vehicles` | `POST/PUT` | Bearer (Staff) | Yes | Upsert vehicle, register plate, bind seat layout |
+| **MGR-007** | Layout Builder | `POST / PUT /api/v1/ops/seat-layouts` | `POST/PUT` | Bearer (Staff) | Yes | Define 2D seat coordinates, decks, and seat codes |
+| **MGR-008** | Route List | `GET /api/v1/ops/routes` | `GET` | Bearer (Staff) | No | Directory of corridors, intermediate stops, distance |
+| **MGR-009** | Route Builder | `POST / PUT /api/v1/ops/routes` | `POST/PUT` | Bearer (Staff) | Yes | Define ordered stops, geofence polygons, segment matrix |
+| **MGR-010** | Trip List | `GET /api/v1/ops/trips` | `GET` | Bearer (Staff) | No | Paginated trip schedules with status and date filters |
+| **MGR-011** | Trip Create | `POST /api/v1/ops/trips` | `POST` | Bearer (Staff) | Yes (`Idempotency-Key`) | Schedule new trip; freeze snapshot of route & layout |
+| **MGR-012** | Trip Detail | `GET /api/v1/ops/trips/{tripId}/master` | `GET` | Bearer (Staff) | No | Complete trip ledger: driver, vehicle, revenue, manifest |
+| **MGR-013** | Seat Matrix | `GET /api/v1/ops/trips/{tripId}/seat-matrix` | `GET` | Bearer (Staff) | No | Sub-route occupancy matrix & manual seat lock/block |
+| **MGR-014** | Dispatch Board | `GET /api/v1/ops/dispatch/matrix` | `GET` | Bearer (Staff) | No | Daily timeline view of vehicles, drivers, and scheduled trips |
+| **MGR-015** | Driver List | `GET /api/v1/ops/drivers` | `GET` | Bearer (Staff) | No | Driver roster, license expiry status, assignment history |
+| **MGR-016** | Driver Detail | `GET /api/v1/ops/drivers/{driverId}/performance` | `GET` | Bearer (Staff) | No | Safety score, GPS uptime %, customer ratings, shift logs |
+| **MGR-017** | Booking Search | `GET /api/v1/ops/bookings` | `GET` | Bearer (Staff) | No | Advanced search by PNR, customer phone, date range |
+| **MGR-018** | Booking Detail | `GET /api/v1/ops/bookings/{bookingId}` | `GET` | Bearer (Staff) | No | Detailed booking financial record, tickets, audit trail |
+| **MGR-019** | POS Search | `GET /api/v1/ops/pos/trips` | `GET` | Bearer (Staff) | No | Optimized fast counter query for available segments |
+| **MGR-020** | POS Checkout | `POST /api/v1/ops/pos/orders` | `POST` | Bearer (Staff) | Yes (`Idempotency-Key`) | Direct POS counter ticket issuance with cash/card/bank |
+| **MGR-021** | Payments | `GET /api/v1/ops/payments` | `GET` | Bearer (Staff) | No | Payment reconciliation log, gateway references, webhook audits |
+| **MGR-022** | Refund Center | `POST /api/v1/ops/refunds/{refundId}/process` | `POST` | Bearer (Staff) | Yes (`Idempotency-Key`) | Approve refund and trigger payment gateway refund API |
+| **MGR-023** | Replace Vehicle| `POST /api/v1/ops/trips/{tripId}/replace-vehicle`| `POST` | Bearer (Staff) | Yes (`Idempotency-Key`) | Execute emergency bus replacement, seat remap & broadcast |
+| **MGR-024** | Delay Mgmt | `POST /api/v1/ops/trips/{tripId}/delay` | `POST` | Bearer (Staff) | Yes | Declare operational delay, update ETA, push to passengers |
+| **MGR-025** | Alerts Feed | `GET /api/v1/ops/alerts` | `GET` | Bearer (Staff) | No | Realtime incident feed (stale GPS, off-route, SOS) |
+| **MGR-026** | Notifications | `POST /api/v1/ops/notifications/broadcast` | `POST` | Bearer (Staff) | Yes | Broadcast SMS / Push to trip or route passengers |
+| **MGR-027** | Reports | `GET /api/v1/ops/reports/yield` | `GET` | Bearer (Staff) | No | Yield management, seat load factor, revenue per corridor |
+| **MGR-028** | Audit Logs | `GET /api/v1/ops/audit-logs` | `GET` | Bearer (Staff) | No | Immutable system audit log with actor, IP, before/after diff |
+| **MGR-029** | Roles & RBAC | `POST / PUT /api/v1/ops/rbac/roles` | `POST/PUT` | Bearer (Admin) | Yes | Manage staff roles, resource permissions, depot scoping |
+| **MGR-030** | System Settings| `POST / PUT /api/v1/ops/settings` | `POST/PUT` | Bearer (Admin) | Yes | Configure lock TTLs, GPS sampling rates, gateway keys |

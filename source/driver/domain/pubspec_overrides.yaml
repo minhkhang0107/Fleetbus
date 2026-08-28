@@ -1,0 +1,10 @@
+# melos_managed_dependency_overrides: init,resources,shared,data
+dependency_overrides:
+  data:
+    path: ../data
+  init:
+    path: ../init
+  resources:
+    path: ../resources
+  shared:
+    path: ../shared
