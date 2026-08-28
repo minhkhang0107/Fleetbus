@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BusGo Manager — Trung Tâm Điều Hành & Giám Sát Hoạt Động</title>
+
+  <!-- Typography: Geist & JetBrains Mono (Strictly NO Inter) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'canvas-light': '#F8FAFC',
+            'surface-panel': '#FFFFFF',
+            'surface-dark': '#0F172A',
+            'sidebar-active': '#1E293B',
+            'charcoal-ink': '#0F172A',
+            'text-muted': '#64748B',
+            'border-whisper': 'rgba(226, 232, 240, 0.8)',
+            'primary-sapphire': '#2563EB',
+            'primary-sapphire-soft': '#EFF6FF',
+            'emerald-safe': '#16A34A',
+            'emerald-soft': '#F0FDF4',
+            'amber-warning': '#D97706',
+            'amber-soft': '#FEF3C7',
+            'alert-critical': '#DC2626',
+            'alert-soft': '#FEF2F2',
+            'pnr-orange': '#FB9821',
+          },
+          fontFamily: {
+            sans: ['Geist', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      font-family: 'Geist', sans-serif;
+      background-color: #F8FAFC;
+      color: #0F172A;
+      -webkit-font-smoothing: antialiased;
+    }
+    .font-mono-data {
+      font-family: 'JetBrains Mono', monospace;
+      font-feature-settings: "tnum";
+      font-variant-numeric: tabular-nums;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #94A3B8;
+      border-radius: 8px;
+      transition: all 0.15s ease;
+      cursor: pointer;
+    }
+    .nav-item:hover {
+      color: #F8FAFC;
+      background-color: #1E293B;
+    }
+    .nav-item.active {
+      color: #FFFFFF;
+      background-color: #2563EB;
+      font-weight: 600;
+    }
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    .card-panel {
+      background: #FFFFFF;
+      border: 1px solid rgba(226, 232, 240, 0.8);
+      border-radius: 12px;
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+    }
+    .table-header-cell {
+      padding: 10px 14px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748B;
+      background-color: #F8FAFC;
+      border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+    }
+    .table-body-cell {
+      padding: 12px 14px;
+      font-size: 13px;
+      border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+    }
+  </style>
+</head>
+<body class="h-full flex overflow-hidden">
+
+  <!-- ========================================================================= -->
+  <!-- FIXED 240px DARK COMMAND SIDEBAR -->
+  <!-- ========================================================================= -->
+  <aside class="w-60 bg-surface-dark flex flex-col justify-between select-none z-30 flex-shrink-0">
+    <div>
+      <!-- Brand Logo -->
+      <div class="h-14 flex items-center px-4 border-b border-slate-800 space-x-3">
+        <div class="w-8 h-8 bg-primary-sapphire rounded-lg flex items-center justify-center text-white font-bold shadow-md">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
+        </div>
+        <div>
+          <span class="font-bold text-sm tracking-tight text-white block">BUSGO OPS</span>
+          <span class="text-[10px] text-slate-400 font-mono-data">v3.0.0 · Control Center</span>
+        </div>
+      </div>
+
+      <!-- Navigation Section Group -->
+      <div class="p-3 space-y-6">
+        <div>
+          <span class="px-3 text-[10px] uppercase font-bold text-slate-500 tracking-wider">TỔNG QUAN VẬN HÀNH</span>
+          <div class="mt-2 space-y-1">
+            <div onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-item active">
+              <svg class="w-4 h-4 mr-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+              <span>Dashboard Hoạt Động</span>
+            </div>
+            <div onclick="switchTab('radar')" id="nav-radar" class="nav-item">
+              <svg class="w-4 h-4 mr-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+              <span>Live Radar GPS</span>
+            </div>
+            <div onclick="switchTab('dispatch')" id="nav-dispatch" class="nav-item">
+              <svg class="w-4 h-4 mr-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="4" rx="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
+              <span>Bảng Điều Độ (Gantt)</span>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <span class="px-3 text-[10px] uppercase font-bold text-slate-500 tracking-wider">KINH DOANH & ĐẶT VÉ</span>
+          <div class="mt-2 space-y-1">
+            <div onclick="switchTab('pos')" id="nav-pos" class="nav-item">
+              <svg class="w-4 h-4 mr-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+              <span>Bán Vé POS / Hotline</span>
+            </div>
+            <div onclick="switchTab('replacement')" id="nav-replacement" class="nav-item">
+              <svg class="w-4 h-4 mr-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></svg>
+              <span>Đổi Xe Khẩn Cấp (Wizard)</span>
+            </div>
+            <div onclick="switchTab('reconcile')" id="nav-reconcile" class="nav-item">
+              <svg class="w-4 h-4 mr-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+              <span>Đối Soát & Hoàn Tiền</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manager Account Profile Footer -->
+    <div class="p-3 border-t border-slate-800 bg-slate-900/60">
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs text-primary-sapphire font-mono-data">
+          TD
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-xs font-bold text-white truncate">Nguyễn Tiến Dũng</p>
+          <p class="text-[10px] text-slate-400 truncate">Giám Đốc Điều Hành (Admin)</p>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ========================================================================= -->
+  <!-- MAIN OPERATIONAL WORKSPACE -->
+  <!-- ========================================================================= -->
+  <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
+
+    <!-- Top Command & Live Status Bar -->
+    <header class="h-14 bg-white border-b border-border-whisper flex items-center justify-between px-6 z-20 flex-shrink-0">
+      <div class="flex items-center space-x-4 flex-1">
+        <div class="relative w-80">
+          <input type="text" placeholder="Tìm PNR, Biển số xe, SĐT khách (Phím /)..." class="w-full h-9 pl-9 pr-4 bg-slate-100/80 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-primary-sapphire focus:bg-white transition" />
+          <svg class="w-4 h-4 text-slate-400 absolute left-3 top-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        </div>
+      </div>
+
+      <div class="flex items-center space-x-4">
+        <div class="flex items-center space-x-2 bg-emerald-soft text-emerald-safe border border-emerald-safe/30 px-3 py-1 rounded-full text-xs font-bold font-mono-data">
+          <span class="w-2 h-2 bg-emerald-safe rounded-full animate-pulse"></span>
+          <span>ATC RADAR: ONLINE (60 FPS)</span>
+        </div>
+        <div class="flex items-center space-x-2 bg-amber-soft text-amber-warning border border-amber-warning/30 px-3 py-1 rounded-full text-xs font-bold font-mono-data">
+          <span>🚨 2 CẢNH BÁO HOẠT ĐỘNG</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Scrollable Multi-Tab Content View -->
+    <div class="flex-1 overflow-y-auto p-6 space-y-6">
+
+      <!-- ========================================================================= -->
+      <!-- TAB 1: EXECUTIVE OPERATIONS DASHBOARD (MGR-002) -->
+      <!-- ========================================================================= -->
+      <div id="tab-dashboard" class="tab-content active space-y-6">
+        <div>
+          <h1 class="text-xl font-bold text-charcoal-ink">Bảng Điều Hành Hoạt Động (Operations Dashboard)</h1>
+          <p class="text-xs text-text-muted">Tổng quan thời gian thực ca chạy ngày 28/08/2026</p>
+        </div>
+
+        <!-- 6-Metric KPI Tiles -->
+        <div class="grid grid-cols-6 gap-4">
+          <div class="card-panel p-4">
+            <span class="text-[11px] font-bold text-text-muted uppercase">Xe Đang Chạy</span>
+            <div class="flex items-baseline space-x-1.5 mt-2">
+              <span class="font-mono-data text-2xl font-bold text-primary-sapphire">2 / 3</span>
+              <span class="text-xs text-text-muted">Xe</span>
+            </div>
+            <span class="text-[10px] text-emerald-safe font-semibold">🟢 66.7% Đội xe hoạt động</span>
+          </div>
+
+          <div class="card-panel p-4">
+            <span class="text-[11px] font-bold text-text-muted uppercase">Tỷ Lệ Lấp Đầy</span>
+            <div class="flex items-baseline space-x-1.5 mt-2">
+              <span class="font-mono-data text-2xl font-bold text-emerald-safe">85.7%</span>
+            </div>
+            <span class="text-[10px] text-text-muted">48 / 56 Chỗ đã bán</span>
+          </div>
+
+          <div class="card-panel p-4">
+            <span class="text-[11px] font-bold text-text-muted uppercase">Doanh Thu Hôm Nay</span>
+            <div class="flex items-baseline space-x-1.5 mt-2">
+              <span class="font-mono-data text-xl font-bold text-charcoal-ink">660.000 đ</span>
+            </div>
+            <span class="text-[10px] text-emerald-safe font-semibold">100% Thu tự động VietQR</span>
+          </div>
+
+          <div class="card-panel p-4">
+            <span class="text-[11px] font-bold text-text-muted uppercase">Đúng Giờ Xuất Bến</span>
+            <div class="flex items-baseline space-x-1.5 mt-2">
+              <span class="font-mono-data text-2xl font-bold text-emerald-safe">96.8%</span>
+            </div>
+            <span class="text-[10px] text-text-muted">Chuẩn KPI quốc gia</span>
+          </div>
+
+          <div class="card-panel p-4">
+            <span class="text-[11px] font-bold text-text-muted uppercase">Sự Cố Cần Xử Lý</span>
+            <div class="flex items-baseline space-x-1.5 mt-2">
+              <span class="font-mono-data text-2xl font-bold text-amber-warning">1</span>
+              <span class="text-xs text-text-muted">Cảnh báo</span>
+            </div>
+            <span class="text-[10px] text-amber-warning font-semibold">Trễ +35p cao tốc 5B</span>
+          </div>
+
+          <div class="card-panel p-4">
+            <span class="text-[11px] font-bold text-text-muted uppercase">Tốc Độ TB Đội Xe</span>
+            <div class="flex items-baseline space-x-1.5 mt-2">
+              <span class="font-mono-data text-2xl font-bold text-charcoal-ink">58.5</span>
+              <span class="text-xs text-text-muted">km/h</span>
+            </div>
+            <span class="text-[10px] text-emerald-safe font-semibold">Tất cả xe dưới 80 km/h</span>
+          </div>
+        </div>
+
+        <!-- Corridors & Alerts Split -->
+        <div class="grid grid-cols-3 gap-6">
+          <div class="card-panel p-5 col-span-2 space-y-4">
+            <h3 class="text-sm font-bold text-charcoal-ink">Tỷ lệ lấp đầy theo hành lang huyết mạch</h3>
+            <div class="space-y-3">
+              <div>
+                <div class="flex justify-between text-xs mb-1 font-semibold">
+                  <span>Hà Nội ➔ Thanh Hóa (Cao tốc Ninh Bình - Bãi Vọt)</span>
+                  <span class="font-mono-data text-primary-sapphire">94.2% · 28/34 Khách</span>
+                </div>
+                <div class="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div class="h-full bg-primary-sapphire rounded-full" style="width: 94.2%"></div>
+                </div>
+              </div>
+
+              <div>
+                <div class="flex justify-between text-xs mb-1 font-semibold">
+                  <span>Hà Nội ➔ Hải Phòng (Cao tốc 5B)</span>
+                  <span class="font-mono-data text-emerald-safe">90.9% · 20/22 Khách</span>
+                </div>
+                <div class="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div class="h-full bg-emerald-safe rounded-full" style="width: 90.9%"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card-panel p-5 space-y-3">
+            <h3 class="text-sm font-bold text-charcoal-ink">Cảnh báo hoạt động cần xử lý</h3>
+            <div class="space-y-2.5">
+              <div class="p-3 bg-amber-soft border border-amber-warning/40 rounded-xl text-xs space-y-1">
+                <div class="flex justify-between font-bold text-amber-warning font-mono-data">
+                  <span>⚠️ XE 29B-444.11 TRỄ +35 PHÚT</span>
+                  <span>13:00</span>
+                </div>
+                <p class="text-slate-700">Chuyến trp_991824 kẹt xe tại đầu nút giao cao tốc 5B Đình Vũ.</p>
+              </div>
+
+              <div class="p-3 bg-emerald-soft border border-emerald-safe/40 rounded-xl text-xs space-y-1">
+                <div class="flex justify-between font-bold text-emerald-safe font-mono-data">
+                  <span>🟢 XE 29B-123.45 ON-TRACK</span>
+                  <span>13:02</span>
+                </div>
+                <p class="text-slate-700">Tốc độ 62 km/h, dự kiến đến Bến xe Ninh Bình sớm 5 phút.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========================================================================= -->
+      <!-- TAB 2: LIVE FLEET RADAR GPS (MGR-003, MGR-004) -->
+      <!-- ========================================================================= -->
+      <div id="tab-radar" class="tab-content space-y-4">
+        <div class="flex justify-between items-center">
+          <div>
+            <h2 class="text-xl font-bold text-charcoal-ink">Giám Sát Vị Trí Xe Trực Tiếp (Live Fleet Radar)</h2>
+            <p class="text-xs text-text-muted">Theo dõi GPS 60Hz, tốc độ xe và cảnh báo lệch lộ trình</p>
+          </div>
+          <button class="px-3.5 py-1.5 bg-primary-sapphire text-white font-bold text-xs rounded-lg shadow">
+            + BẬT CHẾ ĐỘ TOÀN MÀN HÌNH ATC
+          </button>
+        </div>
+
+        <div class="grid grid-cols-3 gap-6 h-[600px]">
+          <!-- Vector Map Canvas Simulation -->
+          <div class="card-panel col-span-2 bg-slate-900 border-slate-800 relative overflow-hidden flex flex-col justify-between p-4">
+            <div class="flex justify-between z-10">
+              <span class="bg-slate-800/90 text-white font-mono-data text-xs px-3 py-1 rounded-lg border border-slate-700">
+                🛰️ VỆ TINH: 14 BEACON KẾT NỐI
+              </span>
+              <span class="bg-emerald-safe/20 text-emerald-safe border border-emerald-safe px-3 py-1 rounded-lg text-xs font-bold font-mono-data">
+                TỌA ĐỘ TRUNG TÂM: 20.9812°N, 105.8430°E
+              </span>
+            </div>
+
+            <!-- Radar Graphic Elements -->
+            <div class="absolute inset-0 flex items-center justify-center opacity-20 pointer-events-none">
+              <div class="w-96 h-96 border border-emerald-safe rounded-full"></div>
+              <div class="w-64 h-64 border border-emerald-safe rounded-full absolute"></div>
+              <div class="w-32 h-32 border border-emerald-safe rounded-full absolute"></div>
+            </div>
+
+            <!-- Bus Marker 1 -->
+            <div class="absolute top-1/3 left-1/2 -translate-x-1/2 flex items-center space-x-2 bg-slate-900/95 border-2 border-emerald-safe px-3 py-1.5 rounded-xl shadow-2xl">
+              <div class="w-3 h-3 bg-emerald-safe rounded-full animate-ping"></div>
+              <div>
+                <span class="font-mono-data text-xs font-bold text-white block">29B-123.45</span>
+                <span class="text-[10px] text-emerald-safe font-mono-data">62 km/h · Đang đến Ninh Bình</span>
+              </div>
+            </div>
+
+            <div class="flex justify-between z-10 text-[11px] text-slate-400 font-mono-data">
+              <span>ĐỘ TRỄ MẠNG: 12ms</span>
+              <span>ĐỘ CHÍNH XÁC GPS: &lt; 2.5m</span>
+            </div>
+          </div>
+
+          <!-- Tracked Vehicle Queue List -->
+          <div class="card-panel p-4 flex flex-col justify-between">
+            <div class="space-y-3">
+              <h3 class="text-xs font-bold text-text-muted uppercase">Danh sách phương tiện đang chạy</h3>
+
+              <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <div class="flex justify-between items-start">
+                  <span class="font-mono-data font-bold text-sm text-charcoal-ink">29B-123.45</span>
+                  <span class="font-mono-data text-[10px] bg-emerald-soft text-emerald-safe border border-emerald-safe/40 px-2 py-0.5 rounded font-bold">LIVE · 62 km/h</span>
+                </div>
+                <p class="text-xs text-text-muted">Tài xế: <b class="text-charcoal-ink">Trần Văn Bình</b> · Limousine 34</p>
+                <p class="text-xs text-slate-500">Tuyến: Hà Nội ➔ Thanh Hóa (Cao tốc)</p>
+              </div>
+
+              <div class="p-3 bg-amber-soft/40 border border-amber-warning/40 rounded-xl space-y-2">
+                <div class="flex justify-between items-start">
+                  <span class="font-mono-data font-bold text-sm text-charcoal-ink">29B-444.11</span>
+                  <span class="font-mono-data text-[10px] bg-amber-warning text-white px-2 py-0.5 rounded font-bold">STALE · TRỄ 35P</span>
+                </div>
+                <p class="text-xs text-text-muted">Tài xế: <b class="text-charcoal-ink">Lê Văn Toàn</b> · Cabin VIP 22</p>
+                <p class="text-xs text-slate-500">Tuyến: Hà Nội ➔ Hải Phòng (5B)</p>
+              </div>
+            </div>
+
+            <button onclick="switchTab('replacement')" class="w-full py-2.5 bg-slate-900 text-white font-bold text-xs rounded-xl shadow hover:bg-slate-800 transition">
+              ĐIỀU ĐỘNG ĐỔI XE KHẨN CẤP ➔
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========================================================================= -->
+      <!-- TAB 3: DISPATCH BOARD (MGR-014) -->
+      <!-- ========================================================================= -->
+      <div id="tab-dispatch" class="tab-content space-y-4">
+        <div>
+          <h2 class="text-xl font-bold text-charcoal-ink">Bảng Điều Độ Chuyến Xe (Dispatch Board)</h2>
+          <p class="text-xs text-text-muted">Quản lý lịch phân tài, biển số xe và tình trạng đặt vé</p>
+        </div>
+
+        <div class="card-panel overflow-hidden">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr>
+                <th class="table-header-cell">Mã Chuyến</th>
+                <th class="table-header-cell">Tuyến Đường</th>
+                <th class="table-header-cell">Biển Số Xe</th>
+                <th class="table-header-cell">Tài Xế Phân Ca</th>
+                <th class="table-header-cell">Giờ Xuất Bến</th>
+                <th class="table-header-cell">Tình Trạng Ghế</th>
+                <th class="table-header-cell">Trạng Thái</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="table-body-cell font-mono-data font-bold text-primary-sapphire">trp_991823</td>
+                <td class="table-body-cell font-semibold">Hà Nội — Thanh Hóa</td>
+                <td class="table-body-cell font-mono-data font-bold">29B-123.45</td>
+                <td class="table-body-cell">Trần Văn Bình (TX8821)</td>
+                <td class="table-body-cell font-mono-data">14:00 (28/08)</td>
+                <td class="table-body-cell font-mono-data font-bold text-emerald-safe">28 / 34 Chỗ</td>
+                <td class="table-body-cell"><span class="px-2.5 py-1 bg-emerald-soft text-emerald-safe border border-emerald-safe/40 rounded-full text-xs font-bold font-mono-data">IN_TRANSIT</span></td>
+              </tr>
+              <tr>
+                <td class="table-body-cell font-mono-data font-bold text-primary-sapphire">trp_991824</td>
+                <td class="table-body-cell font-semibold">Hà Nội — Hải Phòng</td>
+                <td class="table-body-cell font-mono-data font-bold">29B-444.11</td>
+                <td class="table-body-cell">Lê Văn Toàn (TX7712)</td>
+                <td class="table-body-cell font-mono-data">15:30 (28/08)</td>
+                <td class="table-body-cell font-mono-data font-bold text-emerald-safe">20 / 22 Chỗ</td>
+                <td class="table-body-cell"><span class="px-2.5 py-1 bg-amber-soft text-amber-warning border border-amber-warning/40 rounded-full text-xs font-bold font-mono-data">DELAY +35P</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ========================================================================= -->
+      <!-- TAB 4: POS COUNTER & HOTLINE BOOKING (MGR-019, MGR-020) -->
+      <!-- ========================================================================= -->
+      <div id="tab-pos" class="tab-content space-y-4">
+        <div>
+          <h2 class="text-xl font-bold text-charcoal-ink">Bán Vé Tại Quầy POS & Đặt Vé Qua Tổng Đài Hotline</h2>
+          <p class="text-xs text-text-muted">Xuất vé nhanh cho khách gọi điện hoặc mua trực tiếp tại bến</p>
+        </div>
+
+        <div class="grid grid-cols-3 gap-6">
+          <div class="card-panel p-5 space-y-4">
+            <h3 class="text-sm font-bold text-charcoal-ink uppercase">Thông tin khách hàng</h3>
+            <div class="space-y-3">
+              <div>
+                <label class="block text-xs font-semibold text-text-muted mb-1">Họ và tên khách</label>
+                <input id="pos-name" type="text" value="Lê Minh Tâm" class="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-text-muted mb-1">Số điện thoại</label>
+                <input id="pos-phone" type="text" value="0988776655" class="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-lg font-mono-data text-sm font-bold" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-text-muted mb-1">Chuyến xe</label>
+                <select class="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold">
+                  <option>14:00 - Hà Nội ➔ Thanh Hóa (29B-123.45)</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-text-muted mb-1">Số ghế chỉ định</label>
+                <input id="pos-seat" type="text" value="A03" class="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-lg font-mono-data text-sm font-bold text-primary-sapphire" />
+              </div>
+            </div>
+
+            <button onclick="handleCreatePOSBooking()" class="w-full h-12 bg-primary-sapphire text-white font-bold text-sm rounded-xl shadow hover:bg-blue-600 transition">
+              XUẤT VÉ POS & IN MÃ PNR ➔
+            </button>
+          </div>
+
+          <div class="card-panel p-5 col-span-2 space-y-3">
+            <h3 class="text-sm font-bold text-charcoal-ink uppercase">Lịch sử xuất vé tại quầy hôm nay</h3>
+            <div class="space-y-2" id="pos-history-list">
+              <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl flex justify-between items-center">
+                <div>
+                  <span class="font-mono-data font-bold text-sm text-pnr-orange">BG-99412</span>
+                  <span class="text-xs font-bold text-charcoal-ink ml-2">Nguyễn Thị Hoa · Ghế B01</span>
+                  <p class="text-[11px] text-text-muted">Chuyến 14:00 (Hà Nội - Thanh Hóa) · Đã thanh toán 220.000 đ</p>
+                </div>
+                <span class="px-2.5 py-1 bg-emerald-soft text-emerald-safe border border-emerald-safe/40 rounded-full text-xs font-bold font-mono-data">PAID</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========================================================================= -->
+      <!-- TAB 5: EMERGENCY VEHICLE REPLACEMENT (MGR-023) -->
+      <!-- ========================================================================= -->
+      <div id="tab-replacement" class="tab-content space-y-4">
+        <div>
+          <h2 class="text-xl font-bold text-charcoal-ink">Quy Trình Đổi Xe Khẩn Cấp (Emergency Vehicle Replacement)</h2>
+          <p class="text-xs text-text-muted">Tự động ánh xạ chuyển đổi chỗ ngồi và thông báo cho 28 hành khách</p>
+        </div>
+
+        <div class="card-panel p-6 space-y-6">
+          <div class="grid grid-cols-2 gap-8">
+            <div class="p-4 bg-alert-soft/60 border border-alert-critical/40 rounded-2xl space-y-3">
+              <span class="text-xs font-bold text-alert-critical uppercase">XE GẶP SỰ CỐ (XE CŨ)</span>
+              <h3 class="text-lg font-bold text-charcoal-ink font-mono-data">29B-123.45 (Limousine 34)</h3>
+              <p class="text-xs text-text-muted">Số khách cần chuyển chỗ: <b class="font-mono-data text-charcoal-ink font-bold">28 Hành khách</b></p>
+            </div>
+
+            <div class="p-4 bg-emerald-soft border border-emerald-safe/40 rounded-2xl space-y-3">
+              <span class="text-xs font-bold text-emerald-safe uppercase">XE THAY THẾ (DỰ PHÒNG TẠI BẾN)</span>
+              <h3 class="text-lg font-bold text-charcoal-ink font-mono-data">29B-888.22 (Sleeper 34)</h3>
+              <p class="text-xs text-text-muted">Trạng thái: <b class="text-emerald-safe font-bold">SẴN SÀNG ĐIỀU ĐỘNG NGAY</b></p>
+            </div>
+          </div>
+
+          <button onclick="handleExecuteReplacement()" class="w-full h-14 bg-amber-warning text-white font-bold text-base rounded-xl shadow-lg hover:bg-amber-600 transition flex items-center justify-center space-x-2">
+            <span>XÁC NHẬN ĐIỀU ĐỘNG XE 29B-888.22 & ÁNH XẠ TOÀN BỘ 28 GHẾ ➔</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ========================================================================= -->
+      <!-- TAB 6: RECONCILIATION & REFUNDS (MGR-021, MGR-022) -->
+      <!-- ========================================================================= -->
+      <div id="tab-reconcile" class="tab-content space-y-4">
+        <div>
+          <h2 class="text-xl font-bold text-charcoal-ink">Đối Soát Tài Chính & Xử Lý Hoàn Tiền (Reconciliation & Refunds)</h2>
+          <p class="text-xs text-text-muted">Khớp nối sổ cái cổng thanh toán Napas247 / VietQR với dữ liệu bán vé</p>
+        </div>
+
+        <div class="card-panel overflow-hidden">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr>
+                <th class="table-header-cell">Mã PNR</th>
+                <th class="table-header-cell">Hành Khách</th>
+                <th class="table-header-cell">Số Tiền</th>
+                <th class="table-header-cell">Cổng Thanh Toán</th>
+                <th class="table-header-cell">Trạng Thái Sổ Cái</th>
+                <th class="table-header-cell">Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="table-body-cell font-mono-data font-bold text-pnr-orange">BG-88219</td>
+                <td class="table-body-cell font-semibold">Trần Văn Hùng</td>
+                <td class="table-body-cell font-mono-data font-bold">440.000 đ</td>
+                <td class="table-body-cell font-mono-data text-xs">VietQR Napas247</td>
+                <td class="table-body-cell"><span class="px-2.5 py-1 bg-emerald-soft text-emerald-safe border border-emerald-safe/40 rounded-full text-xs font-bold font-mono-data">MATCHED 100%</span></td>
+                <td class="table-body-cell">
+                  <button onclick="handleRefund('BG-88219')" class="px-3 py-1 bg-alert-critical text-white font-bold text-xs rounded-lg hover:bg-red-700 transition">
+                    PHÊ DUYỆT HOÀN TIỀN
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+
+      const targetTab = document.getElementById('tab-' + tabId);
+      const targetNav = document.getElementById('nav-' + tabId);
+
+      if (targetTab) targetTab.classList.add('active');
+      if (targetNav) targetNav.classList.add('active');
+    }
+
+    function handleCreatePOSBooking() {
+      const name = document.getElementById('pos-name').value;
+      const phone = document.getElementById('pos-phone').value;
+      const seat = document.getElementById('pos-seat').value;
+      const pnr = 'BG-POS' + Math.floor(1000 + Math.random() * 9000);
+
+      alert(`✅ ĐÃ XUẤT VÉ POS THÀNH CÔNG!\nMã PNR: ${pnr}\nKhách hàng: ${name}\nGhế: ${seat}\nThu tiền: 220.000 đ`);
+
+      const list = document.getElementById('pos-history-list');
+      const item = document.createElement('div');
+      item.className = 'p-3 bg-emerald-soft border border-emerald-safe/40 rounded-xl flex justify-between items-center';
+      item.innerHTML = `
+        <div>
+          <span class="font-mono-data font-bold text-sm text-pnr-orange">${pnr}</span>
+          <span class="text-xs font-bold text-charcoal-ink ml-2">${name} · Ghế ${seat}</span>
+          <p class="text-[11px] text-text-muted">Chuyến 14:00 (Hà Nội - Thanh Hóa) · Đã thanh toán 220.000 đ</p>
+        </div>
+        <span class="px-2.5 py-1 bg-emerald-soft text-emerald-safe border border-emerald-safe/40 rounded-full text-xs font-bold font-mono-data">PAID</span>
+      `;
+      list.prepend(item);
+    }
+
+    function handleExecuteReplacement() {
+      alert('🔄 ĐÃ ĐIỀU ĐỘNG XE THAY THẾ THÀNH CÔNG!\nXe 29B-888.22 đã nhận lệnh xuất bến thay cho xe 29B-123.45.\nĐã tự động gửi SMS thông báo biển số xe mới cho 28 hành khách!');
+      switchTab('dashboard');
+    }
+
+    function handleRefund(pnr) {
+      alert(`💵 ĐÃ DUYỆT HOÀN TIỀN 100% CHO VÉ ${pnr}!\nSố tiền: 440.000 đ đã hoàn về tài khoản ngân hàng gốc.`);
+    }
+  </script>
+</body>
+</html>

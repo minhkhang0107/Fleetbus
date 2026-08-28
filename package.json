@@ -1,15 +1,15 @@
 {
   "name": "fleetbus-platform",
   "version": "3.0.0",
-  "description": "FleetBus Autonomous Spec-to-Test Pipeline — Passenger & Driver Tactical Applications",
+  "description": "FleetBus Autonomous Spec-to-Test Pipeline — Passenger, Driver & Manager Operations",
   "main": "source/passenger-app/index.js",
   "type": "module",
   "scripts": {
     "test": "node --test test/**/*.test.js",
-    "lint": "node --check source/passenger-app/**/*.js source/driver-app/**/*.js test/**/*.test.js",
+    "lint": "node --check source/passenger-app/**/*.js source/driver-app/**/*.js source/manager-app/**/*.js test/**/*.test.js",
     "start": "node source/passenger-app/server.js"
   },
-  "keywords": ["fleetbus", "passenger", "driver", "busgo", "telemetry", "realtime", "vietqr"],
+  "keywords": ["fleetbus", "passenger", "driver", "manager", "operations", "telemetry", "realtime", "vietqr"],
   "author": "FleetBus Engineering",
   "license": "UNLICENSED"
 }
