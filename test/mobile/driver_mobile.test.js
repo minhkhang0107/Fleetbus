@@ -7,9 +7,10 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-describe('Phase Driver Mobile: Android Platform & Cockpit Theme Integrity Test Suite', () => {
+describe('Phase Driver Mobile: Android & iOS Platform Integrity Test Suite', () => {
   const rootDir = path.resolve(__dirname, '../../');
   const driverManifestPath = path.join(rootDir, 'source/driver/app/android/app/src/main/AndroidManifest.xml');
+  const driverInfoPlistPath = path.join(rootDir, 'source/driver/app/ios/Runner/Info.plist');
   const driverMainDartPath = path.join(rootDir, 'source/driver/app/lib/main.dart');
   const driverAppColorsDartPath = path.join(rootDir, 'source/driver/resources/lib/src/theme/app_colors.dart');
   const driverPresDir = path.join(rootDir, 'source/driver/app/lib/src/presentation');
@@ -26,7 +27,19 @@ describe('Phase Driver Mobile: Android Platform & Cockpit Theme Integrity Test S
     assert.ok(content.includes('android:label="BusGo Driver"'), 'Label must be BusGo Driver');
   });
 
-  it('TC-DRV-MOB-02: Driver Flutter entry point must instantiate BusGoDriverApp with Dark Cockpit theme', () => {
+  it('TC-DRV-MOB-02: Driver iOS Info.plist must have BusGo Driver bundle identity and privacy usage strings', () => {
+    assert.ok(fs.existsSync(driverInfoPlistPath), 'Driver Info.plist must exist');
+    const content = fs.readFileSync(driverInfoPlistPath, 'utf8');
+
+    assert.ok(content.includes('<string>BusGo Driver</string>'), 'CFBundleDisplayName must be BusGo Driver');
+    assert.ok(content.includes('<string>vn.busgo.driver</string>'), 'CFBundleIdentifier must be vn.busgo.driver');
+    assert.ok(content.includes('NSLocationWhenInUseUsageDescription'), 'NSLocationWhenInUseUsageDescription must be set');
+    assert.ok(content.includes('NSLocationAlwaysAndWhenInUseUsageDescription'), 'NSLocationAlwaysAndWhenInUseUsageDescription must be set');
+    assert.ok(content.includes('NSCameraUsageDescription'), 'NSCameraUsageDescription must be set');
+    assert.ok(content.includes('<string>location</string>'), 'UIBackgroundModes location must be set');
+  });
+
+  it('TC-DRV-MOB-03: Driver Flutter entry point must instantiate BusGoDriverApp with Dark Cockpit theme', () => {
     assert.ok(fs.existsSync(driverMainDartPath), 'Driver main.dart must exist');
     const content = fs.readFileSync(driverMainDartPath, 'utf8');
 
@@ -34,7 +47,7 @@ describe('Phase Driver Mobile: Android Platform & Cockpit Theme Integrity Test S
     assert.ok(content.includes('DriverCockpitDashboard'), 'Must launch DriverCockpitDashboard');
   });
 
-  it('TC-DRV-MOB-03: Driver AppColors must declare tactical dark palette matching DESIGN.md', () => {
+  it('TC-DRV-MOB-04: Driver AppColors must declare tactical dark palette matching DESIGN.md', () => {
     assert.ok(fs.existsSync(driverAppColorsDartPath), 'Driver app_colors.dart must exist');
     const content = fs.readFileSync(driverAppColorsDartPath, 'utf8');
 
@@ -44,7 +57,7 @@ describe('Phase Driver Mobile: Android Platform & Cockpit Theme Integrity Test S
     assert.ok(content.includes('0xFFDC2626'), 'Alert critical #DC2626 must be defined');
   });
 
-  it('TC-DRV-MOB-04: All required Driver screens & API service must exist and cover DRI-001 to DRI-019', () => {
+  it('TC-DRV-MOB-05: All required Driver screens & API service must exist and cover DRI-001 to DRI-019', () => {
     const requiredFiles = [
       'driver_login_screen.dart',
       'driver_today_trips_screen.dart',
