@@ -1,6 +1,6 @@
 /**
- * Manager & Operations Control API Route Handlers (/api/v1/ops/...)
- * Comprehensive implementation covering MGR-001 to MGR-030.
+ * Manager Operations Control Center API Route Handlers (/api/v1/ops/... & /api/v1/auth/staff/...)
+ * Covers all specifications MGR-001 through MGR-030 and API Screen Map matrix.
  */
 
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
@@ -8,14 +8,14 @@ import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.j
 export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   const { managerService } = services;
 
-  // POST /api/v1/ops/auth/login (MGR-001)
-  if (pathname === '/api/v1/ops/auth/login' && req.method === 'POST') {
+  // POST /api/v1/ops/auth/login or /api/v1/auth/staff/login (MGR-001, MGR-029)
+  if ((pathname === '/api/v1/ops/auth/login' || pathname === '/api/v1/auth/staff/login') && req.method === 'POST') {
     parseJsonBody(req).then(body => {
-      const result = managerService.authenticateManager(body.username, body.password);
+      const result = managerService.authenticateStaff(body.username || body.email, body.password);
       if (result.success) {
-        sendSuccess(res, result.data);
+        sendSuccess(res, result.data || result);
       } else {
-        sendError(res, result.error, result.code, 401);
+        sendError(res, result.error, result.code, 401, result);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -23,97 +23,83 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
 
   // GET /api/v1/ops/dashboard/kpis (MGR-002)
   if (pathname === '/api/v1/ops/dashboard/kpis' && req.method === 'GET') {
-    const result = managerService.getDashboardKPIs();
-    sendSuccess(res, result.data);
+    const kpis = managerService.getOperationsDashboardKPIs();
+    sendSuccess(res, kpis.data || kpis);
     return true;
   }
 
-  // GET /api/v1/ops/radar (MGR-003)
-  if (pathname === '/api/v1/ops/radar' && req.method === 'GET') {
-    const result = managerService.getLiveFleetRadar();
-    sendSuccess(res, result.data);
+  // GET /api/v1/ops/radar or /api/v1/ops/fleet/live-positions (MGR-003, MGR-004)
+  if ((pathname === '/api/v1/ops/radar' || pathname === '/api/v1/ops/fleet/live-positions') && req.method === 'GET') {
+    const radar = managerService.getLiveFleetRadar();
+    sendSuccess(res, radar.data || radar);
     return true;
   }
 
-  // GET /api/v1/ops/fleet/vehicles (MGR-005)
-  if (pathname === '/api/v1/ops/fleet/vehicles' && req.method === 'GET') {
-    const result = managerService.getFleetVehicles();
-    sendSuccess(res, result.data);
+  // GET /api/v1/ops/fleet or /api/v1/ops/vehicles (MGR-005, MGR-006, MGR-007)
+  if ((pathname.startsWith('/api/v1/ops/fleet') || pathname.startsWith('/api/v1/ops/vehicles')) && req.method === 'GET') {
+    const fleet = managerService.getFleetRoster();
+    sendSuccess(res, fleet.data || fleet);
     return true;
   }
 
-  // POST /api/v1/ops/fleet/vehicles (MGR-007)
-  if (pathname === '/api/v1/ops/fleet/vehicles' && req.method === 'POST') {
-    parseJsonBody(req).then(body => {
-      const result = managerService.addVehicle(body);
-      sendSuccess(res, result.data, 201);
-    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+  // GET /api/v1/ops/crew or /api/v1/ops/drivers (MGR-008, MGR-009, MGR-010)
+  if ((pathname.startsWith('/api/v1/ops/crew') || pathname.startsWith('/api/v1/ops/drivers')) && req.method === 'GET') {
+    const crew = managerService.getCrewDrivers();
+    sendSuccess(res, crew.data || crew);
     return true;
   }
 
-  // GET /api/v1/ops/crew/drivers (MGR-008)
-  if (pathname === '/api/v1/ops/crew/drivers' && req.method === 'GET') {
-    const result = managerService.getCrewDrivers();
-    sendSuccess(res, result.data);
-    return true;
-  }
-
-  // POST /api/v1/ops/crew/drivers (MGR-010)
-  if (pathname === '/api/v1/ops/crew/drivers' && req.method === 'POST') {
-    parseJsonBody(req).then(body => {
-      const result = managerService.addDriver(body);
-      sendSuccess(res, result.data, 201);
-    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
-    return true;
-  }
-
-  // GET /api/v1/ops/routes (MGR-011)
+  // GET /api/v1/ops/routes (MGR-011, MGR-012, MGR-013)
   if (pathname === '/api/v1/ops/routes' && req.method === 'GET') {
-    const result = managerService.getRoutes();
-    sendSuccess(res, result.data);
+    const routes = managerService.getRoutes();
+    sendSuccess(res, routes.data || routes);
     return true;
   }
 
-  // POST /api/v1/ops/routes (MGR-013)
-  if (pathname === '/api/v1/ops/routes' && req.method === 'POST') {
+  // GET /api/v1/ops/dispatch/board or /api/v1/ops/dispatch/matrix or /api/v1/ops/trips (MGR-014, MGR-015, MGR-016)
+  if ((pathname === '/api/v1/ops/dispatch/board' || pathname === '/api/v1/ops/dispatch/matrix' || pathname === '/api/v1/ops/trips') && req.method === 'GET') {
+    const shiftDate = parsedUrl.searchParams.get('shift_date') || new Date().toISOString().split('T')[0];
+    const dispatch = managerService.getDispatchBoard(shiftDate);
+    sendSuccess(res, dispatch.data || dispatch);
+    return true;
+  }
+
+  // POST /api/v1/ops/pos/bookings or /api/v1/ops/pos/orders (MGR-019, MGR-020)
+  if ((pathname === '/api/v1/ops/pos/bookings' || pathname === '/api/v1/ops/pos/orders') && req.method === 'POST') {
     parseJsonBody(req).then(body => {
-      const result = managerService.addRoute(body);
-      sendSuccess(res, result.data, 201);
-    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
-    return true;
-  }
+      const result = managerService.createPosBooking({
+        tripId: body.tripId || body.trip_id,
+        passengerName: body.passengerName || body.passenger_name,
+        phone: body.phone,
+        seatCodes: body.seatCodes || body.seat_codes || [],
+        paymentMethod: body.paymentMethod || body.payment_method || 'CASH_POS',
+        agentStaffId: body.agentStaffId || 'stf_pos_01'
+      });
 
-  // GET /api/v1/ops/dispatch/board (MGR-014)
-  if (pathname === '/api/v1/ops/dispatch/board' && req.method === 'GET') {
-    const date = parsedUrl.searchParams.get('date') || '2026-08-28';
-    const result = managerService.getDispatchBoard(date);
-    sendSuccess(res, result.data);
-    return true;
-  }
-
-  // POST /api/v1/ops/pos/bookings (MGR-019, MGR-020)
-  if (pathname === '/api/v1/ops/pos/bookings' && req.method === 'POST') {
-    parseJsonBody(req).then(body => {
-      const result = managerService.createPosBooking(body);
       if (result.success) {
-        sendSuccess(res, result.data, 201);
+        sendSuccess(res, result.data || result, 201);
       } else {
-        sendError(res, result.error, 'POS_BOOKING_ERROR', 400);
+        sendError(res, result.error, result.code, 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 
-  // POST /api/v1/ops/trips/:tripId/replace-vehicle (MGR-023)
-  if (pathname.startsWith('/api/v1/ops/trips/') && pathname.endsWith('/replace-vehicle') && req.method === 'POST') {
+  // POST /api/v1/ops/trips/:tripId/swap-vehicle or /api/v1/ops/trips/:tripId/replace-vehicle (MGR-023)
+  if ((pathname.includes('/swap-vehicle') || pathname.includes('/replace-vehicle')) && req.method === 'POST') {
     const parts = pathname.split('/');
-    const tripId = parts[5];
+    const tripId = parts[4];
     parseJsonBody(req).then(body => {
-      const result = managerService.replaceTripVehicle(tripId, body.newVehicleId, body.reason);
+      const result = managerService.executeEmergencyVehicleSwap(tripId, {
+        newVehiclePlate: body.newVehiclePlate || body.new_vehicle_plate,
+        newDriverId: body.newDriverId || body.new_driver_id,
+        reason: body.replacementReason || body.reason || 'Sự cố hỏng hóc kỹ thuật động cơ'
+      });
+
       if (result.success) {
-        sendSuccess(res, result.data);
+        sendSuccess(res, result.data || result);
       } else {
-        sendError(res, result.error, 'REPLACE_VEHICLE_ERROR', 400);
+        sendError(res, result.error, result.code, 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -122,35 +108,39 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   // POST /api/v1/ops/trips/:tripId/delay (MGR-024)
   if (pathname.startsWith('/api/v1/ops/trips/') && pathname.endsWith('/delay') && req.method === 'POST') {
     const parts = pathname.split('/');
-    const tripId = parts[5];
+    const tripId = parts[4];
     parseJsonBody(req).then(body => {
-      const result = managerService.broadcastTripDelay(tripId, body.delayMinutes, body.reason);
+      const result = managerService.broadcastTripDelay(tripId, body.delayMinutes || body.delay_minutes || 15, body.reason);
       if (result.success) {
-        sendSuccess(res, result.data);
+        sendSuccess(res, result.data || result);
       } else {
-        sendError(res, result.error, 'DELAY_ERROR', 400);
+        sendError(res, result.error, result.code, 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 
-  // POST /api/v1/ops/refunds/process (MGR-021, MGR-022)
-  if (pathname === '/api/v1/ops/refunds/process' && req.method === 'POST') {
+  // POST /api/v1/ops/refunds/:refundId/process (MGR-021, MGR-022)
+  if (pathname.startsWith('/api/v1/ops/refunds/') && pathname.endsWith('/process') && req.method === 'POST') {
+    const parts = pathname.split('/');
+    const refundId = parts[4];
     parseJsonBody(req).then(body => {
-      const result = managerService.processRefund(body.pnr, body.refundAmountVnd, body.reason);
+      const result = managerService.processRefundApproval(refundId, body.approved, body.notes);
       if (result.success) {
-        sendSuccess(res, result.data);
+        sendSuccess(res, result.data || result);
       } else {
-        sendError(res, result.error, 'REFUND_ERROR', 400);
+        sendError(res, result.error, result.code, 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 
-  // GET /api/v1/ops/reports/executive (MGR-025, MGR-026)
-  if (pathname === '/api/v1/ops/reports/executive' && req.method === 'GET') {
-    const result = managerService.getExecutiveReport();
-    sendSuccess(res, result.data);
+  // GET /api/v1/ops/reports/executive or /api/v1/ops/reports/yield (MGR-025, MGR-026, MGR-027)
+  if ((pathname === '/api/v1/ops/reports/executive' || pathname === '/api/v1/ops/reports/yield') && req.method === 'GET') {
+    const startDate = parsedUrl.searchParams.get('start_date');
+    const endDate = parsedUrl.searchParams.get('end_date');
+    const reports = managerService.getExecutiveReports({ startDate, endDate });
+    sendSuccess(res, reports.data || reports);
     return true;
   }
 

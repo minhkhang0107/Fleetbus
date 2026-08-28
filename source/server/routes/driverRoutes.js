@@ -1,5 +1,6 @@
 /**
- * Driver Tactical Cockpit API Route Handlers (/api/v1/driver/...)
+ * Driver Tactical Cockpit API Route Handlers (/api/v1/driver/... & /api/v1/auth/driver/...)
+ * Covers all specifications DRI-001 through DRI-019 and API Screen Map matrix.
  */
 
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
@@ -7,10 +8,10 @@ import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.j
 export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   const { driverService } = services;
 
-  // POST /api/v1/driver/auth/login (DRI-001)
-  if (pathname === '/api/v1/driver/auth/login' && req.method === 'POST') {
+  // POST /api/v1/driver/auth/login or /api/v1/auth/driver/login (DRI-001)
+  if ((pathname === '/api/v1/driver/auth/login' || pathname === '/api/v1/auth/driver/login') && req.method === 'POST') {
     parseJsonBody(req).then(body => {
-      const result = driverService.authenticateDriver(body.staffIdOrPhone, body.pin);
+      const result = driverService.authenticateDriver(body.staffIdOrPhone || body.staff_id || body.username, body.pin || body.password);
       if (result.success) {
         sendSuccess(res, result.data);
       } else {
@@ -77,12 +78,30 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
-  // POST /api/v1/driver/trips/:tripId/board-qr (DRI-009, DRI-010)
-  if (pathname.startsWith('/api/v1/driver/trips/') && pathname.endsWith('/board-qr') && req.method === 'POST') {
+  // GET /api/v1/driver/trips/:tripId/manifest (DRI-007)
+  if (pathname.startsWith('/api/v1/driver/trips/') && pathname.endsWith('/manifest') && req.method === 'GET') {
+    const parts = pathname.split('/');
+    const tripId = parts[5];
+    const trip = driverService.activeTrips.get(tripId);
+    if (trip) {
+      sendSuccess(res, {
+        trip_id: tripId,
+        vehicle_plate: trip.vehicle_plate,
+        boarded_count: trip.boarded_count,
+        manifest: trip.manifest
+      });
+    } else {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+    }
+    return true;
+  }
+
+  // POST /api/v1/driver/trips/:tripId/board-qr or /api/v1/driver/trips/:tripId/boarding (DRI-009, DRI-010)
+  if (pathname.startsWith('/api/v1/driver/trips/') && (pathname.endsWith('/board-qr') || pathname.endsWith('/boarding')) && req.method === 'POST') {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const qrPayload = body.qrString || body.qrPayload;
+      const qrPayload = body.qrString || body.qrPayload || body.qr_code;
       const result = driverService.boardPassengerByQR(tripId, qrPayload, body.now);
       if (result.success) {
         sendSuccess(res, result.data || result);
@@ -93,12 +112,12 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
-  // POST /api/v1/driver/trips/:tripId/collect-cod (DRI-012)
-  if (pathname.startsWith('/api/v1/driver/trips/') && pathname.endsWith('/collect-cod') && req.method === 'POST') {
+  // POST /api/v1/driver/trips/:tripId/collect-cod or /api/v1/driver/trips/:tripId/payments/cod-collect (DRI-012)
+  if (pathname.startsWith('/api/v1/driver/trips/') && (pathname.endsWith('/collect-cod') || pathname.endsWith('/payments/cod-collect')) && req.method === 'POST') {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.collectCod(tripId, body.ticketId, body.amountVnd);
+      const result = driverService.collectCod(tripId, body.ticketId || body.ticket_id, body.amountVnd || body.amount_vnd);
       if (result.success) {
         sendSuccess(res, result.data || result);
       } else {
@@ -108,12 +127,12 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
-  // POST /api/v1/driver/trips/:tripId/incident (DRI-019)
-  if (pathname.startsWith('/api/v1/driver/trips/') && pathname.endsWith('/incident') && req.method === 'POST') {
+  // POST /api/v1/driver/trips/:tripId/incident or /api/v1/driver/trips/:tripId/incidents (DRI-019)
+  if (pathname.startsWith('/api/v1/driver/trips/') && (pathname.endsWith('/incident') || pathname.endsWith('/incidents')) && req.method === 'POST') {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.reportIncident(tripId, body.incidentType, body.description, body.estimatedDelayMinutes);
+      const result = driverService.reportIncident(tripId, body.incidentType || body.type, body.description, body.estimatedDelayMinutes || body.delay_minutes);
       if (result.success) {
         sendSuccess(res, result);
       } else {
@@ -126,7 +145,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   // POST /api/v1/driver/telemetry/batch-replay (DRI-015)
   if (pathname === '/api/v1/driver/telemetry/batch-replay' && req.method === 'POST') {
     parseJsonBody(req).then(body => {
-      const result = driverService.replayOfflineBuffer(body.telemetryBuffer || []);
+      const result = driverService.replayOfflineBuffer(body.telemetryBuffer || body.buffer || []);
       sendSuccess(res, result);
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -137,7 +156,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.endTrip(tripId, body.endOdometerKm);
+      const result = driverService.endTrip(tripId, body.endOdometerKm || body.odometer_km);
       if (result.success) {
         sendSuccess(res, result);
       } else {
