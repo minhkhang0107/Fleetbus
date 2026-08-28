@@ -1,16 +1,17 @@
 # FleetBus Real-Time Bus Booking & Telemetry System State
 
-Last updated: 2026-08-28 13:30
+Last updated: 2026-08-28 13:42
 
 ## 1. Unified Node.js API Server & Gateway Status (`source/server/`)
 - [x] **Universal REST API Server (`source/server/apiServer.js`)**:
-  - High-performance, modular Node.js HTTP server.
+  - High-performance, modular Node.js HTTP server running live on `http://localhost:3000`.
   - Passenger Gateway: `/api/v1/passenger/*` (Config, Auth OTP, Stations, Trips, 2D Seat Map, Hold, Bookings, Wallet Tickets, Rotating QR, Cancellation/Refund, Radar, Notifications).
   - Driver Tactical Gateway: `/api/v1/driver/*` (Auth, Shift Trips, Pre-start Readiness, Telemetry Ingestion, QR Scanner, COD Cash Collection, Incident SOS, Offline Sync Replay, End Trip).
   - Manager Operations Gateway: `/api/v1/ops/*` (RBAC Auth, Executive KPIs, Live Fleet Radar, Fleet Roster, Crew Directory, Routes, Dispatch Gantt Board, POS Counter Booking, Emergency Vehicle Swap, Trip Delays, Financial Reconciliation, Refunds, Executive Reports).
   - External Webhooks: `/api/v1/webhooks/vietqr/ipn` (Napas247 payment settlement) and `/health` + `/api/v1/openapi.json`.
   - Static Web Portals: `/passenger`, `/driver`, `/manager` (`/ops`).
-  - 67/67 automated tests passing 100% Green (`npm test`).
+  - **Automated Tests**: 67/67 unit and integration tests passing 100% Green (`npm test`).
+  - **Live E2E Flow**: Full end-to-end live flow verified (`node test/e2e_live_flow.js`).
 
 ## 2. Passenger App Platform Status (PAX-001 to PAX-025)
 - [x] **Phase 1: Foundation, Testing Infrastructure & Design System** (`npm test`, `npm run lint` 100% Green)

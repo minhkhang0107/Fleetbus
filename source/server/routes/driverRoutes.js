@@ -1,5 +1,5 @@
 /**
- * Driver API Route Handlers (/api/v1/driver/...)
+ * Driver Tactical Cockpit API Route Handlers (/api/v1/driver/...)
  */
 
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
@@ -10,7 +10,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   // POST /api/v1/driver/auth/login (DRI-001)
   if (pathname === '/api/v1/driver/auth/login' && req.method === 'POST') {
     parseJsonBody(req).then(body => {
-      const result = driverService.authenticateDriver(body.staffIdOrPhone, body.pin, body.deviceInfo);
+      const result = driverService.authenticateDriver(body.staffIdOrPhone, body.pin);
       if (result.success) {
         sendSuccess(res, result.data);
       } else {
@@ -35,7 +35,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     parseJsonBody(req).then(body => {
       const result = driverService.submitReadinessChecklist(tripId, body.checklist);
       if (result.success) {
-        sendSuccess(res, result);
+        sendSuccess(res, result.data || result);
       } else {
         sendError(res, result.error, result.code, 400, result);
       }
@@ -49,7 +49,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const tripId = parts[5];
     const result = driverService.startTrip(tripId);
     if (result.success) {
-      sendSuccess(res, result);
+      sendSuccess(res, result.data || result);
     } else {
       sendError(res, result.error, result.code, 400);
     }
@@ -82,9 +82,10 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.boardPassengerByQR(tripId, body.qrString, body.now);
+      const qrPayload = body.qrString || body.qrPayload;
+      const result = driverService.boardPassengerByQR(tripId, qrPayload, body.now);
       if (result.success) {
-        sendSuccess(res, result);
+        sendSuccess(res, result.data || result);
       } else {
         sendError(res, result.error, result.code, 400);
       }
@@ -99,7 +100,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     parseJsonBody(req).then(body => {
       const result = driverService.collectCod(tripId, body.ticketId, body.amountVnd);
       if (result.success) {
-        sendSuccess(res, result);
+        sendSuccess(res, result.data || result);
       } else {
         sendError(res, result.error, 'COD_ERROR', 400);
       }
@@ -112,16 +113,22 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.reportIncident(tripId, body);
-      sendSuccess(res, result, 201);
+      const result = driverService.reportIncident(tripId, body.incidentType, body.description, body.estimatedDelayMinutes);
+      if (result.success) {
+        sendSuccess(res, result);
+      } else {
+        sendError(res, result.error, 'INCIDENT_ERROR', 400);
+      }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 
   // POST /api/v1/driver/telemetry/batch-replay (DRI-015)
   if (pathname === '/api/v1/driver/telemetry/batch-replay' && req.method === 'POST') {
-    const result = driverService.flushOfflineQueue();
-    sendSuccess(res, result);
+    parseJsonBody(req).then(body => {
+      const result = driverService.replayOfflineBuffer(body.telemetryBuffer || []);
+      sendSuccess(res, result);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 
@@ -129,12 +136,14 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   if (pathname.startsWith('/api/v1/driver/trips/') && pathname.endsWith('/end') && req.method === 'POST') {
     const parts = pathname.split('/');
     const tripId = parts[5];
-    const result = driverService.endTrip(tripId);
-    if (result.success) {
-      sendSuccess(res, result);
-    } else {
-      sendError(res, result.error, 'END_TRIP_ERROR', 400);
-    }
+    parseJsonBody(req).then(body => {
+      const result = driverService.endTrip(tripId, body.endOdometerKm);
+      if (result.success) {
+        sendSuccess(res, result);
+      } else {
+        sendError(res, result.error, result.code, 400);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 

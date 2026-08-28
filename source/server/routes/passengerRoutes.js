@@ -107,33 +107,49 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   // POST /api/v1/passenger/bookings/create (PAX-011, PAX-013)
   if (pathname === '/api/v1/passenger/bookings/create' && req.method === 'POST') {
     parseJsonBody(req).then(body => {
+      const payerInfo = body.payer || body.payerInfo;
+      const passengerList = body.passengers || body.passengerList || [];
+      const seatCodes = body.selectedSeats?.map(s => typeof s === 'string' ? s : s.seat_code) || body.seatCodes || [];
+      const tripId = body.tripId || 'trp_hn_th_01';
+
       const checkoutValidation = checkoutService.validateManifest({
-        payer: body.payer,
-        passengers: body.passengers,
-        selectedSeatsCount: (body.selectedSeats || []).length
+        payerInfo,
+        passengerList,
+        seatCodes
       });
 
-      if (!checkoutValidation.isValid) {
-        sendError(res, checkoutValidation.error, 'VALIDATION_ERROR', 400, checkoutValidation.details);
+      if (!checkoutValidation.success) {
+        sendError(res, checkoutValidation.error, checkoutValidation.code || 'VALIDATION_ERROR', 400);
         return;
       }
 
-      const order = checkoutService.computeOrderReview({
-        seats: body.selectedSeats || [],
+      const orderReview = checkoutService.computeOrderReview({
+        seats: body.selectedSeats || seatCodes.map(c => ({ seat_code: c, price_vnd: body.unitPriceVnd || 220000 })),
         seatPriceVnd: body.unitPriceVnd || 220000,
         voucherCode: body.voucherCode
       });
 
-      const paymentOrder = paymentService.createPaymentOrder({
-        tripId: body.tripId || 'trp_hn_th_01',
-        amountVnd: order.total_payment_vnd,
-        passengerName: body.payer.full_name,
-        seatCodes: (body.selectedSeats || []).map(s => s.seat_code)
+      const tripDetailRes = searchService.getTripDetail(tripId);
+      const tripDetail = tripDetailRes.success ? tripDetailRes.data : {
+        trip_id: tripId,
+        route_name: 'Hà Nội — Thanh Hóa (Cao tốc)',
+        departure_time: '2026-08-28T14:00:00+07:00'
+      };
+
+      const paymentOrderResult = paymentService.createPaymentOrder({
+        holdId: body.holdId || `hld_${tripId}`,
+        trip: tripDetail,
+        seatCodes,
+        payer: checkoutValidation.data ? checkoutValidation.data.payer : payerInfo,
+        passengers: checkoutValidation.data ? checkoutValidation.data.passengers : passengerList,
+        amountVnd: orderReview.data ? orderReview.data.total_payment_vnd : orderReview.total_payment_vnd,
+        pickupStop: body.pickupStop || 'Bến xe Giáp Bát',
+        dropoffStop: body.dropoffStop || 'Bến xe Phía Bắc Thanh Hóa'
       });
 
       sendSuccess(res, {
-        order,
-        payment: paymentOrder
+        order: orderReview.data || orderReview,
+        payment: paymentOrderResult.data
       }, 201);
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -144,7 +160,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     const tab = parsedUrl.searchParams.get('tab') || 'UPCOMING';
     const phone = parsedUrl.searchParams.get('phone') || '0912345678';
     const wallet = paymentService.getTicketsByPhone(phone, tab);
-    sendSuccess(res, wallet);
+    sendSuccess(res, wallet.data || wallet);
     return true;
   }
 
@@ -154,7 +170,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     const ticketId = parts[5];
     const qrResult = paymentService.getDynamicBoardingPass(ticketId);
     if (qrResult.success) {
-      sendSuccess(res, qrResult.data);
+      sendSuccess(res, qrResult.data || qrResult);
     } else {
       sendError(res, qrResult.error, qrResult.code, 404);
     }

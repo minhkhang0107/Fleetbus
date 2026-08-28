@@ -98,7 +98,7 @@ export class PassengerPaymentService {
     const generatedTicketIds = [];
     for (let i = 0; i < order.seat_codes.length; i++) {
       const seatCode = order.seat_codes[i];
-      const passenger = order.passengers[i];
+      const passenger = order.passengers[i] || order.payer;
       const ticketId = `tkt_${order.pnr.replace('-', '')}_${seatCode}`;
 
       const ticket = {
@@ -131,6 +131,37 @@ export class PassengerPaymentService {
         order,
         tickets: generatedTicketIds.map(id => this.tickets.get(id))
       }
+    };
+  }
+
+  /**
+   * Handle VietQR Webhook Callback
+   */
+  handleVietQrCallback({ transferMemo, amountVnd, bankRef, now = Date.now() }) {
+    let matchedOrder = null;
+
+    // Match by memo or PNR in memo
+    for (const order of this.orders.values()) {
+      if (transferMemo && (transferMemo.includes(order.pnr.replace('-', '')) || transferMemo.includes(order.pnr))) {
+        matchedOrder = order;
+        break;
+      }
+    }
+
+    if (!matchedOrder) {
+      return { success: false, error: 'Không tìm thấy đơn hàng khớp với nội dung chuyển khoản', code: 'ORDER_NOT_MATCHED' };
+    }
+
+    const settleResult = this.settlePayment(matchedOrder.order_id, bankRef, now);
+    if (!settleResult.success) {
+      return settleResult;
+    }
+
+    return {
+      success: true,
+      pnr: matchedOrder.pnr,
+      order_id: matchedOrder.order_id,
+      issued_tickets: settleResult.data.tickets || []
     };
   }
 
