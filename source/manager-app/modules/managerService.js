@@ -30,6 +30,11 @@ export class ManagerOperationsService {
       { vehicle_id: 'veh_03', plate_number: '29B-888.22', model: 'Sleeper 34 Giường Nằm', total_seats: 34, status: 'STANDBY', driver_name: 'Hoàng Anh Tuấn', lat: 20.9800, lng: 105.8400, speed_kmh: 0, heading: 0, gps_status: 'LIVE' }
     ];
 
+    this.drivers = [
+      { driver_id: 'drv_8821a', staff_id: 'TX8821', full_name: 'Nguyễn Thành Long', phone: '0912348821', license_class: 'FC', license_expiry: '2028-12-31', safety_score: 98.5, status: 'ON_DUTY' },
+      { driver_id: 'drv_9912b', staff_id: 'TX9912', full_name: 'Trần Văn Bình', phone: '0988776655', license_class: 'FC', license_expiry: '2027-06-30', safety_score: 96.0, status: 'ON_DUTY' }
+    ];
+
     this.routes = [
       { route_id: 'rt_hn_th', name: 'Hà Nội — Thanh Hóa (Cao tốc)', distance_km: 160, base_fare_vnd: 220000, stops_count: 4 },
       { route_id: 'rt_hn_hp', name: 'Hà Nội — Hải Phòng (5B)', distance_km: 120, base_fare_vnd: 180000, stops_count: 3 },
@@ -132,6 +137,72 @@ export class ManagerOperationsService {
         }))
       }
     };
+  }
+
+  /**
+   * MGR-005 / MGR-007: Fleet Roster & Vehicle Management
+   */
+  getFleetVehicles() {
+    return { success: true, data: this.vehicles };
+  }
+
+  addVehicle(vehicleData) {
+    const newVehicle = {
+      vehicle_id: `veh_${Date.now()}`,
+      plate_number: vehicleData.plate_number,
+      model: vehicleData.model || 'Cabin Cung Điện VIP 22',
+      total_seats: vehicleData.total_seats || 22,
+      status: 'STANDBY',
+      driver_name: vehicleData.driver_name || 'Chưa phân công',
+      lat: 20.9800,
+      lng: 105.8400,
+      speed_kmh: 0,
+      heading: 0,
+      gps_status: 'LIVE'
+    };
+    this.vehicles.push(newVehicle);
+    return { success: true, data: newVehicle };
+  }
+
+  /**
+   * MGR-008 / MGR-010: Driver & Crew Directory
+   */
+  getCrewDrivers() {
+    return { success: true, data: this.drivers };
+  }
+
+  addDriver(driverData) {
+    const newDriver = {
+      driver_id: `drv_${Date.now()}`,
+      staff_id: driverData.staff_id,
+      full_name: driverData.full_name,
+      phone: driverData.phone,
+      license_class: driverData.license_class || 'FC',
+      license_expiry: driverData.license_expiry || '2029-12-31',
+      safety_score: 100.0,
+      status: 'AVAILABLE'
+    };
+    this.drivers.push(newDriver);
+    return { success: true, data: newDriver };
+  }
+
+  /**
+   * MGR-011 / MGR-013: Route & Corridor Management
+   */
+  getRoutes() {
+    return { success: true, data: this.routes };
+  }
+
+  addRoute(routeData) {
+    const newRoute = {
+      route_id: `rt_${Date.now()}`,
+      name: routeData.name,
+      distance_km: routeData.distance_km,
+      base_fare_vnd: routeData.base_fare_vnd,
+      stops_count: routeData.stops_count || 3
+    };
+    this.routes.push(newRoute);
+    return { success: true, data: newRoute };
   }
 
   /**
@@ -279,6 +350,28 @@ export class ManagerOperationsService {
       success: true,
       message: `Đã phê duyệt hoàn trả ${refundAmountVnd} đ cho mã vé ${pnr}`,
       data: booking
+    };
+  }
+
+  /**
+   * MGR-025 / MGR-026: Executive Reports
+   */
+  getExecutiveReport() {
+    return {
+      success: true,
+      data: {
+        financial_summary: {
+          total_revenue_vnd: this.bookings.reduce((acc, b) => acc + b.total_fare_vnd, 0),
+          total_tickets_sold: this.bookings.length,
+          pos_share_pct: 50.0,
+          app_share_pct: 50.0
+        },
+        punctuality_summary: {
+          on_time_departure_rate: '96.8%',
+          average_delay_minutes: 3.5,
+          zero_incident_days: 42
+        }
+      }
     };
   }
 }

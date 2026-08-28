@@ -142,8 +142,8 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   // GET /api/v1/passenger/tickets (PAX-016: Ticket Wallet)
   if (pathname === '/api/v1/passenger/tickets' && req.method === 'GET') {
     const tab = parsedUrl.searchParams.get('tab') || 'UPCOMING';
-    const userId = req.headers['x-user-id'] || 'usr_default';
-    const wallet = paymentService.getTicketWallet(userId, tab);
+    const phone = parsedUrl.searchParams.get('phone') || '0912345678';
+    const wallet = paymentService.getTicketsByPhone(phone, tab);
     sendSuccess(res, wallet);
     return true;
   }
@@ -152,9 +152,9 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   if (pathname.startsWith('/api/v1/passenger/tickets/') && pathname.endsWith('/qr') && req.method === 'GET') {
     const parts = pathname.split('/');
     const ticketId = parts[5];
-    const qrResult = paymentService.getDynamicBoardingPassQR(ticketId);
+    const qrResult = paymentService.getDynamicBoardingPass(ticketId);
     if (qrResult.success) {
-      sendSuccess(res, qrResult);
+      sendSuccess(res, qrResult.data);
     } else {
       sendError(res, qrResult.error, qrResult.code, 404);
     }

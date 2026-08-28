@@ -77,7 +77,7 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     assert.strictEqual(openapi.body.data.openapi, '3.0.3');
   });
 
-  it('TC-SRV-02: Passenger API Endpoints (Config, Stations, Trips, Seat-map, Hold)', async () => {
+  it('TC-SRV-02: Passenger API Endpoints (Config, Stations, Trips, Seat-map, Hold, Wallet)', async () => {
     // Config
     const configRes = await makeRequest('/api/v1/passenger/config', {
       headers: { 'x-app-version': '3.0.0' }
@@ -108,6 +108,11 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     });
     assert.strictEqual(holdRes.statusCode, 200);
     assert.strictEqual(holdRes.body.status, 'success');
+
+    // Tickets Wallet
+    const walletRes = await makeRequest('/api/v1/passenger/tickets?phone=0912345678');
+    assert.strictEqual(walletRes.statusCode, 200);
+    assert.strictEqual(walletRes.body.status, 'success');
   });
 
   it('TC-SRV-03: Driver API Endpoints (Auth Login, Today Trips, Start, Telemetry, QR Scan)', async () => {
@@ -135,7 +140,7 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     assert.strictEqual(telemetryRes.body.data.data.speed_kmh, 62.4);
   });
 
-  it('TC-SRV-04: Manager Operations API Endpoints (Dashboard KPIs, Radar, Dispatch, POS Booking)', async () => {
+  it('TC-SRV-04: Manager Operations API Endpoints (Dashboard KPIs, Radar, Fleet, Crew, Reports)', async () => {
     // Dashboard KPIs
     const kpiRes = await makeRequest('/api/v1/ops/dashboard/kpis');
     assert.strictEqual(kpiRes.statusCode, 200);
@@ -145,6 +150,21 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     const radarRes = await makeRequest('/api/v1/ops/radar');
     assert.strictEqual(radarRes.statusCode, 200);
     assert.strictEqual(radarRes.body.data.total_tracked_vehicles, 3);
+
+    // Fleet Roster
+    const fleetRes = await makeRequest('/api/v1/ops/fleet/vehicles');
+    assert.strictEqual(fleetRes.statusCode, 200);
+    assert.ok(fleetRes.body.data.length >= 3);
+
+    // Crew Drivers
+    const crewRes = await makeRequest('/api/v1/ops/crew/drivers');
+    assert.strictEqual(crewRes.statusCode, 200);
+    assert.ok(crewRes.body.data.length >= 2);
+
+    // Executive Report
+    const repRes = await makeRequest('/api/v1/ops/reports/executive');
+    assert.strictEqual(repRes.statusCode, 200);
+    assert.ok(repRes.body.data.financial_summary.total_revenue_vnd > 0);
 
     // POS Booking
     const posRes = await makeRequest('/api/v1/ops/pos/bookings', {

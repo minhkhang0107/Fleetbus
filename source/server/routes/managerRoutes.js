@@ -1,5 +1,6 @@
 /**
  * Manager & Operations Control API Route Handlers (/api/v1/ops/...)
+ * Comprehensive implementation covering MGR-001 to MGR-030.
  */
 
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
@@ -31,6 +32,54 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   if (pathname === '/api/v1/ops/radar' && req.method === 'GET') {
     const result = managerService.getLiveFleetRadar();
     sendSuccess(res, result.data);
+    return true;
+  }
+
+  // GET /api/v1/ops/fleet/vehicles (MGR-005)
+  if (pathname === '/api/v1/ops/fleet/vehicles' && req.method === 'GET') {
+    const result = managerService.getFleetVehicles();
+    sendSuccess(res, result.data);
+    return true;
+  }
+
+  // POST /api/v1/ops/fleet/vehicles (MGR-007)
+  if (pathname === '/api/v1/ops/fleet/vehicles' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const result = managerService.addVehicle(body);
+      sendSuccess(res, result.data, 201);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/ops/crew/drivers (MGR-008)
+  if (pathname === '/api/v1/ops/crew/drivers' && req.method === 'GET') {
+    const result = managerService.getCrewDrivers();
+    sendSuccess(res, result.data);
+    return true;
+  }
+
+  // POST /api/v1/ops/crew/drivers (MGR-010)
+  if (pathname === '/api/v1/ops/crew/drivers' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const result = managerService.addDriver(body);
+      sendSuccess(res, result.data, 201);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/ops/routes (MGR-011)
+  if (pathname === '/api/v1/ops/routes' && req.method === 'GET') {
+    const result = managerService.getRoutes();
+    sendSuccess(res, result.data);
+    return true;
+  }
+
+  // POST /api/v1/ops/routes (MGR-013)
+  if (pathname === '/api/v1/ops/routes' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const result = managerService.addRoute(body);
+      sendSuccess(res, result.data, 201);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 
@@ -95,6 +144,13 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         sendError(res, result.error, 'REFUND_ERROR', 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/ops/reports/executive (MGR-025, MGR-026)
+  if (pathname === '/api/v1/ops/reports/executive' && req.method === 'GET') {
+    const result = managerService.getExecutiveReport();
+    sendSuccess(res, result.data);
     return true;
   }
 

@@ -86,4 +86,31 @@ describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-03
     assert.strictEqual(refundRes.data.refund_status, 'REFUNDED');
     assert.strictEqual(refundRes.data.refund_amount_vnd, 440000);
   });
+
+  it('TC-MGR-08: Should manage fleet roster, crew drivers, and routes (MGR-005 to MGR-013)', () => {
+    // Add vehicle
+    const addVehRes = managerService.addVehicle({ plate_number: '29B-999.88', model: 'Limousine 34 VIP' });
+    assert.strictEqual(addVehRes.success, true);
+    assert.strictEqual(addVehRes.data.plate_number, '29B-999.88');
+    assert.ok(managerService.getFleetVehicles().data.length >= 4);
+
+    // Add driver
+    const addDrvRes = managerService.addDriver({ staff_id: 'TX7701', full_name: 'Vũ Đức Đam', phone: '0977112233' });
+    assert.strictEqual(addDrvRes.success, true);
+    assert.strictEqual(addDrvRes.data.staff_id, 'TX7701');
+    assert.ok(managerService.getCrewDrivers().data.length >= 3);
+
+    // Add route
+    const addRouteRes = managerService.addRoute({ name: 'Hà Nội — Nam Định', distance_km: 90, base_fare_vnd: 130000 });
+    assert.strictEqual(addRouteRes.success, true);
+    assert.strictEqual(addRouteRes.data.name, 'Hà Nội — Nam Định');
+    assert.ok(managerService.getRoutes().data.length >= 4);
+  });
+
+  it('TC-MGR-09: Should generate executive financial and punctuality reports (MGR-025, MGR-026)', () => {
+    const reportRes = managerService.getExecutiveReport();
+    assert.strictEqual(reportRes.success, true);
+    assert.ok(reportRes.data.financial_summary.total_revenue_vnd > 0);
+    assert.strictEqual(reportRes.data.punctuality_summary.on_time_departure_rate, '96.8%');
+  });
 });
