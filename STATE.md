@@ -1,16 +1,16 @@
 # FleetBus Real-Time Bus Booking & Telemetry System State
 
-Last updated: 2026-08-28 13:15
+Last updated: 2026-08-28 13:20
 
 ## 1. Unified Node.js API Server & Gateway Status (`source/server/`)
 - [x] **Universal REST API Server (`source/server/apiServer.js`)**:
   - High-performance, modular Node.js HTTP server.
-  - Passenger Gateway: `/api/v1/passenger/*` (Config, Auth, Stations, Trips, 2D Seat Map, Hold, Bookings, Rotating QR, Radar).
+  - Passenger Gateway: `/api/v1/passenger/*` (Config, Auth OTP, Stations, Trips, 2D Seat Map, Hold, Bookings, Wallet Tickets, Rotating QR, Cancellation/Refund, Radar, Notifications).
   - Driver Tactical Gateway: `/api/v1/driver/*` (Auth, Shift Trips, Pre-start Readiness, Telemetry Ingestion, QR Scanner, COD Cash Collection, Incident SOS, Offline Sync Replay, End Trip).
   - Manager Operations Gateway: `/api/v1/ops/*` (RBAC Auth, Executive KPIs, Live Fleet Radar, Dispatch Gantt Board, POS Counter Booking, Emergency Vehicle Swap, Trip Delays, Financial Reconciliation & Refunds).
   - External Webhooks: `/api/v1/webhooks/vietqr/ipn` (Napas247 payment settlement) and `/health` + `/api/v1/openapi.json`.
   - Static Web Portals: `/passenger`, `/driver`, `/manager` (`/ops`).
-  - 63/63 automated tests passing 100% Green (`npm test`).
+  - 64/64 automated tests passing 100% Green (`npm test`).
 
 ## 2. Passenger App Autonomous Spec-to-Test Pipeline Status (PAX-001 to PAX-025)
 - [x] **Phase 1: Foundation, Testing Infrastructure & Design System** (`npm test`, `npm run lint` 100% Green)
@@ -22,10 +22,22 @@ Last updated: 2026-08-28 13:15
 - [x] **Phase 7: Live GPS Telemetry, Radar Tracking & Disruption Handling (PAX-018 to PAX-021, PAX-023 to PAX-025)**
 - [x] **Phase 8: High-Fidelity Interactive Passenger Web App Suite & Multi-Axis Verification**
 
-## 3. Passenger Android & iOS Mobile Implementation Status
+## 3. Passenger Android & iOS Mobile Client Implementation Status (`source/client/`)
 - [x] **Android Manifest & Permissions (`source/client/app/android/`)**: Location, Camera, Internet, Notifications.
 - [x] **iOS Info.plist (`source/client/app/ios/`)**: DisplayName `BusGo`, Bundle `vn.busgo.passenger`, Location/Camera strings.
-- [x] **Flutter Passenger UI Presentation Screens (`source/client/app/lib/`)**: Splash, Home, Seat Map, Checkout, Rotating QR Pass, Live Radar HUD, 4-Tab Main Shell.
+- [x] **Flutter Client Presentation Suite (`source/client/app/lib/src/presentation/passenger/`)**:
+  - `passenger_splash_screen.dart` (`PAX-001` Version check & handshake)
+  - `passenger_login_screen.dart` (`PAX-002`, `PAX-003` Phone OTP input & 60s cooldown timer)
+  - `passenger_home_screen.dart` (`PAX-004`, `PAX-005` Express search & station selector)
+  - `passenger_search_results_screen.dart` (`PAX-006`, `PAX-007` Filterable trips & amenities)
+  - `passenger_seat_map_screen.dart` (`PAX-008`, `PAX-009`, `PAX-010` 2D VIP Cabin Seat Matrix)
+  - `passenger_checkout_screen.dart` (`PAX-011`, `PAX-012` Manifest info form, CCCD & voucher)
+  - `passenger_ticket_qr_screen.dart` (`PAX-013`, `PAX-015`, `PAX-017` Dynamic 30s rotating HMAC QR)
+  - `passenger_wallet_screen.dart` (`PAX-016`, `PAX-021` Ticket Wallet & cancellation refund)
+  - `passenger_live_radar_screen.dart` (`PAX-018`, `PAX-019` Live GPS Radar HUD & ETA)
+  - `passenger_notifications_screen.dart` (`PAX-020`, `PAX-024`, `PAX-025` Push notification center & delay alerts)
+  - `passenger_main_shell.dart` (Unified 4-tab bottom navigation)
+  - `passenger_api_service.dart` (`source/client/data/lib/` Complete Flutter API Client)
 
 ## 4. Driver App Autonomous Spec-to-Test Pipeline Status (DRI-001 to DRI-019)
 - [x] **Driver Tactical Design System & Tokens (`source/driver-app/core/driverTokens.js`)**

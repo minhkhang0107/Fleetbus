@@ -1,5 +1,6 @@
 /**
- * Passenger API Route Handlers (/api/v1/passenger/...)
+ * Comprehensive Passenger API Route Handlers (/api/v1/passenger/...)
+ * Covers all specifications PAX-001 through PAX-025.
  */
 
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
@@ -57,6 +58,19 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     const timeSlot = parsedUrl.searchParams.get('time_slot');
     const trips = searchService.searchTrips({ originCity: origin, destinationCity: dest, vehicleType, timeSlot });
     sendSuccess(res, trips.data);
+    return true;
+  }
+
+  // GET /api/v1/passenger/trips/:tripId (PAX-007)
+  if (pathname.startsWith('/api/v1/passenger/trips/') && !pathname.includes('seat-map') && !pathname.includes('hold-seats') && !pathname.includes('radar') && req.method === 'GET') {
+    const parts = pathname.split('/');
+    const tripId = parts[5];
+    const detail = searchService.getTripDetail(tripId);
+    if (detail.success) {
+      sendSuccess(res, detail.data);
+    } else {
+      sendError(res, detail.error, detail.code, 404);
+    }
     return true;
   }
 
@@ -125,12 +139,57 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/passenger/tickets (PAX-016: Ticket Wallet)
+  if (pathname === '/api/v1/passenger/tickets' && req.method === 'GET') {
+    const tab = parsedUrl.searchParams.get('tab') || 'UPCOMING';
+    const userId = req.headers['x-user-id'] || 'usr_default';
+    const wallet = paymentService.getTicketWallet(userId, tab);
+    sendSuccess(res, wallet);
+    return true;
+  }
+
+  // GET /api/v1/passenger/tickets/:ticketId/qr (PAX-017: Rotating HMAC QR)
+  if (pathname.startsWith('/api/v1/passenger/tickets/') && pathname.endsWith('/qr') && req.method === 'GET') {
+    const parts = pathname.split('/');
+    const ticketId = parts[5];
+    const qrResult = paymentService.getDynamicBoardingPassQR(ticketId);
+    if (qrResult.success) {
+      sendSuccess(res, qrResult);
+    } else {
+      sendError(res, qrResult.error, qrResult.code, 404);
+    }
+    return true;
+  }
+
+  // POST /api/v1/passenger/tickets/:ticketId/cancel (PAX-021: Cancellation & Refund)
+  if (pathname.startsWith('/api/v1/passenger/tickets/') && pathname.endsWith('/cancel') && req.method === 'POST') {
+    const parts = pathname.split('/');
+    const ticketId = parts[5];
+    parseJsonBody(req).then(body => {
+      const result = trackingService.cancelTicketAndComputeRefund(ticketId, body.departureTime, body.now);
+      if (result.success) {
+        sendSuccess(res, result);
+      } else {
+        sendError(res, result.error, result.code, 400);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
   // GET /api/v1/passenger/trips/:tripId/radar (PAX-018)
   if (pathname.startsWith('/api/v1/passenger/trips/') && pathname.endsWith('/radar') && req.method === 'GET') {
     const parts = pathname.split('/');
     const tripId = parts[5];
     const tracking = trackingService.getLiveTrackingHUD(tripId);
     sendSuccess(res, tracking);
+    return true;
+  }
+
+  // GET /api/v1/passenger/notifications (PAX-020)
+  if (pathname === '/api/v1/passenger/notifications' && req.method === 'GET') {
+    const userId = req.headers['x-user-id'] || 'usr_default';
+    const notifs = trackingService.getNotifications(userId);
+    sendSuccess(res, notifs);
     return true;
   }
 

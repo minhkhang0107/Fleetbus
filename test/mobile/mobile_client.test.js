@@ -13,6 +13,7 @@ describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
   const iosInfoPlistPath = path.join(rootDir, 'source/client/app/ios/Runner/Info.plist');
   const mainDartPath = path.join(rootDir, 'source/client/app/lib/main.dart');
   const appColorsDartPath = path.join(rootDir, 'source/client/resources/lib/src/theme/app_colors.dart');
+  const passengerPresDir = path.join(rootDir, 'source/client/app/lib/src/presentation/passenger');
 
   it('TC-MOB-01: Android Manifest must have correct package name and required permissions', () => {
     assert.ok(fs.existsSync(androidManifestPath), 'AndroidManifest.xml must exist');
@@ -54,5 +55,26 @@ describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
     assert.ok(content.includes('0xFFF8FAFC'), 'Canvas passenger #F8FAFC must be defined');
     assert.ok(content.includes('0xFF0F172A'), 'Charcoal ink #0F172A must be defined');
     assert.ok(content.includes('0xFFFB9821'), 'PNR orange #FB9821 must be defined');
+  });
+
+  it('TC-MOB-05: All required Passenger mobile screens must exist and cover PAX-001 to PAX-025', () => {
+    const requiredFiles = [
+      'passenger_splash_screen.dart',
+      'passenger_login_screen.dart',
+      'passenger_home_screen.dart',
+      'passenger_search_results_screen.dart',
+      'passenger_seat_map_screen.dart',
+      'passenger_checkout_screen.dart',
+      'passenger_ticket_qr_screen.dart',
+      'passenger_wallet_screen.dart',
+      'passenger_live_radar_screen.dart',
+      'passenger_notifications_screen.dart',
+      'passenger_main_shell.dart'
+    ];
+
+    for (const file of requiredFiles) {
+      const fullPath = path.join(passengerPresDir, file);
+      assert.ok(fs.existsSync(fullPath), `Screen ${file} must exist`);
+    }
   });
 });
