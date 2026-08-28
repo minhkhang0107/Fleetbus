@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>BusGo Passenger — Hệ Thống Đặt Vé & Telemetry Thời Gian Thực</title>
+  
+  <!-- Fonts: Geist & JetBrains Mono as per DESIGN.md (Strictly NO Inter) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            canvas: '#F8FAFC',
+            surface: '#FFFFFF',
+            charcoal: '#0F172A',
+            muted: '#64748B',
+            whisper: 'rgba(226, 232, 240, 0.7)',
+            sapphire: '#2563EB',
+            'sapphire-soft': '#EFF6FF',
+            emerald: '#16A34A',
+            'emerald-soft': '#F0FDF4',
+            amber: '#D97706',
+            'amber-soft': '#FEF3C7',
+            crimson: '#DC2626',
+            'crimson-soft': '#FEE2E2',
+            pnr: '#FB9821',
+            'pnr-soft': '#FFF7ED',
+          },
+          fontFamily: {
+            sans: ['Geist', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      background-color: #0F172A;
+      font-family: 'Geist', sans-serif;
+      color: #0F172A;
+      -webkit-font-smoothing: antialiased;
+    }
+    .font-mono-data {
+      font-family: 'JetBrains Mono', monospace;
+      font-feature-settings: "tnum";
+      font-variant-numeric: tabular-nums;
+    }
+    .mobile-frame {
+      max-width: 412px;
+      height: 890px;
+      margin: 20px auto;
+      background: #F8FAFC;
+      border-radius: 40px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 12px #1E293B;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .screen-container {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      display: none;
+      flex-direction: column;
+    }
+    .screen-container.active {
+      display: flex;
+    }
+    .whisper-card {
+      background: #FFFFFF;
+      border: 1px solid rgba(226, 232, 240, 0.7);
+      border-radius: 16px;
+    }
+    .safe-bottom {
+      padding-bottom: max(16px, env(safe-area-inset-bottom));
+    }
+    /* Pulse animation for Live GPS Telemetry Radar */
+    @keyframes radar-pulse {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.2); opacity: 0.3; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .radar-beacon {
+      animation: radar-pulse 2s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-2 md:p-6 bg-slate-950 text-slate-900">
+
+  <!-- Mobile Simulator Frame -->
+  <div class="mobile-frame relative bg-canvas">
+    
+    <!-- Top Hardware Status Bar -->
+    <div class="h-11 bg-white/90 backdrop-blur-md border-b border-slate-100 flex items-center justify-between px-6 z-50 select-none">
+      <span class="font-mono-data text-xs font-semibold text-charcoal" id="top-clock">07:00</span>
+      <div class="w-20 h-4 bg-slate-900 rounded-full mx-auto"></div>
+      <div class="flex items-center space-x-1.5 text-xs text-charcoal">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+        <span class="font-mono-data text-[10px] font-bold">5G</span>
+        <svg class="w-4 h-4 text-emerald" viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="7" width="16" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M22 11v2"/><rect x="4" y="9" width="10" height="6" rx="1"/></svg>
+      </div>
+    </div>
+
+    <!-- Active 10-Minute Seat Hold Global Floating Banner (PAX-010) -->
+    <div id="global-hold-banner" class="hidden bg-amber text-white px-4 py-2 flex items-center justify-between z-40 text-xs shadow-md">
+      <div class="flex items-center space-x-2">
+        <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span>Đang giữ chỗ ghế: <b id="hold-banner-seats" class="font-mono-data">A01</b></span>
+      </div>
+      <span id="hold-banner-timer" class="font-mono-data font-bold text-sm bg-black/20 px-2 py-0.5 rounded">09:59</span>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 1: PAX-001 SPLASH & INITIALIZATION -->
+    <!-- ========================================================================= -->
+    <div id="screen-splash" class="screen-container active justify-between items-center p-8 bg-white">
+      <div class="w-full flex justify-end pt-2">
+        <span class="text-[11px] font-mono-data text-muted bg-slate-100 px-2.5 py-1 rounded-full">v3.0.0 (Build 412)</span>
+      </div>
+      
+      <div class="flex flex-col items-center text-center space-y-4">
+        <div class="w-20 h-20 bg-sapphire rounded-3xl flex items-center justify-center text-white shadow-xl shadow-sapphire/20">
+          <svg class="w-11 h-11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.8-.7-1.5-1.5-1.5H3.5c-.8 0-1.5.7-1.5 1.5 0 .4.1.8.2 1.2.3 1.1.8 2.8.8 2.8h3"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/><path d="M4 11V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7"/></svg>
+        </div>
+        <h1 class="text-3xl font-bold tracking-tight text-charcoal">BusGo</h1>
+        <p class="text-sm text-muted max-w-[240px]">Hệ thống đặt xe & theo dõi telemetry thời gian thực</p>
+      </div>
+
+      <div class="w-full space-y-3 safe-bottom">
+        <button onclick="navigateTo('screen-home')" class="w-full h-13 py-3.5 bg-sapphire text-white font-semibold rounded-2xl shadow-lg shadow-sapphire/25 hover:bg-blue-700 transition flex items-center justify-center space-x-2">
+          <span>BẮT ĐẦU ĐẶT VÉ</span>
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </button>
+        <button onclick="navigateTo('screen-login')" class="w-full h-12 py-3 bg-slate-50 text-charcoal border border-whisper font-medium rounded-2xl hover:bg-slate-100 transition text-sm">
+          Đăng nhập tài khoản
+        </button>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 2: PAX-002 & PAX-003 LOGIN & OTP -->
+    <!-- ========================================================================= -->
+    <div id="screen-login" class="screen-container p-6 bg-white justify-between">
+      <div>
+        <button onclick="navigateTo('screen-splash')" class="p-2 -ml-2 text-muted hover:text-charcoal">
+          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <div class="mt-4">
+          <h2 class="text-2xl font-bold text-charcoal">Đăng nhập tài khoản</h2>
+          <p class="text-sm text-muted mt-1">Nhập số điện thoại để nhận mã xác thực OTP</p>
+        </div>
+
+        <div class="mt-8 space-y-4">
+          <div>
+            <label class="block text-xs font-semibold text-charcoal uppercase tracking-wider mb-2">Số điện thoại</label>
+            <div class="relative">
+              <span class="absolute left-4 top-3.5 font-mono-data text-sm font-semibold text-charcoal">+84</span>
+              <input id="login-phone-input" type="tel" value="0912345678" placeholder="912 345 678" class="w-full h-13 pl-14 pr-4 bg-slate-50 border border-whisper rounded-2xl font-mono-data text-base font-semibold text-charcoal focus:outline-none focus:ring-2 focus:ring-sapphire focus:bg-white" />
+            </div>
+          </div>
+
+          <div id="otp-section" class="hidden space-y-3 pt-2">
+            <div class="flex justify-between items-center">
+              <label class="block text-xs font-semibold text-charcoal uppercase tracking-wider">Mã OTP (6 chữ số)</label>
+              <span id="otp-timer-badge" class="font-mono-data text-xs text-sapphire font-semibold">Gửi lại sau 59s</span>
+            </div>
+            <input id="otp-input" type="text" maxlength="6" value="882199" placeholder="● ● ● ● ● ●" class="w-full h-13 text-center tracking-widest font-mono-data text-xl font-bold bg-slate-50 border border-whisper rounded-2xl focus:outline-none focus:ring-2 focus:ring-sapphire focus:bg-white" />
+            <p class="text-xs text-muted text-center">Mã thử nghiệm mặc định: <b class="font-mono-data text-sapphire">882199</b></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="safe-bottom space-y-3">
+        <button id="btn-request-otp" onclick="handleRequestOTP()" class="w-full h-13 py-3.5 bg-sapphire text-white font-semibold rounded-2xl shadow-lg shadow-sapphire/25 hover:bg-blue-700 transition">
+          GỬI MÃ OTP
+        </button>
+        <button id="btn-verify-otp" onclick="handleVerifyOTP()" class="hidden w-full h-13 py-3.5 bg-sapphire text-white font-semibold rounded-2xl shadow-lg shadow-sapphire/25 hover:bg-blue-700 transition">
+          XÁC NHẬN ĐĂNG NHẬP
+        </button>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 3: PAX-004 HOME & SEARCH BAR -->
+    <!-- ========================================================================= -->
+    <div id="screen-home" class="screen-container bg-canvas pb-20">
+      <!-- Header Banner -->
+      <div class="bg-sapphire text-white p-6 pt-4 rounded-b-3xl shadow-lg shadow-sapphire/15">
+        <div class="flex justify-between items-center mb-4">
+          <div class="flex items-center space-x-2">
+            <div class="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center">
+              <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.8-.7-1.5-1.5-1.5H3.5c-.8 0-1.5.7-1.5 1.5 0 .4.1.8.2 1.2.3 1.1.8 2.8.8 2.8h3"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
+            </div>
+            <span class="font-bold text-lg">BusGo</span>
+          </div>
+          <button onclick="navigateTo('screen-notifications')" class="relative p-2 bg-white/15 rounded-xl">
+            <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+            <span class="absolute top-1.5 right-1.5 w-2 h-2 bg-pnr rounded-full"></span>
+          </button>
+        </div>
+
+        <h2 class="text-xl font-bold leading-snug">Tìm kiếm chuyến xe liên tỉnh chất lượng cao</h2>
+      </div>
+
+      <!-- Search Card Form (PAX-004 & PAX-005) -->
+      <div class="px-4 -mt-4">
+        <div class="whisper-card p-5 shadow-sm space-y-4">
+          <div>
+            <label class="block text-xs font-semibold text-muted uppercase">Điểm đi</label>
+            <div class="flex items-center space-x-3 mt-1.5 p-3 bg-slate-50 border border-whisper rounded-xl cursor-pointer" onclick="openLocationPicker('origin')">
+              <svg class="w-5 h-5 text-sapphire" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+              <div class="flex-1">
+                <p id="home-origin-text" class="text-sm font-semibold text-charcoal">Hà Nội (Bến xe Giáp Bát)</p>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-muted uppercase">Điểm đến</label>
+            <div class="flex items-center space-x-3 mt-1.5 p-3 bg-slate-50 border border-whisper rounded-xl cursor-pointer" onclick="openLocationPicker('dest')">
+              <svg class="w-5 h-5 text-crimson" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+              <div class="flex-1">
+                <p id="home-dest-text" class="text-sm font-semibold text-charcoal">Thanh Hóa (Bến xe Phía Bắc)</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-muted uppercase">Ngày đi</label>
+              <div class="flex items-center space-x-2 mt-1.5 p-3 bg-slate-50 border border-whisper rounded-xl">
+                <svg class="w-4 h-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                <span class="font-mono-data text-xs font-bold text-charcoal">Hôm nay (28/08)</span>
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-muted uppercase">Loại xe</label>
+              <div class="flex items-center space-x-2 mt-1.5 p-3 bg-slate-50 border border-whisper rounded-xl">
+                <svg class="w-4 h-4 text-sapphire" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/></svg>
+                <span class="text-xs font-bold text-charcoal">Cabin VIP</span>
+              </div>
+            </div>
+          </div>
+
+          <button onclick="handleSearchTrips()" class="w-full h-13 py-3.5 bg-sapphire text-white font-semibold rounded-2xl shadow-lg shadow-sapphire/25 hover:bg-blue-700 transition flex items-center justify-center space-x-2 mt-2">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <span>TÌM CHUYẾN XE</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Shortcuts & Active Trips -->
+      <div class="px-4 mt-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-bold text-charcoal">Tuyến phổ biến hôm nay</h3>
+          <span class="text-xs text-sapphire font-semibold cursor-pointer">Xem tất cả</span>
+        </div>
+
+        <div class="space-y-3">
+          <div onclick="quickSelectRoute('Hà Nội', 'Thanh Hóa')" class="whisper-card p-4 flex items-center justify-between cursor-pointer hover:border-sapphire transition">
+            <div class="space-y-1">
+              <div class="flex items-center space-x-2">
+                <span class="font-bold text-sm text-charcoal">Hà Nội</span>
+                <svg class="w-3.5 h-3.5 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                <span class="font-bold text-sm text-charcoal">Thanh Hóa</span>
+              </div>
+              <p class="text-xs text-muted">2h 30m · Cao tốc Bắc - Nam</p>
+            </div>
+            <div class="text-right">
+              <span class="font-mono-data font-bold text-sm text-sapphire">220.000 đ</span>
+              <span class="block text-[10px] text-emerald font-semibold">14 chuyến/ngày</span>
+            </div>
+          </div>
+
+          <div onclick="quickSelectRoute('Hà Nội', 'Sầm Sơn')" class="whisper-card p-4 flex items-center justify-between cursor-pointer hover:border-sapphire transition">
+            <div class="space-y-1">
+              <div class="flex items-center space-x-2">
+                <span class="font-bold text-sm text-charcoal">Hà Nội</span>
+                <svg class="w-3.5 h-3.5 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                <span class="font-bold text-sm text-charcoal">Sầm Sơn (Biển)</span>
+              </div>
+              <p class="text-xs text-muted">2h 45m · Đưa đón tận nơi</p>
+            </div>
+            <div class="text-right">
+              <span class="font-mono-data font-bold text-sm text-sapphire">250.000 đ</span>
+              <span class="block text-[10px] text-emerald font-semibold">8 chuyến/ngày</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 4: PAX-006 SEARCH RESULTS & TRIP SELECTION -->
+    <!-- ========================================================================= -->
+    <div id="screen-search-results" class="screen-container bg-canvas pb-20">
+      <div class="bg-white border-b border-whisper p-4 sticky top-0 z-30">
+        <div class="flex items-center space-x-3">
+          <button onclick="navigateTo('screen-home')" class="p-1 text-muted hover:text-charcoal">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div class="flex-1">
+            <h3 class="text-sm font-bold text-charcoal">Hà Nội ➔ Thanh Hóa</h3>
+            <p class="text-xs text-muted">Hôm nay, 28/08/2026 · Tìm thấy 3 chuyến</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-4 space-y-3.5" id="trip-list-container">
+        <!-- Generated Dynamically via JS -->
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 5: PAX-009 & PAX-010 2D SEAT MAP & REDIS LOCK -->
+    <!-- ========================================================================= -->
+    <div id="screen-seat-map" class="screen-container bg-canvas pb-24">
+      <div class="bg-white border-b border-whisper p-4 sticky top-0 z-30">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-3">
+            <button onclick="navigateTo('screen-search-results')" class="p-1 text-muted hover:text-charcoal">
+              <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+            </button>
+            <div>
+              <h3 class="text-sm font-bold text-charcoal">Chọn chỗ ngồi (Cabin VIP)</h3>
+              <p class="text-xs text-muted">Tối đa chọn 5 ghế / giao dịch</p>
+            </div>
+          </div>
+          <span class="font-mono-data text-xs bg-sapphire-soft text-sapphire font-bold px-2 py-1 rounded-lg">22 Phòng</span>
+        </div>
+
+        <!-- Deck Switcher Tabs -->
+        <div class="grid grid-cols-2 gap-2 mt-3 bg-slate-100 p-1 rounded-xl">
+          <button id="btn-deck-1" onclick="switchDeck(1)" class="py-2 text-xs font-bold rounded-lg bg-white text-charcoal shadow-sm transition">
+            TẦNG DƯỚI (Deck 1)
+          </button>
+          <button id="btn-deck-2" onclick="switchDeck(2)" class="py-2 text-xs font-bold rounded-lg text-muted hover:text-charcoal transition">
+            TẦNG TRÊN (Deck 2)
+          </button>
+        </div>
+      </div>
+
+      <!-- Seat Legend -->
+      <div class="flex items-center justify-around py-3 px-4 bg-white border-b border-whisper text-[11px] font-medium text-muted">
+        <div class="flex items-center space-x-1.5">
+          <div class="w-4 h-4 bg-white border border-slate-300 rounded"></div>
+          <span>Trống</span>
+        </div>
+        <div class="flex items-center space-x-1.5">
+          <div class="w-4 h-4 bg-sapphire rounded"></div>
+          <span>Đang chọn</span>
+        </div>
+        <div class="flex items-center space-x-1.5">
+          <div class="w-4 h-4 bg-amber-soft border border-amber rounded"></div>
+          <span>Đang giữ</span>
+        </div>
+        <div class="flex items-center space-x-1.5">
+          <div class="w-4 h-4 bg-slate-200 border border-slate-300 rounded"></div>
+          <span>Đã đặt</span>
+        </div>
+      </div>
+
+      <!-- 2D Vehicle Cockpit & Seat Matrix Layout -->
+      <div class="p-4">
+        <!-- Front of Bus Indicator -->
+        <div class="whisper-card py-2 text-center text-xs font-bold text-muted uppercase tracking-wider mb-4 bg-slate-100 flex items-center justify-center space-x-2">
+          <svg class="w-4 h-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/></svg>
+          <span>Đầu xe / Bác tài</span>
+        </div>
+
+        <!-- 2D Interactive Seat Grid -->
+        <div id="seat-grid-container" class="space-y-3">
+          <!-- Dynamically populated rows -->
+        </div>
+      </div>
+
+      <!-- Sticky Seat Selection Bottom Bar -->
+      <div class="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-whisper p-4 safe-bottom flex items-center justify-between z-30 shadow-lg">
+        <div>
+          <p class="text-xs text-muted">Ghế đã chọn: <b id="selected-seats-label" class="font-mono-data text-charcoal">Chưa chọn</b></p>
+          <p class="text-base font-bold text-sapphire font-mono-data" id="selected-seats-price">0 đ</p>
+        </div>
+        <button id="btn-proceed-manifest" onclick="handleProceedToManifest()" disabled class="px-6 py-3 bg-slate-200 text-slate-400 font-bold text-sm rounded-xl transition">
+          TIẾP TỤC (0)
+        </button>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 6: PAX-011 & PAX-012 MANIFEST & ORDER REVIEW -->
+    <!-- ========================================================================= -->
+    <div id="screen-checkout" class="screen-container bg-canvas pb-24">
+      <div class="bg-white border-b border-whisper p-4 sticky top-0 z-30">
+        <div class="flex items-center space-x-3">
+          <button onclick="navigateTo('screen-seat-map')" class="p-1 text-muted hover:text-charcoal">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div>
+            <h3 class="text-sm font-bold text-charcoal">Xác nhận thông tin & Thanh toán</h3>
+            <p class="text-xs text-muted">Kiểm tra thông tin hành khách</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-4 space-y-4">
+        <!-- Trip Brief Card -->
+        <div class="whisper-card p-4 space-y-3">
+          <div class="flex justify-between items-start">
+            <div>
+              <span class="font-mono-data text-xs font-bold text-pnr bg-pnr-soft px-2 py-0.5 rounded">HÀ NỘI — THANH HÓA</span>
+              <h4 class="text-base font-bold text-charcoal mt-1">07:00 · 28/08/2026</h4>
+            </div>
+            <span class="font-mono-data text-xs font-semibold text-muted">29B-882.19</span>
+          </div>
+          <div class="border-t border-whisper pt-2 text-xs text-muted space-y-1">
+            <p>Đón: <b class="text-charcoal">Bến xe Giáp Bát (07:00)</b></p>
+            <p>Trả: <b class="text-charcoal">Bến xe Phía Bắc Thanh Hóa (09:30)</b></p>
+          </div>
+        </div>
+
+        <!-- Passenger Forms (PAX-011) -->
+        <div class="whisper-card p-4 space-y-3">
+          <h4 class="text-xs font-bold text-charcoal uppercase tracking-wider">Thông tin người đặt vé</h4>
+          <div>
+            <label class="block text-xs text-muted mb-1">Họ và tên</label>
+            <input id="checkout-payer-name" type="text" value="Nguyễn Văn An" class="w-full h-11 px-3 bg-slate-50 border border-whisper rounded-xl text-sm font-semibold text-charcoal focus:outline-none focus:ring-2 focus:ring-sapphire focus:bg-white" />
+          </div>
+          <div>
+            <label class="block text-xs text-muted mb-1">Số điện thoại nhận vé</label>
+            <input id="checkout-payer-phone" type="tel" value="0912345678" class="w-full h-11 px-3 bg-slate-50 border border-whisper rounded-xl font-mono-data text-sm font-semibold text-charcoal focus:outline-none focus:ring-2 focus:ring-sapphire focus:bg-white" />
+          </div>
+        </div>
+
+        <!-- Voucher & Breakdown (PAX-012) -->
+        <div class="whisper-card p-4 space-y-3">
+          <h4 class="text-xs font-bold text-charcoal uppercase tracking-wider">Mã giảm giá (Voucher)</h4>
+          <div class="flex space-x-2">
+            <input id="checkout-voucher-input" type="text" value="BUSGO50K" placeholder="Nhập mã voucher" class="flex-1 h-11 px-3 bg-slate-50 border border-whisper rounded-xl font-mono-data text-sm font-bold uppercase text-charcoal focus:outline-none focus:ring-2 focus:ring-sapphire" />
+            <button onclick="applyVoucher()" class="px-4 h-11 bg-slate-100 hover:bg-slate-200 text-charcoal text-xs font-bold rounded-xl transition">Áp dụng</button>
+          </div>
+
+          <div class="border-t border-whisper pt-3 space-y-2 text-xs">
+            <div class="flex justify-between text-muted">
+              <span>Tiền vé (<span id="summary-seats-count">1</span> ghế)</span>
+              <span id="summary-subtotal" class="font-mono-data text-charcoal font-semibold">220.000 đ</span>
+            </div>
+            <div class="flex justify-between text-muted">
+              <span>Bảo hiểm chuyến đi</span>
+              <span id="summary-insurance" class="font-mono-data text-charcoal font-semibold">10.000 đ</span>
+            </div>
+            <div class="flex justify-between text-emerald">
+              <span>Giảm giá voucher (BUSGO50K)</span>
+              <span id="summary-discount" class="font-mono-data font-bold">-50.000 đ</span>
+            </div>
+            <div class="flex justify-between text-sm font-bold text-charcoal border-t border-whisper pt-2">
+              <span>Tổng thanh toán</span>
+              <span id="summary-final-total" class="font-mono-data text-sapphire text-base">180.000 đ</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Checkout CTA -->
+      <div class="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-whisper p-4 safe-bottom flex items-center justify-between z-30 shadow-lg">
+        <div>
+          <p class="text-xs text-muted">Tổng tiền</p>
+          <p class="text-lg font-bold text-sapphire font-mono-data" id="checkout-cta-price">180.000 đ</p>
+        </div>
+        <button onclick="handleCreatePaymentOrder()" class="px-8 py-3.5 bg-sapphire text-white font-bold text-sm rounded-xl shadow-lg shadow-sapphire/25 hover:bg-blue-700 transition">
+          THANH TOÁN VIETQR ➔
+        </button>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 7: PAX-013 & PAX-014 VIETQR PAYMENT & VERIFICATION -->
+    <!-- ========================================================================= -->
+    <div id="screen-payment" class="screen-container bg-canvas pb-24">
+      <div class="bg-white border-b border-whisper p-4 sticky top-0 z-30 flex items-center justify-between">
+        <h3 class="text-sm font-bold text-charcoal">Thanh toán VietQR Napas247</h3>
+        <span class="font-mono-data text-xs bg-amber-soft text-amber font-bold px-2.5 py-1 rounded-full animate-pulse" id="payment-timer">09:45</span>
+      </div>
+
+      <div class="p-5 text-center space-y-4">
+        <!-- VietQR Box -->
+        <div class="whisper-card p-6 bg-white shadow-md flex flex-col items-center space-y-4">
+          <div class="w-full flex justify-between items-center border-b border-whisper pb-3">
+            <span class="text-xs font-bold text-charcoal">VietinBank · Napas247</span>
+            <span class="font-mono-data text-xs text-pnr font-bold" id="pay-pnr-badge">BG-882199</span>
+          </div>
+
+          <!-- Dynamic QR Graphic placeholder with BusGo Security Shield -->
+          <div class="w-52 h-52 bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center p-3 relative">
+            <svg class="w-32 h-32 text-charcoal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+            <span class="text-[10px] font-mono-data text-muted mt-2">Mã QR Chuyển khoản Tự động</span>
+          </div>
+
+          <div class="w-full space-y-2 text-left bg-slate-50 p-3 rounded-xl border border-whisper text-xs">
+            <div class="flex justify-between">
+              <span class="text-muted">Số tài khoản:</span>
+              <b class="font-mono-data text-charcoal">1088219999</b>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-muted">Số tiền:</span>
+              <b class="font-mono-data text-sapphire text-sm" id="pay-amount-label">180.000 đ</b>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-muted">Nội dung CK:</span>
+              <b class="font-mono-data text-pnr" id="pay-memo-label">BUSGO BG882199</b>
+            </div>
+          </div>
+        </div>
+
+        <p class="text-xs text-muted">Hệ thống sẽ tự động xuất vé ngay khi nhận được biến động số dư từ ngân hàng.</p>
+      </div>
+
+      <!-- Mock Fast Settlement Button for Automated Demo & Verification -->
+      <div class="absolute bottom-0 left-0 right-0 bg-white border-t border-whisper p-4 safe-bottom z-30">
+        <button onclick="handleSimulateSuccessfulPayment()" class="w-full h-13 py-3.5 bg-emerald text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald/25 hover:bg-emerald-700 transition flex items-center justify-center space-x-2">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          <span>GIẢ LẬP ĐÃ THANH TOÁN (WEBHOOK SUCCESS)</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 8: PAX-015, PAX-016, PAX-017 TICKET PASS & DYNAMIC QR -->
+    <!-- ========================================================================= -->
+    <div id="screen-ticket-qr" class="screen-container bg-canvas pb-20">
+      <div class="bg-white border-b border-whisper p-4 sticky top-0 z-30 flex items-center justify-between">
+        <h3 class="text-sm font-bold text-charcoal">Vé điện tử lên xe</h3>
+        <span class="font-mono-data text-xs bg-emerald-soft text-emerald font-bold px-2.5 py-1 rounded-full">HỢP LỆ</span>
+      </div>
+
+      <div class="p-4 space-y-4">
+        <!-- E-Ticket Card -->
+        <div class="whisper-card p-5 bg-white shadow-md space-y-4 border-t-4 border-t-sapphire">
+          <div class="flex justify-between items-start">
+            <div>
+              <p class="text-xs text-muted">Mã vé (PNR)</p>
+              <h3 class="font-mono-data text-lg font-bold text-pnr" id="ticket-pnr-label">BG-882199</h3>
+            </div>
+            <div class="text-right">
+              <p class="text-xs text-muted">Ghế</p>
+              <h3 class="font-mono-data text-xl font-bold text-sapphire" id="ticket-seat-label">A01</h3>
+            </div>
+          </div>
+
+          <div class="border-t border-b border-dashed border-slate-200 py-3 space-y-2 text-xs">
+            <div class="flex justify-between">
+              <span class="text-muted">Hành khách:</span>
+              <b class="text-charcoal" id="ticket-pax-name">Nguyễn Văn An</b>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-muted">Chuyến:</span>
+              <b class="text-charcoal">Hà Nội ➔ Thanh Hóa (07:00)</b>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-muted">Điểm đón:</span>
+              <b class="text-charcoal">Bến xe Giáp Bát</b>
+            </div>
+          </div>
+
+          <!-- Dynamic Rotating HMAC QR (PAX-017) -->
+          <div class="flex flex-col items-center py-2 space-y-2">
+            <div class="w-44 h-44 bg-slate-900 text-white rounded-2xl p-4 flex flex-col items-center justify-center relative shadow-inner">
+              <svg class="w-28 h-28 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+              <div class="absolute bottom-2 text-[9px] font-mono-data text-emerald font-bold tracking-wider" id="qr-hmac-sig">HMAC: 9B7C12EF8821</div>
+            </div>
+
+            <!-- 30s Countdown Bar -->
+            <div class="w-44 flex items-center justify-between text-[11px] text-muted">
+              <span>Mã QR tự xoay sau:</span>
+              <b class="font-mono-data text-sapphire" id="qr-refresh-timer">28s</b>
+            </div>
+          </div>
+        </div>
+
+        <button onclick="navigateTo('screen-radar')" class="w-full h-13 py-3 bg-slate-900 text-white font-semibold rounded-2xl flex items-center justify-center space-x-2 shadow-lg">
+          <svg class="w-5 h-5 text-emerald" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
+          <span>THEO DÕI VỊ TRÍ XE TRỰC TIẾP (RADAR GPS)</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 9: PAX-018 & PAX-019 LIVE GPS RADAR TELEMETRY -->
+    <!-- ========================================================================= -->
+    <div id="screen-radar" class="screen-container bg-slate-900 text-white pb-20">
+      <div class="bg-slate-900/90 border-b border-slate-800 p-4 flex items-center justify-between sticky top-0 z-30">
+        <div class="flex items-center space-x-3">
+          <button onclick="navigateTo('screen-ticket-qr')" class="p-1 text-slate-400 hover:text-white">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div>
+            <h3 class="text-sm font-bold text-white">Live Radar GPS</h3>
+            <p class="text-xs text-slate-400">Xe 29B-882.19 (Cabin VIP)</p>
+          </div>
+        </div>
+        <span class="font-mono-data text-xs bg-emerald/20 text-emerald border border-emerald/40 px-2.5 py-0.5 rounded-full font-bold">ONLINE</span>
+      </div>
+
+      <!-- Radar HUD Graphic -->
+      <div class="relative h-72 bg-slate-950 flex items-center justify-center overflow-hidden border-b border-slate-800">
+        <!-- Radar rings -->
+        <div class="absolute w-60 h-60 border border-slate-800 rounded-full"></div>
+        <div class="absolute w-40 h-40 border border-slate-800 rounded-full"></div>
+        <div class="absolute w-20 h-20 border border-slate-800 rounded-full"></div>
+
+        <!-- Bus Marker Pulse -->
+        <div class="relative z-10 flex flex-col items-center">
+          <div class="w-12 h-12 bg-sapphire rounded-full flex items-center justify-center shadow-lg shadow-sapphire/50 text-white radar-beacon">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
+          </div>
+          <span class="font-mono-data text-[11px] font-bold bg-slate-900 px-2 py-0.5 rounded-md border border-slate-700 mt-2">29B-882.19</span>
+        </div>
+
+        <!-- Live Speed & Bearing HUD -->
+        <div class="absolute bottom-3 left-4 bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-mono-data">
+          Tốc độ: <b class="text-emerald">58.2 km/h</b>
+        </div>
+        <div class="absolute bottom-3 right-4 bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-mono-data">
+          ETA: <b class="text-sapphire">~12 phút</b>
+        </div>
+      </div>
+
+      <!-- Live Route Segment Info -->
+      <div class="p-4 space-y-3">
+        <div class="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 space-y-3">
+          <h4 class="text-xs font-bold text-slate-300 uppercase tracking-wider">Trạng thái lộ trình</h4>
+          <div class="space-y-2 text-xs text-slate-300">
+            <div class="flex justify-between">
+              <span>Khoảng cách đến điểm đón:</span>
+              <b class="font-mono-data text-white">8.5 km</b>
+            </div>
+            <div class="flex justify-between">
+              <span>Dự kiến đến Bến Giáp Bát:</span>
+              <b class="font-mono-data text-emerald">06:55 (Sớm 5 phút)</b>
+            </div>
+          </div>
+        </div>
+
+        <button onclick="navigateTo('screen-home')" class="w-full h-12 bg-slate-800 text-slate-300 font-semibold rounded-2xl hover:bg-slate-700 transition text-sm">
+          Về Trang Chủ
+        </button>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 10: PAX-020 NOTIFICATIONS -->
+    <!-- ========================================================================= -->
+    <div id="screen-notifications" class="screen-container bg-canvas pb-20">
+      <div class="bg-white border-b border-whisper p-4 sticky top-0 z-30 flex items-center space-x-3">
+        <button onclick="navigateTo('screen-home')" class="p-1 text-muted hover:text-charcoal">
+          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <h3 class="text-sm font-bold text-charcoal">Trung tâm thông báo</h3>
+      </div>
+
+      <div class="p-4 space-y-3">
+        <div class="whisper-card p-4 space-y-1 border-l-4 border-l-emerald">
+          <div class="flex justify-between items-center">
+            <h4 class="text-xs font-bold text-charcoal">Đặt vé thành công</h4>
+            <span class="text-[10px] font-mono-data text-muted">Vừa xong</span>
+          </div>
+          <p class="text-xs text-muted">Mã PNR <b class="font-mono-data text-pnr">BG-882199</b> cho chuyến Hà Nội - Thanh Hóa lúc 07:00 đã được xác nhận.</p>
+        </div>
+
+        <div class="whisper-card p-4 space-y-1 border-l-4 border-l-sapphire">
+          <div class="flex justify-between items-center">
+            <h4 class="text-xs font-bold text-charcoal">Nhắc nhở chuẩn bị đón xe</h4>
+            <span class="text-[10px] font-mono-data text-muted">10 phút trước</span>
+          </div>
+          <p class="text-xs text-muted">Xe 29B-882.19 đang cách điểm đón Bến xe Giáp Bát khoảng 8.5 km.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- UNIFIED 4-ITEM PASSENGER BOTTOM MENU (Strict adherence to STATE.md standard) -->
+    <!-- ========================================================================= -->
+    <div id="bottom-nav-bar" class="h-16 bg-white/95 backdrop-blur-md border-t border-slate-200 grid grid-cols-4 items-center z-40 select-none">
+      <button onclick="navigateTo('screen-home')" class="flex flex-col items-center justify-center space-y-1 text-sapphire" id="nav-item-home">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span class="text-[10px] font-bold">Trang chủ</span>
+      </button>
+
+      <button onclick="navigateTo('screen-ticket-qr')" class="flex flex-col items-center justify-center space-y-1 text-muted hover:text-sapphire" id="nav-item-trips">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
+        <span class="text-[10px] font-medium">Chuyến đi</span>
+      </button>
+
+      <button onclick="navigateTo('screen-notifications')" class="flex flex-col items-center justify-center space-y-1 text-muted hover:text-sapphire relative" id="nav-item-notifs">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        <span class="absolute top-2 right-6 w-2 h-2 bg-crimson rounded-full"></span>
+        <span class="text-[10px] font-medium">Thông báo</span>
+      </button>
+
+      <button onclick="navigateTo('screen-login')" class="flex flex-col items-center justify-center space-y-1 text-muted hover:text-sapphire" id="nav-item-profile">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span class="text-[10px] font-medium">Cá nhân</span>
+      </button>
+    </div>
+
+  </div>
+
+  <!-- Interactive Client State Engine -->
+  <script>
+    // State Store
+    const appState = {
+      currentDeck: 1,
+      selectedSeats: new Set(['A01']),
+      activeTrip: {
+        trip_id: 'trp_hn_th_01',
+        route_name: 'Hà Nội — Thanh Hóa (Cao tốc)',
+        departure_time: '07:00, 28/08/2026',
+        plate_number: '29B-882.19',
+        price_vnd: 220000
+      },
+      holdSecondsLeft: 600,
+      holdTimerInterval: null,
+      qrSecondsLeft: 30,
+      qrInterval: null
+    };
+
+    function navigateTo(screenId) {
+      document.querySelectorAll('.screen-container').forEach(el => el.classList.remove('active'));
+      const target = document.getElementById(screenId);
+      if (target) {
+        target.classList.add('active');
+        target.scrollTop = 0;
+      }
+      updateBottomNav(screenId);
+    }
+
+    function updateBottomNav(screenId) {
+      const nav = document.getElementById('bottom-nav-bar');
+      if (screenId === 'screen-splash' || screenId === 'screen-login') {
+        nav.style.display = 'none';
+      } else {
+        nav.style.display = 'grid';
+      }
+    }
+
+    function handleRequestOTP() {
+      document.getElementById('otp-section').classList.remove('hidden');
+      document.getElementById('btn-request-otp').classList.add('hidden');
+      document.getElementById('btn-verify-otp').classList.remove('hidden');
+    }
+
+    function handleVerifyOTP() {
+      navigateTo('screen-home');
+    }
+
+    function handleSearchTrips() {
+      const container = document.getElementById('trip-list-container');
+      container.innerHTML = `
+        <div onclick="selectTrip('trp_hn_th_01')" class="whisper-card p-4 space-y-3 cursor-pointer hover:border-sapphire transition bg-white">
+          <div class="flex justify-between items-start">
+            <div>
+              <span class="font-mono-data text-xs font-bold text-sapphire bg-sapphire-soft px-2 py-0.5 rounded">CABIN CUNG ĐIỆN VIP</span>
+              <div class="flex items-center space-x-2 mt-1.5">
+                <span class="font-mono-data font-bold text-base text-charcoal">07:00</span>
+                <span class="text-xs text-muted">➔ 09:30</span>
+              </div>
+            </div>
+            <div class="text-right">
+              <span class="font-mono-data font-bold text-base text-sapphire">220.000 đ</span>
+              <span class="block text-[11px] text-emerald font-semibold">Còn 14 chỗ</span>
+            </div>
+          </div>
+          <div class="flex items-center space-x-3 text-xs text-muted border-t border-whisper pt-2">
+            <span>Bến Giáp Bát ➔ Bến Phía Bắc</span>
+            <span>·</span>
+            <span>2h 30m</span>
+          </div>
+        </div>
+
+        <div onclick="selectTrip('trp_hn_th_02')" class="whisper-card p-4 space-y-3 cursor-pointer hover:border-sapphire transition bg-white">
+          <div class="flex justify-between items-start">
+            <div>
+              <span class="font-mono-data text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">GIƯỜNG NẰM 34 CHỖ</span>
+              <div class="flex items-center space-x-2 mt-1.5">
+                <span class="font-mono-data font-bold text-base text-charcoal">14:00</span>
+                <span class="text-xs text-muted">➔ 16:30</span>
+              </div>
+            </div>
+            <div class="text-right">
+              <span class="font-mono-data font-bold text-base text-sapphire">180.000 đ</span>
+              <span class="block text-[11px] text-emerald font-semibold">Còn 8 chỗ</span>
+            </div>
+          </div>
+          <div class="flex items-center space-x-3 text-xs text-muted border-t border-whisper pt-2">
+            <span>Bến Mỹ Đình ➔ Bến Phía Bắc</span>
+            <span>·</span>
+            <span>2h 30m</span>
+          </div>
+        </div>
+      `;
+      navigateTo('screen-search-results');
+    }
+
+    function selectTrip(tripId) {
+      renderSeatMap(1);
+      navigateTo('screen-seat-map');
+    }
+
+    function switchDeck(deckNum) {
+      appState.currentDeck = deckNum;
+      document.getElementById('btn-deck-1').className = deckNum === 1
+        ? 'py-2 text-xs font-bold rounded-lg bg-white text-charcoal shadow-sm transition'
+        : 'py-2 text-xs font-bold rounded-lg text-muted hover:text-charcoal transition';
+      document.getElementById('btn-deck-2').className = deckNum === 2
+        ? 'py-2 text-xs font-bold rounded-lg bg-white text-charcoal shadow-sm transition'
+        : 'py-2 text-xs font-bold rounded-lg text-muted hover:text-charcoal transition';
+      renderSeatMap(deckNum);
+    }
+
+    function renderSeatMap(deck) {
+      const container = document.getElementById('seat-grid-container');
+      const rows = deck === 1
+        ? [
+            { a: 'A01', b: 'B01', stateA: 'AVAILABLE', stateB: 'AVAILABLE' },
+            { a: 'A02', b: 'B02', stateA: 'AVAILABLE', stateB: 'LOCKED_BY_OTHER' },
+            { a: 'A03', b: 'B03', stateA: 'BOOKED', stateB: 'AVAILABLE' },
+            { a: 'A04', b: 'B04', stateA: 'AVAILABLE', stateB: 'AVAILABLE' },
+            { a: 'A05', b: 'B05', stateA: 'AVAILABLE', stateB: 'AVAILABLE' },
+            { a: 'A06', b: null, stateA: 'AVAILABLE', stateB: null }
+          ]
+        : [
+            { a: 'A07', b: 'B06', stateA: 'AVAILABLE', stateB: 'BOOKED' },
+            { a: 'A08', b: 'B07', stateA: 'AVAILABLE', stateB: 'AVAILABLE' },
+            { a: 'A09', b: 'B08', stateA: 'AVAILABLE', stateB: 'AVAILABLE' },
+            { a: 'A10', b: 'B09', stateA: 'AVAILABLE', stateB: 'AVAILABLE' },
+            { a: 'A11', b: 'B10', stateA: 'AVAILABLE', stateB: 'AVAILABLE' }
+          ];
+
+      let html = '';
+      rows.forEach(r => {
+        html += `<div class="grid grid-cols-3 gap-3 items-center">`;
+        
+        // Col A
+        html += renderSeatButton(r.a, r.stateA);
+        
+        // Aisle
+        html += `<div class="text-center text-[10px] text-slate-300 font-mono-data">LỐI ĐI</div>`;
+        
+        // Col B
+        html += r.b ? renderSeatButton(r.b, r.stateB) : `<div></div>`;
+        
+        html += `</div>`;
+      });
+
+      container.innerHTML = html;
+      updateSelectionSummary();
+    }
+
+    function renderSeatButton(code, state) {
+      const isSelected = appState.selectedSeats.has(code);
+      let btnClass = 'h-14 whisper-card flex flex-col items-center justify-center font-mono-data transition ';
+      
+      if (isSelected) {
+        btnClass += 'bg-sapphire text-white border-blue-700 shadow-md scale-98';
+      } else if (state === 'BOOKED') {
+        btnClass += 'bg-slate-200 text-slate-400 border-slate-300 cursor-not-allowed opacity-60';
+      } else if (state === 'LOCKED_BY_OTHER') {
+        btnClass += 'bg-amber-soft text-amber border-amber cursor-not-allowed';
+      } else {
+        btnClass += 'bg-white text-charcoal hover:border-sapphire cursor-pointer';
+      }
+
+      const label = state === 'BOOKED' ? 'Đã đặt' : state === 'LOCKED_BY_OTHER' ? 'Đang giữ' : '220k';
+
+      return `
+        <button onclick="toggleSeat('${code}', '${state}')" class="${btnClass}">
+          <span class="text-xs font-bold">${code}</span>
+          <span class="text-[10px] ${isSelected ? 'text-blue-100' : 'text-muted'}">${label}</span>
+        </button>
+      `;
+    }
+
+    function toggleSeat(code, state) {
+      if (state === 'BOOKED' || state === 'LOCKED_BY_OTHER') return;
+      if (appState.selectedSeats.has(code)) {
+        appState.selectedSeats.delete(code);
+      } else {
+        if (appState.selectedSeats.size >= 5) {
+          alert('Bạn chỉ được chọn tối đa 5 ghế trong một lần đặt!');
+          return;
+        }
+        appState.selectedSeats.add(code);
+      }
+      renderSeatMap(appState.currentDeck);
+    }
+
+    function updateSelectionSummary() {
+      const count = appState.selectedSeats.size;
+      const seatsArr = Array.from(appState.selectedSeats);
+      const total = count * 220000;
+
+      document.getElementById('selected-seats-label').innerText = count > 0 ? seatsArr.join(', ') : 'Chưa chọn';
+      document.getElementById('selected-seats-price').innerText = new Intl.NumberFormat('vi-VN').format(total) + ' đ';
+
+      const btn = document.getElementById('btn-proceed-manifest');
+      if (count > 0) {
+        btn.disabled = false;
+        btn.className = 'px-6 py-3 bg-sapphire text-white font-bold text-sm rounded-xl shadow-lg shadow-sapphire/25 hover:bg-blue-700 transition';
+        btn.innerText = `TIẾP TỤC (${count})`;
+      } else {
+        btn.disabled = true;
+        btn.className = 'px-6 py-3 bg-slate-200 text-slate-400 font-bold text-sm rounded-xl transition';
+        btn.innerText = 'TIẾP TỤC (0)';
+      }
+    }
+
+    function handleProceedToManifest() {
+      startHoldTimer();
+      navigateTo('screen-checkout');
+    }
+
+    function startHoldTimer() {
+      const banner = document.getElementById('global-hold-banner');
+      banner.classList.remove('hidden');
+      document.getElementById('hold-banner-seats').innerText = Array.from(appState.selectedSeats).join(', ');
+
+      if (appState.holdTimerInterval) clearInterval(appState.holdTimerInterval);
+      appState.holdSecondsLeft = 600;
+
+      appState.holdTimerInterval = setInterval(() => {
+        appState.holdSecondsLeft--;
+        if (appState.holdSecondsLeft <= 0) {
+          clearInterval(appState.holdTimerInterval);
+          banner.classList.add('hidden');
+          alert('Hết thời gian giữ chỗ! Vui lòng chọn lại ghế.');
+          navigateTo('screen-seat-map');
+        } else {
+          const m = Math.floor(appState.holdSecondsLeft / 60);
+          const s = appState.holdSecondsLeft % 60;
+          const str = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+          document.getElementById('hold-banner-timer').innerText = str;
+          const payTimer = document.getElementById('payment-timer');
+          if (payTimer) payTimer.innerText = str;
+        }
+      }, 1000);
+    }
+
+    function applyVoucher() {
+      alert('Áp dụng mã giảm giá BUSGO50K thành công! Giảm 50.000 đ');
+    }
+
+    function handleCreatePaymentOrder() {
+      navigateTo('screen-payment');
+    }
+
+    function handleSimulateSuccessfulPayment() {
+      if (appState.holdTimerInterval) clearInterval(appState.holdTimerInterval);
+      document.getElementById('global-hold-banner').classList.add('hidden');
+      startDynamicQRRotation();
+      navigateTo('screen-ticket-qr');
+    }
+
+    function startDynamicQRRotation() {
+      if (appState.qrInterval) clearInterval(appState.qrInterval);
+      appState.qrSecondsLeft = 30;
+
+      appState.qrInterval = setInterval(() => {
+        appState.qrSecondsLeft--;
+        if (appState.qrSecondsLeft <= 0) {
+          appState.qrSecondsLeft = 30;
+          // Rotate signature
+          const mockSig = Math.floor(10000000 + Math.random() * 90000000).toString(16).toUpperCase();
+          document.getElementById('qr-hmac-sig').innerText = `HMAC: ${mockSig}`;
+        }
+        document.getElementById('qr-refresh-timer').innerText = `${appState.qrSecondsLeft}s`;
+      }, 1000);
+    }
+
+    // Initialize UI on load
+    window.addEventListener('DOMContentLoaded', () => {
+      // Clock timer
+      setInterval(() => {
+        const d = new Date();
+        document.getElementById('top-clock').innerText = 
+          `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+      }, 1000);
+    });
+  </script>
+</body>
+</html>

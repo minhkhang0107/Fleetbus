@@ -1,39 +1,41 @@
 # FleetBus Real-Time Bus Booking & Telemetry System State
 
-Last updated: 2026-08-27 11:18
+Last updated: 2026-08-28 11:50
 
-## Master Spec & UI Alignment Status
-- [x] **Master SRS Spec & Navigation Architecture**: Synchronized with `docs/specs/bus_booking_tracking_system_spec.md` and all 15 module specs.
-- [x] **Unified 4-Item Passenger Bottom Menu (Trang chủ, Chuyến đi, Thông báo, Cá nhân)**:
-  - **Tab 1: `Trang chủ`** (`home` SVG icon) ➔ `02_passenger_trip_search.html` (Active on Home/Search).
-  - **Tab 2: `Chuyến đi`** (`directions_bus` SVG icon) ➔ `06b_passenger_my_trips.html` (Active on My Trips).
-  - **Tab 3: `Thông báo`** (`notifications` SVG icon + unread red/primary dot badge).
-  - **Tab 4: `Cá nhân`** (`person` SVG icon) ➔ `01b_passenger_profile.html` (Active on User Profile).
-  - *Design System Standard*: In-place update on existing pages, 100% compliant with `taste-skill` v2 anti-slop guidelines (`bg-white/95 backdrop-blur-md dark:bg-slate-900/95`, Whisper border `border-t border-slate-200 dark:border-slate-800`, active sapphire pill `bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 font-bold px-4 py-1 rounded-xl`).
-- [x] **Seamless 5-Step Booking Journey (Sequential CTAs & Links)**:
-  1. `PASS-02-SEARCH` (Bước 1): Tìm kiếm chuyến xe & lọc giờ xuất bến (`02_passenger_trip_search.html`) ➔ `[ CHỌN CHUYẾN ➔ ]`.
-  2. `PASS-02B-PICKUP` (Bước 2): Chọn điểm đón 2 kiểu (Đón tận nơi GPS <10km vs. Trạm cố định) (`03b_passenger_pickup_selection.html`) ➔ `[ TIẾP TỤC: CHỌN GHẾ ➔ ]`.
-  3. `PASS-03-SEATS` (Bước 3): Sơ đồ chọn Cabin VIP 2 tầng, bộ đếm ngược giữ chỗ 10p (`03_passenger_seat_booking.html`) ➔ `[ TIẾP TỤC: XÁC NHẬN ĐƠN ➔ ]`.
-  4. `PASS-03C-REVIEW` (Bước 4): Review tóm tắt đơn vé chuẩn Grab (`03c_passenger_booking_review.html`) ➔ `[ TIẾP TỤC THANH TOÁN ➔ ]`.
-  5. `PASS-04-PAYMENT` (Bước 5): Thanh toán VietQR Napas247, sao chép 1 chạm, vé QR xoay 30s (`04_passenger_payment_ticket.html`).
-- [x] **Complete High-Fidelity UI Screens Suite (20 screens in `docs/designs/`)**:
-  1. `PASS-00-SPLASH`: `00_splash_screen.html`
-  2. `PASS-01-LOGIN`: `01_passenger_login.html`
-  3. `PASS-01-REGISTER`: `01_passenger_register.html`
-  4. `PASS-01B-PROFILE`: `01b_passenger_profile.html`
-  5. `PASS-02-SEARCH`: `02_passenger_trip_search.html`
-  6. `PASS-02B-PICKUP`: `03b_passenger_pickup_selection.html`
-  7. `PASS-03-SEATS`: `03_passenger_seat_booking.html`
-  8. `PASS-03C-REVIEW`: `03c_passenger_booking_review.html`
-  9. `PASS-04-PAYMENT`: `04_passenger_payment_ticket.html`
-  10. `PASS-04B-TICKETS`: `04b_passenger_my_tickets.html`
-  11. `PASS-05-TRACKING`: `05_passenger_live_tracking.html`
-  12. `PASS-06-MY-TRIPS`: `06b_passenger_my_trips.html`
-  13. `DRV-01-SHIFT`: `06_driver_auth_shift.html`
-  14. `DRV-02-MANIFEST`: `07_driver_passenger_manifest.html`
-  15. `DRV-04-NAVIGATION`: `08_driver_telemetry_navigation.html`
-  16. `ADM-01-BUILDER`: `09_admin_fleet_seat_builder.html`
-  17. `ADM-02-ROUTES`: `10_admin_routes_stops.html`
-  18. `ADM-03-DISPATCH`: `11_admin_trip_dispatch.html`
-  19. `ADM-04-RADAR`: `12_admin_live_operations_radar.html`
-  20. `ADM-05-POS`: `13_admin_pos_emergency.html`
+## Passenger App Autonomous Spec-to-Test Pipeline Status (PAX-001 to PAX-025)
+- [x] **Phase 1: Foundation, Testing Infrastructure & Design System** (`npm test`, `npm run lint` 100% Green)
+  - Core tokens matching `DESIGN.md` (`Geist`, `JetBrains Mono`, Sapphire `#2563EB`, Canvas `#F8FAFC`, Pure Surface `#FFFFFF`, Whisper Border, 0 emojis, 100% SVG icons).
+  - Crypto engine with HMAC-SHA256 30s rotating dynamic QR generator and VietQR EMVCo/Napas247 CRC16 payload builder.
+  - Core domain formatters: VND currency, PNR formatter, CCCD & Vietnam phone regex, Haversine telemetry & refund tiers.
+- [x] **Phase 2: Onboarding & Authentication Journey (PAX-001, PAX-002, PAX-003, PAX-022)**
+  - `PAX-001` Splash & Remote Config version check (`FORCE_UPGRADE` blocking invariant).
+  - `PAX-002` Phone Login with normalization (`09x` / `+84`).
+  - `PAX-003` OTP verification with 60s cooldown countdown, 180s TTL, and 5-attempt brute-force protection.
+  - `PAX-022` User Profile & secure JWT session management.
+- [x] **Phase 3: Discovery, Location Picker & Trip Search Journey (PAX-004, PAX-005, PAX-006, PAX-007)**
+  - `PAX-004` Home screen with popular routes & express search card.
+  - `PAX-005` Station & Location picker with Vietnamese diacritics fuzzy search.
+  - `PAX-006` Sub-route trip search engine with vehicle type filters (`VIP_CABIN`, `SLEEPER_34`), departure time slots and price sorting.
+  - `PAX-007` Detailed trip itinerary, plate numbers, and amenity inspection.
+- [x] **Phase 4: Pickup Selection & Realtime 2D VIP Seat Map Engine (PAX-008, PAX-009, PAX-010)**
+  - `PAX-008` Station vs GPS pickup/dropoff selection.
+  - `PAX-009` Interactive 2D Double Deck VIP Cabin seat map (Deck 1 & Deck 2) with middle aisle and real-time state flags.
+  - `PAX-010` Distributed 10-Minute Redis Seat Hold Engine (`BR-SEAT-001` max 5 seats, auto-expiry timer, conflict race condition auto-deselect).
+- [x] **Phase 5: Passenger Manifest & Checkout Review (PAX-011, PAX-012)**
+  - `PAX-011` Multi-seat passenger manifest validation with CCCD and phone validation.
+  - `PAX-012` Booking Review Order Summary with promo voucher discount engine (`BUSGO50K`, `VIP10`) and insurance breakdown.
+- [x] **Phase 6: Payment, Ticket Wallet & Dynamic HMAC QR Code (PAX-013, PAX-014, PAX-015, PAX-016, PAX-017)**
+  - `PAX-013` Dynamic VietQR Napas247 payment flow with auto-generated transfer memo.
+  - `PAX-014` / `PAX-015` Webhook settlement handler, PNR generation, and e-ticket issuance.
+  - `PAX-016` Passenger Ticket Wallet with tab filters (`UPCOMING`, `COMPLETED`, `CANCELLED`).
+  - `PAX-017` Dynamic Rotating HMAC-SHA256 Boarding Pass (30s window) with anti-screenshot watermark and driver boarding scan verification.
+- [x] **Phase 7: Live GPS Telemetry, Radar Tracking & Disruption Handling (PAX-018 to PAX-021, PAX-023 to PAX-025)**
+  - `PAX-018` / `PAX-019` Live GPS Telemetry Radar HUD, vehicle speed/bearing tracking, and Haversine geofencing ETA.
+  - `PAX-020` Real-time push notification center with unread count badges.
+  - `PAX-021` Automated cancellation & refund tier calculator (100% >24h, 50% 12-24h, 0% <12h).
+  - `PAX-024` / `PAX-025` Vehicle replacement & delay disruption broadcast service.
+- [x] **Phase 8: High-Fidelity Interactive Passenger Web App Suite & Multi-Axis Verification**
+  - Unified interactive web app suite delivered at `docs/designs/passenger_suite.html`.
+  - HTTP Server & REST API Gateway at `source/passenger-app/server.js`.
+  - 37/37 automated test cases passing 100% Green (`npm test`).
+  - Strict compliance with `DESIGN.md` (0 emojis, Geist + JetBrains Mono, Whisper borders, Sapphire `#2563EB`).
