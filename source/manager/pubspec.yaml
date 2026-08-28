@@ -1,0 +1,10 @@
+name: busgo_manager_monorepo
+description: BusGo Manager Operations Web Monorepo Workspace
+version: 3.0.0
+publish_to: none
+
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+
+dev_dependencies:
+  melos: ^6.3.0

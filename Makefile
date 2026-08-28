@@ -1,18 +1,19 @@
 # ==============================================================================
 # FLEETBUS UNIFIED MONOREPO MAKEFILE
-# Orchestrates Node.js API Gateway, Passenger Flutter App & Driver Flutter App
+# Orchestrates Node.js API Gateway, Passenger Flutter App, Driver Flutter App & Manager Web Portal
 # ==============================================================================
 
 .PHONY: all help test lint start_server stop_server e2e \
         client_bootstrap client_sync client_build_dev client_build_prod \
-        driver_bootstrap driver_sync driver_build_dev driver_build_prod
+        driver_bootstrap driver_sync driver_build_dev driver_build_prod \
+        manager_bootstrap manager_sync manager_build_dev manager_build_prod manager_run_web
 
 help:
 	@echo "╔════════════════════════════════════════════════════════════════════╗"
 	@echo "║                 FLEETBUS PLATFORM BUILD COMMANDS                   ║"
 	@echo "╠════════════════════════════════════════════════════════════════════╣"
 	@echo "║ Core Commands:                                                     ║"
-	@echo "║   make test                 - Run all 68 automated test suites     ║"
+	@echo "║   make test                 - Run all 73 automated test suites     ║"
 	@echo "║   make lint                 - Run syntax and lint checks           ║"
 	@echo "║   make start_server         - Launch unified Node.js API Gateway   ║"
 	@echo "║   make e2e                  - Run live end-to-end integration test ║"
@@ -28,6 +29,13 @@ help:
 	@echo "║   make driver_sync          - Sync l10n and build_runner           ║"
 	@echo "║   make driver_build_dev     - Build develop APK for Driver         ║"
 	@echo "║   make driver_build_prod    - Build production APK for Driver      ║"
+	@echo "║                                                                    ║"
+	@echo "║ Manager Operations Portal (Flutter Web / Melos):                   ║"
+	@echo "║   make manager_bootstrap    - Run Melos bootstrap for Manager Web  ║"
+	@echo "║   make manager_sync         - Sync Manager Web code generator      ║"
+	@echo "║   make manager_run_web      - Run Manager Web locally on Chrome    ║"
+	@echo "║   make manager_build_dev    - Build develop web distribution       ║"
+	@echo "║   make manager_build_prod   - Build production web distribution    ║"
 	@echo "╚════════════════════════════════════════════════════════════════════╝"
 
 # ------------------------------------------------------------------------------
@@ -80,3 +88,24 @@ driver_build_prod:
 
 driver_test:
 	cd source/driver && $(MAKE) test
+
+# ------------------------------------------------------------------------------
+# Manager Operations Web App (source/manager/)
+# ------------------------------------------------------------------------------
+manager_bootstrap:
+	cd source/manager && melos bootstrap
+
+manager_sync:
+	cd source/manager && $(MAKE) sync
+
+manager_run_web:
+	cd source/manager && $(MAKE) run_web
+
+manager_build_dev:
+	cd source/manager && $(MAKE) build_dev_web
+
+manager_build_prod:
+	cd source/manager && $(MAKE) build_prod_web
+
+manager_test:
+	cd source/manager && $(MAKE) test

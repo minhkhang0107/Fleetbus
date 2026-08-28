@@ -1,0 +1,43 @@
+name: mestudy
+
+packages:
+  - ./**
+
+command:
+  bootstrap:
+    runPubGetInParallel: false
+
+scripts:
+  # build runner
+  build_all:
+    run: dart pub global run melos exec --depends-on="build_runner" "flutter packages pub run build_runner build"
+    description: build_runner build all modules.
+
+  force_build_all:
+    run: dart pub global run melos exec --depends-on="build_runner" "flutter packages pub run build_runner build --delete-conflicting-outputs"
+    description: build_runner build all modules with conflicting outputs deleted.
+
+  # Web run and build scripts
+  build_web_dev:
+    run: cd app && flutter build web -t lib/main.dart --flavor develop --web-renderer canvaskit --dart-define=ENV=develop --dart-define=API_BASE_URL=http://localhost:3000/api/v1 --output=../web_dist
+    description: Build Manager Web application for development.
+
+  build_web_prod:
+    run: cd app && flutter build web -t lib/main.dart --flavor production --web-renderer canvaskit --dart-define=ENV=production --dart-define=API_BASE_URL=https://api.busgo.vn/api/v1 --output=../web_dist
+    description: Build Manager Web application for production.
+
+  run_web:
+    run: cd app && flutter run -d chrome -t lib/main.dart --web-port=8080 --dart-define=ENV=develop --dart-define=API_BASE_URL=http://localhost:3000/api/v1
+    description: Run Manager Web locally on Chrome.
+
+  test:
+    run: dart pub global run melos exec --fail-fast --dir-exists="test" "flutter test"
+    description: Run all tests.
+
+  analyze:
+    run: dart pub global run melos exec "flutter analyze ."
+    description: Analyze all packages.
+
+  format:
+    run: dart pub global run melos exec "dart format ."
+    description: Format all code.
