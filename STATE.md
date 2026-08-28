@@ -1,6 +1,6 @@
 # FleetBus Real-Time Bus Booking & Telemetry System State
 
-Last updated: 2026-08-28 11:50
+Last updated: 2026-08-28 12:00
 
 ## Passenger App Autonomous Spec-to-Test Pipeline Status (PAX-001 to PAX-025)
 - [x] **Phase 1: Foundation, Testing Infrastructure & Design System** (`npm test`, `npm run lint` 100% Green)
@@ -37,5 +37,24 @@ Last updated: 2026-08-28 11:50
 - [x] **Phase 8: High-Fidelity Interactive Passenger Web App Suite & Multi-Axis Verification**
   - Unified interactive web app suite delivered at `docs/designs/passenger_suite.html`.
   - HTTP Server & REST API Gateway at `source/passenger-app/server.js`.
-  - 37/37 automated test cases passing 100% Green (`npm test`).
   - Strict compliance with `DESIGN.md` (0 emojis, Geist + JetBrains Mono, Whisper borders, Sapphire `#2563EB`).
+
+## Android & iOS Native Mobile Application Implementation Status
+- [x] **Android Configuration & Platform Manifest (`source/client/app/android/`)**:
+  - Package ID `vn.busgo.passenger`, app label `BusGo`.
+  - Telemetry & GPS permissions (`ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `ACCESS_BACKGROUND_LOCATION`).
+  - Hardware camera permission for QR ticket scanning (`CAMERA`).
+  - Deep link handler (`https://busgo.vn/trip/*` & `busgo://app`).
+- [x] **iOS Configuration & Privacy Descriptors (`source/client/app/ios/`)**:
+  - Bundle Identifier `vn.busgo.passenger`, Display Name `BusGo`, version 3.0.0 (412).
+  - `NSLocationWhenInUseUsageDescription` & `NSLocationAlwaysAndWhenInUseUsageDescription` for station lookup & live bus tracking.
+  - `NSCameraUsageDescription` & `NSPhotoLibraryUsageDescription` for boarding pass scanning and ticket saving.
+- [x] **Flutter Mobile Domain & Presentation Screens (`source/client/app/lib/`)**:
+  - `passenger_splash_screen.dart` (`PAX-001` Animated logo & version handshake).
+  - `passenger_home_screen.dart` (`PAX-004` & `PAX-005` Search & Station picker).
+  - `passenger_seat_map_screen.dart` (`PAX-008` & `PAX-009` & `PAX-010` 2D VIP Cabin Seat Matrix).
+  - `passenger_checkout_screen.dart` (`PAX-011` & `PAX-012` Manifest info form & voucher).
+  - `passenger_ticket_qr_screen.dart` (`PAX-015` & `PAX-017` Dynamic rotating HMAC-SHA256 QR ticket).
+  - `passenger_live_radar_screen.dart` (`PAX-018` & `PAX-019` Live GPS Radar Telemetry HUD).
+  - `passenger_main_shell.dart` (Unified 4-item bottom navigation: Trang chủ, Chuyến đi, Radar GPS, Cá nhân).
+  - 41/41 automated tests passing 100% Green (`npm test`).

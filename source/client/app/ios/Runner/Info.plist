@@ -3,27 +3,42 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<string>vi</string>
 	<key>CFBundleDisplayName</key>
-	<string>Mestudy</string>
+	<string>BusGo</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<string>vn.busgo.passenger</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>mestudy</string>
+	<string>busgo_passenger</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>$(FLUTTER_BUILD_NAME)</string>
+	<string>3.0.0</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
-	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<string>412</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+
+	<!-- Location Usage Descriptions (PAX-005, PAX-018, PAX-019) -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>BusGo sử dụng vị trí của bạn để tìm kiếm bến xe gần nhất và theo dõi lộ trình xe đến điểm đón.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>BusGo cập nhật vị trí xe theo thời gian thực và thông báo khi xe sắp đến điểm đón.</string>
+
+	<!-- Camera Usage for Dynamic QR Ticket Scanning (PAX-017) -->
+	<key>NSCameraUsageDescription</key>
+	<string>BusGo cần quyền truy cập máy ảnh để quét mã QR vé xe và xác thực hành khách.</string>
+
+	<!-- Photo Library for Saving E-Tickets -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>BusGo cho phép lưu ảnh vé điện tử và mã QR vé xe vào thư viện ảnh của bạn.</string>
+
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
@@ -31,15 +46,11 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>

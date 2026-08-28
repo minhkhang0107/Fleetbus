@@ -1,23 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:resources/resources.dart';
-
-import 'src/presentation/main_shell_screen.dart';
+import 'src/presentation/passenger/passenger_splash_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const SocialQAApp());
+  runApp(const BusGoPassengerApp());
 }
 
-class SocialQAApp extends StatelessWidget {
-  const SocialQAApp({super.key});
+class BusGoPassengerApp extends StatelessWidget {
+  const BusGoPassengerApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Social QA Auto-Responder (Tourism Edition)',
+      title: 'BusGo Passenger — Hệ thống Đặt vé & Telemetry',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      home: const MainShellScreen(),
+      home: const PassengerSplashScreen(),
     );
   }
 }
