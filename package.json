@@ -1,15 +1,15 @@
 {
   "name": "fleetbus-platform",
   "version": "3.0.0",
-  "description": "FleetBus Autonomous Spec-to-Test Pipeline — Passenger, Driver & Manager Operations",
-  "main": "source/passenger-app/index.js",
+  "description": "FleetBus Autonomous Spec-to-Test Pipeline — Unified Node.js API Server, Passenger, Driver & Manager Platforms",
+  "main": "source/server/index.js",
   "type": "module",
   "scripts": {
     "test": "node --test test/**/*.test.js",
-    "lint": "node --check source/passenger-app/**/*.js source/driver-app/**/*.js source/manager-app/**/*.js test/**/*.test.js",
-    "start": "node source/passenger-app/server.js"
+    "lint": "node --check source/**/*.js test/**/*.test.js",
+    "start": "node source/server/apiServer.js"
   },
-  "keywords": ["fleetbus", "passenger", "driver", "manager", "operations", "telemetry", "realtime", "vietqr"],
+  "keywords": ["fleetbus", "passenger", "driver", "manager", "operations", "telemetry", "realtime", "vietqr", "nodejs", "api-gateway"],
   "author": "FleetBus Engineering",
   "license": "UNLICENSED"
 }
