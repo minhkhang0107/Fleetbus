@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>BusGo Driver Tactical Cockpit — Ứng Dụng Điều Hành Dành Cho Tài Xế</title>
+
+  <!-- Typography: Geist & JetBrains Mono as per Driver DESIGN.md (Strictly NO Inter) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            'canvas-ops': '#0F172A',
+            'surface-panel': '#1E293B',
+            'surface-active': '#334155',
+            'border-tactical': '#334155',
+            'primary-action': '#2563EB',
+            'emerald-safe': '#16A34A',
+            'emerald-soft': '#064E3B',
+            'amber-warning': '#D97706',
+            'amber-soft': '#78350F',
+            'alert-critical': '#DC2626',
+            'alert-soft': '#7F1D1D',
+            'pnr-orange': '#FB9821',
+          },
+          fontFamily: {
+            sans: ['Geist', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      background-color: #020617;
+      font-family: 'Geist', sans-serif;
+      color: #F8FAFC;
+      -webkit-font-smoothing: antialiased;
+    }
+    .font-mono-data {
+      font-family: 'JetBrains Mono', monospace;
+      font-feature-settings: "tnum";
+      font-variant-numeric: tabular-nums;
+    }
+    .cockpit-frame {
+      max-width: 430px;
+      height: 900px;
+      margin: 10px auto;
+      background: #0F172A;
+      border-radius: 40px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 0 12px #1E293B;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .screen-view {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      display: none;
+      flex-direction: column;
+    }
+    .screen-view.active {
+      display: flex;
+    }
+    .tactical-card {
+      background: #1E293B;
+      border: 1px solid #334155;
+      border-radius: 16px;
+    }
+    .touch-cta-72 {
+      height: 72px;
+      min-height: 72px;
+    }
+    .touch-cta-64 {
+      height: 64px;
+      min-height: 64px;
+    }
+    .safe-bottom {
+      padding-bottom: max(16px, env(safe-area-inset-bottom));
+    }
+  </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-2 md:p-4 bg-slate-950 text-slate-100">
+
+  <!-- Driver Mobile / Tablet Cockpit Frame -->
+  <div class="cockpit-frame relative bg-canvas-ops">
+
+    <!-- Persistent Top Hardware & GPS Status Bar (DRI-006 & DRI-014) -->
+    <div class="h-12 bg-slate-900/95 border-b border-border-tactical flex items-center justify-between px-4 z-50 select-none">
+      <div class="flex items-center space-x-2">
+        <span class="w-2.5 h-2.5 bg-emerald-safe rounded-full animate-pulse"></span>
+        <span class="font-mono-data text-xs font-bold text-emerald-safe" id="gps-pill-status">GPS LIVE · 60Hz</span>
+      </div>
+      <div class="flex items-center space-x-2">
+        <span class="font-mono-data text-xs text-slate-400 bg-slate-800 px-2 py-0.5 rounded border border-border-tactical">TX-8821</span>
+        <span class="font-mono-data text-xs text-amber-warning font-bold bg-amber-soft/40 px-2 py-0.5 rounded border border-amber-warning/40">29B-123.45</span>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 1: DRI-001 DRIVER LOGIN & AUTHENTICATION -->
+    <!-- ========================================================================= -->
+    <div id="driver-screen-login" class="screen-view active p-6 justify-between bg-canvas-ops">
+      <div>
+        <div class="mt-4 flex items-center space-x-3">
+          <div class="w-12 h-12 bg-primary-action rounded-2xl flex items-center justify-center text-white shadow-lg">
+            <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
+          </div>
+          <div>
+            <h1 class="text-xl font-bold text-text-high-contrast">BUSGO FLEET DRIVER</h1>
+            <p class="text-xs text-text-muted">Ứng dụng Điều hành Ca chạy</p>
+          </div>
+        </div>
+
+        <div class="mt-8 space-y-4">
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-text-muted mb-2">Mã số nhân viên / SĐT</label>
+            <input id="drv-staff-id" type="text" value="TX8821" class="w-full h-14 px-4 bg-surface-panel border border-border-tactical rounded-2xl font-mono-data text-lg font-bold text-text-high-contrast uppercase focus:outline-none focus:border-primary-action" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-text-muted mb-2">Mã PIN bảo mật (6 số)</label>
+            <input id="drv-pin" type="password" maxlength="6" value="123456" class="w-full h-14 px-4 bg-surface-panel border border-border-tactical rounded-2xl font-mono-data text-xl tracking-widest text-text-high-contrast focus:outline-none focus:border-primary-action" />
+          </div>
+
+          <div class="p-3 bg-surface-panel/60 border border-border-tactical rounded-xl text-xs text-text-muted flex items-center space-x-2">
+            <svg class="w-4 h-4 text-emerald-safe flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+            <span>Bằng lái FC: Còn hạn đến 31/12/2028</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="safe-bottom space-y-3">
+        <button onclick="handleDriverLogin()" class="w-full touch-cta-64 bg-primary-action text-white font-bold text-base rounded-2xl shadow-xl shadow-primary-action/25 hover:bg-blue-600 transition flex items-center justify-center space-x-2">
+          <span>ĐĂNG NHẬP CA CHẠY ➔</span>
+        </button>
+        <p class="text-[11px] text-center text-text-muted">Quên mã PIN? Tổng đài điều độ: <b class="font-mono-data text-text-high-contrast">1900 6868</b></p>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 2: DRI-002 TODAY ASSIGNED TRIPS & SHIFT HUB -->
+    <!-- ========================================================================= -->
+    <div id="driver-screen-today" class="screen-view p-4 bg-canvas-ops space-y-4">
+      <div class="flex justify-between items-center border-b border-border-tactical pb-3">
+        <div>
+          <h2 class="text-base font-bold text-text-high-contrast">Lịch chạy hôm nay</h2>
+          <p class="text-xs text-text-muted font-mono-data">28/08/2026 · Ca sáng & chiều</p>
+        </div>
+        <span class="font-mono-data text-xs bg-emerald-soft text-emerald-safe border border-emerald-safe/40 px-2.5 py-1 rounded-full font-bold">1 Chuyến sắp chạy</span>
+      </div>
+
+      <!-- Trip Card 1 (Ready) -->
+      <div class="tactical-card p-5 space-y-4 border-l-4 border-l-primary-action">
+        <div class="flex justify-between items-start">
+          <div>
+            <span class="font-mono-data text-xs font-bold text-emerald-safe bg-emerald-soft/80 px-2 py-0.5 rounded">SẴN SÀNG KHỞI HÀNH</span>
+            <h3 class="text-lg font-bold text-text-high-contrast mt-1.5">Hà Nội ➔ Thanh Hóa</h3>
+            <p class="text-xs text-text-muted">Xuất bến: <b class="font-mono-data text-text-high-contrast">14:00 (Hôm nay)</b></p>
+          </div>
+          <span class="font-mono-data text-xs bg-slate-800 text-pnr-orange px-2 py-1 rounded font-bold border border-border-tactical">29B-123.45</span>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 text-xs bg-slate-900/60 p-3 rounded-xl border border-border-tactical">
+          <div>
+            <span class="text-text-muted block">Số lượng khách:</span>
+            <b class="font-mono-data text-text-high-contrast text-sm">28 / 34 Chỗ</b>
+          </div>
+          <div>
+            <span class="text-text-muted block">Điểm xuất phát:</span>
+            <b class="text-text-high-contrast">Bến xe Giáp Bát</b>
+          </div>
+        </div>
+
+        <button onclick="openPreStartChecklist('trp_991823')" class="w-full touch-cta-64 bg-primary-action text-white font-bold text-sm rounded-2xl shadow-lg hover:bg-blue-600 transition flex items-center justify-center space-x-2">
+          <span>CHUẨN BỊ XUẤT BẾN (KIỂM TRA XE) ➔</span>
+        </button>
+      </div>
+
+      <!-- Secondary Trip Info -->
+      <div class="tactical-card p-4 opacity-70 space-y-2">
+        <div class="flex justify-between">
+          <span class="text-xs font-mono-data text-text-muted">CHUYẾN TIẾP THEO · 19:30</span>
+          <span class="text-xs text-text-muted font-mono-data">Chiều về</span>
+        </div>
+        <p class="text-sm font-bold text-text-high-contrast">Thanh Hóa ➔ Hà Nội</p>
+        <p class="text-xs text-text-muted">Xe: 29B-123.45 · Dự kiến 18 khách</p>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 3: DRI-004 PRE-START VEHICLE READINESS INSPECTION -->
+    <!-- ========================================================================= -->
+    <div id="driver-screen-readiness" class="screen-view p-4 bg-canvas-ops justify-between">
+      <div class="space-y-4">
+        <div class="flex items-center space-x-3 border-b border-border-tactical pb-3">
+          <button onclick="showScreen('driver-screen-today')" class="p-1 text-text-muted hover:text-white">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div>
+            <h2 class="text-base font-bold text-text-high-contrast">Kiểm tra an toàn xe (Pre-Start)</h2>
+            <p class="text-xs text-text-muted">Bắt buộc hoàn thành trước khi xuất bến</p>
+          </div>
+        </div>
+
+        <div class="space-y-2.5">
+          <label class="tactical-card p-4 flex items-center justify-between cursor-pointer">
+            <span class="text-sm font-semibold text-text-high-contrast">1. Áp suất lốp & gai lốp xe</span>
+            <input type="checkbox" id="chk-tires" checked class="w-6 h-6 text-primary-action rounded" />
+          </label>
+          <label class="tactical-card p-4 flex items-center justify-between cursor-pointer">
+            <span class="text-sm font-semibold text-text-high-contrast">2. Dầu phanh & hệ thống phanh ABS</span>
+            <input type="checkbox" id="chk-brakes" checked class="w-6 h-6 text-primary-action rounded" />
+          </label>
+          <label class="tactical-card p-4 flex items-center justify-between cursor-pointer">
+            <span class="text-sm font-semibold text-text-high-contrast">3. Điều hòa & vệ sinh khoang Cabin</span>
+            <input type="checkbox" id="chk-ac" checked class="w-6 h-6 text-primary-action rounded" />
+          </label>
+          <label class="tactical-card p-4 flex items-center justify-between cursor-pointer">
+            <span class="text-sm font-semibold text-text-high-contrast">4. Bình chữa cháy & túi cứu thương</span>
+            <input type="checkbox" id="chk-firstaid" checked class="w-6 h-6 text-primary-action rounded" />
+          </label>
+          <label class="tactical-card p-4 flex items-center justify-between cursor-pointer">
+            <span class="text-sm font-semibold text-text-high-contrast">5. Mức nhiên liệu (Đầy bình)</span>
+            <input type="checkbox" id="chk-fuel" checked class="w-6 h-6 text-primary-action rounded" />
+          </label>
+          <label class="tactical-card p-4 flex items-center justify-between cursor-pointer">
+            <span class="text-sm font-semibold text-text-high-contrast">6. Beacon GPS Telemetry MQTT kết nối</span>
+            <input type="checkbox" id="chk-gps" checked class="w-6 h-6 text-primary-action rounded" />
+          </label>
+        </div>
+      </div>
+
+      <div class="safe-bottom pt-4">
+        <button onclick="handleStartActiveTrip()" class="w-full touch-cta-72 bg-emerald-safe text-white font-bold text-lg rounded-2xl shadow-xl shadow-emerald-safe/25 hover:bg-emerald-600 transition flex items-center justify-center space-x-2">
+          <span>XUẤT BẾN & MỞ COCKPIT (72dp) ➔</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 4: DRI-006 ACTIVE TRIP COCKPIT DASHBOARD -->
+    <!-- ========================================================================= -->
+    <div id="driver-screen-cockpit" class="screen-view p-4 bg-canvas-ops space-y-4">
+      <!-- Speed & Arrival Metric Glance Deck -->
+      <div class="grid grid-cols-2 gap-3">
+        <div class="tactical-card p-4 text-center">
+          <p class="text-[10px] uppercase font-bold text-text-muted tracking-wider">Tốc độ hiện tại</p>
+          <div class="flex items-baseline justify-center space-x-1 mt-1">
+            <span class="font-mono-data text-4xl font-extrabold text-emerald-safe" id="cockpit-speed">62</span>
+            <span class="font-mono-data text-xs text-text-muted">km/h</span>
+          </div>
+        </div>
+
+        <div class="tactical-card p-4 text-center">
+          <p class="text-[10px] uppercase font-bold text-text-muted tracking-wider">Đến trạm kế tiếp</p>
+          <div class="flex items-baseline justify-center space-x-1 mt-1">
+            <span class="font-mono-data text-4xl font-extrabold text-primary-action" id="cockpit-eta">~14</span>
+            <span class="font-mono-data text-xs text-text-muted">phút</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Next Stop Highlight Card -->
+      <div class="tactical-card p-5 space-y-3 border-2 border-primary-action bg-surface-panel shadow-lg">
+        <div class="flex justify-between items-center">
+          <span class="text-xs font-bold text-primary-action uppercase tracking-wider">TRẠM KẾ TIẾP (Trạm 2/4):</span>
+          <span class="font-mono-data text-xs text-text-muted">Cách 8.2 km</span>
+        </div>
+        <h3 class="text-xl font-extrabold text-text-high-contrast">BẾN XE NINH BÌNH</h3>
+
+        <div class="grid grid-cols-2 gap-2 text-xs border-t border-border-tactical pt-2.5">
+          <div class="text-emerald-safe font-bold">⬆️ Đón: 4 khách</div>
+          <div class="text-amber-warning font-bold">⬇️ Trả: 8 khách</div>
+        </div>
+        <div class="text-xs text-pnr-orange font-mono-data font-semibold bg-pnr-orange/10 p-2 rounded-lg border border-pnr-orange/30">
+          💵 Thu COD tại trạm: 1 vé (220.000 đ)
+        </div>
+      </div>
+
+      <!-- Passenger Progress -->
+      <div class="tactical-card p-4 space-y-2">
+        <div class="flex justify-between text-xs font-mono-data">
+          <span class="text-text-muted">TIẾN ĐỘ ĐÓN KHÁCH</span>
+          <b class="text-text-high-contrast" id="cockpit-boarded-label">ĐÃ LÊN XE 24 / 28</b>
+        </div>
+        <div class="w-full h-3 bg-slate-800 rounded-full overflow-hidden">
+          <div class="h-full bg-emerald-safe rounded-full" style="width: 85%"></div>
+        </div>
+      </div>
+
+      <!-- Primary Action Buttons (72dp & 64dp Touch Targets) -->
+      <div class="space-y-3">
+        <button onclick="showScreen('driver-screen-scan')" class="w-full touch-cta-72 bg-primary-action text-white font-extrabold text-base rounded-2xl shadow-xl hover:bg-blue-600 transition flex items-center justify-center space-x-3">
+          <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+          <span>QUÉT VÉ QR LÊN XE (72dp)</span>
+        </button>
+
+        <button onclick="showScreen('driver-screen-manifest')" class="w-full touch-cta-64 bg-surface-panel border border-border-tactical text-text-high-contrast font-bold text-sm rounded-2xl hover:bg-slate-700 transition flex items-center justify-center space-x-2">
+          <svg class="w-5 h-5 text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>
+          <span>DANH SÁCH HÀNH KHÁCH (MANIFEST)</span>
+        </button>
+      </div>
+
+      <!-- Bottom Quick Actions -->
+      <div class="grid grid-cols-2 gap-3 pt-2">
+        <button onclick="reportDelaySOS()" class="h-12 bg-alert-soft/50 border border-alert-critical text-alert-critical font-bold text-xs rounded-xl flex items-center justify-center space-x-1.5">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span>BÁO SỰ CỐ / KẸT XE</span>
+        </button>
+
+        <button onclick="handleEndTrip()" class="h-12 bg-slate-800 border border-border-tactical text-text-muted font-bold text-xs rounded-xl flex items-center justify-center space-x-1.5">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+          <span>KẾT THÚC CHUYẾN</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 5: DRI-007 PASSENGER MANIFEST & DRI-012 COD COLLECTION -->
+    <!-- ========================================================================= -->
+    <div id="driver-screen-manifest" class="screen-view p-4 bg-canvas-ops space-y-3.5">
+      <div class="flex items-center justify-between border-b border-border-tactical pb-3">
+        <div class="flex items-center space-x-3">
+          <button onclick="showScreen('driver-screen-cockpit')" class="p-1 text-text-muted hover:text-white">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div>
+            <h2 class="text-base font-bold text-text-high-contrast">Danh sách khách (Manifest)</h2>
+            <p class="text-xs text-text-muted font-mono-data">Tổng cộng: 28 hành khách</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Manifest Items -->
+      <div class="space-y-3" id="manifest-list">
+        <!-- Item 1: Boarded -->
+        <div class="tactical-card p-4 space-y-2 border-l-4 border-l-emerald-safe">
+          <div class="flex justify-between items-center">
+            <span class="font-mono-data text-xs font-bold text-emerald-safe bg-emerald-soft/80 px-2 py-0.5 rounded">🟢 ĐÃ LÊN XE</span>
+            <span class="font-mono-data text-sm font-bold text-pnr-orange">Ghế A01 (T1)</span>
+          </div>
+          <div class="flex justify-between text-xs">
+            <span class="text-text-high-contrast font-bold text-sm">Trần Văn Hùng</span>
+            <span class="font-mono-data text-text-muted">098***112</span>
+          </div>
+          <p class="text-xs text-text-muted">Trả tại: Bến xe Ninh Bình · Đã thanh toán VNPAY</p>
+        </div>
+
+        <!-- Item 2: Pending COD -->
+        <div class="tactical-card p-4 space-y-3 border-l-4 border-l-amber-warning">
+          <div class="flex justify-between items-center">
+            <span class="font-mono-data text-xs font-bold text-amber-warning bg-amber-soft/80 px-2 py-0.5 rounded">🟡 CHƯA LÊN XE</span>
+            <span class="font-mono-data text-sm font-bold text-pnr-orange">Ghế A02 (T1)</span>
+          </div>
+          <div class="flex justify-between text-xs">
+            <span class="text-text-high-contrast font-bold text-sm">Nguyễn Văn Nam</span>
+            <span class="font-mono-data text-text-muted">098***321</span>
+          </div>
+          <div class="flex justify-between text-xs bg-amber-soft/30 p-2 rounded border border-amber-warning/30 font-mono-data">
+            <span class="text-amber-warning font-bold">💵 CẦN THU COD:</span>
+            <b class="text-text-high-contrast">220.000 đ</b>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 pt-1">
+            <button onclick="handleCollectCOD('A02')" class="h-11 bg-amber-warning text-white font-bold text-xs rounded-xl shadow">
+              💵 THU TIỀN COD
+            </button>
+            <button onclick="handleManualBoard('A02')" class="h-11 bg-primary-action text-white font-bold text-xs rounded-xl shadow">
+              ✅ CHO LÊN XE
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 6: DRI-009 60FPS QR TICKET CAMERA SCANNER -->
+    <!-- ========================================================================= -->
+    <div id="driver-screen-scan" class="screen-view bg-black justify-between p-4">
+      <div class="flex justify-between items-center text-white z-20">
+        <button onclick="showScreen('driver-screen-cockpit')" class="p-2 bg-slate-800/80 rounded-xl">
+          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <span class="font-bold text-sm">Quét mã QR Vé Lên Xe</span>
+        <div class="w-8"></div>
+      </div>
+
+      <!-- Scanner Reticle Simulation -->
+      <div class="relative flex flex-col items-center justify-center my-auto">
+        <div class="w-64 h-64 border-2 border-emerald-safe rounded-3xl relative flex items-center justify-center bg-emerald-safe/5 shadow-2xl">
+          <div class="w-56 h-56 border border-dashed border-emerald-safe/50 rounded-2xl flex items-center justify-center">
+            <svg class="w-24 h-24 text-emerald-safe animate-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+          </div>
+          <!-- Red Laser Scan line -->
+          <div class="absolute w-60 h-0.5 bg-emerald-safe shadow-lg shadow-emerald-safe"></div>
+        </div>
+        <p class="text-xs text-slate-400 mt-4 text-center">Hướng camera vào mã QR xoay trên điện thoại hành khách</p>
+      </div>
+
+      <div class="safe-bottom space-y-3 z-20">
+        <button onclick="handleSimulateScanSuccess()" class="w-full touch-cta-64 bg-emerald-safe text-white font-bold text-sm rounded-2xl shadow-xl">
+          GIẢ LẬP QUÉT THÀNH CÔNG (A01 - HÙNG)
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    function showScreen(screenId) {
+      document.querySelectorAll('.screen-view').forEach(el => el.classList.remove('active'));
+      const target = document.getElementById(screenId);
+      if (target) {
+        target.classList.add('active');
+        target.scrollTop = 0;
+      }
+    }
+
+    function handleDriverLogin() {
+      showScreen('driver-screen-today');
+    }
+
+    function openPreStartChecklist(tripId) {
+      showScreen('driver-screen-readiness');
+    }
+
+    function handleStartActiveTrip() {
+      showScreen('driver-screen-cockpit');
+    }
+
+    function handleSimulateScanSuccess() {
+      alert('✅ SOÁT VÉ THÀNH CÔNG!\nHành khách: Trần Văn Hùng\nGhế: A01 (Tầng 1)\nMã PNR: BG-88219');
+      showScreen('driver-screen-cockpit');
+    }
+
+    function handleCollectCOD(seatCode) {
+      alert(`💵 Đã thu 220.000 đ tiền mặt (COD) cho ghế ${seatCode}!`);
+    }
+
+    function handleManualBoard(seatCode) {
+      alert(`✅ Đã đánh dấu khách ghế ${seatCode} lên xe thành công!`);
+    }
+
+    function reportDelaySOS() {
+      alert('⚠️ Đã gửi cảnh báo sự cố / trễ chuyến về trung tâm Điều hành Radar!');
+    }
+
+    function handleEndTrip() {
+      alert('🏁 Đã kết thúc chuyến đi thành công!\nTổng cộng đã đón: 28 khách\nTổng COD thu được: 220.000 đ');
+      showScreen('driver-screen-today');
+    }
+  </script>
+</body>
+</html>

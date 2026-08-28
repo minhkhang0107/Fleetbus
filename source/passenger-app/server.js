@@ -1,6 +1,6 @@
 /**
- * FleetBus Passenger Application HTTP Server & API Gateway
- * Serves the interactive high-fidelity web suite and passenger REST API endpoints.
+ * FleetBus Passenger & Driver Application HTTP Server & API Gateway
+ * Serves the interactive high-fidelity web suites and REST API endpoints.
  */
 
 import http from 'http';
@@ -14,6 +14,7 @@ import { PassengerSeatMapService } from './modules/seatMap.js';
 import { PassengerCheckoutService } from './modules/checkout.js';
 import { PassengerPaymentService } from './modules/payment.js';
 import { PassengerTrackingService } from './modules/tracking.js';
+import { DriverCockpitService } from '../driver-app/modules/driverService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,6 +28,7 @@ export const seatMapService = new PassengerSeatMapService();
 export const checkoutService = new PassengerCheckoutService();
 export const paymentService = new PassengerPaymentService();
 export const trackingService = new PassengerTrackingService();
+export const driverService = new DriverCockpitService();
 
 export const server = http.createServer((req, res) => {
   const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
@@ -46,6 +48,16 @@ export const server = http.createServer((req, res) => {
   // Static File Serving: docs/designs/passenger_suite.html
   if (pathname === '/' || pathname === '/index.html' || pathname === '/passenger') {
     const htmlPath = path.resolve(__dirname, '../../docs/designs/passenger_suite.html');
+    if (fs.existsSync(htmlPath)) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(fs.readFileSync(htmlPath));
+      return;
+    }
+  }
+
+  // Static File Serving: docs/designs/driver_cockpit.html
+  if (pathname === '/driver' || pathname === '/driver/cockpit' || pathname === '/driver.html') {
+    const htmlPath = path.resolve(__dirname, '../../docs/designs/driver_cockpit.html');
     if (fs.existsSync(htmlPath)) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(fs.readFileSync(htmlPath));
@@ -100,6 +112,13 @@ export const server = http.createServer((req, res) => {
     return;
   }
 
+  // REST API: Driver Today Trips (DRI-002)
+  if (pathname === '/api/v1/driver/trips/today' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(driverService.getTodayTrips('drv_8821a')));
+    return;
+  }
+
   // Fallback 404
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Endpoint not found', path: pathname }));
@@ -107,6 +126,6 @@ export const server = http.createServer((req, res) => {
 
 if (process.env.NODE_ENV !== 'test' && import.meta.url === `file://${process.argv[1]}`) {
   server.listen(PORT, () => {
-    console.log(`🚀 FleetBus Passenger Server running at http://localhost:${PORT}`);
+    console.log(`🚀 FleetBus Server (Passenger & Driver) running at http://localhost:${PORT}`);
   });
 }
