@@ -102,6 +102,28 @@ class DriverApiClientService {
   }
 
   /**
+   * DRI-005: Start Trip Dispatch
+   */
+  Future<Map<String, dynamic>> startTrip(String tripId) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/v1/driver/trips/$tripId/start'),
+      headers: _headers,
+    );
+    return jsonDecode(response.body);
+  }
+
+  /**
+   * DRI-007: Passenger Manifest
+   */
+  Future<Map<String, dynamic>> getManifest(String tripId) async {
+    final response = await _client.get(
+      Uri.parse('$baseUrl/api/v1/driver/trips/$tripId/manifest'),
+      headers: _headers,
+    );
+    return jsonDecode(response.body);
+  }
+
+  /**
    * DRI-015: Offline Batch Telemetry Replay
    */
   Future<Map<String, dynamic>> replayOfflineTelemetry(List<Map<String, dynamic>> buffer) async {
@@ -109,6 +131,39 @@ class DriverApiClientService {
       Uri.parse('$baseUrl/api/v1/driver/telemetry/batch-replay'),
       headers: _headers,
       body: jsonEncode({'telemetryBuffer': buffer}),
+    );
+    return jsonDecode(response.body);
+  }
+
+  /**
+   * DRI-017: End Trip & Complete Shift
+   */
+  Future<Map<String, dynamic>> endTrip(String tripId) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/v1/driver/trips/$tripId/end'),
+      headers: _headers,
+    );
+    return jsonDecode(response.body);
+  }
+
+  /**
+   * DRI-019: Report Emergency Incident / SOS
+   */
+  Future<Map<String, dynamic>> reportIncident(String tripId, {
+    required String incidentType,
+    required String description,
+    required double lat,
+    required double lng,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/v1/driver/trips/$tripId/incident'),
+      headers: _headers,
+      body: jsonEncode({
+        'incident_type': incidentType,
+        'description': description,
+        'lat': lat,
+        'lng': lng,
+      }),
     );
     return jsonDecode(response.body);
   }

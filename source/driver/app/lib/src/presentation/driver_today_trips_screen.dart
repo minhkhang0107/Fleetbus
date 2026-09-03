@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'driver_readiness_screen.dart';
+import 'driver_trip_detail_screen.dart';
 
 class DriverTodayTripsScreen extends StatelessWidget {
   const DriverTodayTripsScreen({super.key});
@@ -150,7 +150,17 @@ class DriverTodayTripsScreen extends StatelessWidget {
             child: ElevatedButton(
               onPressed: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const DriverReadinessScreen()),
+                  MaterialPageRoute(
+                    builder: (_) => DriverTripDetailScreen(
+                      tripId: tripId,
+                      route: route,
+                      departureTime: departureTime,
+                      vehiclePlate: vehiclePlate,
+                      vehicleType: vehicleType,
+                      manifestCount: manifestCount,
+                      totalSeats: totalSeats,
+                    ),
+                  ),
                 );
               },
               style: ElevatedButton.styleFrom(
@@ -158,7 +168,7 @@ class DriverTodayTripsScreen extends StatelessWidget {
                 shape: BorderRadius.circular(12),
               ),
               child: const Text(
-                'KIỂM TRA AN TOÀN TRƯỚC XUẤT BẾN ➔',
+                'XEM LỘ TRÌNH & ĐIỂM DỪNG ➔',
                 style: TextStyle(fontFamily: 'JetBrains Mono', fontSize: 12, fontWeight: FontWeight.bold),
               ),
             ),

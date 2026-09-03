@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:resources/resources.dart';
 import 'driver_manifest_screen.dart';
 import 'driver_qr_scanner_screen.dart';
+import 'driver_navigation_screen.dart';
+import 'driver_incident_dialog.dart';
 
 class DriverCockpitDashboard extends StatelessWidget {
   const DriverCockpitDashboard({super.key});
@@ -15,6 +17,18 @@ class DriverCockpitDashboard extends StatelessWidget {
         title: const Text('29B-123.45 · ĐANG CHẠY'),
         leading: const SizedBox(),
         actions: [
+          IconButton(
+            tooltip: 'Báo cáo sự cố SOS (DRI-019)',
+            icon: const Icon(Icons.warning_amber_rounded, color: AppColors.alertCritical),
+            onPressed: () {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder: (_) => const DriverIncidentDialog(),
+              );
+            },
+          ),
           Container(
             margin: const EdgeInsets.only(right: 16),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -60,14 +74,21 @@ class DriverCockpitDashboard extends StatelessWidget {
             ),
             const SizedBox(height: 16),
 
-            // Next Stop Card
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: AppColors.surfacePanel,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: AppColors.primaryAction, width: 2),
-              ),
+            // Next Stop Card (Tap to open Turn Navigation DRI-013)
+            InkWell(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DriverNavigationScreen()),
+                );
+              },
+              borderRadius: BorderRadius.circular(18),
+              child: Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: AppColors.surfacePanel,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: AppColors.primaryAction, width: 2),
+                ),
               child: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [

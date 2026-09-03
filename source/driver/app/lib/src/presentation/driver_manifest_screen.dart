@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:resources/resources.dart';
+import 'driver_cod_dialog.dart';
 
 class DriverManifestScreen extends StatelessWidget {
   const DriverManifestScreen({super.key});
@@ -105,25 +106,46 @@ class DriverManifestScreen extends StatelessWidget {
           Text('Trả tại: $destination', style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
           if (codAmount != null) ...[
             const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: AppColors.amberSoft.withOpacity(0.4),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.amberWarning.withOpacity(0.4)),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.payments_rounded, size: 14, color: AppColors.amberWarning),
-                      SizedBox(width: 4),
-                      Text('Thu tiền mặt (COD):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.amberWarning)),
-                    ],
+            InkWell(
+              onTap: () {
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (_) => DriverCodDialog(
+                    seatCode: seatCode,
+                    passengerName: name,
+                    amountVnd: 220000,
                   ),
-                  Text(codAmount, style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
-                ],
+                );
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.amberSoft.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.amberWarning.withOpacity(0.4)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.payments_rounded, size: 14, color: AppColors.amberWarning),
+                        SizedBox(width: 4),
+                        Text('Thu tiền mặt (COD):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.amberWarning)),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Text(codAmount, style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
+                        const SizedBox(width: 6),
+                        const Icon(Icons.touch_app_rounded, size: 14, color: AppColors.amberWarning),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
