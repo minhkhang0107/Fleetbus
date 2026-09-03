@@ -4,6 +4,7 @@
  */
 
 import { generateDynamicTicketQR } from '../source/passenger-app/core/cryptoEngine.js';
+import { server } from '../source/server/apiServer.js';
 
 const BASE_URL = 'http://localhost:3000';
 
@@ -182,4 +183,28 @@ async function runLiveE2E() {
   console.log('\n🎉 ALL LIVE APP INTEGRATIONS AND ENDPOINTS VERIFIED SUCCESSFULLY! 100% OPERATIONAL.');
 }
 
-runLiveE2E().catch(console.error);
+async function main() {
+  let serverStartedLocally = false;
+  try {
+    // Check if server is already running
+    await fetch('http://localhost:3000/health').catch(() => {
+      return new Promise((resolve) => {
+        server.listen(3000, () => {
+          serverStartedLocally = true;
+          resolve();
+        });
+      });
+    });
+
+    await runLiveE2E();
+  } catch (err) {
+    console.error(err);
+    process.exitCode = 1;
+  } finally {
+    if (serverStartedLocally) {
+      server.close();
+    }
+  }
+}
+
+main();
