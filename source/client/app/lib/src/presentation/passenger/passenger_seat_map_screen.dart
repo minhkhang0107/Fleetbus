@@ -31,8 +31,8 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
                 Expanded(
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _selectedDeck === 1 ? AppColors.primarySapphire : Colors.grey.shade100,
-                      foregroundColor: _selectedDeck === 1 ? Colors.white : AppColors.charcoalInk,
+                      backgroundColor: _selectedDeck == 1 ? AppColors.primarySapphire : Colors.grey.shade100,
+                      foregroundColor: _selectedDeck == 1 ? Colors.white : AppColors.charcoalInk,
                       minimumSize: const Size(double.infinity, 44),
                     ),
                     onPressed: () => setState(() => _selectedDeck = 1),
@@ -43,8 +43,8 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
                 Expanded(
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _selectedDeck === 2 ? AppColors.primarySapphire : Colors.grey.shade100,
-                      foregroundColor: _selectedDeck === 2 ? Colors.white : AppColors.charcoalInk,
+                      backgroundColor: _selectedDeck == 2 ? AppColors.primarySapphire : Colors.grey.shade100,
+                      foregroundColor: _selectedDeck == 2 ? Colors.white : AppColors.charcoalInk,
                       minimumSize: const Size(double.infinity, 44),
                     ),
                     onPressed: () => setState(() => _selectedDeck = 2),
@@ -66,11 +66,16 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
                     color: Colors.grey.shade200,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Center(
-                    child: Text(
-                      '🚌 ĐẦU XE / BÁC TÀI',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.mutedSteel),
-                    ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.directions_bus_rounded, size: 16, color: AppColors.mutedSteel),
+                      SizedBox(width: 8),
+                      Text(
+                        'ĐẦU XE / BÁC TÀI',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.mutedSteel),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -143,7 +148,7 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
   }
 
   List<Widget> _buildDeckRows(int deck) {
-    final rows = deck === 1
+    final rows = deck == 1
         ? [
             {'a': 'A01', 'b': 'B01'},
             {'a': 'A02', 'b': 'B02'},

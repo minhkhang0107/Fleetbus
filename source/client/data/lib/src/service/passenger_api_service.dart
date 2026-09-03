@@ -24,7 +24,7 @@ class PassengerApiClientService {
   /**
    * PAX-001: App Config handshake
    */
-  async Future<Map<String, dynamic>> getAppConfig() async {
+  Future<Map<String, dynamic>> getAppConfig() async {
     final response = await _client.get(
       Uri.parse('$baseUrl/api/v1/passenger/config'),
       headers: _headers,
@@ -35,7 +35,7 @@ class PassengerApiClientService {
   /**
    * PAX-002: Request Phone OTP
    */
-  async Future<Map<String, dynamic>> requestOtp(String phone) async {
+  Future<Map<String, dynamic>> requestOtp(String phone) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/v1/passenger/auth/request-otp'),
       headers: _headers,
@@ -47,7 +47,7 @@ class PassengerApiClientService {
   /**
    * PAX-005: Search Stations
    */
-  async Future<List<dynamic>> searchStations(String query) async {
+  Future<List<dynamic>> searchStations(String query) async {
     final response = await _client.get(
       Uri.parse('$baseUrl/api/v1/passenger/stations?q=${Uri.encodeComponent(query)}'),
       headers: _headers,
@@ -59,7 +59,7 @@ class PassengerApiClientService {
   /**
    * PAX-006: Search Trips
    */
-  async Future<List<dynamic>> searchTrips({
+  Future<List<dynamic>> searchTrips({
     required String origin,
     required String destination,
     String? vehicleType,
@@ -81,7 +81,7 @@ class PassengerApiClientService {
   /**
    * PAX-009: Get 2D Seat Map
    */
-  async Future<Map<String, dynamic>> getSeatMap(String tripId, {String? pickupId, String? dropoffId}) async {
+  Future<Map<String, dynamic>> getSeatMap(String tripId, {String? pickupId, String? dropoffId}) async {
     final uri = Uri.parse('$baseUrl/api/v1/passenger/trips/$tripId/seat-map');
     final response = await _client.get(uri, headers: _headers);
     return jsonDecode(response.body);
@@ -90,7 +90,7 @@ class PassengerApiClientService {
   /**
    * PAX-010: Hold Seats
    */
-  async Future<Map<String, dynamic>> holdSeats(String tripId, List<String> seatCodes, String userId) async {
+  Future<Map<String, dynamic>> holdSeats(String tripId, List<String> seatCodes, String userId) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/v1/passenger/trips/$tripId/hold-seats'),
       headers: _headers,
@@ -102,7 +102,7 @@ class PassengerApiClientService {
   /**
    * PAX-018: Get Live GPS Radar HUD
    */
-  async Future<Map<String, dynamic>> getLiveRadarHUD(String tripId) async {
+  Future<Map<String, dynamic>> getLiveRadarHUD(String tripId) async {
     final response = await _client.get(
       Uri.parse('$baseUrl/api/v1/passenger/trips/$tripId/radar'),
       headers: _headers,

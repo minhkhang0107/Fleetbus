@@ -23,7 +23,7 @@ class DriverApiClientService {
   /**
    * DRI-001: Driver PIN Login
    */
-  async Future<Map<String, dynamic>> login(String staffId, String pin) async {
+  Future<Map<String, dynamic>> login(String staffId, String pin) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/v1/driver/auth/login'),
       headers: _headers,
@@ -35,7 +35,7 @@ class DriverApiClientService {
   /**
    * DRI-002: Today Assigned Trips
    */
-  async Future<Map<String, dynamic>> getTodayTrips() async {
+  Future<Map<String, dynamic>> getTodayTrips() async {
     final response = await _client.get(
       Uri.parse('$baseUrl/api/v1/driver/trips/today'),
       headers: _headers,
@@ -46,7 +46,7 @@ class DriverApiClientService {
   /**
    * DRI-004: Pre-Start Readiness Checklist
    */
-  async Future<Map<String, dynamic>> submitReadinessCheck(String tripId, Map<String, bool> checklist) async {
+  Future<Map<String, dynamic>> submitReadinessCheck(String tripId, Map<String, bool> checklist) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/v1/driver/trips/$tripId/readiness'),
       headers: _headers,
@@ -58,7 +58,7 @@ class DriverApiClientService {
   /**
    * DRI-006: Stream Telemetry GPS Ping
    */
-  async Future<Map<String, dynamic>> sendTelemetry(String tripId, {
+  Future<Map<String, dynamic>> sendTelemetry(String tripId, {
     required double lat,
     required double lng,
     required double speedKmh,
@@ -80,7 +80,7 @@ class DriverApiClientService {
   /**
    * DRI-009: Scan Dynamic HMAC QR
    */
-  async Future<Map<String, dynamic>> boardWithQr(String tripId, String qrPayload) async {
+  Future<Map<String, dynamic>> boardWithQr(String tripId, String qrPayload) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/v1/driver/trips/$tripId/board-qr'),
       headers: _headers,
@@ -92,7 +92,7 @@ class DriverApiClientService {
   /**
    * DRI-012: Collect COD Cash
    */
-  async Future<Map<String, dynamic>> collectCod(String tripId, String pnr, int amountVnd) async {
+  Future<Map<String, dynamic>> collectCod(String tripId, String pnr, int amountVnd) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/v1/driver/trips/$tripId/collect-cod'),
       headers: _headers,
@@ -104,7 +104,7 @@ class DriverApiClientService {
   /**
    * DRI-015: Offline Batch Telemetry Replay
    */
-  async Future<Map<String, dynamic>> replayOfflineTelemetry(List<Map<String, dynamic>> buffer) async {
+  Future<Map<String, dynamic>> replayOfflineTelemetry(List<Map<String, dynamic>> buffer) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/v1/driver/telemetry/batch-replay'),
       headers: _headers,

@@ -1,54 +1,63 @@
-# Implementation Plan: FleetBus (BusGo) UI & System SRS Alignment via StitchMCP
+# Implementation Plan: Android & iOS Mobile Apps Spec & Design Alignment
 
-Dựa trên tài liệu đặc tả tổng hợp master [bus_booking_tracking_system_spec.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/docs/specs/bus_booking_tracking_system_spec.md) và thiết kế hệ thống [DESIGN.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/docs/design/DESIGN.md), kế hoạch này quy định việc thiết kế, kiểm thử và review 13 màn hình UI giao diện qua StitchMCP.
-
----
-
-## 1. Danh Mục Màn Hình & Ánh Xạ Chức Năng SRS (`bus_booking_tracking_system_spec.md`)
-
-### 1.1. Passenger Mobile Application (Light Canvas `#F8FAFC`, Sapphire `#2563EB`)
-- **F-PAS-01**: Xác thực OTP & Hồ sơ / Danh bạ người đi hộ → `PASS-01` (`b4415c98...`)
-- **F-PAS-02**: Tìm kiếm Chuyến & Lọc Chặng phụ (Sub-routes) → `PASS-02` (`0eeb6c65...`)
-- **F-PAS-03**: Sơ đồ Ghế Đa tầng Realtime & Redis Lock 10 Phút → `PASS-03` (`ef45253f...`)
-- **F-PAS-04**: Thanh toán VietQR Dynamic & Dynamic QR Ticket HMAC → `PASS-04` (`73f0552d...`)
-- **F-PAS-05**: Theo dõi Live GPS Telemetry, Speed & Geofencing ETA HUD → `PASS-05` (`be48f147...`)
-
-### 1.2. Driver Mobile Application (Tactical Dark Cockpit `#0F172A`)
-- **F-DRI-01**: Đăng nhập Ca chạy & Lịch trình chuyến xe được gán → `DRV-01` (`bbcad1d6...`)
-- **F-DRI-02**: Manifest Đón/Trả, Masked Phone Call & Camera QR Scanner → `DRV-02` (`903ccc77...`)
-- **F-DRI-03/04**: GPS Telemetry Engine (3s/15m), Offline Buffer & Navigation HUD → `DRV-03` (`6ebf3efa...`)
-
-### 1.3. Admin Web CMS Portal (ATC GIS Operations Radar - Asymmetric Desktop Layout)
-- **F-ADM-01**: Visual Drag-and-Drop Seat Layout Builder đa tầng → `ADM-01` (`24d4cfaf...`)
-- **F-ADM-02**: Quản trị Tuyến đường, Trạm dừng & PostGIS Point Geometry → `ADM-02` (`9002fe15...`)
-- **F-ADM-03**: Trip Dispatching, Gán Xe/Tài xế & Bảng giá chặng linh hoạt → `ADM-03` (`92208eff...`)
-- **F-ADM-04**: GIS Live Operations Radar (Cảnh báo lệch tuyến >500m, dừng quá 20m) → `ADM-04` (`0d4217c3...`)
-- **F-ADM-05**: Phòng vé POS Hotline & Điều phối Khẩn cấp / Đổi vé → `ADM-05` (`21f08db7...`)
+Dựa trên tài liệu đặc tả hệ thống master [bus_booking_tracking_system_spec_v3_enhanced.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/docs/specs/bus_booking_tracking_system_spec_v3_enhanced.md), quy chuẩn thiết kế [screen-spec/passenger/DESIGN.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/passenger/DESIGN.md), [screen-spec/driver/DESIGN.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/driver/DESIGN.md) và các đặc tả màn hình `PAX-001` -> `PAX-025`, `DRI-001` -> `DRI-019`.
 
 ---
 
-## 2. Quy Chuẩn Review & Tiêu Chí Kiểm Thu
+## 1. Mục Tiêu & Phạm Vi Công Việc
 
-### 2.1. Đơn vị Dữ liệu Realtime & Monospace Engine
-- **Mã PNR**: Chuỗi 6-8 ký tự in hoa (ví dụ: `FB9821`), hiển thị bằng font `JetBrains Mono`.
-- **Biển số phương tiện**: Chuẩn biển số Việt Nam (ví dụ: `29B-123.45`), hiển thị `JetBrains Mono`.
-- **Thời gian đếm ngược (Seat Lock 10m)**: Định dạng `MM:SS` (ví dụ: `09:58`), nhấp nháy khi còn < 60s.
-- **Telemetry GPS**: Tốc độ `58.2 km/h`, Khoảng cách `8.5 km`, Tọa độ Lat/Lng hiển thị `JetBrains Mono`.
-
-### 2.2. Kiểm Tra Strict Anti-Patterns (`DESIGN.md`)
-- ❌ Không dùng font `Inter` hay font serif tự do.
-- ❌ Không dùng màu đen thuần `#000000`.
-- ❌ Không dùng Emojis (Bắt buộc 100% SVG Icons).
-- ❌ Không dùng hiệu ứng Neon Outer Glow hay gradient tím/xanh AI.
+1. **Sửa lỗi cú pháp Dart nghiêm trọng**:
+   - `async Future<...>` trong `PassengerApiClientService` và `DriverApiClientService` (cú pháp chuẩn Dart: `Future<...> ... async`).
+   - Toán tử so sánh JavaScript `===` trong `PassengerSeatMapScreen` (cú pháp chuẩn Dart: `==`).
+2. **Tuân thủ triệt để Quy chuẩn Design System (Zero Emojis & Design Tokens)**:
+   - Loại bỏ 100% emojis vi phạm quy chuẩn `DESIGN.md` trong UI khách hàng và buồng lái tài xế (như `🚌`, `⬆️`, `⬇️`, `💵`, `✅`), thay thế bằng `IconData` / Material Icons và typography chuẩn (`Geist`, `JetBrains Mono`).
+3. **Hoàn thiện Luồng Điều Hướng & Màn Hình Spec (PAX & DRI)**:
+   - Sửa luồng tìm kiếm từ `PassengerHomeScreen` sang `PassengerSearchResultsScreen` (PAX-006) thay vì nhảy cóc thẳng vào `PassengerSeatMapScreen`.
+   - Bổ sung các màn hình/dialog chức năng theo spec: `passenger_location_picker_screen.dart` (PAX-005), `passenger_trip_detail_screen.dart` (PAX-007), `passenger_payment_processing_screen.dart` (PAX-013/014), `passenger_cancel_refund_screen.dart` (PAX-021), `driver_trip_detail_screen.dart` (DRI-003), `driver_navigation_screen.dart` (DRI-013), `driver_incident_dialog.dart` (DRI-019), `driver_cod_dialog.dart` (DRI-012).
+   - Mở rộng đầy đủ các phương thức API Client trong `passenger_api_service.dart` và `driver_api_service.dart` kết nối chính xác với backend `passengerRoutes.js` và `driverRoutes.js`.
+4. **Mở rộng Bộ Kiểm Thử Tự Động (Automated Integrity Test Suite)**:
+   - Bổ sung test kiểm tra tính hợp lệ của toàn bộ mã nguồn Dart (không có `===`, không có `async Future`, không có emoji).
+   - Bổ sung test kiểm tra toàn vẹn API contracts và màn hình presentation.
+   - Chạy 100% Green test suite `npm test` và cập nhật `STATE.md`.
 
 ---
 
-## 3. Kế Hoạch Xác Nhận & Đánh Giá (Verification Plan)
+## 2. Kế Hoạch Thực Hiện Chi Tiết (Phân Rã Atomic Tasks)
 
-### Kiểm Tra Cấu Trúc Code HTML/CSS:
-1. Đọc mã HTML từng màn hình trong Stitch Project `13555615882856172226` qua StitchMCP.
-2. Kiểm tra `tailwind.config` cho việc load đúng `Geist` và `JetBrains Mono`.
-3. Kiểm tra các class Tailwind như `bg-canvas-ops`, `bg-surface-dark`, `text-pnr-orange`, `text-alert-crimson`.
+### Giai đoạn 1: Khắc phục lỗi cú pháp Dart (Syntax Self-Healing)
+- [ ] **Task 1.1**: Sửa lỗi `async Future<...>` thành `Future<...> ... async` trong `source/client/data/lib/src/service/passenger_api_service.dart` và `source/driver/app/lib/src/service/driver_api_service.dart`.
+- [ ] **Task 1.2**: Sửa lỗi toán tử `===` thành `==` trong `source/client/app/lib/src/presentation/passenger/passenger_seat_map_screen.dart`.
 
-### Báo Cáo Đánh Giá Tổng Hợp:
-- Cập nhật toàn bộ kết quả audit chi tiết vào [walkthrough.md](file:///home/david/.gemini/antigravity-ide/brain/2262b68b-3c19-4bfa-a0bc-a6a5971cef80/walkthrough.md).
+### Giai đoạn 2: Chuẩn hóa Design System & Loại bỏ Emojis
+- [ ] **Task 2.1**: Loại bỏ emoji vi phạm trong các màn hình Passenger (`passenger_seat_map_screen.dart`), chuẩn hóa icon xe bus Material Icons.
+- [ ] **Task 2.2**: Loại bỏ emojis trong buồng lái Driver (`driver_cockpit_dashboard.dart`, `driver_manifest_screen.dart`, `driver_qr_scanner_screen.dart`), thay bằng vector Material Icons và JetBrains Mono data pills.
+
+### Giai đoạn 3: Hoàn thiện Luồng Nghiệp Vụ & API Passenger (PAX-001 -> PAX-025)
+- [ ] **Task 3.1**: Mở rộng `PassengerApiClientService` đầy đủ các endpoints: `verifyOtp`, `homeFeed`, `createBooking`, `getTicketWallet`, `getTicketQR`, `cancelTicket`, `getLiveRadarHUD`, `getNotifications`, `getTripDetail`.
+- [ ] **Task 3.2**: Bổ sung các màn hình Passenger: `passenger_location_picker_screen.dart` (PAX-005), `passenger_trip_detail_screen.dart` (PAX-007), `passenger_payment_processing_screen.dart` (PAX-013), `passenger_cancel_refund_screen.dart` (PAX-021).
+- [ ] **Task 3.3**: Chuẩn hóa luồng điều hướng: từ Home bấm "TÌM KIẾM CHUYẾN XE" chuyển đến `PassengerSearchResultsScreen`, từ kết quả chuyển đến Trip Detail / Seat Map, từ Checkout chuyển đến Payment Processing rồi E-Ticket QR.
+
+### Giai đoạn 4: Hoàn thiện Luồng Nghiệp Vụ & API Driver (DRI-001 -> DRI-019)
+- [ ] **Task 4.1**: Mở rộng `DriverApiClientService` đầy đủ endpoints: `startTrip`, `getManifest`, `boardWithQr`, `markNoShow`, `collectCod`, `reportIncident`, `endTrip`.
+- [ ] **Task 4.2**: Bổ sung các màn hình/dialog Driver: `driver_trip_detail_screen.dart` (DRI-003), `driver_navigation_screen.dart` (DRI-013), `driver_incident_dialog.dart` (DRI-019), `driver_cod_dialog.dart` (DRI-012).
+- [ ] **Task 4.3**: Kết nối luồng hoàn chỉnh từ Login -> Today Trips -> Readiness Checklist -> Trip Detail -> Cockpit Dashboard -> Manifest / QR Scanner / Navigation / Offline Sync.
+
+### Giai đoạn 5: Mở Rộng Kiểm Thử Tự Động & Empirical Verification
+- [ ] **Task 5.1**: Mở rộng `test/mobile/mobile_client.test.js` kiểm tra toàn diện Dart syntax, zero-emoji, typography, API methods và màn hình Passenger.
+- [ ] **Task 5.2**: Mở rộng `test/mobile/driver_mobile.test.js` kiểm tra toàn diện Dart syntax, zero-emoji, typography, API methods và màn hình Driver.
+
+### Giai đoạn 6: Nghiệm Thu, Cập Nhật Trạng Thái & Walkthrough
+- [ ] **Task 6.1**: Chạy `npm test` (đảm bảo 100% pass), chạy `node test/e2e_live_flow.js`, cập nhật `STATE.md` và tạo báo cáo `walkthrough.md`.
+
+---
+
+## 3. Verification Plan
+
+### Automated Tests:
+- `npm test`: Chạy toàn bộ test suites của platform (Node.js API, Mobile Client, Driver Mobile, Manager Web).
+- `npm run lint`: Kiểm tra cú pháp mã nguồn.
+- `node test/e2e_live_flow.js`: Kiểm tra live server API flow từ lúc tạo vé đến soát vé QR.
+
+### Manual / Structural Verifications:
+- Quét toàn bộ repository kiểm tra không còn bất kỳ ký tự emoji nào trong UI mobile.
+- Quét không còn `===` hay `async Future` trong toàn bộ file `.dart`.
