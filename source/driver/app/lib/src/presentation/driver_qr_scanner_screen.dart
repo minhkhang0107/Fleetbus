@@ -51,7 +51,13 @@ class DriverQrScannerScreen extends StatelessWidget {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     backgroundColor: AppColors.emeraldSafe,
-                    content: Text('✅ SOÁT VÉ THÀNH CÔNG: A01 - Trần Văn Hùng'),
+                    content: Row(
+                      children: [
+                        Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                        SizedBox(width: 8),
+                        Text('SOÁT VÉ THÀNH CÔNG: A01 - Trần Văn Hùng'),
+                      ],
+                    ),
                   ),
                 );
                 Navigator.of(context).pop();

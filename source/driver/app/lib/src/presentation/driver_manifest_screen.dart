@@ -115,7 +115,13 @@ class DriverManifestScreen extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('💵 Thu tiền mặt (COD):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.amberWarning)),
+                  const Row(
+                    children: [
+                      Icon(Icons.payments_rounded, size: 14, color: AppColors.amberWarning),
+                      SizedBox(width: 4),
+                      Text('Thu tiền mặt (COD):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.amberWarning)),
+                    ],
+                  ),
                   Text(codAmount, style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
                 ],
               ),

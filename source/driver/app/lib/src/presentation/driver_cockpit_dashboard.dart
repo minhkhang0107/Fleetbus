@@ -104,9 +104,13 @@ class DriverCockpitDashboard extends StatelessWidget {
                   SizedBox(height: 12),
                   Row(
                     children: [
-                      Text('⬆️ Đón: 4 khách', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.emeraldSafe)),
-                      SizedBox(width: 24),
-                      Text('⬇️ Trả: 8 khách', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.amberWarning)),
+                      const Icon(Icons.arrow_upward_rounded, size: 14, color: AppColors.emeraldSafe),
+                      const SizedBox(width: 4),
+                      const Text('Đón: 4 khách', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.emeraldSafe)),
+                      const SizedBox(width: 24),
+                      const Icon(Icons.arrow_downward_rounded, size: 14, color: AppColors.amberWarning),
+                      const SizedBox(width: 4),
+                      const Text('Trả: 8 khách', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.amberWarning)),
                     ],
                   ),
                 ],
