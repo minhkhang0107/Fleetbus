@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:resources/resources.dart';
 import 'passenger_ticket_qr_screen.dart';
+import 'passenger_cancel_refund_screen.dart';
 
 class PassengerWalletScreen extends StatefulWidget {
   const PassengerWalletScreen({super.key});
@@ -137,6 +138,7 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
           Row(
             children: [
               Expanded(
+                flex: 3,
                 child: ElevatedButton(
                   onPressed: () {
                     Navigator.of(context).push(
@@ -144,6 +146,29 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
                     );
                   },
                   child: const Text('MỞ VÉ LÊN XE (QR)', style: TextStyle(fontSize: 13)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.alertCrimson,
+                    side: const BorderSide(color: AppColors.alertCrimson),
+                    minimumSize: const Size(0, 54),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const PassengerCancelRefundScreen(
+                          pnr: 'BG-882199',
+                          ticketPrice: 220000,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('HỦY VÉ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                 ),
               ),
             ],

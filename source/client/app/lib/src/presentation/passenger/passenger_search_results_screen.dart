@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:resources/resources.dart';
 import 'passenger_seat_map_screen.dart';
+import 'passenger_trip_detail_screen.dart';
 
 class PassengerSearchResultsScreen extends StatefulWidget {
   const PassengerSearchResultsScreen({super.key});
@@ -126,7 +127,15 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
     return InkWell(
       onTap: () {
         Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const PassengerSeatMapScreen()),
+          MaterialPageRoute(
+            builder: (_) => PassengerTripDetailScreen(
+              tripId: tripId,
+              departureTime: time,
+              price: price,
+              vehicleType: vehicleType,
+              vehiclePlate: plate,
+            ),
+          ),
         );
       },
       borderRadius: BorderRadius.circular(16),

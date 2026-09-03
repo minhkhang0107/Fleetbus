@@ -1,9 +1,47 @@
 import 'package:flutter/material.dart';
 import 'package:resources/resources.dart';
-import 'passenger_seat_map_screen.dart';
+import 'passenger_location_picker_screen.dart';
+import 'passenger_search_results_screen.dart';
+import 'passenger_trip_detail_screen.dart';
 
-class PassengerHomeScreen extends StatelessWidget {
+class PassengerHomeScreen extends StatefulWidget {
   const PassengerHomeScreen({super.key});
+
+  @override
+  State<PassengerHomeScreen> createState() => _PassengerHomeScreenState();
+}
+
+class _PassengerHomeScreenState extends State<PassengerHomeScreen> {
+  String _origin = 'Hà Nội (Bến xe Giáp Bát)';
+  String _destination = 'Thanh Hóa (Bến xe Phía Bắc)';
+
+  Future<void> _pickOrigin() async {
+    final result = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => PassengerLocationPickerScreen(
+          title: 'Chọn điểm đi (PAX-005)',
+          initialValue: _origin,
+        ),
+      ),
+    );
+    if (result != null && mounted) {
+      setState(() => _origin = result);
+    }
+  }
+
+  Future<void> _pickDestination() async {
+    final result = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => PassengerLocationPickerScreen(
+          title: 'Chọn điểm đến (PAX-005)',
+          initialValue: _destination,
+        ),
+      ),
+    );
+    if (result != null && mounted) {
+      setState(() => _destination = result);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -63,26 +101,28 @@ class PassengerHomeScreen extends StatelessWidget {
                     _buildLocationField(
                       icon: Icons.trip_origin_rounded,
                       iconColor: AppColors.primarySapphire,
-                      label: 'Điểm đi',
-                      value: 'Hà Nội (Bến xe Giáp Bát)',
+                      label: 'Điểm đi (Chạm để đổi)',
+                      value: _origin,
+                      onTap: _pickOrigin,
                     ),
                     const SizedBox(height: 12),
                     _buildLocationField(
                       icon: Icons.location_on_rounded,
                       iconColor: AppColors.alertCrimson,
-                      label: 'Điểm đến',
-                      value: 'Thanh Hóa (Bến xe Phía Bắc)',
+                      label: 'Điểm đến (Chạm để đổi)',
+                      value: _destination,
+                      onTap: _pickDestination,
                     ),
                     const SizedBox(height: 16),
                     ElevatedButton(
                       onPressed: () {
                         Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (_) => const PassengerSeatMapScreen(),
+                            builder: (_) => const PassengerSearchResultsScreen(),
                           ),
                         );
                       },
-                      child: const Text('TÌM KIẾM CHUYẾN XE'),
+                      child: const Text('TÌM KIẾM CHUYẾN XE (PAX-006) ➔'),
                     ),
                   ],
                 ),
@@ -143,38 +183,44 @@ class PassengerHomeScreen extends StatelessWidget {
     required Color iconColor,
     required String label,
     required String value,
+    required VoidCallback onTap,
   }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.canvasPassenger,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.whisperBorder),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: iconColor, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(fontSize: 10, color: AppColors.mutedSteel),
-                ),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.charcoalInk,
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.canvasPassenger,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.whisperBorder),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: iconColor, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(fontSize: 10, color: AppColors.mutedSteel),
                   ),
-                ),
-              ],
+                  Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.charcoalInk,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+            const Icon(Icons.swap_vert_rounded, color: AppColors.mutedSteel, size: 18),
+          ],
+        ),
       ),
     );
   }
@@ -190,7 +236,15 @@ class PassengerHomeScreen extends StatelessWidget {
     return InkWell(
       onTap: () {
         Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const PassengerSeatMapScreen()),
+          MaterialPageRoute(
+            builder: (_) => PassengerTripDetailScreen(
+              origin: origin,
+              destination: destination,
+              price: price,
+              departureTime: time.split(' ')[0],
+              vehicleType: vehicle,
+            ),
+          ),
         );
       },
       borderRadius: BorderRadius.circular(16),

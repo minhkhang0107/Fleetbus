@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:resources/resources.dart';
-import 'passenger_ticket_qr_screen.dart';
+import 'passenger_payment_processing_screen.dart';
 
 class PassengerCheckoutScreen extends StatelessWidget {
   final List<String> selectedSeats;
@@ -152,10 +152,15 @@ class PassengerCheckoutScreen extends StatelessWidget {
           ElevatedButton(
             onPressed: () {
               Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const PassengerTicketQrScreen()),
+                MaterialPageRoute(
+                  builder: (_) => PassengerPaymentProcessingScreen(
+                    totalAmount: total,
+                    selectedSeats: selectedSeats,
+                  ),
+                ),
               );
             },
-            child: const Text('XÁC NHẬN & THANH TOÁN VIETQR'),
+            child: const Text('XÁC NHẬN & THANH TOÁN VIETQR ➔'),
           ),
         ],
       ),
