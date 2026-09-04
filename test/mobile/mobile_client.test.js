@@ -10,7 +10,11 @@ const __dirname = path.dirname(__filename);
 describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
   const rootDir = path.resolve(__dirname, '../../');
   const androidManifestPath = path.join(rootDir, 'source/client/app/android/app/src/main/AndroidManifest.xml');
+  const androidBuildGradlePath = path.join(rootDir, 'source/client/app/android/app/build.gradle');
+  const androidMainActivityPath = path.join(rootDir, 'source/client/app/android/app/src/main/kotlin/vn/busgo/passenger/MainActivity.kt');
   const iosInfoPlistPath = path.join(rootDir, 'source/client/app/ios/Runner/Info.plist');
+  const iosPbxprojPath = path.join(rootDir, 'source/client/app/ios/Runner.xcodeproj/project.pbxproj');
+  const pubspecPath = path.join(rootDir, 'source/client/app/pubspec.yaml');
   const mainDartPath = path.join(rootDir, 'source/client/app/lib/main.dart');
   const appColorsDartPath = path.join(rootDir, 'source/client/resources/lib/src/theme/app_colors.dart');
   const appThemeDartPath = path.join(rootDir, 'source/client/resources/lib/src/theme/app_theme.dart');
@@ -28,6 +32,7 @@ describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
     assert.ok(content.includes('android.permission.CAMERA'), 'CAMERA required for QR ticket scanning');
     assert.ok(content.includes('android:label="BusGo"'), 'Label must be BusGo');
     assert.ok(content.includes('android:scheme="busgo"'), 'Deep link scheme busgo must be configured');
+    assert.ok(content.includes('android:usesCleartextTraffic="true"'), 'Cleartext traffic must be enabled for dev APIs');
   });
 
   it('TC-MOB-02: iOS Info.plist must have BusGo bundle identity and privacy usage strings', () => {
@@ -148,5 +153,38 @@ describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
     for (const method of expectedMethods) {
       assert.ok(content.includes(method), `PassengerApiClientService must implement ${method}()`);
     }
+  });
+
+  it('TC-MOB-09: Android Gradle & Kotlin Activity configuration must be aligned to vn.busgo.passenger', () => {
+    assert.ok(fs.existsSync(androidBuildGradlePath), 'build.gradle must exist');
+    const gradleContent = fs.readFileSync(androidBuildGradlePath, 'utf8');
+    assert.ok(gradleContent.includes('namespace "vn.busgo.passenger"'), 'Namespace must be vn.busgo.passenger');
+    assert.ok(gradleContent.includes('applicationId "vn.busgo.passenger"'), 'Default applicationId must be vn.busgo.passenger');
+
+    assert.ok(fs.existsSync(androidMainActivityPath), 'MainActivity.kt must exist in vn/busgo/passenger/');
+    const ktContent = fs.readFileSync(androidMainActivityPath, 'utf8');
+    assert.ok(ktContent.includes('package vn.busgo.passenger'), 'MainActivity package must be vn.busgo.passenger');
+  });
+
+  it('TC-MOB-10: iOS Xcode project.pbxproj & Info.plist must be configured for vn.busgo.passenger and ATS', () => {
+    assert.ok(fs.existsSync(iosPbxprojPath), 'project.pbxproj must exist');
+    const pbxprojContent = fs.readFileSync(iosPbxprojPath, 'utf8');
+    assert.ok(pbxprojContent.includes('PRODUCT_BUNDLE_IDENTIFIER = vn.busgo.passenger;'), 'iOS Bundle ID must be vn.busgo.passenger');
+    assert.ok(!pbxprojContent.includes('PRODUCT_BUNDLE_IDENTIFIER = com.mkd.mestudy;'), 'Legacy template ID must not exist');
+
+    const infoPlistContent = fs.readFileSync(iosInfoPlistPath, 'utf8');
+    assert.ok(infoPlistContent.includes('<key>NSAppTransportSecurity</key>'), 'NSAppTransportSecurity must be configured');
+    assert.ok(infoPlistContent.includes('<key>NSAllowsLocalNetworking</key>'), 'NSAllowsLocalNetworking must be enabled');
+  });
+
+  it('TC-MOB-11: Pubspec dependencies and adaptive baseUrl cross-platform configuration', () => {
+    assert.ok(fs.existsSync(pubspecPath), 'pubspec.yaml must exist');
+    const pubspecContent = fs.readFileSync(pubspecPath, 'utf8');
+    assert.ok(pubspecContent.includes('data:\n    path: ../data'), 'app pubspec must depend on data package');
+
+    const serviceContent = fs.readFileSync(passengerServicePath, 'utf8');
+    assert.ok(serviceContent.includes('resolvePassengerBaseUrl'), 'Must implement resolvePassengerBaseUrl');
+    assert.ok(serviceContent.includes('http://10.0.2.2:3000'), 'Must handle Android emulator host alias 10.0.2.2:3000');
+    assert.ok(serviceContent.includes('http://localhost:3000'), 'Must handle iOS simulator / default host localhost:3000');
   });
 });

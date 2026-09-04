@@ -10,7 +10,11 @@ const __dirname = path.dirname(__filename);
 describe('Phase Driver Mobile: Android & iOS Platform Integrity Test Suite', () => {
   const rootDir = path.resolve(__dirname, '../../');
   const driverManifestPath = path.join(rootDir, 'source/driver/app/android/app/src/main/AndroidManifest.xml');
+  const driverBuildGradlePath = path.join(rootDir, 'source/driver/app/android/app/build.gradle');
+  const driverMainActivityPath = path.join(rootDir, 'source/driver/app/android/app/src/main/kotlin/vn/busgo/driver/MainActivity.kt');
   const driverInfoPlistPath = path.join(rootDir, 'source/driver/app/ios/Runner/Info.plist');
+  const driverPbxprojPath = path.join(rootDir, 'source/driver/app/ios/Runner.xcodeproj/project.pbxproj');
+  const driverPubspecPath = path.join(rootDir, 'source/driver/app/pubspec.yaml');
   const driverMainDartPath = path.join(rootDir, 'source/driver/app/lib/main.dart');
   const driverAppColorsDartPath = path.join(rootDir, 'source/driver/resources/lib/src/theme/app_colors.dart');
   const driverAppThemeDartPath = path.join(rootDir, 'source/driver/resources/lib/src/theme/app_theme.dart');
@@ -26,6 +30,7 @@ describe('Phase Driver Mobile: Android & iOS Platform Integrity Test Suite', () 
     assert.ok(content.includes('android.permission.ACCESS_FINE_LOCATION'), 'FINE_LOCATION required');
     assert.ok(content.includes('android.permission.CAMERA'), 'CAMERA permission required');
     assert.ok(content.includes('android:label="BusGo Driver"'), 'Label must be BusGo Driver');
+    assert.ok(content.includes('android:usesCleartextTraffic="true"'), 'Cleartext traffic must be enabled for dev APIs');
   });
 
   it('TC-DRV-MOB-02: Driver iOS Info.plist must have BusGo Driver bundle identity and privacy usage strings', () => {
@@ -140,5 +145,38 @@ describe('Phase Driver Mobile: Android & iOS Platform Integrity Test Suite', () 
     for (const method of expectedMethods) {
       assert.ok(content.includes(method), `DriverApiClientService must implement ${method}()`);
     }
+  });
+
+  it('TC-DRV-MOB-09: Driver Android Gradle & Kotlin Activity configuration must be aligned to vn.busgo.driver', () => {
+    assert.ok(fs.existsSync(driverBuildGradlePath), 'driver build.gradle must exist');
+    const gradleContent = fs.readFileSync(driverBuildGradlePath, 'utf8');
+    assert.ok(gradleContent.includes('namespace "vn.busgo.driver"'), 'Namespace must be vn.busgo.driver');
+    assert.ok(gradleContent.includes('applicationId "vn.busgo.driver"'), 'Default applicationId must be vn.busgo.driver');
+
+    assert.ok(fs.existsSync(driverMainActivityPath), 'MainActivity.kt must exist in vn/busgo/driver/');
+    const ktContent = fs.readFileSync(driverMainActivityPath, 'utf8');
+    assert.ok(ktContent.includes('package vn.busgo.driver'), 'MainActivity package must be vn.busgo.driver');
+  });
+
+  it('TC-DRV-MOB-10: Driver iOS Xcode project.pbxproj & Info.plist must be configured for vn.busgo.driver and ATS', () => {
+    assert.ok(fs.existsSync(driverPbxprojPath), 'driver project.pbxproj must exist');
+    const pbxprojContent = fs.readFileSync(driverPbxprojPath, 'utf8');
+    assert.ok(pbxprojContent.includes('PRODUCT_BUNDLE_IDENTIFIER = vn.busgo.driver;'), 'iOS Bundle ID must be vn.busgo.driver');
+    assert.ok(!pbxprojContent.includes('PRODUCT_BUNDLE_IDENTIFIER = com.mkd.mestudy;'), 'Legacy template ID must not exist');
+
+    const infoPlistContent = fs.readFileSync(driverInfoPlistPath, 'utf8');
+    assert.ok(infoPlistContent.includes('<key>NSAppTransportSecurity</key>'), 'NSAppTransportSecurity must be configured');
+    assert.ok(infoPlistContent.includes('<key>NSAllowsLocalNetworking</key>'), 'NSAllowsLocalNetworking must be enabled');
+  });
+
+  it('TC-DRV-MOB-11: Driver Pubspec dependencies and adaptive baseUrl cross-platform configuration', () => {
+    assert.ok(fs.existsSync(driverPubspecPath), 'pubspec.yaml must exist');
+    const pubspecContent = fs.readFileSync(driverPubspecPath, 'utf8');
+    assert.ok(pubspecContent.includes('data:\n    path: ../data'), 'driver app pubspec must depend on data package');
+
+    const serviceContent = fs.readFileSync(driverServicePath, 'utf8');
+    assert.ok(serviceContent.includes('resolveDriverBaseUrl'), 'Must implement resolveDriverBaseUrl');
+    assert.ok(serviceContent.includes('http://10.0.2.2:3000'), 'Must handle Android emulator host alias 10.0.2.2:3000');
+    assert.ok(serviceContent.includes('http://localhost:3000'), 'Must handle iOS simulator / default host localhost:3000');
   });
 });
