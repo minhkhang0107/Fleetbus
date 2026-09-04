@@ -14,6 +14,8 @@ dependencies:
   injectable: ^2.5.0
   domain:
     path: ../domain
+  data:
+    path: ../data
   shared:
     path: ../shared
   init:

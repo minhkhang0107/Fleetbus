@@ -4,16 +4,31 @@
  */
 
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+
+/// Helper function to resolve the target backend URL adaptively across Android & iOS
+String resolveDriverBaseUrl([String? customUrl]) {
+  if (customUrl != null && customUrl.isNotEmpty) {
+    return customUrl;
+  }
+  // Android emulator loopback alias to host machine
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    return 'http://10.0.2.2:3000';
+  }
+  // iOS Simulator, macOS/Web, desktop, or default host
+  return 'http://localhost:3000';
+}
 
 class DriverApiClientService {
   final String baseUrl;
   final http.Client _client;
 
   DriverApiClientService({
-    this.baseUrl = 'http://localhost:3000',
+    String? baseUrl,
     http.Client? client,
-  }) : _client = client ?? http.Client();
+  })  : baseUrl = resolveDriverBaseUrl(baseUrl),
+        _client = client ?? http.Client();
 
   Map<String, String> get _headers => {
     'Content-Type': 'application/json',
