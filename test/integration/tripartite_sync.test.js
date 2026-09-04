@@ -7,7 +7,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import http from 'http';
 import { createFleetBusServer } from '../../source/server/apiServer.js';
-import { generateDynamicTicketQR } from '../../source/passenger-app/core/cryptoEngine.js';
+import { generateDynamicTicketQR } from '../../source/server/services/passenger/core/cryptoEngine.js';
 
 describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () => {
   let server;

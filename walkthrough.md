@@ -3,9 +3,9 @@
 ## Tổng quan kết quả thực hiện (Executive Summary)
 
 Đã hoàn thành phân tích toàn diện, tái cấu trúc và tích hợp thông suốt **3 chiều (Tripartite Real-time Synchronization)** giữa:
-1. **Passenger Mobile App** (`source/client/` & `source/passenger-app/`)
-2. **Driver Tactical Cockpit** (`source/driver/` & `source/driver-app/`)
-3. **Manager Operations Control Center** (`source/manager/` & `source/manager-app/`)
+1. **Passenger Mobile App** (`source/passenger/` & `source/server/services/passenger/`)
+2. **Driver Tactical Cockpit** (`source/driver/` & `source/server/services/driver/`)
+3. **Manager Operations Control Center** (`source/manager/` & `source/server/services/manager/`)
 4. **Unified Node.js API Gateway & Event Bridge** (`source/server/`)
 
 Mục tiêu cốt lõi: **Đảm bảo mọi nghiệp vụ phát sinh từ bất kỳ nền tảng nào (hành khách đặt vé, tài xế quét QR soát vé, tài xế ping GPS, quản lý quầy bán vé POS, quản lý điều xe khẩn cấp, hành khách hủy vé) đều lập tức phản chiếu tức thời và nhất quán vào trạng thái bộ nhớ và luồng nghiệp vụ của hai nền tảng còn lại.**

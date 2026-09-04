@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { PassengerSearchService } from '../../source/passenger-app/modules/search.js';
+import { PassengerSearchService } from '../../source/server/services/passenger/modules/search.js';
 
 describe('Phase 3: Discovery, Location Picker & Search Test Suite', () => {
   const searchService = new PassengerSearchService();

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { PassengerCheckoutService } from '../../source/passenger-app/modules/checkout.js';
+import { PassengerCheckoutService } from '../../source/server/services/passenger/modules/checkout.js';
 
 describe('Phase 5: Passenger Manifest & Checkout Review Test Suite', () => {
   const checkoutService = new PassengerCheckoutService();

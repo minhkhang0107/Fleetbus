@@ -2,10 +2,10 @@
 
 Hệ sinh thái công nghệ toàn diện phục vụ quản lý và vận hành nhà xe liên tỉnh, bao gồm 3 phân hệ ứng dụng độc lập kết nối qua cổng **Unified Node.js API Gateway**:
 
-1. 📱 **Passenger App** (`source/client/`): Ứng dụng di động Flutter dành cho Hành khách (Đặt vé, chọn ghế 2D, thanh toán VietQR Napas247, ví vé xoay mã HMAC QR 30s, theo dõi GPS Radar HUD).
+1. 📱 **Passenger App** (`source/passenger/`): Ứng dụng di động Flutter dành cho Hành khách (Đặt vé, chọn ghế 2D, thanh toán VietQR Napas247, ví vé xoay mã HMAC QR 30s, theo dõi GPS Radar HUD).
 2. 🚌 **Driver App** (`source/driver/`): Ứng dụng di động Flutter buồng lái dành cho Tài xế (Điểm danh ca, kiểm tra an toàn 6 điểm, quét QR vé siêu tốc, thu hộ COD, truyền GPS Telemetry 3s/lần, xử lý ngoại tuyến).
-3. 🖥️ **Manager Operations Center** (`source/manager-app/`): Cổng web điều hành thời gian thực dành cho Quản lý & Điều độ (Bản đồ radar hạm đội 60Hz, điều độ xe/tài xế, bán vé POS/Hotline, đổi xe khẩn cấp, báo cáo doanh thu & đúng giờ).
-4. 🌐 **Unified API Gateway** (`source/server/`): Máy chủ Node.js REST API Server cung cấp dịch vụ tập trung và cổng thanh toán tự động IPN Webhook.
+3. 🖥️ **Manager Operations Center** (`source/manager/`): Cổng web điều hành thời gian thực dành cho Quản lý & Điều độ (Bản đồ radar hạm đội 60Hz, điều độ xe/tài xế, bán vé POS/Hotline, đổi xe khẩn cấp, báo cáo doanh thu & đúng giờ).
+4. 🌐 **Unified API Gateway & Services** (`source/server/`): Máy chủ Node.js REST API Server cung cấp dịch vụ tập trung và cổng thanh toán tự động IPN Webhook (chứa `services/passenger`, `services/driver`, `services/manager`).
 
 ---
 
@@ -40,9 +40,9 @@ make driver_build_prod # Build file APK buồng lái Production
 
 ## 2. Hướng Dẫn Chi Tiết Từng Phân Hệ
 
-- 📱 [Hướng Dẫn Build App Hành Khách (Passenger App README)](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/source/client/README.md)
+- 📱 [Hướng Dẫn Build App Hành Khách (Passenger App README)](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/source/passenger/README.md)
 - 🚌 [Hướng Dẫn Build App Tài Xế (Driver App README)](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/source/driver/README.md)
-- 🖥️ [Hướng Dẫn Phân Hệ Quản Lý & Điều Hành (Manager Operations)](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/source/manager-app/)
+- 🖥️ [Hướng Dẫn Phân Hệ Quản Lý & Điều Hành (Manager Operations)](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/source/manager/README.md)
 - 📖 [Tài Liệu Chi Tiết Trạng Thái Hệ Thống (STATE.md)](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/STATE.md)
 
 ---

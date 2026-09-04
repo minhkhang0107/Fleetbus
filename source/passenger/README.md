@@ -1,4 +1,4 @@
-# BusGo Passenger Mobile App (`source/client/`)
+# BusGo Passenger Mobile App (`source/passenger/`)
 
 Ứng dụng di động **BusGo Passenger** (Flutter Native dành cho Android & iOS) phục vụ hành khách tìm kiếm tuyến xe, chọn ghế 2D trực quan, đặt vé thanh toán Napas247 / VietQR tự động, quản lý ví vé điện tử xoay mã HMAC QR 30 giây chống chụp màn hình và theo dõi radar xe buýt thời gian thực (PAX-001 đến PAX-025).
 
@@ -16,7 +16,7 @@
 ## 2. Cấu Trúc Monorepo Đa Gói (Clean Architecture)
 
 ```text
-source/client/
+source/passenger/
 ├── app/                  # Presentation Layer (11 Flutter screens & Shell)
 │   ├── android/          # Android Native Manifest (vn.busgo.passenger)
 │   ├── ios/              # iOS Native Info.plist & Xcode Workspace
@@ -37,7 +37,7 @@ source/client/
 
 ## 3. Thiết Lập & Đồng Bộ Dự Án Lần Đầu
 
-Chạy các lệnh sau từ thư mục `source/client/`:
+Chạy các lệnh sau từ thư mục `source/passenger/`:
 
 ```bash
 # 1. Kích hoạt Melos (nếu chưa cài)

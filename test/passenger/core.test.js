@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { DESIGN_TOKENS } from '../../source/passenger-app/core/designTokens.js';
+import { DESIGN_TOKENS } from '../../source/server/services/passenger/core/designTokens.js';
 import {
   formatVND,
   formatPNR,
@@ -10,7 +10,7 @@ import {
   formatSpeed,
   formatDistance,
   calculateRefundAmount
-} from '../../source/passenger-app/core/formatters.js';
+} from '../../source/server/services/passenger/core/formatters.js';
 import {
   generateDynamicTicketQR,
   verifyDynamicTicketQR,
@@ -18,7 +18,7 @@ import {
   generateVietQRPayload,
   calculateHaversineDistance,
   calculateETA
-} from '../../source/passenger-app/core/cryptoEngine.js';
+} from '../../source/server/services/passenger/core/cryptoEngine.js';
 
 describe('Phase 1: Core Design System & Utilities Test Suite', () => {
   it('TC-CORE-01: Should contain valid Design System tokens without banned anti-patterns', () => {

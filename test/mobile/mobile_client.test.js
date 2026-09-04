@@ -9,17 +9,17 @@ const __dirname = path.dirname(__filename);
 
 describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
   const rootDir = path.resolve(__dirname, '../../');
-  const androidManifestPath = path.join(rootDir, 'source/client/app/android/app/src/main/AndroidManifest.xml');
-  const androidBuildGradlePath = path.join(rootDir, 'source/client/app/android/app/build.gradle');
-  const androidMainActivityPath = path.join(rootDir, 'source/client/app/android/app/src/main/kotlin/vn/busgo/passenger/MainActivity.kt');
-  const iosInfoPlistPath = path.join(rootDir, 'source/client/app/ios/Runner/Info.plist');
-  const iosPbxprojPath = path.join(rootDir, 'source/client/app/ios/Runner.xcodeproj/project.pbxproj');
-  const pubspecPath = path.join(rootDir, 'source/client/app/pubspec.yaml');
-  const mainDartPath = path.join(rootDir, 'source/client/app/lib/main.dart');
-  const appColorsDartPath = path.join(rootDir, 'source/client/resources/lib/src/theme/app_colors.dart');
-  const appThemeDartPath = path.join(rootDir, 'source/client/resources/lib/src/theme/app_theme.dart');
-  const passengerPresDir = path.join(rootDir, 'source/client/app/lib/src/presentation/passenger');
-  const passengerServicePath = path.join(rootDir, 'source/client/data/lib/src/service/passenger_api_service.dart');
+  const androidManifestPath = path.join(rootDir, 'source/passenger/app/android/app/src/main/AndroidManifest.xml');
+  const androidBuildGradlePath = path.join(rootDir, 'source/passenger/app/android/app/build.gradle');
+  const androidMainActivityPath = path.join(rootDir, 'source/passenger/app/android/app/src/main/kotlin/vn/busgo/passenger/MainActivity.kt');
+  const iosInfoPlistPath = path.join(rootDir, 'source/passenger/app/ios/Runner/Info.plist');
+  const iosPbxprojPath = path.join(rootDir, 'source/passenger/app/ios/Runner.xcodeproj/project.pbxproj');
+  const pubspecPath = path.join(rootDir, 'source/passenger/app/pubspec.yaml');
+  const mainDartPath = path.join(rootDir, 'source/passenger/app/lib/main.dart');
+  const appColorsDartPath = path.join(rootDir, 'source/passenger/resources/lib/src/theme/app_colors.dart');
+  const appThemeDartPath = path.join(rootDir, 'source/passenger/resources/lib/src/theme/app_theme.dart');
+  const passengerPresDir = path.join(rootDir, 'source/passenger/app/lib/src/presentation/passenger');
+  const passengerServicePath = path.join(rootDir, 'source/passenger/data/lib/src/service/passenger_api_service.dart');
 
   it('TC-MOB-01: Android Manifest must have correct package name and required permissions', () => {
     assert.ok(fs.existsSync(androidManifestPath), 'AndroidManifest.xml must exist');
@@ -110,9 +110,9 @@ describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
       }
     };
 
-    checkDir(path.join(rootDir, 'source/client/app/lib'));
-    checkDir(path.join(rootDir, 'source/client/data/lib'));
-    checkDir(path.join(rootDir, 'source/client/resources/lib'));
+    checkDir(path.join(rootDir, 'source/passenger/app/lib'));
+    checkDir(path.join(rootDir, 'source/passenger/data/lib'));
+    checkDir(path.join(rootDir, 'source/passenger/resources/lib'));
   });
 
   it('TC-MOB-07: Design System Anti-Pattern check — Zero picture emojis in presentation screens', () => {

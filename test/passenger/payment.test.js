@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { PassengerPaymentService } from '../../source/passenger-app/modules/payment.js';
+import { PassengerPaymentService } from '../../source/server/services/passenger/modules/payment.js';
 
 describe('Phase 6: Payment, Ticket Wallet & Dynamic HMAC QR Test Suite', () => {
   const paymentService = new PassengerPaymentService();

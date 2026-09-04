@@ -15,13 +15,13 @@ Last updated: 2026-09-04 09:28
   - **Live E2E Flow**: Full tripartite end-to-end live flow verified (`node test/e2e_live_flow.js`).
   - **Cross-Service Event Bridge**: `FleetBusEventBridge` pub-sub linking Passenger, Driver, and Manager in real time.
 
-## 2. Passenger Mobile App (Android & iOS Flutter: `source/client/`)
-- [x] **Android Configuration (`source/client/app/android/`)**:
+## 2. Passenger Mobile App (Android & iOS Flutter: `source/passenger/`)
+- [x] **Android Configuration (`source/passenger/app/android/`)**:
   - Package & Namespace: `vn.busgo.passenger` (in `AndroidManifest.xml` and `app/build.gradle`).
   - Application ID: `vn.busgo.passenger` (Flavors: `dev`, `qa`, `stg`, `production`).
-  - Kotlin Activity: `source/client/app/android/app/src/main/kotlin/vn/busgo/passenger/MainActivity.kt` with package `vn.busgo.passenger`.
+  - Kotlin Activity: `source/passenger/app/android/app/src/main/kotlin/vn/busgo/passenger/MainActivity.kt` with package `vn.busgo.passenger`.
   - Permissions: camera, fine & coarse GPS, cleartext dev traffic (`android:usesCleartextTraffic="true"`), deep link scheme `busgo://`.
-- [x] **iOS Configuration (`source/client/app/ios/`)**:
+- [x] **iOS Configuration (`source/passenger/app/ios/`)**:
   - Bundle Identifier: `vn.busgo.passenger` (in `Info.plist` and `Runner.xcodeproj/project.pbxproj`).
   - App Transport Security: `NSAllowsArbitraryLoads` and `NSAllowsLocalNetworking` enabled for seamless local API server access.
   - Privacy Descriptions: location, camera, and photo library access permissions configured.

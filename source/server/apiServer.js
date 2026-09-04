@@ -8,14 +8,14 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { PassengerAuthService } from '../passenger-app/modules/auth.js';
-import { PassengerSearchService } from '../passenger-app/modules/search.js';
-import { PassengerSeatMapService } from '../passenger-app/modules/seatMap.js';
-import { PassengerCheckoutService } from '../passenger-app/modules/checkout.js';
-import { PassengerPaymentService } from '../passenger-app/modules/payment.js';
-import { PassengerTrackingService } from '../passenger-app/modules/tracking.js';
-import { DriverCockpitService } from '../driver-app/modules/driverService.js';
-import { ManagerOperationsService } from '../manager-app/modules/managerService.js';
+import { PassengerAuthService } from './services/passenger/modules/auth.js';
+import { PassengerSearchService } from './services/passenger/modules/search.js';
+import { PassengerSeatMapService } from './services/passenger/modules/seatMap.js';
+import { PassengerCheckoutService } from './services/passenger/modules/checkout.js';
+import { PassengerPaymentService } from './services/passenger/modules/payment.js';
+import { PassengerTrackingService } from './services/passenger/modules/tracking.js';
+import { DriverCockpitService } from './services/driver/modules/driverService.js';
+import { ManagerOperationsService } from './services/manager/modules/managerService.js';
 
 import { setCorsHeaders, sendError } from './middleware/httpUtils.js';
 import { handlePassengerRoutes } from './routes/passengerRoutes.js';

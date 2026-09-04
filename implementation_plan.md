@@ -5,7 +5,7 @@ Review and harden the FleetBus Passenger and Driver mobile apps to guarantee rel
 ## User Review Required
 
 > [!NOTE]
-> All changes align existing scaffolding (`source/client` and `source/driver`) with the official bundle identifiers (`vn.busgo.passenger` and `vn.busgo.driver`) and resolve real-world runtime crash hazards on Android and network blocks on iOS.
+> All changes align existing scaffolding (`source/passenger` and `source/driver`) with the official bundle identifiers (`vn.busgo.passenger` and `vn.busgo.driver`) and resolve real-world runtime crash hazards on Android and network blocks on iOS.
 
 ## Proposed Changes
 

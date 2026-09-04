@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { ManagerOperationsService } from '../../source/manager-app/modules/managerService.js';
+import { ManagerOperationsService } from '../../source/server/services/manager/modules/managerService.js';
 
 describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-030)', () => {
   const managerService = new ManagerOperationsService();

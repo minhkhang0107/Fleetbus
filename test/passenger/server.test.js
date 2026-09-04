@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import http from 'http';
-import { server } from '../../source/passenger-app/server.js';
+import { server } from '../../source/server/services/passenger/server.js';
 
 describe('Phase 8: End-to-End Passenger Server & API Gateway Test Suite', () => {
   const TEST_PORT = 3099;

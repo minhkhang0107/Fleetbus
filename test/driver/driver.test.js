@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { DriverCockpitService } from '../../source/driver-app/modules/driverService.js';
-import { generateDynamicTicketQR } from '../../source/passenger-app/core/cryptoEngine.js';
+import { DriverCockpitService } from '../../source/server/services/driver/modules/driverService.js';
+import { generateDynamicTicketQR } from '../../source/server/services/passenger/core/cryptoEngine.js';
 
 describe('Phase Driver: Driver Tactical Cockpit Test Suite (DRI-001 to DRI-019)', () => {
   const driverService = new DriverCockpitService();

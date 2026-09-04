@@ -3,7 +3,7 @@
  * Implements DRI-001 through DRI-019 for the commercial driver mobile/tablet platform.
  */
 
-import { verifyDynamicTicketQR } from '../../passenger-app/core/cryptoEngine.js';
+import { verifyDynamicTicketQR } from '../../passenger/core/cryptoEngine.js';
 
 export const MOCK_DRIVERS_DB = [
   {

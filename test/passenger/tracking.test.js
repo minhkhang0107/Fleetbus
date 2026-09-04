@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { PassengerTrackingService } from '../../source/passenger-app/modules/tracking.js';
+import { PassengerTrackingService } from '../../source/server/services/passenger/modules/tracking.js';
 
 describe('Phase 7: Live GPS Telemetry, Radar & Disruption Test Suite', () => {
   const trackingService = new PassengerTrackingService();

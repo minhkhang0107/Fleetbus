@@ -14,8 +14,8 @@ import { PassengerSeatMapService } from './modules/seatMap.js';
 import { PassengerCheckoutService } from './modules/checkout.js';
 import { PassengerPaymentService } from './modules/payment.js';
 import { PassengerTrackingService } from './modules/tracking.js';
-import { DriverCockpitService } from '../driver-app/modules/driverService.js';
-import { ManagerOperationsService } from '../manager-app/modules/managerService.js';
+import { DriverCockpitService } from '../driver/modules/driverService.js';
+import { ManagerOperationsService } from '../manager/modules/managerService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,7 +49,7 @@ export const server = http.createServer((req, res) => {
 
   // Static File Serving: docs/designs/passenger_suite.html
   if (pathname === '/' || pathname === '/index.html' || pathname === '/passenger') {
-    const htmlPath = path.resolve(__dirname, '../../docs/designs/passenger_suite.html');
+    const htmlPath = path.resolve(__dirname, '../../../../docs/designs/passenger_suite.html');
     if (fs.existsSync(htmlPath)) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(fs.readFileSync(htmlPath));
@@ -59,7 +59,7 @@ export const server = http.createServer((req, res) => {
 
   // Static File Serving: docs/designs/driver_cockpit.html
   if (pathname === '/driver' || pathname === '/driver/cockpit' || pathname === '/driver.html') {
-    const htmlPath = path.resolve(__dirname, '../../docs/designs/driver_cockpit.html');
+    const htmlPath = path.resolve(__dirname, '../../../../docs/designs/driver_cockpit.html');
     if (fs.existsSync(htmlPath)) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(fs.readFileSync(htmlPath));
@@ -69,7 +69,7 @@ export const server = http.createServer((req, res) => {
 
   // Static File Serving: docs/designs/manager_portal.html
   if (pathname === '/manager' || pathname === '/ops' || pathname === '/manager.html' || pathname === '/admin') {
-    const htmlPath = path.resolve(__dirname, '../../docs/designs/manager_portal.html');
+    const htmlPath = path.resolve(__dirname, '../../../../docs/designs/manager_portal.html');
     if (fs.existsSync(htmlPath)) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(fs.readFileSync(htmlPath));

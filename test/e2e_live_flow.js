@@ -3,7 +3,7 @@
  * Tests the live Node.js server running on http://localhost:3000 across all 3 apps and banking webhook.
  */
 
-import { generateDynamicTicketQR } from '../source/passenger-app/core/cryptoEngine.js';
+import { generateDynamicTicketQR } from '../source/server/services/passenger/core/cryptoEngine.js';
 import { server } from '../source/server/apiServer.js';
 
 const BASE_URL = 'http://localhost:3000';

@@ -54,22 +54,22 @@ e2e:
 	node test/e2e_live_flow.js
 
 # ------------------------------------------------------------------------------
-# Passenger App (source/client/)
+# Passenger App (source/passenger/)
 # ------------------------------------------------------------------------------
-client_bootstrap:
-	cd source/client && melos bootstrap
+passenger_bootstrap client_bootstrap:
+	cd source/passenger && melos bootstrap
 
-client_sync:
-	cd source/client && $(MAKE) sync
+passenger_sync client_sync:
+	cd source/passenger && $(MAKE) sync
 
-client_build_dev:
-	cd source/client && $(MAKE) build_dev_apk
+passenger_build_dev client_build_dev:
+	cd source/passenger && $(MAKE) build_dev_apk
 
-client_build_prod:
-	cd source/client && $(MAKE) build_prod_apk
+passenger_build_prod client_build_prod:
+	cd source/passenger && $(MAKE) build_prod_apk
 
-client_test:
-	cd source/client && $(MAKE) test
+passenger_test client_test:
+	cd source/passenger && $(MAKE) test
 
 # ------------------------------------------------------------------------------
 # Driver App (source/driver/)
