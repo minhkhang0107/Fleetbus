@@ -1,63 +1,48 @@
-# Implementation Plan: Android & iOS Mobile Apps Spec & Design Alignment
+# Implementation Plan: Mobile Review & Cross-Platform Alignment (Android & iOS)
 
-Dựa trên tài liệu đặc tả hệ thống master [bus_booking_tracking_system_spec_v3_enhanced.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/docs/specs/bus_booking_tracking_system_spec_v3_enhanced.md), quy chuẩn thiết kế [screen-spec/passenger/DESIGN.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/passenger/DESIGN.md), [screen-spec/driver/DESIGN.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/driver/DESIGN.md) và các đặc tả màn hình `PAX-001` -> `PAX-025`, `DRI-001` -> `DRI-019`.
+Review and harden the FleetBus Passenger and Driver mobile apps to guarantee reliable execution on both Android and iOS platforms.
 
----
+## User Review Required
 
-## 1. Mục Tiêu & Phạm Vi Công Việc
+> [!NOTE]
+> All changes align existing scaffolding (`source/client` and `source/driver`) with the official bundle identifiers (`vn.busgo.passenger` and `vn.busgo.driver`) and resolve real-world runtime crash hazards on Android and network blocks on iOS.
 
-1. **Sửa lỗi cú pháp Dart nghiêm trọng**:
-   - `async Future<...>` trong `PassengerApiClientService` và `DriverApiClientService` (cú pháp chuẩn Dart: `Future<...> ... async`).
-   - Toán tử so sánh JavaScript `===` trong `PassengerSeatMapScreen` (cú pháp chuẩn Dart: `==`).
-2. **Tuân thủ triệt để Quy chuẩn Design System (Zero Emojis & Design Tokens)**:
-   - Loại bỏ 100% emojis vi phạm quy chuẩn `DESIGN.md` trong UI khách hàng và buồng lái tài xế (như `🚌`, `⬆️`, `⬇️`, `💵`, `✅`), thay thế bằng `IconData` / Material Icons và typography chuẩn (`Geist`, `JetBrains Mono`).
-3. **Hoàn thiện Luồng Điều Hướng & Màn Hình Spec (PAX & DRI)**:
-   - Sửa luồng tìm kiếm từ `PassengerHomeScreen` sang `PassengerSearchResultsScreen` (PAX-006) thay vì nhảy cóc thẳng vào `PassengerSeatMapScreen`.
-   - Bổ sung các màn hình/dialog chức năng theo spec: `passenger_location_picker_screen.dart` (PAX-005), `passenger_trip_detail_screen.dart` (PAX-007), `passenger_payment_processing_screen.dart` (PAX-013/014), `passenger_cancel_refund_screen.dart` (PAX-021), `driver_trip_detail_screen.dart` (DRI-003), `driver_navigation_screen.dart` (DRI-013), `driver_incident_dialog.dart` (DRI-019), `driver_cod_dialog.dart` (DRI-012).
-   - Mở rộng đầy đủ các phương thức API Client trong `passenger_api_service.dart` và `driver_api_service.dart` kết nối chính xác với backend `passengerRoutes.js` và `driverRoutes.js`.
-4. **Mở rộng Bộ Kiểm Thử Tự Động (Automated Integrity Test Suite)**:
-   - Bổ sung test kiểm tra tính hợp lệ của toàn bộ mã nguồn Dart (không có `===`, không có `async Future`, không có emoji).
-   - Bổ sung test kiểm tra toàn vẹn API contracts và màn hình presentation.
-   - Chạy 100% Green test suite `npm test` và cập nhật `STATE.md`.
+## Proposed Changes
 
----
+### Phase 1: Android Platform Build & Runtime Alignment
+Align Gradle build scripts and Kotlin activity sources with Android package conventions:
+- Fix Android namespace and applicationId from legacy template `com.mkd.mestudy` to `vn.busgo.passenger` and `vn.busgo.driver`.
+- Relocate `MainActivity.kt` to matching package directory `src/main/kotlin/vn/busgo/passenger/MainActivity.kt` and `src/main/kotlin/vn/busgo/driver/MainActivity.kt`.
+- Enable cleartext traffic for local development in `AndroidManifest.xml` (`android:usesCleartextTraffic="true"`).
 
-## 2. Kế Hoạch Thực Hiện Chi Tiết (Phân Rã Atomic Tasks)
+### Phase 2: iOS Platform Build & Runtime Alignment
+Align Xcode project settings and security permissions for iOS devices and simulators:
+- Update `PRODUCT_BUNDLE_IDENTIFIER` in `Runner.xcodeproj/project.pbxproj` to `vn.busgo.passenger` (Passenger) and `vn.busgo.driver` (Driver).
+- Configure `NSAppTransportSecurity` in `Info.plist` with `NSAllowsArbitraryLoads` and `NSAllowsLocalNetworking` so the app can communicate with local development API servers on iOS.
 
-### Giai đoạn 1: Khắc phục lỗi cú pháp Dart (Syntax Self-Healing)
-- [ ] **Task 1.1**: Sửa lỗi `async Future<...>` thành `Future<...> ... async` trong `source/client/data/lib/src/service/passenger_api_service.dart` và `source/driver/app/lib/src/service/driver_api_service.dart`.
-- [ ] **Task 1.2**: Sửa lỗi toán tử `===` thành `==` trong `source/client/app/lib/src/presentation/passenger/passenger_seat_map_screen.dart`.
+### Phase 3: Cross-Platform Network Adaptability & Dependencies
+- Add `data: path: ../data` to `dependencies` in `pubspec.yaml` for both apps.
+- Implement platform-adaptive `defaultBaseUrl` in `passenger_api_service.dart` and `driver_api_service.dart`:
+  - Android Emulator: `http://10.0.2.2:3000`
+  - iOS Simulator & Web: `http://localhost:3000`
+  - Overridable via constructor / environment.
 
-### Giai đoạn 2: Chuẩn hóa Design System & Loại bỏ Emojis
-- [ ] **Task 2.1**: Loại bỏ emoji vi phạm trong các màn hình Passenger (`passenger_seat_map_screen.dart`), chuẩn hóa icon xe bus Material Icons.
-- [ ] **Task 2.2**: Loại bỏ emojis trong buồng lái Driver (`driver_cockpit_dashboard.dart`, `driver_manifest_screen.dart`, `driver_qr_scanner_screen.dart`), thay bằng vector Material Icons và JetBrains Mono data pills.
+### Phase 4: Automated Verification & Test Suite
+- Expand `test/mobile/mobile_client.test.js` and `test/mobile/driver_mobile.test.js` to verify:
+  - Android namespace, applicationId, and Kotlin MainActivity package matching
+  - iOS Xcode `project.pbxproj` bundle identifier matching
+  - iOS `Info.plist` App Transport Security configuration
+  - Pubspec dependencies linking `package:data`
+  - BaseUrl cross-platform resolution
+- Run `npm test`, `npm run lint`, and `node test/e2e_live_flow.js`.
 
-### Giai đoạn 3: Hoàn thiện Luồng Nghiệp Vụ & API Passenger (PAX-001 -> PAX-025)
-- [ ] **Task 3.1**: Mở rộng `PassengerApiClientService` đầy đủ các endpoints: `verifyOtp`, `homeFeed`, `createBooking`, `getTicketWallet`, `getTicketQR`, `cancelTicket`, `getLiveRadarHUD`, `getNotifications`, `getTripDetail`.
-- [ ] **Task 3.2**: Bổ sung các màn hình Passenger: `passenger_location_picker_screen.dart` (PAX-005), `passenger_trip_detail_screen.dart` (PAX-007), `passenger_payment_processing_screen.dart` (PAX-013), `passenger_cancel_refund_screen.dart` (PAX-021).
-- [ ] **Task 3.3**: Chuẩn hóa luồng điều hướng: từ Home bấm "TÌM KIẾM CHUYẾN XE" chuyển đến `PassengerSearchResultsScreen`, từ kết quả chuyển đến Trip Detail / Seat Map, từ Checkout chuyển đến Payment Processing rồi E-Ticket QR.
+## Verification Plan
 
-### Giai đoạn 4: Hoàn thiện Luồng Nghiệp Vụ & API Driver (DRI-001 -> DRI-019)
-- [ ] **Task 4.1**: Mở rộng `DriverApiClientService` đầy đủ endpoints: `startTrip`, `getManifest`, `boardWithQr`, `markNoShow`, `collectCod`, `reportIncident`, `endTrip`.
-- [ ] **Task 4.2**: Bổ sung các màn hình/dialog Driver: `driver_trip_detail_screen.dart` (DRI-003), `driver_navigation_screen.dart` (DRI-013), `driver_incident_dialog.dart` (DRI-019), `driver_cod_dialog.dart` (DRI-012).
-- [ ] **Task 4.3**: Kết nối luồng hoàn chỉnh từ Login -> Today Trips -> Readiness Checklist -> Trip Detail -> Cockpit Dashboard -> Manifest / QR Scanner / Navigation / Offline Sync.
+### Automated Tests
+- `npm test`: Run all 14 test suites including expanded mobile platform suites.
+- `npm run lint`: Verify 0 syntax errors across all JS/test files.
+- `node test/e2e_live_flow.js`: Verify complete end-to-end flow.
 
-### Giai đoạn 5: Mở Rộng Kiểm Thử Tự Động & Empirical Verification
-- [ ] **Task 5.1**: Mở rộng `test/mobile/mobile_client.test.js` kiểm tra toàn diện Dart syntax, zero-emoji, typography, API methods và màn hình Passenger.
-- [ ] **Task 5.2**: Mở rộng `test/mobile/driver_mobile.test.js` kiểm tra toàn diện Dart syntax, zero-emoji, typography, API methods và màn hình Driver.
-
-### Giai đoạn 6: Nghiệm Thu, Cập Nhật Trạng Thái & Walkthrough
-- [ ] **Task 6.1**: Chạy `npm test` (đảm bảo 100% pass), chạy `node test/e2e_live_flow.js`, cập nhật `STATE.md` và tạo báo cáo `walkthrough.md`.
-
----
-
-## 3. Verification Plan
-
-### Automated Tests:
-- `npm test`: Chạy toàn bộ test suites của platform (Node.js API, Mobile Client, Driver Mobile, Manager Web).
-- `npm run lint`: Kiểm tra cú pháp mã nguồn.
-- `node test/e2e_live_flow.js`: Kiểm tra live server API flow từ lúc tạo vé đến soát vé QR.
-
-### Manual / Structural Verifications:
-- Quét toàn bộ repository kiểm tra không còn bất kỳ ký tự emoji nào trong UI mobile.
-- Quét không còn `===` hay `async Future` trong toàn bộ file `.dart`.
+### Manual / Structural Inspection
+- Inspect `git diff` for exact alignment.
+- Verify directory trees for Android Kotlin activities.

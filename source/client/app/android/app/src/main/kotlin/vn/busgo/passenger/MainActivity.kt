@@ -1,4 +1,4 @@
-package com.mkd.mestudy
+package vn.busgo.passenger
 
 import io.flutter.embedding.android.FlutterActivity
 

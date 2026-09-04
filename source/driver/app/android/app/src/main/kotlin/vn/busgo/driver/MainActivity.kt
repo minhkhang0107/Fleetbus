@@ -1,4 +1,4 @@
-package com.mkd.mestudy
+package vn.busgo.driver
 
 import io.flutter.embedding.android.FlutterActivity
 
