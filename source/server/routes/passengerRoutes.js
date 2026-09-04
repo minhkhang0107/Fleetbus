@@ -187,7 +187,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     parseJsonBody(req).then(body => {
       const result = trackingService.cancelTicketAndComputeRefund(ticketId, body.departureTime, body.now);
       if (result.success) {
-        sendSuccess(res, result);
+        sendSuccess(res, result.data || result);
       } else {
         sendError(res, result.error, result.code, 400);
       }
@@ -208,7 +208,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   if (pathname === '/api/v1/passenger/notifications' && req.method === 'GET') {
     const userId = req.headers['x-user-id'] || 'usr_default';
     const notifs = trackingService.getNotifications(userId);
-    sendSuccess(res, notifs);
+    sendSuccess(res, notifs.data || notifs);
     return true;
   }
 

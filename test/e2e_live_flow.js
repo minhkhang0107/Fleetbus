@@ -111,7 +111,8 @@ async function runLiveE2E() {
   const driverTrips = await request('/api/v1/driver/trips/today');
   console.log('✅ Driver Shift Trips:', driverTrips.body.data.trips.length);
 
-  const driverTripId = driverTrips.body.data.trips[0].trip_id;
+  const matchingTrip = driverTrips.body.data.trips.find(t => t.trip_id === tripId) || driverTrips.body.data.trips[0];
+  const driverTripId = matchingTrip.trip_id;
   const readiness = await request(`/api/v1/driver/trips/${driverTripId}/readiness`, {
     method: 'POST',
     body: {
@@ -133,18 +134,12 @@ async function runLiveE2E() {
   });
   console.log('✅ Trip Started! Status:', startTrip.body.data.status || 'IN_TRANSIT');
 
-  // Generate a valid QR for the assigned driver trip manifest passenger (tkt_88219_A01)
-  const manifestPassenger = driverTrips.body.data.trips[0].manifest[0];
-  const driverTicketQr = generateDynamicTicketQR(
-    { ticket_id: manifestPassenger.ticket_id, pnr: manifestPassenger.pnr, trip_id: driverTripId },
-    'busgo_master_secret_key_2026'
-  );
-
+  // Board the exact mobile passenger who booked in Step 2 using dynamic rotating HMAC QR!
   const boardScan = await request(`/api/v1/driver/trips/${driverTripId}/board-qr`, {
     method: 'POST',
-    body: { qrPayload: driverTicketQr.qr_code_value }
+    body: { qrPayload: qrString }
   });
-  console.log('✅ Dynamic HMAC QR Scanned by Driver! Result:', boardScan.body.message, '| Boarded Seat:', boardScan.body.data?.seat_code);
+  console.log('✅ Dynamic HMAC QR Scanned by Driver! Passenger:', boardScan.body.data?.passenger_name, '| Boarded Seat:', boardScan.body.data?.seat_code);
 
   const telemetry = await request(`/api/v1/driver/trips/${driverTripId}/telemetry`, {
     method: 'POST',

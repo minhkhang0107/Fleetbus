@@ -128,8 +128,54 @@ export class PassengerTrackingService {
 
     this.cancellations.set(pnr, cancelRecord);
 
+    if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('TICKET_CANCELLED', {
+        pnr,
+        refundAmountVnd: refundCalc.refundAmount,
+        reason
+      });
+    }
+
     return {
       success: true,
+      data: cancelRecord
+    };
+  }
+
+  /**
+   * PAX-021: Cancel Ticket & Compute Refund by ticketId (Route Adapter)
+   */
+  cancelTicketAndComputeRefund(ticketId, departureTime, mockNow = Date.now(), reason = 'Khách hủy vé trực tuyến') {
+    const defaultDeparture = departureTime || new Date(Date.now() + 86400000 * 2).toISOString();
+    const totalPriceVnd = 220000;
+    const refundCalc = calculateRefundAmount(totalPriceVnd, defaultDeparture, mockNow);
+
+    const cancelRecord = {
+      ticket_id: ticketId,
+      total_price_vnd: totalPriceVnd,
+      refund_percentage: refundCalc.percentage,
+      refund_amount_vnd: refundCalc.refundAmount,
+      fee_amount_vnd: refundCalc.feeAmount,
+      tier: refundCalc.tier,
+      policy_message: refundCalc.message,
+      reason,
+      status: 'CANCELLED_AND_REFUNDED',
+      cancelled_at: new Date(mockNow).toISOString()
+    };
+
+    this.cancellations.set(ticketId, cancelRecord);
+
+    if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('TICKET_CANCELLED', {
+        ticketId,
+        refundAmountVnd: refundCalc.refundAmount,
+        reason
+      });
+    }
+
+    return {
+      success: true,
+      message: `Đã hủy vé thành công. Hoàn tiền: ${refundCalc.refundAmount.toLocaleString('vi-VN')} đ`,
       data: cancelRecord
     };
   }

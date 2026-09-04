@@ -88,7 +88,8 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   // POST /api/v1/ops/trips/:tripId/swap-vehicle or /api/v1/ops/trips/:tripId/replace-vehicle (MGR-023)
   if ((pathname.includes('/swap-vehicle') || pathname.includes('/replace-vehicle')) && req.method === 'POST') {
     const parts = pathname.split('/');
-    const tripId = parts[4];
+    const tripIndex = parts.indexOf('trips');
+    const tripId = tripIndex !== -1 ? parts[tripIndex + 1] : parts[4];
     parseJsonBody(req).then(body => {
       const result = managerService.executeEmergencyVehicleSwap(tripId, {
         newVehiclePlate: body.newVehiclePlate || body.new_vehicle_plate,
@@ -108,7 +109,8 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   // POST /api/v1/ops/trips/:tripId/delay (MGR-024)
   if (pathname.startsWith('/api/v1/ops/trips/') && pathname.endsWith('/delay') && req.method === 'POST') {
     const parts = pathname.split('/');
-    const tripId = parts[4];
+    const tripIndex = parts.indexOf('trips');
+    const tripId = tripIndex !== -1 ? parts[tripIndex + 1] : parts[4];
     parseJsonBody(req).then(body => {
       const result = managerService.broadcastTripDelay(tripId, body.delayMinutes || body.delay_minutes || 15, body.reason);
       if (result.success) {
@@ -123,7 +125,8 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   // POST /api/v1/ops/refunds/:refundId/process (MGR-021, MGR-022)
   if (pathname.startsWith('/api/v1/ops/refunds/') && pathname.endsWith('/process') && req.method === 'POST') {
     const parts = pathname.split('/');
-    const refundId = parts[4];
+    const refundIndex = parts.indexOf('refunds');
+    const refundId = refundIndex !== -1 ? parts[refundIndex + 1] : parts[4];
     parseJsonBody(req).then(body => {
       const result = managerService.processRefundApproval(refundId, body.approved, body.notes);
       if (result.success) {

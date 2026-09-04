@@ -40,11 +40,11 @@ class ManagerDispatchScreen extends StatelessWidget {
             ),
             child: Column(
               children: [
-                _buildTripRow('TRP-HN-TH-01', '07:00 ➔ 10:15', '29B-882.19 (VIP Cabin 22)', 'Trần Văn Bình (TX8821)', 'ĐANG CHẠY (IN_TRANSIT)', '20/22 khách', ManagerColors.emeraldSafe),
+                _buildTripRow('TRP-HN-TH-01', '07:00 — 10:15', '29B-882.19 (VIP Cabin 22)', 'Trần Văn Bình (TX8821)', 'ĐANG CHẠY (IN_TRANSIT)', '20/22 khách', ManagerColors.emeraldSafe),
                 const Divider(color: ManagerColors.borderSubtle, height: 24),
-                _buildTripRow('TRP-HN-TH-02', '14:00 ➔ 17:15', '29B-991.82 (Sleeper 34)', 'Nguyễn Tiến Dũng (TX9912)', 'ĐÃ KIỂM TRA XE (READY)', '18/34 khách', ManagerColors.cyanAccent),
+                _buildTripRow('TRP-HN-TH-02', '14:00 — 17:15', '29B-991.82 (Sleeper 34)', 'Nguyễn Tiến Dũng (TX9912)', 'ĐÃ KIỂM TRA XE (READY)', '18/34 khách', ManagerColors.cyanAccent),
                 const Divider(color: ManagerColors.borderSubtle, height: 24),
-                _buildTripRow('TRP-HN-HP-01', '16:30 ➔ 18:30', '15B-772.30 (VIP Limousine)', 'Phạm Văn Long (TX7720)', 'CHỜ TÀI XẾ (SCHEDULED)', '12/16 khách', ManagerColors.amberWarning),
+                _buildTripRow('TRP-HN-HP-01', '16:30 — 18:30', '15B-772.30 (VIP Limousine)', 'Phạm Văn Long (TX7720)', 'CHỜ TÀI XẾ (SCHEDULED)', '12/16 khách', ManagerColors.amberWarning),
               ],
             ),
           ),

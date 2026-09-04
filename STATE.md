@@ -10,9 +10,10 @@ Last updated: 2026-09-04 09:28
   - Manager Operations Gateway: `/api/v1/ops/*` (Auth, KPIs, Fleet Radar, POS, Dispatch, Emergency Swap, Fleet & Crew, Reports).
   - External Webhooks: `/api/v1/webhooks/vietqr/ipn` and `/health` + `/api/v1/openapi.json`.
   - Static Web Portals: `/passenger`, `/driver`, `/manager`.
-  - **Automated Tests**: 85/85 unit and integration tests passing 100% Green across 14 suites (`npm test`).
+  - **Automated Tests**: 96/96 unit and integration tests passing 100% Green across 15 suites (`npm test`).
   - **Lint Check**: 100% Clean (`npm run lint`).
-  - **Live E2E Flow**: Full end-to-end live flow verified (`node test/e2e_live_flow.js`).
+  - **Live E2E Flow**: Full tripartite end-to-end live flow verified (`node test/e2e_live_flow.js`).
+  - **Cross-Service Event Bridge**: `FleetBusEventBridge` pub-sub linking Passenger, Driver, and Manager in real time.
 
 ## 2. Passenger Mobile App (Android & iOS Flutter: `source/client/`)
 - [x] **Android Configuration (`source/client/app/android/`)**:
@@ -89,3 +90,20 @@ Last updated: 2026-09-04 09:28
   - `manager_fleet_roster_screen.dart` (`MGR-005`, `MGR-008` Fleet & Crew Directory)
   - `manager_reports_screen.dart` (`MGR-025`, `MGR-026` Executive Financial & OTP Reports)
   - `manager_web_shell.dart` (Desktop Sidebar Navigation Shell)
+
+## 5. Realtime Tripartite Synchronization & Cross-Platform Verification
+- [x] **Event Bridge (`source/server/core/fleetBusEventBridge.js`)**:
+  - `TICKET_SETTLED`: Mobile passenger booking + VietQR webhook auto-locks seat map, registers ticket on driver manifest, logs revenue and booking on manager dashboard, sends push notification.
+  - `PASSENGER_BOARDED`: Driver QR scanner boarding pass scan marks ticket as BOARDED in passenger wallet, sends boarding confirmation push, increments boarded count in manager control center.
+  - `DRIVER_TELEMETRY`: 1Hz driver GPS ping broadcasts live position, speed, and heading to passenger Live Radar HUD and manager 60Hz Fleet Radar map.
+  - `INCIDENT_ALERT`: Driver emergency/delay report surfaces immediately in manager Ops alert center and broadcasts push alerts to affected passengers.
+  - `POS_BOOKING_CREATED`: Manager hotline counter booking reserves seat on seat map and appends passenger to driver manifest.
+  - `VEHICLE_SWAPPED`: Manager emergency swap updates assigned vehicle plate for driver and pushes disruption advisory to passengers.
+  - `TRIP_DELAYED`: Manager trip delay broadcast updates driver schedule and notifies passengers with adjusted ETA.
+  - `TICKET_CANCELLED`: Passenger self-service cancellation recalculates refund tier, frees seat on seat map, updates driver manifest, and records refund in manager ledger.
+  - `TRIP_COMPLETED`: Driver ending shift updates manager trip status to COMPLETED and sets vehicle to STANDBY.
+- [x] **Tripartite Integration Test Suite (`test/integration/tripartite_sync.test.js`)**:
+  - `TC-SYNC-01` to `TC-SYNC-09`: 9 comprehensive automated integration tests verifying bidirectional event flows across all 3 platforms.
+- [x] **Web Manager Dart Syntax Hygiene & Anti-Patterns**:
+  - Cleansed Unicode Dingbat picture arrows (`\u2794`) into typographic em-dashes across all Flutter Web screens.
+  - Verified 0 picture emojis and 0 JS triple equals across all 5 manager presentation screens (`TC-MGR-WEB-06`, `TC-MGR-WEB-07`).

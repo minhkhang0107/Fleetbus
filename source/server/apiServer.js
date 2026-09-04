@@ -22,11 +22,14 @@ import { handlePassengerRoutes } from './routes/passengerRoutes.js';
 import { handleDriverRoutes } from './routes/driverRoutes.js';
 import { handleManagerRoutes } from './routes/managerRoutes.js';
 import { handleWebhookRoutes } from './routes/webhookRoutes.js';
+import { FleetBusEventBridge } from './core/fleetBusEventBridge.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export function createFleetBusServer(customServices = {}) {
+  const eventBridge = customServices.eventBridge || new FleetBusEventBridge();
+
   const services = {
     authService: customServices.authService || new PassengerAuthService(),
     searchService: customServices.searchService || new PassengerSearchService(),
@@ -36,7 +39,10 @@ export function createFleetBusServer(customServices = {}) {
     trackingService: customServices.trackingService || new PassengerTrackingService(),
     driverService: customServices.driverService || new DriverCockpitService(),
     managerService: customServices.managerService || new ManagerOperationsService(),
+    eventBridge,
   };
+
+  eventBridge.bindServices(services);
 
   const server = http.createServer((req, res) => {
     const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost:3000'}`);

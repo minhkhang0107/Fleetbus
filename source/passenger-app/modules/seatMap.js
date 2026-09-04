@@ -213,6 +213,50 @@ export class PassengerSeatMapService {
     return { success: true, released_count: releasedCount };
   }
 
+  /**
+   * Confirm booking: Transition held/available seats to permanently BOOKED.
+   */
+  confirmBooking(tripId, seatCodes = []) {
+    let layout = this.tripLayouts.get(tripId);
+    if (!layout) {
+      this._initMockTripLayout(tripId);
+      layout = this.tripLayouts.get(tripId);
+    }
+    if (!layout) return { success: false, error: 'Chuyến xe không tồn tại' };
+
+    for (const code of seatCodes) {
+      const holdKey = `${tripId}:${code}`;
+      this.seatHolds.delete(holdKey);
+
+      const seat = layout.seats.find(s => s.seat_code === code);
+      if (seat) {
+        seat.state = 'BOOKED';
+      }
+    }
+
+    return { success: true, booked_seats: seatCodes };
+  }
+
+  /**
+   * Release booking: Transition cancelled seats back to AVAILABLE.
+   */
+  releaseBooking(tripId, seatCodes = []) {
+    const layout = this.tripLayouts.get(tripId);
+    if (!layout) return { success: false, error: 'Chuyến xe không tồn tại' };
+
+    for (const code of seatCodes) {
+      const holdKey = `${tripId}:${code}`;
+      this.seatHolds.delete(holdKey);
+
+      const seat = layout.seats.find(s => s.seat_code === code);
+      if (seat) {
+        seat.state = 'AVAILABLE';
+      }
+    }
+
+    return { success: true, released_seats: seatCodes };
+  }
+
   _cleanExpiredHolds(mockNow = Date.now()) {
     for (const [key, hold] of this.seatHolds.entries()) {
       if (mockNow >= hold.heldUntil) {
@@ -221,3 +265,4 @@ export class PassengerSeatMapService {
     }
   }
 }
+

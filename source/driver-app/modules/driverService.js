@@ -79,7 +79,40 @@ export class DriverCockpitService {
       ]
     };
 
+    const trip2 = {
+      trip_id: 'trp_hn_th_01',
+      route_name: 'Hà Nội — Thanh Hóa (Cao tốc)',
+      planned_departure_time: '2026-08-28T07:00:00+07:00',
+      status: 'READY',
+      vehicle_plate: '29B-882.19',
+      vehicle_model: 'Cabin Cung Điện VIP 22 Phòng',
+      total_capacity: 22,
+      booked_passengers_count: 1,
+      boarded_count: 0,
+      total_cod_collected_vnd: 0,
+      current_speed_kmh: 0,
+      current_lat: 20.9806,
+      current_lng: 105.8413,
+      current_stop_index: 0,
+      readiness_checklist: {
+        tires_checked: true,
+        brakes_fluid_checked: true,
+        ac_cleanliness_checked: true,
+        first_aid_extinguisher_checked: true,
+        fuel_level_sufficient: true,
+        gps_telemetry_beacon_active: true
+      },
+      stops: [
+        { stop_id: 'stp_hn_gb', name: 'Bến xe Giáp Bát', city: 'Hà Nội', order: 1, expected_board: 1, expected_alight: 0, status: 'PENDING' },
+        { stop_id: 'stp_th_pb', name: 'Bến xe Phía Bắc Thanh Hóa', city: 'Thanh Hóa', order: 2, expected_board: 0, expected_alight: 1, status: 'PENDING' }
+      ],
+      manifest: [
+        { ticket_id: 'tkt_88219_A01', pnr: 'BG-88219', seat_code: 'A01', deck: 1, passenger_name: 'Trần Văn Hùng', phone_masked: '098***112', pickup_stop_id: 'stp_hn_gb', dropoff_stop_id: 'stp_th_pb', boarding_status: 'ISSUED', payment_method: 'VNPAY_ONLINE', cod_amount_vnd: 0 }
+      ]
+    };
+
     this.activeTrips.set(trip1.trip_id, trip1);
+    this.activeTrips.set(trip2.trip_id, trip2);
   }
 
   /**
@@ -222,6 +255,10 @@ export class DriverCockpitService {
       this.offlineQueue.push(ping);
     }
 
+    if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('DRIVER_TELEMETRY', { tripId, telemetry: ping });
+    }
+
     return {
       success: true,
       buffered_offline_count: this.offlineQueue.length,
@@ -253,6 +290,16 @@ export class DriverCockpitService {
     passenger.boarding_status = 'BOARDED';
     passenger.boarded_at = new Date(mockNow).toISOString();
     trip.boarded_count += 1;
+
+    if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('PASSENGER_BOARDED', {
+        tripId,
+        passenger,
+        ticketId: passenger.ticket_id,
+        pnr: passenger.pnr,
+        now: mockNow
+      });
+    }
 
     return {
       success: true,
@@ -305,18 +352,50 @@ export class DriverCockpitService {
   /**
    * DRI-019: Report Incident / SOS / Delay
    */
-  reportIncident(tripId, { type, description, estimated_delay_minutes = 0, lat, lng }) {
+  /**
+   * DRI-019: Report Incident / SOS / Delay (Polymorphic signature support)
+   */
+  reportIncident(tripId, payloadOrType, maybeDesc, maybeDelay, maybeLoc) {
+    let type = 'TRAFFIC_JAM';
+    let description = 'Sự cố vận hành';
+    let estimatedDelay = 0;
+    let lat = 20.98;
+    let lng = 105.84;
+
+    if (payloadOrType && typeof payloadOrType === 'object') {
+      type = payloadOrType.type || payloadOrType.incident_type || payloadOrType.incidentType || 'TRAFFIC_JAM';
+      description = payloadOrType.description || payloadOrType.desc || 'Sự cố vận hành';
+      estimatedDelay = payloadOrType.estimated_delay_minutes || payloadOrType.estimatedDelayMinutes || payloadOrType.delay_minutes || 0;
+      lat = payloadOrType.lat !== undefined ? payloadOrType.lat : (payloadOrType.location?.lat || 20.98);
+      lng = payloadOrType.lng !== undefined ? payloadOrType.lng : (payloadOrType.location?.lng || 105.84);
+    } else {
+      type = payloadOrType || 'TRAFFIC_JAM';
+      description = maybeDesc || 'Sự cố vận hành';
+      estimatedDelay = maybeDelay || 0;
+      if (maybeLoc && typeof maybeLoc === 'object') {
+        lat = maybeLoc.lat || 20.98;
+        lng = maybeLoc.lng || 105.84;
+      }
+    }
+
+    const trip = this.activeTrips.get(tripId);
     const incident = {
       incident_id: `inc_${Date.now()}`,
       trip_id: tripId,
-      type, // 'TRAFFIC_JAM' | 'VEHICLE_BREAKDOWN' | 'ACCIDENT' | 'WEATHER' | 'PASSENGER_MEDICAL'
+      vehicle_plate: trip ? trip.vehicle_plate : '29B-882.19',
+      type,
       description,
-      estimated_delay_minutes,
+      estimated_delay_minutes: parseInt(estimatedDelay, 10) || 0,
       location: { lat, lng },
       reported_at: new Date().toISOString()
     };
 
     this.incidents.push(incident);
+
+    if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('INCIDENT_ALERT', { tripId, incident });
+    }
+
     return {
       success: true,
       message: 'Đã gửi báo cáo khẩn về trung tâm Điều hành (ATC Radar)',
@@ -338,6 +417,43 @@ export class DriverCockpitService {
   }
 
   /**
+   * DRI-015: Replay Offline Telemetry Buffer
+   */
+  replayOfflineBuffer(telemetryBuffer = []) {
+    const buffer = Array.isArray(telemetryBuffer) ? telemetryBuffer : [];
+    let lastPing = null;
+
+    for (const item of buffer) {
+      const tripId = item.trip_id || item.tripId || 'trp_hn_th_01';
+      const trip = this.activeTrips.get(tripId);
+      lastPing = {
+        trip_id: tripId,
+        vehicle_plate: (trip && trip.vehicle_plate) || item.vehicle_plate || '29B-882.19',
+        lat: parseFloat(item.lat || 20.98),
+        lng: parseFloat(item.lng || 105.84),
+        speed_kmh: parseFloat(item.speed_kmh) || 0,
+        bearing_deg: parseInt(item.bearing_deg, 10) || 0,
+        timestamp: item.timestamp || new Date().toISOString()
+      };
+      if (trip) {
+        trip.current_lat = lastPing.lat;
+        trip.current_lng = lastPing.lng;
+        trip.current_speed_kmh = lastPing.speed_kmh;
+      }
+    }
+
+    if (lastPing && this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('DRIVER_TELEMETRY', { tripId: lastPing.trip_id, telemetry: lastPing });
+    }
+
+    return {
+      success: true,
+      replayed_count: buffer.length,
+      message: `Đã phát lại và đồng bộ ${buffer.length} bản ghi telemetry về máy chủ.`
+    };
+  }
+
+  /**
    * DRI-017: End Trip at final terminal
    */
   endTrip(tripId) {
@@ -346,6 +462,17 @@ export class DriverCockpitService {
 
     trip.status = 'COMPLETED';
     trip.completed_at = new Date().toISOString();
+
+    if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('TRIP_COMPLETED', {
+        tripId,
+        summary: {
+          vehicle_plate: trip.vehicle_plate,
+          total_passengers: trip.booked_passengers_count,
+          boarded_count: trip.boarded_count
+        }
+      });
+    }
 
     return {
       success: true,

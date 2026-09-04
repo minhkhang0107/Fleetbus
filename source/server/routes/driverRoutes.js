@@ -132,7 +132,13 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.reportIncident(tripId, body.incidentType || body.type, body.description, body.estimatedDelayMinutes || body.delay_minutes);
+      const result = driverService.reportIncident(
+        tripId,
+        body.incidentType || body.type || body.incident_type,
+        body.description,
+        body.estimatedDelayMinutes || body.delay_minutes || 0,
+        { lat: body.lat, lng: body.lng }
+      );
       if (result.success) {
         sendSuccess(res, result);
       } else {
@@ -158,7 +164,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     parseJsonBody(req).then(body => {
       const result = driverService.endTrip(tripId, body.endOdometerKm || body.odometer_km);
       if (result.success) {
-        sendSuccess(res, result);
+        sendSuccess(res, result.data || result);
       } else {
         sendError(res, result.error, result.code, 400);
       }

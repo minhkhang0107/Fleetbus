@@ -74,8 +74,8 @@ class ManagerRadarMapScreen extends StatelessWidget {
                           ),
                         ),
                         // Radar Vehicle Beacons
-                        _buildVehicleMarker('29B-882.19', '68 km/h', 'Hà Nội ➔ Thanh Hóa', 0.45, 0.48, ManagerColors.emeraldSafe),
-                        _buildVehicleMarker('29B-991.82', '74 km/h', 'Hà Nội ➔ Hải Phòng', 0.62, 0.35, ManagerColors.cyanAccent),
+                        _buildVehicleMarker('29B-882.19', '68 km/h', 'Hà Nội — Thanh Hóa', 0.45, 0.48, ManagerColors.emeraldSafe),
+                        _buildVehicleMarker('29B-991.82', '74 km/h', 'Hà Nội — Hải Phòng', 0.62, 0.35, ManagerColors.cyanAccent),
                         _buildVehicleMarker('36B-441.20', '0 km/h (Đón khách)', 'Bến xe Giáp Bát', 0.38, 0.65, ManagerColors.amberWarning),
                       ],
                     ),

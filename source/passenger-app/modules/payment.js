@@ -124,12 +124,17 @@ export class PassengerPaymentService {
     }
 
     order.ticket_ids = generatedTicketIds;
+    const issuedTickets = generatedTicketIds.map(id => this.tickets.get(id));
+
+    if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('TICKET_SETTLED', { order, tickets: issuedTickets });
+    }
 
     return {
       success: true,
       data: {
         order,
-        tickets: generatedTicketIds.map(id => this.tickets.get(id))
+        tickets: issuedTickets
       }
     };
   }
@@ -253,6 +258,16 @@ export class PassengerPaymentService {
 
     ticket.status = 'BOARDED';
     ticket.boarded_at = new Date(mockNow).toISOString();
+
+    if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('PASSENGER_BOARDED', {
+        tripId: ticket.trip_id,
+        passenger: ticket,
+        ticketId: ticket.ticket_id,
+        pnr: ticket.pnr,
+        now: mockNow
+      });
+    }
 
     return {
       success: true,

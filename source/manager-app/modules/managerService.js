@@ -261,11 +261,30 @@ export class ManagerOperationsService {
     };
   }
 
+  findTrip(tripId) {
+    let trip = this.trips.find(t => t.trip_id === tripId);
+    if (!trip && tripId === 'trp_hn_th_01') {
+      trip = {
+        trip_id: 'trp_hn_th_01',
+        route_id: 'rt_hn_th',
+        vehicle_id: 'veh_01',
+        vehicle_plate: '29B-882.19',
+        departure_time: '2026-08-28T07:00:00+07:00',
+        status: 'IN_TRANSIT',
+        booked_seats: 14,
+        total_seats: 22,
+        delay_minutes: 0
+      };
+      this.trips.push(trip);
+    }
+    return trip;
+  }
+
   /**
    * MGR-019 / MGR-020: Counter POS & Hotline Telephone Ticket Booking
    */
   createPosBooking({ tripId, passengerName, phone, seatCodes, paymentMethod = 'CASH_POS', agentStaffId = 'stf_pos_01' }) {
-    const trip = this.trips.find(t => t.trip_id === tripId);
+    const trip = this.findTrip(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
 
     const route = this.routes.find(r => r.route_id === trip.route_id);
@@ -291,6 +310,10 @@ export class ManagerOperationsService {
     this.bookings.push(newBooking);
     trip.booked_seats += seatCodes.length;
 
+    if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('POS_BOOKING_CREATED', { booking: newBooking, seatCodes });
+    }
+
     return {
       success: true,
       message: `Xuất vé POS thành công cho khách ${passengerName} (${seatCodes.join(', ')})`,
@@ -302,7 +325,7 @@ export class ManagerOperationsService {
    * MGR-023: Emergency Vehicle Replacement Wizard
    */
   replaceTripVehicle(tripId, newVehicleIdOrPlate, reason = 'Sự cố hỏng hóc kỹ thuật động cơ') {
-    const trip = this.trips.find(t => t.trip_id === tripId);
+    const trip = this.findTrip(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
 
     const targetVehicle = this.vehicles.find(v => v.vehicle_id === newVehicleIdOrPlate || v.plate_number === newVehicleIdOrPlate) || {
@@ -329,6 +352,15 @@ export class ManagerOperationsService {
       created_at: new Date().toISOString()
     });
 
+    if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('VEHICLE_SWAPPED', {
+        tripId,
+        oldPlate,
+        newPlate: targetVehicle.plate_number,
+        reason
+      });
+    }
+
     return {
       success: true,
       message: `Đã thực thi đổi xe thành công từ ${oldPlate} sang ${targetVehicle.plate_number}`,
@@ -350,7 +382,7 @@ export class ManagerOperationsService {
    * MGR-024: Trip Delay & Disruption Management
    */
   broadcastTripDelay(tripId, delayMinutes, reason = 'Kẹt xe đường bộ') {
-    const trip = this.trips.find(t => t.trip_id === tripId);
+    const trip = this.findTrip(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại' };
 
     trip.delay_minutes = delayMinutes;
@@ -364,6 +396,14 @@ export class ManagerOperationsService {
       message: msg,
       created_at: new Date().toISOString()
     });
+
+    if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('TRIP_DELAYED', {
+        tripId,
+        delayMinutes,
+        reason
+      });
+    }
 
     return {
       success: true,
