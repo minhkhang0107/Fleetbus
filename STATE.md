@@ -1,6 +1,6 @@
 # FleetBus Real-Time Bus Booking & Telemetry System State
 
-Last updated: 2026-09-03 17:36
+Last updated: 2026-09-04 09:28
 
 ## 1. Unified Node.js API Server & Gateway Status (`source/server/`)
 - [x] **Universal REST API Server (`source/server/apiServer.js`)**:
@@ -10,15 +10,24 @@ Last updated: 2026-09-03 17:36
   - Manager Operations Gateway: `/api/v1/ops/*` (Auth, KPIs, Fleet Radar, POS, Dispatch, Emergency Swap, Fleet & Crew, Reports).
   - External Webhooks: `/api/v1/webhooks/vietqr/ipn` and `/health` + `/api/v1/openapi.json`.
   - Static Web Portals: `/passenger`, `/driver`, `/manager`.
-  - **Automated Tests**: 79/79 unit and integration tests passing 100% Green across 14 suites (`npm test`).
+  - **Automated Tests**: 85/85 unit and integration tests passing 100% Green across 14 suites (`npm test`).
   - **Lint Check**: 100% Clean (`npm run lint`).
   - **Live E2E Flow**: Full end-to-end live flow verified (`node test/e2e_live_flow.js`).
 
 ## 2. Passenger Mobile App (Android & iOS Flutter: `source/client/`)
-- [x] **Android Configuration (`source/client/app/android/`)**: Package `vn.busgo.passenger`, camera, fine & coarse GPS, deep link scheme `busgo://`.
-- [x] **iOS Configuration (`source/client/app/ios/Runner/Info.plist`)**: Bundle ID `vn.busgo.passenger`, location & camera privacy descriptions.
+- [x] **Android Configuration (`source/client/app/android/`)**:
+  - Package & Namespace: `vn.busgo.passenger` (in `AndroidManifest.xml` and `app/build.gradle`).
+  - Application ID: `vn.busgo.passenger` (Flavors: `dev`, `qa`, `stg`, `production`).
+  - Kotlin Activity: `source/client/app/android/app/src/main/kotlin/vn/busgo/passenger/MainActivity.kt` with package `vn.busgo.passenger`.
+  - Permissions: camera, fine & coarse GPS, cleartext dev traffic (`android:usesCleartextTraffic="true"`), deep link scheme `busgo://`.
+- [x] **iOS Configuration (`source/client/app/ios/`)**:
+  - Bundle Identifier: `vn.busgo.passenger` (in `Info.plist` and `Runner.xcodeproj/project.pbxproj`).
+  - App Transport Security: `NSAllowsArbitraryLoads` and `NSAllowsLocalNetworking` enabled for seamless local API server access.
+  - Privacy Descriptions: location, camera, and photo library access permissions configured.
 - [x] **Design Tokens & Typography (`resources/lib/src/theme/`)**: `#2563EB` Sapphire, `#F8FAFC` Canvas, `#0F172A` Charcoal, `#FB9821` PNR, `Geist` body font, `JetBrains Mono` code font. 0 emojis in presentation code.
-- [x] **API Client Service (`data/lib/src/service/passenger_api_service.dart`)**: Complete typed HTTP integration covering `getAppConfig`, `requestOtp`, `verifyOtp`, `getHomeFeed`, `searchStations`, `searchTrips`, `getTripDetail`, `getSeatMap`, `holdSeats`, `createBookingOrder`, `getTicketWallet`, `getTicketQR`, `getLiveRadarHUD`, `getNotifications`, `cancelTicket`.
+- [x] **API Client Service (`data/lib/src/service/passenger_api_service.dart`)**:
+  - Platform-adaptive base URL (`resolvePassengerBaseUrl`): `10.0.2.2:3000` for Android emulator, `localhost:3000` for iOS simulator/web, overridable for physical LAN.
+  - Complete typed HTTP integration covering `getAppConfig`, `requestOtp`, `verifyOtp`, `getHomeFeed`, `searchStations`, `searchTrips`, `getTripDetail`, `getSeatMap`, `holdSeats`, `createBookingOrder`, `getTicketWallet`, `getTicketQR`, `getLiveRadarHUD`, `getNotifications`, `cancelTicket`.
 - [x] **Flutter Presentation Suite (`app/lib/src/presentation/passenger/`)**: 15 screens covering PAX-001 to PAX-025:
   - `passenger_splash_screen.dart` (PAX-001: Splash & handshake)
   - `passenger_login_screen.dart` (PAX-002: Phone & OTP login)
@@ -37,10 +46,19 @@ Last updated: 2026-09-03 17:36
   - `passenger_main_shell.dart` (Bottom navigation shell)
 
 ## 3. Driver Mobile App (Android & iOS Flutter: `source/driver/`)
-- [x] **Android Configuration (`source/driver/app/android/`)**: Package `vn.busgo.driver`, Foreground Location Service, Camera.
-- [x] **iOS Configuration (`source/driver/app/ios/Runner/Info.plist`)**: Bundle ID `vn.busgo.driver`, Background Location, Camera.
+- [x] **Android Configuration (`source/driver/app/android/`)**:
+  - Package & Namespace: `vn.busgo.driver` (in `AndroidManifest.xml` and `app/build.gradle`).
+  - Application ID: `vn.busgo.driver` (Flavors: `dev`, `qa`, `stg`, `production`).
+  - Kotlin Activity: `source/driver/app/android/app/src/main/kotlin/vn/busgo/driver/MainActivity.kt` with package `vn.busgo.driver`.
+  - Permissions: Foreground Location Service, Camera, cleartext dev traffic (`android:usesCleartextTraffic="true"`).
+- [x] **iOS Configuration (`source/driver/app/ios/`)**:
+  - Bundle Identifier: `vn.busgo.driver` (in `Info.plist` and `Runner.xcodeproj/project.pbxproj`).
+  - App Transport Security: `NSAllowsArbitraryLoads` and `NSAllowsLocalNetworking` enabled for local API communication.
+  - Background Modes: `location`, `fetch`, `remote-notification` configured.
 - [x] **Tactical Design Tokens & Typography (`resources/lib/src/theme/`)**: `#0F172A` Ops Canvas, `#1E293B` Surface Panel, `#16A34A` Emerald Safe, `#DC2626` Alert Critical, `#2563EB` Action, `#D97706` Amber Warning, `Geist` & `JetBrains Mono`. Large touch targets (64–72dp). 0 emojis in presentation code.
-- [x] **API Client Service (`app/lib/src/service/driver_api_service.dart`)**: Complete typed HTTP integration covering `login`, `getTodayTrips`, `submitReadinessCheck`, `startTrip`, `sendTelemetry`, `getManifest`, `boardWithQr`, `collectCod`, `replayOfflineTelemetry`, `endTrip`, `reportIncident`.
+- [x] **API Client Service (`app/lib/src/service/driver_api_service.dart`)**:
+  - Platform-adaptive base URL (`resolveDriverBaseUrl`): `10.0.2.2:3000` for Android emulator, `localhost:3000` for iOS simulator/web, overridable for physical LAN.
+  - Complete typed HTTP integration covering `login`, `getTodayTrips`, `submitReadinessCheck`, `startTrip`, `sendTelemetry`, `getManifest`, `boardWithQr`, `collectCod`, `replayOfflineTelemetry`, `endTrip`, `reportIncident`.
 - [x] **Flutter Tactical Presentation Suite (`app/lib/src/presentation/`)**: 12 screens & dialogs covering DRI-001 to DRI-019:
   - `driver_login_screen.dart` (DRI-001: Staff ID & PIN login)
   - `driver_today_trips_screen.dart` (DRI-002: Shift trip assignment list)
