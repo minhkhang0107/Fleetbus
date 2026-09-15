@@ -179,4 +179,16 @@ describe('Phase Driver Mobile: Android & iOS Platform Integrity Test Suite', () 
     assert.ok(serviceContent.includes('http://10.0.2.2:3000'), 'Must handle Android emulator host alias 10.0.2.2:3000');
     assert.ok(serviceContent.includes('http://localhost:3000'), 'Must handle iOS simulator / default host localhost:3000');
   });
+
+  it('TC-DRV-MOB-12: Driver local.properties and web_dist production distribution integrity', () => {
+    const localPropPath = path.join(rootDir, 'source/driver/app/android/local.properties');
+    assert.ok(fs.existsSync(localPropPath), 'Driver local.properties must exist');
+    const localPropContent = fs.readFileSync(localPropPath, 'utf8');
+    assert.ok(localPropContent.includes('sdk.dir='), 'sdk.dir must be configured in local.properties');
+
+    const webDistPath = path.join(rootDir, 'source/driver/web_dist/index.html');
+    assert.ok(fs.existsSync(webDistPath), 'Driver web_dist/index.html must exist');
+    const webContent = fs.readFileSync(webDistPath, 'utf8');
+    assert.ok(webContent.includes('BusGo Driver') || webContent.includes('Driver Cockpit'), 'Must contain Driver Cockpit');
+  });
 });

@@ -60,28 +60,34 @@ export function createFleetBusServer(customServices = {}) {
     // 1. STATIC CLIENT SUITE SERVING
     // =========================================================================
     if (pathname === '/' || pathname === '/index.html' || pathname === '/passenger') {
+      const distPath = path.resolve(__dirname, '../../source/passenger/web_dist/index.html');
       const htmlPath = path.resolve(__dirname, '../../docs/designs/passenger_suite.html');
-      if (fs.existsSync(htmlPath)) {
+      const targetPath = fs.existsSync(distPath) ? distPath : htmlPath;
+      if (fs.existsSync(targetPath)) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(fs.readFileSync(htmlPath));
+        res.end(fs.readFileSync(targetPath));
         return;
       }
     }
 
     if (pathname === '/driver' || pathname === '/driver/cockpit' || pathname === '/driver.html') {
+      const distPath = path.resolve(__dirname, '../../source/driver/web_dist/index.html');
       const htmlPath = path.resolve(__dirname, '../../docs/designs/driver_cockpit.html');
-      if (fs.existsSync(htmlPath)) {
+      const targetPath = fs.existsSync(distPath) ? distPath : htmlPath;
+      if (fs.existsSync(targetPath)) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(fs.readFileSync(htmlPath));
+        res.end(fs.readFileSync(targetPath));
         return;
       }
     }
 
     if (pathname === '/manager' || pathname === '/ops' || pathname === '/manager.html' || pathname === '/admin') {
+      const distPath = path.resolve(__dirname, '../../source/manager/web_dist/index.html');
       const htmlPath = path.resolve(__dirname, '../../docs/designs/manager_portal.html');
-      if (fs.existsSync(htmlPath)) {
+      const targetPath = fs.existsSync(distPath) ? distPath : htmlPath;
+      if (fs.existsSync(targetPath)) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(fs.readFileSync(htmlPath));
+        res.end(fs.readFileSync(targetPath));
         return;
       }
     }

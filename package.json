@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/**/*.test.js",
-    "lint": "node --check source/**/*.js test/**/*.test.js",
+    "lint": "node --check source/**/*.js test/**/*.test.js tools/**/*.js",
+    "build": "node tools/build_system.js",
+    "e2e": "node test/e2e_live_flow.js",
     "start": "node source/server/apiServer.js"
   },
   "keywords": ["fleetbus", "passenger", "driver", "manager", "operations", "telemetry", "realtime", "vietqr", "nodejs", "api-gateway"],

@@ -3,7 +3,7 @@
 # Orchestrates Node.js API Gateway, Passenger Flutter App, Driver Flutter App & Manager Web Portal
 # ==============================================================================
 
-.PHONY: all help test lint start_server stop_server e2e \
+.PHONY: all help build test lint start_server stop_server e2e \
         client_bootstrap client_sync client_build_dev client_build_prod \
         driver_bootstrap driver_sync driver_build_dev driver_build_prod \
         manager_bootstrap manager_sync manager_build_dev manager_build_prod manager_run_web
@@ -13,7 +13,8 @@ help:
 	@echo "║                 FLEETBUS PLATFORM BUILD COMMANDS                   ║"
 	@echo "╠════════════════════════════════════════════════════════════════════╣"
 	@echo "║ Core Commands:                                                     ║"
-	@echo "║   make test                 - Run all 73 automated test suites     ║"
+	@echo "║   make build                - Build & package all platforms & dists║"
+	@echo "║   make test                 - Run all automated test suites        ║"
 	@echo "║   make lint                 - Run syntax and lint checks           ║"
 	@echo "║   make start_server         - Launch unified Node.js API Gateway   ║"
 	@echo "║   make e2e                  - Run live end-to-end integration test ║"
@@ -41,6 +42,9 @@ help:
 # ------------------------------------------------------------------------------
 # Core Platform & API Gateway
 # ------------------------------------------------------------------------------
+build:
+	node tools/build_system.js
+
 test:
 	npm test
 

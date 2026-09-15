@@ -1,6 +1,6 @@
 # FleetBus Real-Time Bus Booking & Telemetry System State
 
-Last updated: 2026-09-04 09:28
+Last updated: 2026-09-15 13:30
 
 ## 1. Unified Node.js API Server & Gateway Status (`source/server/`)
 - [x] **Universal REST API Server (`source/server/apiServer.js`)**:
@@ -9,10 +9,11 @@ Last updated: 2026-09-04 09:28
   - Driver Tactical Gateway: `/api/v1/driver/*` (Auth, Today Trips, Readiness, Start Trip, Manifest, QR Boarding, COD Cash Collection, Telemetry Ping & Replay, Incidents/SOS, End Trip).
   - Manager Operations Gateway: `/api/v1/ops/*` (Auth, KPIs, Fleet Radar, POS, Dispatch, Emergency Swap, Fleet & Crew, Reports).
   - External Webhooks: `/api/v1/webhooks/vietqr/ipn` and `/health` + `/api/v1/openapi.json`.
-  - Static Web Portals: `/passenger`, `/driver`, `/manager`.
-  - **Automated Tests**: 96/96 unit and integration tests passing 100% Green across 15 suites (`npm test`).
-  - **Lint Check**: 100% Clean (`npm run lint`).
-  - **Live E2E Flow**: Full tripartite end-to-end live flow verified (`node test/e2e_live_flow.js`).
+  - Static Web Portals: `/passenger`, `/driver`, `/manager` served directly from built `web_dist/` distributions with fallback to `docs/designs/`.
+  - **Automated Tests**: 99/99 unit and integration tests passing 100% Green across 15 suites (`npm test` / `make test`).
+  - **Lint Check**: 100% Clean (`npm run lint` / `make lint`).
+  - **Universal System Build**: `npm run build` / `make build` compiles and packages all platforms, generates `build_manifest.json`, and aligns Android `local.properties`.
+  - **Live E2E Flow**: Full tripartite end-to-end live flow verified (`npm run e2e` / `make e2e` / `node test/e2e_live_flow.js`).
   - **Cross-Service Event Bridge**: `FleetBusEventBridge` pub-sub linking Passenger, Driver, and Manager in real time.
 
 ## 2. Passenger Mobile App (Android & iOS Flutter: `source/passenger/`)
@@ -107,3 +108,22 @@ Last updated: 2026-09-04 09:28
 - [x] **Web Manager Dart Syntax Hygiene & Anti-Patterns**:
   - Cleansed Unicode Dingbat picture arrows (`\u2794`) into typographic em-dashes across all Flutter Web screens.
   - Verified 0 picture emojis and 0 JS triple equals across all 5 manager presentation screens (`TC-MGR-WEB-06`, `TC-MGR-WEB-07`).
+
+## 6. Universal System Build & Live Full-Flow Test Pipeline
+- [x] **Build Engine (`tools/build_system.js`)**:
+  - `npm run build` / `make build`: Automatically coordinates full system packaging.
+  - Generates and synchronizes production-ready `web_dist/index.html` for Passenger (`54.5KB`), Driver (`25.7KB`), and Manager (`33.1KB`).
+  - Configures Android environment `local.properties` (`sdk.dir=/home/david/Android/Sdk`) for Passenger and Driver mobile apps to prevent Gradle assert failures.
+  - Generates `build_manifest.json` with SHA-256 checksums, platform configs, and timestamped statuses.
+- [x] **Live End-to-End Flow (`node test/e2e_live_flow.js` / `npm run e2e` / `make e2e`)**:
+  - Automatically spins up or connects to server on `http://localhost:3000`.
+  - Step 1: Healthcheck & Service Status (`UP`, 5 core services).
+  - Step 2: Passenger discovery, fuzzy station search, 2D VIP seat map, 10-minute lock, booking order creation.
+  - Step 3: Napas247 / VietQR payment settlement via IPN webhook with ticket issuance.
+  - Step 4: Passenger Ticket Wallet retrieval & 30s rotating dynamic HMAC QR boarding pass generation.
+  - Step 5: Driver tactical auth, shift trip inspection, 6-point readiness safety checklist, start trip (`IN_TRANSIT`), camera QR boarding scan, 1Hz live GPS telemetry stream.
+  - Step 6: Manager Operations login, executive KPIs (Load Factor, Gross Revenue), 60Hz live fleet radar tracking, hotline POS booking, executive OTP and punctuality report.
+- [x] **Regression & Integrity Guard**:
+  - 15 test suites with 99/99 passing tests (`npm test`).
+  - 100% clean syntax and lint (`npm run lint`).
+  - Single command orchestration via `make build && make lint && make test && make e2e`.

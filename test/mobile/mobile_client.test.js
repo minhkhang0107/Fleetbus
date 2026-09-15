@@ -187,4 +187,16 @@ describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
     assert.ok(serviceContent.includes('http://10.0.2.2:3000'), 'Must handle Android emulator host alias 10.0.2.2:3000');
     assert.ok(serviceContent.includes('http://localhost:3000'), 'Must handle iOS simulator / default host localhost:3000');
   });
+
+  it('TC-MOB-12: Passenger local.properties and web_dist production distribution integrity', () => {
+    const localPropPath = path.join(rootDir, 'source/passenger/app/android/local.properties');
+    assert.ok(fs.existsSync(localPropPath), 'Passenger local.properties must exist');
+    const localPropContent = fs.readFileSync(localPropPath, 'utf8');
+    assert.ok(localPropContent.includes('sdk.dir='), 'sdk.dir must be configured in local.properties');
+
+    const webDistPath = path.join(rootDir, 'source/passenger/web_dist/index.html');
+    assert.ok(fs.existsSync(webDistPath), 'Passenger web_dist/index.html must exist');
+    const webContent = fs.readFileSync(webDistPath, 'utf8');
+    assert.ok(webContent.includes('BusGo') || webContent.includes('Passenger'), 'Must contain Passenger web suite');
+  });
 });

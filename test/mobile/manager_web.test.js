@@ -104,4 +104,11 @@ describe('Phase Manager Web: Flutter Web Platform & Dashboard Integrity Test Sui
       }
     }
   });
+
+  it('TC-MGR-WEB-08: Manager Web Distribution must exist and match BusGo Operations Control Center', () => {
+    const webDistPath = path.join(managerDir, 'web_dist/index.html');
+    assert.ok(fs.existsSync(webDistPath), 'source/manager/web_dist/index.html must exist');
+    const content = fs.readFileSync(webDistPath, 'utf8');
+    assert.ok(content.includes('BusGo Operations') || content.includes('BusGo Manager'), 'Must contain BusGo Operations title');
+  });
 });
