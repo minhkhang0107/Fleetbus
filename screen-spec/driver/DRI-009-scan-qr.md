@@ -82,16 +82,43 @@
 
 ---
 
-## 6. Offline Validation Algorithm & SQLite Schema
+## 6. Offline Validation Algorithm & Dual Format Support
+
+The scanner auto-detects payload format and executes instant local validation ($<150\text{ms}$):
 
 ```dart
-// Dart offline verification logic
-bool verifyTicketSignature(Map<String, dynamic> qrData, String dailySecret) {
-  final expectedSig = hmacSha256(
-    "${qrData['tid']}:${qrData['trp']}:${qrData['seat']}:${qrData['seg']}:${qrData['iat']}",
-    dailySecret
-  );
-  return qrData['sig'] == expectedSig && qrData['trp'] == currentTripId;
+// Dart offline verification engine supporting both dynamic TOTP and daily static signature
+ScanResult verifyScannedPayload(String payload, String tripSecret, int currentTimestampMs) {
+  // Format 1: Dynamic 30s TOTP string (BUSGO|pnr|tid|window|hmac)
+  if (payload.startsWith('BUSGO|')) {
+    final parts = payload.split('|');
+    if (parts.length >= 5) {
+      final pnr = parts[1];
+      final tid = parts[2];
+      final scannedWindow = int.parse(parts[3]);
+      final hmac = parts[4];
+      final currentWindow = currentTimestampMs ~/ 30000;
+      
+      // Permit +-2 windows (60s drift tolerance)
+      if ((currentWindow - scannedWindow).abs() <= 2) {
+        final expectedHmac = computeHmac16("{\"pnr\":\"$pnr\",\"ticket_id\":\"$tid\",\"w\":$scannedWindow}", tripSecret);
+        if (hmac == expectedHmac) {
+          return ScanResult.valid(ticketId: tid, pnr: pnr, method: 'DYNAMIC_TOTP');
+        }
+      }
+    }
+  }
+
+  // Format 2: Offline JSON signature (Zero connectivity fallback / Printed Ticket)
+  try {
+    final Map<String, dynamic> data = jsonDecode(payload);
+    final expectedSig = hmacSha256("${data['tid']}:${data['trp']}:${data['seat']}:${data['iat']}", tripSecret);
+    if (data['sig'] == expectedSig && data['trp'] == currentTripId) {
+      return ScanResult.valid(ticketId: data['tid'], pnr: data['pnr'], method: 'STATIC_OFFLINE');
+    }
+  } catch (_) {}
+
+  return ScanResult.invalid(reason: 'SIGNATURE_MISMATCH_OR_EXPIRED');
 }
 ```
 
@@ -99,7 +126,7 @@ bool verifyTicketSignature(Map<String, dynamic> qrData, String dailySecret) {
   - `ticket_id: TEXT PRIMARY KEY`
   - `trip_id: TEXT`
   - `scanned_at: TEXT (ISO 8601)`
-  - `scan_method: TEXT ('QR_OFFLINE' | 'MANUAL')`
+  - `scan_method: TEXT ('DYNAMIC_TOTP' | 'STATIC_OFFLINE' | 'MANUAL_PIN')`
   - `synced: INTEGER (0 = false, 1 = true)`
 
 ---

@@ -128,6 +128,12 @@ Exit Points:
 - `BANKING_APP_OPENED`: `{ bank_code: "MB" }`
 - `PAYMENT_WEBHOOK_RECEIVED`: `{ status: "SUCCESS", latency_ms: 6200 }`
 
+## 8. Business Rules
+- `BR-PAY-001`: Payment transaction must have a valid idempotency key and match the booking total amount exactly.
+- `BR-PAY-002`: System accepts IPN webhook callbacks idempotently; duplicate callbacks return 200 OK without re-issuing tickets.
+- `BR-PAY-003` (App Lifecycle & Active Fallback Polling): When the app returns to foreground (resumes from banking app or multitasking), the client immediately polls `GET /api/v1/passenger/bookings/:pnr/status` and starts a 3-second fallback polling interval to resolve payment status even if WebSocket connection dropped during app switching.
+- `BR-PAY-004` (Manual Payment Confirmation Trigger): Passenger tapping "Tôi đã chuyển tiền" triggers an immediate server-side bank reconciliation query, displaying a transient spinner without blocking the UI.
+
 ---
 
 ## 9. UI Copy & Localization
@@ -156,3 +162,4 @@ Scenario: Realtime VietQR payment confirmation
 | :--- | :--- | :--- | :--- |
 | `TC-PAX-013-01` | Functional | Tap copy account button | Copies to clipboard, shows toast |
 | `TC-PAX-013-02` | Realtime | Receive `PAYMENT_COMPLETED` WS | Auto-navigates to Booking Success |
+| `TC-PAX-013-03` | Lifecycle | App resumes from background | Executes active status poll within 3s |

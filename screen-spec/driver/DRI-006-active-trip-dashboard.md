@@ -32,6 +32,7 @@ Parent Screen: None (Active Drive Lock)
 Previous Screen: Locked from back navigation (Must explicitly tap "KẾT THÚC CHUYẾN" at final stop)
 Child Modals / Sub-screens:
   ├── [DRI-007 Manifest] (Tap "DANH SÁCH HÀNH KHÁCH")
+  │     └── [Onboard Hail Passenger] (Tap "➕ THÊM KHÁCH DỌC ĐƯỜNG")
   ├── [DRI-008 Stop Detail] (Tap Next Stop Card)
   ├── [DRI-009 Scan QR] (Tap "QUÉT VÉ QR")
   ├── [DRI-013 Navigation] (Tap "BẢN ĐỒ DẪN ĐƯỜNG")

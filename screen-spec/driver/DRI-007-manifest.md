@@ -70,6 +70,7 @@
 | `CollectCodButton` | Button | Conditional | Ticket Fare State | Visible if COD pending | Opens `DRI-012-cod.md` |
 | `ManualBoardCTA` | Button | Yes | Manifest State | Enabled | Marks boarded with 1 tap (`DRI-010`) |
 | `MarkNoShowCTA` | Text CTA | Yes | Departure Time | Enabled after grace | Opens `DRI-011-no-show.md` |
+| `OnboardHailCTA` | Primary CTA | Yes | Manifest State | Enabled | Opens On-the-road Hail Passenger Sheet |
 
 ---
 
@@ -105,6 +106,38 @@
 }
 ```
 
+### 4.2. Onboard Hail Passenger (Đón khách vẫy dọc đường - REV-05)
+- **Endpoint:** `POST /api/v1/driver/trips/{tripId}/onboard-hail`
+- **Auth:** Bearer (Driver)
+- **Request Body:**
+```json
+{
+  "passenger_name": "Khách Vẫy Dọc Đường",
+  "phone": "0912345678",
+  "dropoff_stop_id": "stp_th_bx",
+  "seat_code": "B06",
+  "fare_amount_vnd": 180000,
+  "payment_method": "CASH",
+  "amount_collected_vnd": 200000,
+  "change_settlement_method": "CASH_RETURNED"
+}
+```
+- **Response `201 Created`:**
+```json
+{
+  "status": "success",
+  "data": {
+    "ticket_id": "tkt_hail_99120",
+    "pnr": "BG-HAIL-771",
+    "seat_code": "B06",
+    "boarding_status": "BOARDED",
+    "payment_status": "SUCCESS",
+    "amount_collected_vnd": 200000,
+    "change_due_vnd": 20000
+  }
+}
+```
+
 ---
 
 ## 5. Security & Privacy
@@ -112,6 +145,16 @@
 
 ---
 
-## 6. Acceptance Criteria & Test Matrix
+## 6. Business Rules (REV-05)
+- `BR-MAN-002` (Đón khách dọc đường):
+  - Phụ xe/tài xế chỉ được phép thêm khách vẫy dọc đường vào ghế còn trống (`VACANT`) trên chuyến xe.
+  - Ngay khi tạo thành công, vé được chuyển thẳng trạng thái `BOARDED`, `Payment` ghi nhận `SUCCESS` với tiền mặt thu tại chỗ, và tự động đồng bộ vào nhật trình xe để tính doanh thu ca trực của tài xế.
+
+---
+
+## 7. Acceptance Criteria & Test Matrix
 - **AC-001:** Manifest groups passengers by current stop by default; tapping "Lên xe" updates status to `BOARDED` and decrements pending count.
+- **AC-002:** Tapping "THÊM KHÁCH DỌC ĐƯỜNG" allows assigning an empty seat, instantly issuing a boarded ticket and recording cash payment.
 - **TC-DRI-007-01:** Verifies COD pending badge is visible only for unpaid tickets.
+- **TC-DRI-007-02:** Verifies onboard hail passenger assigns vacant seat and marks ticket boarded.
+

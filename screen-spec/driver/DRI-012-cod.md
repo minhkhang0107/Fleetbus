@@ -41,6 +41,11 @@
 │                                                   │
 │ ┌─ CHANGE CALCULATION ─────────────────────────┐  │
 │ │ 🟢 TIỀN THỪA TRẢ KHÁCH:      280.000 đ       │  │
+│ │                                              │  │
+│ │ Phương thức thối tiền:                       │  │
+│ │ [🔘 Trả đủ tiền mặt]                         │  │
+│ │ [⚪ Ghi nợ tiền thừa - Trả tại trạm nghỉ]     │  │
+│ │ [⚪ Nạp ví thành viên (SĐT hành khách)]       │  │
 │ └──────────────────────────────────────────────┘  │
 │                                                   │
 ├───────────────────────────────────────────────────┤
@@ -52,14 +57,40 @@
 
 ## 3. Business Rules & API Contract
 - `BR-COD-001`: Submitting cash receipt transitions `Payment` to `SUCCESS` and queues transaction in SQLite for shift reconciliation at depot end (`DRI-017`).
+- `BR-COD-002` (Xử lý thối tiền lẻ khi phụ xe thiếu tiền mặt - REV-04):
+  - Hỗ trợ 3 hình thức giải quyết tiền thừa:
+    1. `CASH_RETURNED`: Đã thối trực tiếp tiền mặt đủ cho khách.
+    2. `REST_STOP_DEBT_RECEIPT`: Phụ xe thiếu tiền lẻ; phát hành mã biên lai nợ tiền thừa (Debt Receipt). Hệ thống tự động gửi SMS cho khách mã nhận tiền kèm số tiền nợ. Khách xuất trình mã để nhận tiền tại quầy thu ngân trạm dừng nghỉ kế tiếp hoặc bến xe trả khách.
+    3. `WALLET_CREDIT`: Cộng thẳng số tiền thừa vào số dư tài khoản/ví BusGo liên kết với SĐT hành khách.
 - **API Endpoint:** `POST /api/v1/driver/trips/{tripId}/payments/cod-collect`
 - **Request Body:**
 ```json
 {
   "ticket_id": "tkt_88192a",
-  "amount_collected_vnd": 220000,
+  "amount_collected_vnd": 500000,
+  "fare_amount_vnd": 220000,
+  "change_due_vnd": 280000,
+  "change_settlement_method": "CASH_RETURNED",
   "collected_by_staff_id": "TX8821",
   "device_timestamp": "2026-08-27T14:32:00Z"
 }
 ```
+- **Response `200 OK`:**
+```json
+{
+  "status": "success",
+  "data": {
+    "ticket_id": "tkt_88192a",
+    "boarding_status": "BOARDED",
+    "payment_status": "SUCCESS",
+    "change_settlement": {
+      "method": "REST_STOP_DEBT_RECEIPT",
+      "debt_receipt_code": "DR-88192A-280K",
+      "amount_due_vnd": 280000,
+      "payout_location": "Trạm dừng nghỉ Ninh Bình Km120"
+    }
+  }
+}
+```
 - **TC-DRI-012-01:** Verifies collecting cash marks ticket `BOARDED` and increments driver shift cash balance.
+- **TC-DRI-012-02:** Verifies selecting `REST_STOP_DEBT_RECEIPT` creates a pending debt record for station cashier settlement.

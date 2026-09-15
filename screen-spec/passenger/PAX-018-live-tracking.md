@@ -173,8 +173,9 @@ Next Screen:
 
 ## 8. Business Rules & Connection Resilience
 - `BR-TRACK-001`: If WebSocket drops, client immediately falls back to REST polling (`GET /trips/{id}/tracking`) every $10\text{ seconds}$ while attempting exponential backoff WebSocket reconnection ($1\text{s}, 2\text{s}, 4\text{s}, 8\text{s}$).
-- `BR-TRACK-002`: If no GPS position has been received for $>60\text{s}$, ConnectionBadge changes to `STALE` (Amber: *"Dữ liệu xe bị chậm"*). If $>180\text{s}$, badge changes to `OFFLINE` (Red: *"Mất tín hiệu GPS xe"*).
+- `BR-TRACK-002`: If no GPS position has been received for $>60\text{s}$, ConnectionBadge changes to `STALE` (Amber: *"Dữ liệu xe bị chậm"*). If $>180\text{s}$, badge changes to `OFFLINE` (Red: *"Mất tín hiệu GPS xe — Đang kết nối lại"*).
 - `BR-TRACK-003`: When vehicle enters within $1.0\text{km}$ ($<5\text{ minutes}$ ETA) of passenger's pickup geofence, trigger local high-priority alert chime: *"Xe sắp đến điểm đón của bạn!"*.
+- `BR-TRACK-004` (Rest-Stop & Depot Status): If vehicle speed is $0\text{ km/h}$ for $>5\text{ minutes}$ within a designated rest stop or meal depot geofence, the map sheet displays an informational badge: *"Xe đang tại Trạm dừng nghỉ ({stop_name}) — Dự kiến tiếp tục hành trình sau {minutes} phút"* to prevent passenger confusion regarding vehicle stoppage.
 
 ---
 

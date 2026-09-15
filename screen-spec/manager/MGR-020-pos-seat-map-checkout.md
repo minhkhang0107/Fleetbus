@@ -39,6 +39,8 @@
 │                                      │ Tiền thừa trả:  [ 280000 ] đ         │
 │                                      │                                      │
 │                                      │ ┌──────────────────────────────────┐ │
+│                                      │ │ 📞 GIỮ CHỖ HOTLINE [F8]          │ │
+│                                      │ ├──────────────────────────────────┤ │
 │                                      │ │ 🖨️ XUẤT VÉ & IN NGAY [F9] (CTA)  │ │
 │                                      │ └──────────────────────────────────┘ │
 └──────────────────────────────────────┴──────────────────────────────────────┘
@@ -48,5 +50,41 @@
 
 ## 3. Business Rules & API Contract
 - `BR-POS-002`: Counter ticket issuance directly issues tickets with status `CONFIRMED` and payment status `SUCCESS` in a single database transaction.
-- **API Endpoint:** `POST /api/v1/ops/pos/orders`
+- `BR-POS-003` (Hotline Seat Reservation Hold Policy - REV-06):
+  - Khác với cơ chế khóa ghế 10 phút trên app hành khách (`LOCK_TTL = 600s`), nhân viên quầy/tổng đài viên được phép tạo lệnh giữ chỗ qua điện thoại (`source: "HOTLINE"`).
+  - Thời hạn giữ chỗ (`hold_until`) được hỗ trợ theo 2 chế độ:
+    1. `UNTIL_DEPARTURE_OFFSET`: Mặc định giữ ghế cho đến trước giờ khởi hành chuyến xe `T - 30 phút` (hoặc cấu hình tuyến).
+    2. `CUSTOM_EXPIRY_MINUTES`: Cấu hình số phút giữ cụ thể (ví dụ: 60 phút, 120 phút).
+  - Nếu quá hạn giữ chỗ (`hold_until`) mà khách chưa đến quầy nhận vé/chưa thanh toán, hệ thống tự động hoàn trả ghế về trạng thái `VACANT` để bán cho khách khác.
+- **API Endpoint 1 (POS Instant Checkout):** `POST /api/v1/ops/pos/orders`
+- **API Endpoint 2 (Hotline Seat Hold - REV-06):** `POST /api/v1/ops/pos/hotline-hold`
+- **Request Body (Hotline Hold):**
+```json
+{
+  "trip_id": "trp_991823",
+  "seat_codes": ["B02"],
+  "passenger_name": "Trần Thị Lan",
+  "phone": "0912988776",
+  "hold_policy": "UNTIL_DEPARTURE_OFFSET",
+  "departure_offset_minutes": 30,
+  "notes": "Khách đón tại Cổng ĐH Thủy Lợi, thanh toán tiền mặt khi lên xe"
+}
+```
+- **Response `201 Created`:**
+```json
+{
+  "status": "success",
+  "data": {
+    "reservation_id": "rsv_pos_99812",
+    "pnr": "BG-RSV-882",
+    "trip_id": "trp_991823",
+    "seat_codes": ["B02"],
+    "hold_status": "HELD_HOTLINE",
+    "hold_until": "2026-08-27T13:30:00Z",
+    "created_by": "clerk_hn_01"
+  }
+}
+```
 - **TC-MGR-020-01:** Verifies pressing `F9` executes transaction and triggers silent thermal print job.
+- **TC-MGR-020-02:** Verifies creating hotline reservation holds seat with configured `hold_until` timestamp and releases correctly on expiry.
+
