@@ -55,6 +55,8 @@ export class ManagerOperationsService {
       { alert_id: 'alt_01', vehicle_plate: '29B-444.11', type: 'DELAY_WARNING', severity: 'AMBER', message: 'Chuyến trp_991824 dự kiến trễ +35 phút do kẹt xe đầu cao tốc 5B', created_at: '2026-08-28T13:00:00Z' },
       { alert_id: 'alt_02', vehicle_plate: '29B-123.45', type: 'GPS_LIVE', severity: 'GREEN', message: 'Xe đang vận hành ổn định trên cao tốc Pháp Vân - Cầu Giẽ', created_at: '2026-08-28T13:02:00Z' }
     ];
+
+    this.hotlineReservations = [];
   }
 
   /**
@@ -319,6 +321,111 @@ export class ManagerOperationsService {
       message: `Xuất vé POS thành công cho khách ${passengerName} (${seatCodes.join(', ')})`,
       data: newBooking
     };
+  }
+
+  /**
+   * MGR-020 / REV-06: Configurable Hotline Telephone Seat Hold Reservation
+   */
+  createHotlineHold({
+    tripId,
+    passengerName,
+    phone,
+    seatCodes,
+    holdPolicy = 'UNTIL_DEPARTURE_OFFSET',
+    departureOffsetMinutes = 30,
+    customExpiryMinutes = 60,
+    notes = '',
+    agentStaffId = 'stf_hotline_01',
+    mockNow = Date.now()
+  }) {
+    const trip = this.findTrip(tripId);
+    if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+
+    let holdUntilMs;
+    if (holdPolicy === 'UNTIL_DEPARTURE_OFFSET') {
+      const departureTimeMs = new Date(trip.departure_time).getTime();
+      holdUntilMs = departureTimeMs - (departureOffsetMinutes * 60 * 1000);
+      // If departure is very close or in the past relative to mockNow, fallback to 15m hold
+      if (holdUntilMs <= mockNow) {
+        holdUntilMs = mockNow + (15 * 60 * 1000);
+      }
+    } else {
+      holdUntilMs = mockNow + (customExpiryMinutes * 60 * 1000);
+    }
+
+    const holdUntil = new Date(holdUntilMs).toISOString();
+
+    const reservation = {
+      reservation_id: `rsv_pos_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`,
+      pnr: `BG-RSV-${Math.floor(100 + Math.random() * 900)}`,
+      trip_id: tripId,
+      passenger_name: passengerName,
+      phone,
+      seat_codes: seatCodes,
+      hold_policy: holdPolicy,
+      departure_offset_minutes: departureOffsetMinutes,
+      hold_status: 'HELD_HOTLINE',
+      hold_until: holdUntil,
+      created_at: new Date(mockNow).toISOString(),
+      created_by: agentStaffId,
+      notes
+    };
+
+    this.hotlineReservations.push(reservation);
+    trip.booked_seats += seatCodes.length;
+
+    return {
+      success: true,
+      message: `Giữ chỗ hotline thành công cho khách ${passengerName} (Hạn giữ đến: ${holdUntil})`,
+      data: reservation
+    };
+  }
+
+  /**
+   * Automatically release expired hotline reservations (REV-06)
+   */
+  releaseExpiredHotlineHolds(mockNow = Date.now()) {
+    const releasedList = [];
+
+    for (const rsv of this.hotlineReservations) {
+      if (rsv.hold_status === 'HELD_HOTLINE' && mockNow > new Date(rsv.hold_until).getTime()) {
+        rsv.hold_status = 'EXPIRED_RELEASED';
+        rsv.released_at = new Date(mockNow).toISOString();
+
+        const trip = this.findTrip(rsv.trip_id);
+        if (trip) {
+          trip.booked_seats = Math.max(0, trip.booked_seats - rsv.seat_codes.length);
+        }
+        releasedList.push(rsv);
+      }
+    }
+
+    return {
+      success: true,
+      released_count: releasedList.length,
+      data: releasedList
+    };
+  }
+
+  /**
+   * Cancel a hotline hold explicitly
+   */
+  cancelHotlineHold(reservationId, reason = 'Khách hủy yêu cầu qua điện thoại', mockNow = Date.now()) {
+    const rsv = this.hotlineReservations.find(r => r.reservation_id === reservationId);
+    if (!rsv) return { success: false, error: 'Không tìm thấy thông tin giữ chỗ' };
+
+    if (rsv.hold_status === 'HELD_HOTLINE') {
+      rsv.hold_status = 'CANCELLED';
+      rsv.cancel_reason = reason;
+      rsv.cancelled_at = new Date(mockNow).toISOString();
+
+      const trip = this.findTrip(rsv.trip_id);
+      if (trip) {
+        trip.booked_seats = Math.max(0, trip.booked_seats - rsv.seat_codes.length);
+      }
+    }
+
+    return { success: true, data: rsv };
   }
 
   /**

@@ -113,4 +113,39 @@ describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-03
     assert.ok(reportRes.data.financial_summary.total_revenue_vnd > 0);
     assert.strictEqual(reportRes.data.punctuality_summary.on_time_departure_rate, '96.8%');
   });
+
+  it('TC-MGR-10: Should create configurable hotline seat holds and release on expiry (MGR-020, REV-06)', () => {
+    const service = new ManagerOperationsService();
+    const trip = service.findTrip('trp_991823');
+    const initialBooked = trip.booked_seats;
+    const t0 = 1724820000000;
+
+    // 1. Create hotline hold until departure offset (T - 30 mins)
+    const holdRes = service.createHotlineHold({
+      tripId: 'trp_991823',
+      passengerName: 'Hoàng Thùy Linh',
+      phone: '0988112233',
+      seatCodes: ['B02'],
+      holdPolicy: 'UNTIL_DEPARTURE_OFFSET',
+      departureOffsetMinutes: 30,
+      notes: 'Khách đón tại nút giao Vực Vòng',
+      mockNow: t0
+    });
+
+    assert.strictEqual(holdRes.success, true);
+    assert.strictEqual(holdRes.data.hold_status, 'HELD_HOTLINE');
+    assert.ok(holdRes.data.hold_until);
+    assert.strictEqual(trip.booked_seats, initialBooked + 1);
+
+    // 2. Before expiry: hold remains active
+    const activeCheck = service.releaseExpiredHotlineHolds(t0 + 1000);
+    assert.strictEqual(activeCheck.released_count, 0);
+
+    // 3. After hold_until expires: automatically released
+    const expiryMs = new Date(holdRes.data.hold_until).getTime() + 1000;
+    const releaseCheck = service.releaseExpiredHotlineHolds(expiryMs);
+    assert.strictEqual(releaseCheck.released_count, 1);
+    assert.strictEqual(releaseCheck.data[0].hold_status, 'EXPIRED_RELEASED');
+    assert.strictEqual(trip.booked_seats, initialBooked);
+  });
 });
