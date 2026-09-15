@@ -1,0 +1,47 @@
+sequenceDiagram
+    autonumber
+    actor PAX as 📱 Hành Khách
+    actor DRI as 🚍 Phụ Xe / Tài Xế (Tablet)
+    participant GW as ⚙️ API Gateway
+    participant DB as 🗄️ PostgreSQL Database
+    actor POS as 🏪 Quầy Thu Ngân Trạm Nghỉ
+    actor MGR as 🖥️ Điều Hành / Thủ Quỹ (Manager Portal)
+
+    %% Giai đoạn 1: Thu tiền & Phát sinh biên lai nợ
+    Note over PAX,DRI: 1. Thu tiền COD & Khách đưa tiền mệnh giá lớn (DRI-012)
+    PAX->>DRI: Lên xe, đưa 500.000đ tiền mặt (Giá vé: 220.000đ)
+    DRI->>DRI: Tài xế kiểm tra túi tiền: Thiếu 280.000đ tiền thối
+    DRI->>DRI: Trên DRI-012 nhập: Số tiền nhận: 500.000đ -> Chọn [Ghi Nợ Tiền Thừa: 280.000đ]
+    DRI->>GW: POST /api/v1/driver/trips/TRIP101/tickets/TK101/collect-cod<br/>{receivedAmount: 500000, fare: 220000, debtAmount: 280000}
+    activate GW
+    GW->>DB: UPDATE bookings SET payment_status='COLLECTED_CASH_WITH_DEBT'
+    GW->>DB: INSERT INTO debt_receipts (receiptId: "DEBT-88", amount: 280000, status: 'PENDING')
+    GW-->>DRI: 200 OK {receiptId: "DEBT-88", qrPayload: "BUSGO_DEBT:88:280K"}
+    deactivate GW
+    DRI->>PAX: Xác nhận trên App hành khách hoặc gửi tin nhắn biên lai nợ kèm QR DEBT-88
+
+    %% Giai đoạn 2: Khách lấy lại tiền thừa tại Trạm dừng chân
+    Note over PAX,POS: 2. Xe dừng nghỉ 30 phút - Khách đến Quầy nhận tiền thừa
+    PAX->>POS: Xuất trình mã QR DEBT-88 tại Quầy Thu Ngân Trạm Dừng
+    POS->>GW: POST /api/v1/ops/debt-receipts/DEBT-88/redeem<br/>{cashierId: "CSH-HN01", stationId: "REST-STATION-PHUTHO"}
+    activate GW
+    GW->>DB: UPDATE debt_receipts SET status='REDEEMED', redeemed_at=NOW()
+    GW-->>POS: 200 OK {valid: true, amount: 280000, passengerName: "Nguyễn Văn A"}
+    deactivate GW
+    POS->>PAX: Xuất quỹ trả 280.000đ tiền mặt cho hành khách (hoặc bấm bắn VietQR vào STK khách)
+    POS-->>PAX: Trả tiền thành công, trạng thái biên lai nợ chuyển thành ĐÃ HOÀN TẤT
+
+    %% Giai đoạn 3: Chốt sổ cuối ca chạy
+    Note over DRI,MGR: 3. Chốt sổ bàn giao tiền mặt cuối chuyến (DRI-017)
+    DRI->>DRI: Xe về bến cuối, mở màn hình DRI-017 (Quyết toán tiền mặt)
+    DRI->>GW: GET /api/v1/driver/trips/TRIP101/cash-summary
+    activate GW
+    GW-->>DRI: 200 OK {expectedCash: 3500000, codTicketsCount: 7, totalDebtIssued: 280000}
+    deactivate GW
+    DRI->>DRI: Đếm tiền mặt thực tế trong ví: 3.500.000đ (Khớp 100%)
+    DRI->>GW: POST /api/v1/driver/trips/TRIP101/cash-reconciliation<br/>{actualAmount: 3500000, variance: 0, notes: "Khớp đủ tiền, 0 lệch"}
+    activate GW
+    GW->>DB: INSERT INTO cash_settlements (...)
+    GW-->>DRI: 200 OK {status: "SETTLED"}
+    deactivate GW
+    GW-->>MGR: Cập nhật MGR-017 & Báo cáo thủ quỹ: Chuyến xe đã chốt sổ thành công

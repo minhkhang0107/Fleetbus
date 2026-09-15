@@ -1,0 +1,13 @@
+{
+  "theme": "default",
+  "themeVariables": {
+    "fontFamily": "Inter, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif",
+    "fontSize": "14px",
+    "primaryColor": "#e0f2fe",
+    "primaryTextColor": "#0f172a",
+    "primaryBorderColor": "#0284c7",
+    "lineColor": "#475569",
+    "secondaryColor": "#fef3c7",
+    "tertiaryColor": "#f1f5f9"
+  }
+}

@@ -17,6 +17,11 @@ Trong vận tải đường dài, các sự cố bất khả kháng như hỏng 
 
 ## 2. Sơ Đồ Trình Tự Tương Tác (Mermaid Sequence Diagram)
 
+> [!TIP]
+> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/FLOW-07-incident-emergency-vehicle-swap.svg) | [Xem ảnh PNG HD](./images/FLOW-07-incident-emergency-vehicle-swap.png)
+
+![UML Sequence Diagram FLOW-07](./images/FLOW-07-incident-emergency-vehicle-swap.svg)
+
 ```mermaid
 sequenceDiagram
     autonumber

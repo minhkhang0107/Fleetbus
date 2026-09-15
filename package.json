@@ -9,6 +9,7 @@
     "lint": "node --check source/**/*.js test/**/*.test.js tools/**/*.js",
     "build": "node tools/build_system.js",
     "e2e": "node test/e2e_live_flow.js",
+    "render:diagrams": "node tools/render_flow_diagrams.cjs",
     "start": "node source/server/apiServer.js"
   },
   "keywords": ["fleetbus", "passenger", "driver", "manager", "operations", "telemetry", "realtime", "vietqr", "nodejs", "api-gateway"],

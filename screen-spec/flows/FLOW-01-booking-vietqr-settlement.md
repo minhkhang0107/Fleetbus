@@ -14,6 +14,11 @@ Luồng cho phép hành khách chọn ghế trên sơ đồ xe 2 tầng, hệ th
 
 ## 2. Sơ Đồ Trình Tự Tương Tác (Mermaid Sequence Diagram)
 
+> [!TIP]
+> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/FLOW-01-booking-vietqr-settlement.svg) | [Xem ảnh PNG HD](./images/FLOW-01-booking-vietqr-settlement.png)
+
+![UML Sequence Diagram FLOW-01](./images/FLOW-01-booking-vietqr-settlement.svg)
+
 ```mermaid
 sequenceDiagram
     autonumber

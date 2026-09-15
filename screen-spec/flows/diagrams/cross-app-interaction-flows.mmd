@@ -1,0 +1,58 @@
+graph TD
+    subgraph Passenger_Domain["📱 Khách Hàng (Passenger Domain)"]
+        PAX_APP["Passenger App\n(Flutter / Web)"]
+        PAX_BOOK["Sơ đồ ghế & Giữ chỗ 10m\nPAX-009 / PAX-010"]
+        PAX_PAY["VietQR Thanh Toán Tức Thì\nPAX-013 / PAX-014"]
+        PAX_TICKET["Vé Động TOTP & Theo dõi HUD\nPAX-015 / PAX-018 / PAX-019"]
+    end
+
+    subgraph Driver_Domain["🚍 Tổ Lái Xe (Driver Tactical Domain)"]
+        DRI_APP["Driver Tablet App\n(Android Tactical Cockpit)"]
+        DRI_RADAR["HUD Dẫn Đường & MQTT GPS\nDRI-006 / DRI-014"]
+        DRI_SCAN["Soát vé QR & PIN Ngoại tuyến\nDRI-009 / DRI-010"]
+        DRI_CASH["Thu COD & Biên lai nợ tiền\nDRI-012 / DRI-017"]
+        DRI_HAIL["Đón khách vẫy & Báo sự cố\nDRI-007 / DRI-019"]
+        SQLITE[("SQLite Outbox Cache\nOffline-First Storage")]
+    end
+
+    subgraph Manager_Domain["🖥️ Trung Tâm Điều Hành (Manager Operations)"]
+        MGR_PORTAL["Operations Portal Web App\n(React / Tailwind)"]
+        MGR_MAP["Radar Đội Xe 60Hz\nMGR-003 / MGR-004"]
+        MGR_INC["Chỉ Huy Sự Cố & Đổi Xe\nMGR-005 / MGR-023"]
+        MGR_MATRIX["Ma Trận Ghế & Đặt Chỗ Hotline\nMGR-013 / MGR-020"]
+    end
+
+    subgraph Backend_Domain["⚙️ Lớp Hạ Tầng & Dịch Vụ (Backend Core)"]
+        GATEWAY["API Gateway / Node.js Express"]
+        REDIS["Redis In-Memory Engine\n(Distributed Lock & Seat Cache)"]
+        EVENT_BUS["WebSocket Server (Socket.io)\nRooms: trip:{id}, booking:{id}"]
+        MQTT_BROKER["MQTT Telemetry Broker\nTopic: fleet/trips/{id}/telemetry"]
+        DATABASE[("PostgreSQL Database\nACID Core")]
+        CRON["Scheduler Engine (BullMQ)\nHotline TTL & Stale Watchdog"]
+    end
+
+    %% Giao tiếp Passenger
+    PAX_BOOK -->|POST /hold| GATEWAY
+    PAX_PAY -->|Quét QR| GATEWAY
+    EVENT_BUS -.->|Emit payment_confirmed| PAX_PAY
+    EVENT_BUS -.->|Emit trip_vehicle_swapped| PAX_TICKET
+
+    %% Giao tiếp Driver
+    DRI_RADAR -->|MQTT 3s| MQTT_BROKER
+    DRI_SCAN <-->|Đối soát cục bộ| SQLITE
+    SQLITE -.->|Đồng bộ khi có 4G| GATEWAY
+    DRI_HAIL -->|POST /hail-passengers| GATEWAY
+    DRI_CASH -->|POST /collect-cod| GATEWAY
+
+    %% Giao tiếp Manager
+    EVENT_BUS -.->|Broadcast 60Hz stream| MGR_MAP
+    MGR_INC -->|POST /swap-vehicle| GATEWAY
+    MGR_MATRIX -->|POST /hotline-hold| GATEWAY
+
+    %% Hạ tầng Backend
+    GATEWAY <--> REDIS
+    GATEWAY <--> DATABASE
+    MQTT_BROKER --> GATEWAY
+    CRON --> DATABASE
+    CRON --> EVENT_BUS
+    GATEWAY --> EVENT_BUS

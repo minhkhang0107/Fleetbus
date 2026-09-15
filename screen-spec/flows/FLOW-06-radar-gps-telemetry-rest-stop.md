@@ -17,6 +17,11 @@ Việc giám sát phương tiện theo thời gian thực (Realtime Fleet Teleme
 
 ## 2. Sơ Đồ Trình Tự Tương Tác (Mermaid Sequence Diagram)
 
+> [!TIP]
+> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/FLOW-06-radar-gps-telemetry-rest-stop.svg) | [Xem ảnh PNG HD](./images/FLOW-06-radar-gps-telemetry-rest-stop.png)
+
+![UML Sequence Diagram FLOW-06](./images/FLOW-06-radar-gps-telemetry-rest-stop.svg)
+
 ```mermaid
 sequenceDiagram
     autonumber

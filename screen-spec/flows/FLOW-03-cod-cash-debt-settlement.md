@@ -23,6 +23,11 @@ Hệ thống giải quyết triệt để vấn đề này qua tính năng **Bi�
 
 ## 2. Sơ Đồ Trình Tự Tương Tác (Mermaid Sequence Diagram)
 
+> [!TIP]
+> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/FLOW-03-cod-cash-debt-settlement.svg) | [Xem ảnh PNG HD](./images/FLOW-03-cod-cash-debt-settlement.png)
+
+![UML Sequence Diagram FLOW-03](./images/FLOW-03-cod-cash-debt-settlement.svg)
+
 ```mermaid
 sequenceDiagram
     autonumber

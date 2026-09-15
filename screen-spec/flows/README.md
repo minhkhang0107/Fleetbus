@@ -25,7 +25,13 @@ Hệ sinh thái FleetBus sử dụng mô hình kết hợp (Hybrid Communication
 - **REST APIs (HTTP/2 + JSON)**: Phục vụ các giao dịch trạng thái đơn lẻ (Request/Response) có hỗ trợ `Idempotency-Key`.
 - **WebSocket (Realtime Rooms)**: Phát sóng sự kiện tức thì đến từng phiên làm việc của người dùng theo room `trip:{tripId}` hoặc `booking:{bookingId}`.
 - **MQTT Telemetry Broker**: Bắn luồng tọa độ GPS tần suất $3\text{s}$/lần từ thiết bị máy tính bảng của tài xế về máy chủ với băng thông tối ưu.
-- **Offline Outbox Queue (SQLite)**: Cho phép phụ xe và tài xế soát vé, xác thực mã PIN và thu tiền mặt khi xe đi vào vùng núi hoặc hầm đường bộ không có sóng di động ($0\text{G}/2\text{G}$).
+> [!TIP]
+> **Tùy chọn hiển thị hình ảnh:**
+> - Xem ảnh Vector SVG: [`README.svg`](./images/README.svg)
+> - Xem ảnh Raster PNG: [`README.png`](./images/README.png)
+> - Toàn bộ kho ảnh sơ đồ được lưu tại: [`screen-spec/flows/images/`](./images/)
+
+![Kiến Trúc Đa Tầng](./images/README.svg)
 
 ```mermaid
 flowchart TB

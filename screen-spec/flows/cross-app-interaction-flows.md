@@ -27,6 +27,11 @@
 
 ## 2. Kiến Trúc Tương Tác Giữa Các Hệ Thống (Cross-System Interaction Architecture)
 
+> [!TIP]
+> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/cross-app-interaction-flows.svg) | [Xem ảnh PNG HD](./images/cross-app-interaction-flows.png)
+
+![Kiến Trúc Tương Tác Đa Hệ Thống](./images/cross-app-interaction-flows.svg)
+
 ```mermaid
 graph TD
     subgraph Passenger_Domain["📱 Khách Hàng (Passenger Domain)"]
@@ -91,6 +96,11 @@ graph TD
 ---
 
 ## 3. Ma Trận Ma-sát & Nguyên Tắc Khóa Trạng Thái Ghế (Seat State Interlocking)
+
+> [!TIP]
+> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/cross-app-interaction-flows-2.svg) | [Xem ảnh PNG HD](./images/cross-app-interaction-flows-2.png)
+
+![Sơ đồ máy trạng thái ghế](./images/cross-app-interaction-flows-2.svg)
 
 Trạng thái của mỗi ghế trên một chuyến xe tuân thủ máy trạng thái nghiêm ngặt (Strict State Machine):
 

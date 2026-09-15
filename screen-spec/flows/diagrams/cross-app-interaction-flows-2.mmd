@@ -1,0 +1,21 @@
+stateDiagram-v2
+    [*] --> AVAILABLE : Khởi tạo chuyến xe
+
+    AVAILABLE --> HOLDING_ONLINE : Khách online chọn ghế (PAX-009) [TTL: 10 phút]
+    AVAILABLE --> HOLDING_HOTLINE : Tổng đài giữ chỗ (MGR-020) [TTL: Do ĐTV đặt]
+    AVAILABLE --> SOLD_HAIL : Tài xế đón khách vẫy (DRI-007) [Ngay lập tức]
+
+    HOLDING_ONLINE --> CONFIRMED_PAID : Webhook Napas/VietQR báo đã thanh toán
+    HOLDING_ONLINE --> AVAILABLE : Hết hạn 10 phút / Khách hủy chọn
+
+    HOLDING_HOTLINE --> CONFIRMED_PAID : Khách thanh toán qua link SMS/VietQR
+    HOLDING_HOTLINE --> AVAILABLE : Quá hạn giữ chỗ / Scheduler tự thu hồi
+
+    CONFIRMED_PAID --> BOARDED : Quét Dynamic QR / Nhập PIN thành công (DRI-009)
+    CONFIRMED_PAID --> NO_SHOW : Quá giờ xuất bến, tài xế xác nhận vắng mặt (DRI-011)
+
+    SOLD_HAIL --> BOARDED : Khách đã ngồi lên xe và thu tiền mặt COD
+    
+    BOARDED --> COMPLETED : Chuyến xe về bến cuối an toàn
+    NO_SHOW --> [*]
+    COMPLETED --> [*]

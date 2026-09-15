@@ -22,6 +22,11 @@ Giải pháp:
 
 ## 2. Sơ Đồ Trình Tự Tương Tác (Mermaid Sequence Diagram)
 
+> [!TIP]
+> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/FLOW-04-onboard-hail-passengers.svg) | [Xem ảnh PNG HD](./images/FLOW-04-onboard-hail-passengers.png)
+
+![UML Sequence Diagram FLOW-04](./images/FLOW-04-onboard-hail-passengers.svg)
+
 ```mermaid
 sequenceDiagram
     autonumber

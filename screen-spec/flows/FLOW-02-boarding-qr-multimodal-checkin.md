@@ -20,6 +20,11 @@ Hệ thống cung cấp 4 chế độ xác thực linh hoạt:
 
 ## 2. Sơ Đồ Trình Tự Tương Tác (Mermaid Sequence Diagram)
 
+> [!TIP]
+> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/FLOW-02-boarding-qr-multimodal-checkin.svg) | [Xem ảnh PNG HD](./images/FLOW-02-boarding-qr-multimodal-checkin.png)
+
+![UML Sequence Diagram FLOW-02](./images/FLOW-02-boarding-qr-multimodal-checkin.svg)
+
 ```mermaid
 sequenceDiagram
     autonumber

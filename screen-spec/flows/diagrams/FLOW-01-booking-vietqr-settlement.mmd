@@ -1,0 +1,54 @@
+sequenceDiagram
+    autonumber
+    actor PAX as 📱 Khách Hàng (Passenger App)
+    participant GW as ⚙️ API Gateway / Redis Lock
+    participant DB as 🗄️ PostgreSQL Database
+    participant WS as ⚡ WebSocket Event Bus
+    actor BANK as 🏦 Ngân Hàng / App Banking
+    actor MGR as 🖥️ Điều Hành (Manager Portal)
+    actor DRI as 🚍 Tài Xế (Driver Cockpit)
+
+    %% 1. Chọn ghế và Giữ chỗ
+    Note over PAX,GW: 1. Giai đoạn chọn ghế & Giữ chỗ 10 phút (Locking)
+    PAX->>GW: POST /api/v1/passenger/bookings/hold<br/>{tripId, seatNumbers: ["A01", "A02"], passengerId}
+    activate GW
+    GW->>GW: Redis SETNX lock:seat:TRIP101:A01 EX 600
+    alt Ghế đã bị người khác chọn
+        GW-->>PAX: 409 Conflict {error: "SEAT_ALREADY_HELD"}
+    else Khóa thành công
+        GW->>DB: INSERT INTO bookings (status: 'HELD', expire_at: NOW() + 10m)
+        GW->>WS: Broadcast room "trip:TRIP101" event: "seat_status_changed"<br/>{seats: ["A01", "A02"], status: "HOLDING"}
+        WS-->>MGR: Cập nhật ma trận ghế MGR-013 (Màu vàng đếm ngược)
+        WS-->>DRI: Cập nhật danh sách ghế chặng DRI-007
+        GW-->>PAX: 200 OK {bookingId: "BKG-789", expireAt: 1726416000, ttlSeconds: 600}
+    end
+    deactivate GW
+
+    %% 2. Tạo mã VietQR
+    Note over PAX,GW: 2. Phát sinh mã thanh toán VietQR EMVCo
+    PAX->>GW: POST /api/v1/passenger/bookings/BKG-789/vietqr
+    activate GW
+    GW-->>PAX: 200 OK {qrData: "00020101021238580010A000000727...", amount: 480000, transferContent: "BUSGO BKG789"}
+    deactivate GW
+
+    %% 3. Thanh toán qua Ngân hàng
+    Note over PAX,BANK: 3. Khách quét QR trên App Ngân Hàng (Napas247)
+    PAX->>BANK: Quét mã QR & Xác thực sinh trắc học FaceID / OTP
+    BANK->>BANK: Xử lý trừ tiền tài khoản & chuyển Napas247
+
+    %% 4. Webhook IPN & Tức Thì Đồng Bộ
+    Note over BANK,GW: 4. Ngân hàng gửi Webhook IPN về Gateway
+    BANK->>GW: POST /api/v1/webhooks/vietqr-ipn<br/>{reference: "BKG789", amount: 480000, transId: "NAPAS998822"}
+    activate GW
+    GW->>GW: Kiểm tra Idempotency & Đối soát số tiền
+    GW->>DB: UPDATE bookings SET status='CONFIRMED', payment_status='PAID'
+    GW->>DB: INSERT INTO tickets (ticketId, qr_payload, status='ISSUED')
+    GW->>WS: Emit to user "booking:BKG-789" event: "payment_confirmed"<br/>{bookingId: "BKG-789", tickets: [...]}
+    GW->>WS: Broadcast room "trip:TRIP101" event: "seat_status_changed"<br/>{seats: ["A01", "A02"], status: "CONFIRMED"}
+    GW-->>BANK: 200 OK {status: "SUCCESS"}
+    deactivate GW
+
+    %% 5. Giao diện người dùng cập nhật
+    WS-->>PAX: Màn hình PAX-013 tự chuyển sang PAX-014 (Vé Điện Tử Kèm QR)
+    WS-->>MGR: Màn hình MGR-013 chuyển ghế A01, A02 sang Đỏ (Đã bán)
+    WS-->>DRI: Màn hình DRI-007 thêm 2 hành khách vào danh sách đón

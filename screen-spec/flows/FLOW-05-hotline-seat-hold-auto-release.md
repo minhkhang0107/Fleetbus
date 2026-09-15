@@ -23,6 +23,11 @@ Hệ thống cung cấp giải pháp **Giữ Chỗ Hotline Có Thời Gian Sốn
 
 ## 2. Sơ Đồ Trình Tự Tương Tác (Mermaid Sequence Diagram)
 
+> [!TIP]
+> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/FLOW-05-hotline-seat-hold-auto-release.svg) | [Xem ảnh PNG HD](./images/FLOW-05-hotline-seat-hold-auto-release.png)
+
+![UML Sequence Diagram FLOW-05](./images/FLOW-05-hotline-seat-hold-auto-release.svg)
+
 ```mermaid
 sequenceDiagram
     autonumber
