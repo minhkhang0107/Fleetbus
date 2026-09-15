@@ -58,4 +58,43 @@ describe('Phase 7: Live GPS Telemetry, Radar & Disruption Test Suite', () => {
     assert.strictEqual(checkDisruption.data.new_plate_number, '29B-999.88');
     assert.strictEqual(checkDisruption.data.type, 'VEHICLE_REPLACEMENT');
   });
+
+  it('TC-TRACK-05: Should detect stale GPS telemetry and display rest-stop status (PAX-018, PAX-019, REV-07)', () => {
+    const t0 = 1756300000000;
+    // 1. Stale GPS telemetry (>60s lag)
+    trackingService.updateBusPosition('trp_stale_01', {
+      lat: 20.4500,
+      lng: 105.9000,
+      speed_kmh: 60,
+      bearing_deg: 180,
+      plate_number: '29B-888.99',
+      mockNow: t0
+    });
+
+    const staleHud = trackingService.getLiveTrackingHUD('trp_stale_01', 20.9806, 105.8413, t0 + 120000); // 120s later
+    assert.strictEqual(staleHud.success, true);
+    assert.strictEqual(staleHud.data.is_stale, true);
+    assert.strictEqual(staleHud.data.telemetry_age_seconds, 120);
+    assert.ok(staleHud.data.stale_warning.includes('Tín hiệu GPS'));
+
+    // 2. Rest-stop status
+    trackingService.updateBusPosition('trp_rest_01', {
+      lat: 20.2500,
+      lng: 105.9700,
+      speed_kmh: 0,
+      bearing_deg: 0,
+      plate_number: '29B-123.45',
+      is_at_rest_stop: true,
+      rest_stop_name: 'Trạm dừng chân Cao tốc Ninh Bình',
+      estimated_rest_minutes: 20,
+      mockNow: t0
+    });
+
+    const restHud = trackingService.getLiveTrackingHUD('trp_rest_01', 19.8067, 105.7852, t0 + 5000);
+    assert.strictEqual(restHud.success, true);
+    assert.strictEqual(restHud.data.is_at_rest_stop, true);
+    assert.strictEqual(restHud.data.rest_stop_name, 'Trạm dừng chân Cao tốc Ninh Bình');
+    assert.strictEqual(restHud.data.estimated_rest_minutes, 20);
+    assert.ok(restHud.data.hud_status_text.includes('Xe đang dừng nghỉ tại Trạm dừng chân Cao tốc Ninh Bình'));
+  });
 });

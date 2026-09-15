@@ -3,7 +3,15 @@
  * Implements PAX-013 (VietQR Payment), PAX-014/015 (Verification & Success), PAX-016 (My Tickets), PAX-017 (Dynamic QR Ticket).
  */
 
-import { generateVietQRPayload, generateDynamicTicketQR, verifyDynamicTicketQR } from '../core/cryptoEngine.js';
+import {
+  generateVietQRPayload,
+  generateDynamicTicketQR,
+  verifyDynamicTicketQR,
+  generateGroupBoardingQR,
+  verifyGroupBoardingQR,
+  generateTicketPin,
+  verifyTicketPin
+} from '../core/cryptoEngine.js';
 import { formatPNR } from '../core/formatters.js';
 
 export class PassengerPaymentService {
@@ -235,10 +243,178 @@ export class PassengerPaymentService {
   }
 
   /**
-   * Driver QR Scan validation endpoint
+   * PAX-013 / PAX-014: Active resume polling & manual confirmation trigger (REV-02)
    */
-  validateAndBoardTicket(qrString, mockNow = Date.now()) {
-    const qrCheck = verifyDynamicTicketQR(qrString, this.secretKey, mockNow);
+  checkPaymentStatus(orderId, { manualTrigger = false, mockNow = Date.now() } = {}) {
+    const order = this.orders.get(orderId);
+    if (!order) {
+      return { success: false, error: 'Không tìm thấy đơn hàng', code: 'ORDER_NOT_FOUND' };
+    }
+
+    // Check expiry
+    if (order.payment_status === 'PENDING_PAYMENT' && mockNow > new Date(order.expires_at).getTime()) {
+      order.payment_status = 'EXPIRED';
+      return { success: false, error: 'Đơn hàng đã hết hạn thanh toán', code: 'PAYMENT_EXPIRED', data: order };
+    }
+
+    // If user explicitly pressed "Tôi đã chuyển tiền" (manualTrigger) and still pending,
+    // trigger instantaneous bank reconciliation
+    if (manualTrigger && order.payment_status === 'PENDING_PAYMENT') {
+      const settleRes = this.settlePayment(orderId, `manual_tx_${mockNow}`, mockNow);
+      if (settleRes.success) {
+        return {
+          success: true,
+          payment_status: 'PAID',
+          is_settled: true,
+          reconciliation_mode: 'MANUAL_TRIGGER',
+          data: settleRes.data.order,
+          tickets: settleRes.data.tickets
+        };
+      }
+    }
+
+    return {
+      success: true,
+      payment_status: order.payment_status,
+      is_settled: order.payment_status === 'PAID',
+      reconciliation_mode: 'ACTIVE_POLL',
+      data: order,
+      tickets: order.ticket_ids ? order.ticket_ids.map(id => this.tickets.get(id)).filter(Boolean) : []
+    };
+  }
+
+  /**
+   * PAX-017 / REV-01: Aggregate Group Boarding Pass for multi-ticket orders
+   */
+  getGroupBoardingPass(orderIdOrPnr, mockNow = Date.now()) {
+    let order = this.orders.get(orderIdOrPnr);
+    if (!order && this.pnrIndex.has(orderIdOrPnr)) {
+      order = this.orders.get(this.pnrIndex.get(orderIdOrPnr));
+    }
+    if (!order) {
+      return { success: false, error: 'Không tìm thấy đơn hàng tương ứng', code: 'ORDER_NOT_FOUND' };
+    }
+
+    const orderTickets = (order.ticket_ids || []).map(id => this.tickets.get(id)).filter(Boolean);
+    const activeTickets = orderTickets.filter(t => t.status === 'ACTIVE');
+
+    if (activeTickets.length === 0) {
+      return { success: false, error: 'Không còn vé khả dụng để xuất vé đoàn', code: 'NO_ACTIVE_TICKETS' };
+    }
+
+    const groupQr = generateGroupBoardingQR(activeTickets, this.secretKey, mockNow);
+
+    return {
+      success: true,
+      data: {
+        pnr: order.pnr,
+        order_id: order.order_id,
+        total_tickets: orderTickets.length,
+        active_tickets_count: activeTickets.length,
+        group_qr: groupQr,
+        tickets: orderTickets
+      }
+    };
+  }
+
+  /**
+   * PAX-017 / REV-01: Delegate / Share Ticket to companion with offline 6-digit PIN
+   */
+  delegateTicket(ticketId, { delegateToPhone, delegateToName, mockNow = Date.now() }) {
+    const ticket = this.tickets.get(ticketId);
+    if (!ticket) {
+      return { success: false, error: 'Không tìm thấy vé', code: 'TICKET_NOT_FOUND' };
+    }
+
+    if (ticket.status !== 'ACTIVE') {
+      return { success: false, error: `Không thể chia sẻ vé đang ở trạng thái ${ticket.status}`, code: 'TICKET_NOT_ACTIVE' };
+    }
+
+    const pin = generateTicketPin(ticketId, this.secretKey);
+    const shareLink = `https://busgo.vn/ticket/share?t=${ticketId}&pin=${pin}`;
+
+    ticket.delegated_to = {
+      phone: delegateToPhone,
+      name: delegateToName,
+      pin,
+      delegated_at: new Date(mockNow).toISOString(),
+      share_link: shareLink
+    };
+
+    return {
+      success: true,
+      message: `Đã tạo mã chia sẻ vé cho ${delegateToName} (${delegateToPhone})`,
+      data: {
+        ticket_id: ticketId,
+        pnr: ticket.pnr,
+        seat_code: ticket.seat_code,
+        delegate_phone: delegateToPhone,
+        offline_pin: pin,
+        share_link: shareLink,
+        sms_preview: `[BusGo] Bạn nhận được vé xe tuyến ${ticket.route_name}, Ghế ${ticket.seat_code}. Xuất trình mã PIN: ${pin} hoặc mở link: ${shareLink}`
+      }
+    };
+  }
+
+  /**
+   * Driver QR Scan / Group QR / Offline PIN validation endpoint (REV-01, REV-03)
+   */
+  validateAndBoardTicket(inputString, mockNow = Date.now()) {
+    if (!inputString) return { success: false, error: 'Chuỗi quét hoặc mã PIN không được để trống' };
+
+    // Case A: Group Boarding QR (BUSGO_GRP|...)
+    if (inputString.startsWith('BUSGO_GRP|')) {
+      const groupCheck = verifyGroupBoardingQR(inputString, this.secretKey, mockNow);
+      if (!groupCheck.isValid) {
+        return { success: false, error: `Mã QR nhóm không hợp lệ (${groupCheck.reason})`, code: groupCheck.reason };
+      }
+
+      const boardedTickets = [];
+      for (const tktId of groupCheck.ticket_ids) {
+        const ticket = this.tickets.get(tktId);
+        if (ticket && ticket.status === 'ACTIVE') {
+          ticket.status = 'BOARDED';
+          ticket.boarded_at = new Date(mockNow).toISOString();
+          boardedTickets.push(ticket);
+        }
+      }
+
+      return {
+        success: true,
+        isGroup: true,
+        message: `Soát vé đoàn thành công! Đã cho ${boardedTickets.length}/${groupCheck.ticket_count} khách lên xe`,
+        data: {
+          pnr: groupCheck.pnr,
+          boarded_count: boardedTickets.length,
+          tickets: boardedTickets
+        }
+      };
+    }
+
+    // Case B: 6-digit PIN (Format: PIN:ticketId:pin or just ticketId with pin lookup)
+    if (inputString.startsWith('PIN:')) {
+      const [, ticketId, pin] = inputString.split(':');
+      const ticket = this.tickets.get(ticketId);
+      if (!ticket) return { success: false, error: 'Không tìm thấy vé trong hệ thống', code: 'TICKET_NOT_FOUND' };
+
+      const pinCheck = verifyTicketPin(ticketId, pin, this.secretKey);
+      if (!pinCheck.isValid) return { success: false, error: 'Mã PIN vé không chính xác', code: 'INVALID_PIN' };
+
+      if (ticket.status === 'BOARDED') {
+        return { success: false, error: `Vé này đã lên xe lúc ${ticket.boarded_at}`, code: 'TICKET_ALREADY_USED' };
+      }
+
+      ticket.status = 'BOARDED';
+      ticket.boarded_at = new Date(mockNow).toISOString();
+      return {
+        success: true,
+        message: `Xác thực mã PIN thành công! Khách ${ticket.passenger_name} (Ghế ${ticket.seat_code}) lên xe`,
+        data: ticket
+      };
+    }
+
+    // Case C: Standard Dynamic TOTP QR (BUSGO|...)
+    const qrCheck = verifyDynamicTicketQR(inputString, this.secretKey, mockNow);
     if (!qrCheck.isValid) {
       return { success: false, error: `Mã QR không hợp lệ: ${qrCheck.reason}`, code: qrCheck.reason };
     }
