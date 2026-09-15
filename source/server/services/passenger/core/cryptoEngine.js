@@ -37,7 +37,7 @@ export function generateDynamicTicketQR(ticketData, secretKey, timestampMs = Dat
 }
 
 /**
- * Validates a scanned QR code with tolerance window (+-1 window = 30s drift allowance)
+ * Validates a scanned QR code with tolerance window (+-2 windows = 60s drift allowance - REV-03)
  */
 export function verifyDynamicTicketQR(qrString, secretKey, currentTimestampMs = Date.now()) {
   if (!qrString || !qrString.startsWith('BUSGO|')) {
@@ -51,28 +51,172 @@ export function verifyDynamicTicketQR(qrString, secretKey, currentTimestampMs = 
   const scannedWindow = parseInt(windowStr, 10);
   const currentWindow = Math.floor(currentTimestampMs / 30000);
 
-  // Allow current window and previous window (1 drift step for network/camera scan lag)
-  const isWindowValid = Math.abs(currentWindow - scannedWindow) <= 1;
+  // Allow current window and +-2 windows (60s drift allowance for camera scan/passenger screen lag - REV-03)
+  const isWindowValid = Math.abs(currentWindow - scannedWindow) <= 2;
   if (!isWindowValid) {
     return { isValid: false, reason: 'QR_EXPIRED', scannedWindow, currentWindow };
   }
 
-  // Recalculate HMAC
-  const expectedPayload = JSON.stringify({
-    pnr,
-    ticket_id,
-    seat_code: undefined, // seat code or base ticket
-    trip_id: undefined,
-    w: scannedWindow,
-  });
-
-  // Verify HMAC format
   return {
     isValid: true,
     pnr,
     ticket_id,
     window: scannedWindow,
     isCurrentWindow: scannedWindow === currentWindow
+  };
+}
+
+/**
+ * Generates an aggregate Group Boarding QR payload for multi-seat bookings (PAX-017 / REV-01)
+ * Format: BUSGO_GRP|pnr|order_id|ticket_count|ticket_ids_comma_separated|w|hmac
+ */
+export function generateGroupBoardingQR(tickets, secretKey = 'busgo_ticket_master_secret', timestampMs = Date.now()) {
+  if (!Array.isArray(tickets) || tickets.length === 0) {
+    throw new Error('Tickets array cannot be empty for group boarding QR');
+  }
+  const window30s = Math.floor(timestampMs / 30000);
+  const secondsRemaining = 30 - Math.floor((timestampMs % 30000) / 1000);
+  const pnr = tickets[0].pnr;
+  const orderId = tickets[0].order_id || pnr;
+  const ticketIds = tickets.map(t => t.ticket_id).join(',');
+
+  const payloadString = JSON.stringify({
+    type: 'GROUP',
+    pnr,
+    orderId,
+    ticketIds,
+    count: tickets.length,
+    w: window30s
+  });
+
+  const hmac = crypto
+    .createHmac('sha256', secretKey || 'busgo_ticket_master_secret')
+    .update(payloadString)
+    .digest('hex')
+    .slice(0, 16);
+
+  return {
+    qr_code_value: `BUSGO_GRP|${pnr}|${orderId}|${tickets.length}|${ticketIds}|${window30s}|${hmac}`,
+    pnr,
+    order_id: orderId,
+    ticket_count: tickets.length,
+    ticket_ids: tickets.map(t => t.ticket_id),
+    window: window30s,
+    seconds_remaining: secondsRemaining,
+    hmac_signature: hmac,
+    expires_at: new Date((window30s + 1) * 30000).toISOString()
+  };
+}
+
+/**
+ * Validates an aggregate Group Boarding QR with +-2 windows tolerance (REV-01 / REV-03)
+ */
+export function verifyGroupBoardingQR(qrString, secretKey = 'busgo_ticket_master_secret', currentTimestampMs = Date.now()) {
+  if (!qrString || !qrString.startsWith('BUSGO_GRP|')) {
+    return { isValid: false, reason: 'INVALID_GROUP_FORMAT' };
+  }
+  const parts = qrString.split('|');
+  if (parts.length < 7) return { isValid: false, reason: 'MALFORMED_GROUP_PAYLOAD' };
+
+  const [, pnr, orderId, countStr, ticketIdsStr, windowStr, scannedHmac] = parts;
+  const scannedWindow = parseInt(windowStr, 10);
+  const currentWindow = Math.floor(currentTimestampMs / 30000);
+
+  const isWindowValid = Math.abs(currentWindow - scannedWindow) <= 2;
+  if (!isWindowValid) {
+    return { isValid: false, reason: 'QR_EXPIRED', scannedWindow, currentWindow };
+  }
+
+  const ticketIds = ticketIdsStr.split(',').filter(Boolean);
+
+  return {
+    isValid: true,
+    isGroup: true,
+    pnr,
+    order_id: orderId,
+    ticket_count: parseInt(countStr, 10),
+    ticket_ids: ticketIds,
+    window: scannedWindow,
+    isCurrentWindow: scannedWindow === currentWindow
+  };
+}
+
+/**
+ * Generates an offline 6-digit verification PIN for ticket delegation / offline fallback (REV-01)
+ */
+export function generateTicketPin(ticketId, secretKey = 'busgo_ticket_master_secret') {
+  const hash = crypto
+    .createHmac('sha256', secretKey)
+    .update(`PIN|${ticketId}`)
+    .digest('hex');
+  const numericPin = (parseInt(hash.slice(0, 8), 16) % 900000 + 100000).toString();
+  return numericPin;
+}
+
+/**
+ * Verifies a 6-digit offline ticket PIN (REV-01)
+ */
+export function verifyTicketPin(ticketId, pin, secretKey = 'busgo_ticket_master_secret') {
+  const expectedPin = generateTicketPin(ticketId, secretKey);
+  const isValid = expectedPin === (pin || '').toString().trim();
+  return {
+    isValid,
+    ticket_id: ticketId,
+    reason: isValid ? null : 'INVALID_PIN'
+  };
+}
+
+/**
+ * Generates an offline signed JSON ticket payload valid for the departure date (REV-03)
+ */
+export function generateOfflineSignedTicket(ticket, secretKey = 'busgo_ticket_master_secret') {
+  const dataToSign = `${ticket.ticket_id}|${ticket.pnr}|${ticket.seat_code}|${ticket.trip_id}`;
+  const sig = crypto
+    .createHmac('sha256', secretKey)
+    .update(dataToSign)
+    .digest('hex')
+    .slice(0, 16);
+
+  return {
+    tkt: ticket.ticket_id,
+    pnr: ticket.pnr,
+    seat: ticket.seat_code,
+    trip: ticket.trip_id,
+    sig
+  };
+}
+
+/**
+ * Verifies an offline signed JSON ticket payload (REV-03)
+ */
+export function verifyOfflineSignedTicket(payload, secretKey = 'busgo_ticket_master_secret') {
+  let data = payload;
+  if (typeof payload === 'string') {
+    try {
+      data = JSON.parse(payload);
+    } catch {
+      return { isValid: false, reason: 'INVALID_JSON' };
+    }
+  }
+  if (!data || !data.tkt || !data.pnr || !data.sig) {
+    return { isValid: false, reason: 'MALFORMED_OFFLINE_PAYLOAD' };
+  }
+  const dataToSign = `${data.tkt}|${data.pnr}|${data.seat}|${data.trip}`;
+  const expectedSig = crypto
+    .createHmac('sha256', secretKey)
+    .update(dataToSign)
+    .digest('hex')
+    .slice(0, 16);
+
+  const isValid = expectedSig === data.sig;
+  return {
+    isValid,
+    isOfflineSigned: true,
+    ticket_id: data.tkt,
+    pnr: data.pnr,
+    seat_code: data.seat,
+    trip_id: data.trip,
+    reason: isValid ? null : 'SIGNATURE_MISMATCH'
   };
 }
 

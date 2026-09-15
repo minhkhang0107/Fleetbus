@@ -14,6 +14,12 @@ import {
 import {
   generateDynamicTicketQR,
   verifyDynamicTicketQR,
+  generateGroupBoardingQR,
+  verifyGroupBoardingQR,
+  generateTicketPin,
+  verifyTicketPin,
+  generateOfflineSignedTicket,
+  verifyOfflineSignedTicket,
   crc16Ccitt,
   generateVietQRPayload,
   calculateHaversineDistance,
@@ -114,5 +120,73 @@ describe('Phase 1: Core Design System & Utilities Test Suite', () => {
     const noRefund = calculateRefundAmount(220000, depDate6h);
     assert.strictEqual(noRefund.tier, 'NO_REFUND');
     assert.strictEqual(noRefund.refundAmount, 0);
+  });
+
+  it('TC-CORE-04B: Should verify dynamic QR with +-2 window tolerance (60s drift allowance - REV-03)', () => {
+    const ticket = { pnr: 'BG-88219', ticket_id: 'tkt_88219_A01', seat_code: 'A01', trip_id: 'trp_01' };
+    const baseNow = 1756300000000;
+    const qrResult = generateDynamicTicketQR(ticket, 'busgo_ticket_master_secret', baseNow);
+
+    // Same window
+    const checkSame = verifyDynamicTicketQR(qrResult.qr_code_value, 'busgo_ticket_master_secret', baseNow);
+    assert.strictEqual(checkSame.isValid, true);
+    assert.strictEqual(checkSame.isCurrentWindow, true);
+
+    // 1 window ahead (+30s)
+    const check1Ahead = verifyDynamicTicketQR(qrResult.qr_code_value, 'busgo_ticket_master_secret', baseNow + 30000);
+    assert.strictEqual(check1Ahead.isValid, true);
+
+    // 2 windows ahead (+60s) -> Valid under REV-03
+    const check2Ahead = verifyDynamicTicketQR(qrResult.qr_code_value, 'busgo_ticket_master_secret', baseNow + 60000);
+    assert.strictEqual(check2Ahead.isValid, true);
+
+    // 3 windows ahead (+90s) -> Invalid
+    const check3Ahead = verifyDynamicTicketQR(qrResult.qr_code_value, 'busgo_ticket_master_secret', baseNow + 90000);
+    assert.strictEqual(check3Ahead.isValid, false);
+    assert.strictEqual(check3Ahead.reason, 'QR_EXPIRED');
+  });
+
+  it('TC-CORE-08: Should generate and verify aggregate group boarding QR (REV-01)', () => {
+    const tickets = [
+      { ticket_id: 'tkt_01', pnr: 'BG-GRP-11', order_id: 'ord_11', seat_code: 'A01' },
+      { ticket_id: 'tkt_02', pnr: 'BG-GRP-11', order_id: 'ord_11', seat_code: 'A02' },
+      { ticket_id: 'tkt_03', pnr: 'BG-GRP-11', order_id: 'ord_11', seat_code: 'A03' }
+    ];
+    const baseNow = 1756300000000;
+    const groupQR = generateGroupBoardingQR(tickets, 'busgo_ticket_master_secret', baseNow);
+
+    assert.ok(groupQR.qr_code_value.startsWith('BUSGO_GRP|BG-GRP-11|ord_11|3|'));
+    assert.strictEqual(groupQR.ticket_count, 3);
+    assert.deepStrictEqual(groupQR.ticket_ids, ['tkt_01', 'tkt_02', 'tkt_03']);
+
+    const verified = verifyGroupBoardingQR(groupQR.qr_code_value, 'busgo_ticket_master_secret', baseNow + 30000);
+    assert.strictEqual(verified.isValid, true);
+    assert.strictEqual(verified.isGroup, true);
+    assert.strictEqual(verified.pnr, 'BG-GRP-11');
+    assert.strictEqual(verified.ticket_count, 3);
+    assert.deepStrictEqual(verified.ticket_ids, ['tkt_01', 'tkt_02', 'tkt_03']);
+  });
+
+  it('TC-CORE-09: Should generate and verify offline 6-digit PIN and signed offline ticket (REV-01, REV-03)', () => {
+    const ticketId = 'tkt_test_998811';
+    const pin = generateTicketPin(ticketId, 'busgo_secret_123');
+    assert.match(pin, /^\d{6}$/);
+
+    const checkPinValid = verifyTicketPin(ticketId, pin, 'busgo_secret_123');
+    assert.strictEqual(checkPinValid.isValid, true);
+
+    const checkPinWrong = verifyTicketPin(ticketId, '000000', 'busgo_secret_123');
+    assert.strictEqual(checkPinWrong.isValid, false);
+    assert.strictEqual(checkPinWrong.reason, 'INVALID_PIN');
+
+    // Offline signed ticket payload
+    const ticket = { ticket_id: 'tkt_off_01', pnr: 'BG-991', seat_code: 'B02', trip_id: 'trp_100' };
+    const offlineSigned = generateOfflineSignedTicket(ticket, 'busgo_secret_123');
+    assert.ok(offlineSigned.sig);
+    assert.strictEqual(offlineSigned.tkt, 'tkt_off_01');
+
+    const verifiedTicket = verifyOfflineSignedTicket(offlineSigned, 'busgo_secret_123');
+    assert.strictEqual(verifiedTicket.isValid, true);
+    assert.strictEqual(verifiedTicket.ticket_id, 'tkt_off_01');
   });
 });
