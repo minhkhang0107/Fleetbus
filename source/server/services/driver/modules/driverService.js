@@ -3,7 +3,12 @@
  * Implements DRI-001 through DRI-019 for the commercial driver mobile/tablet platform.
  */
 
-import { verifyDynamicTicketQR } from '../../passenger/core/cryptoEngine.js';
+import {
+  verifyDynamicTicketQR,
+  verifyGroupBoardingQR,
+  verifyOfflineSignedTicket,
+  verifyTicketPin
+} from '../../passenger/core/cryptoEngine.js';
 
 export const MOCK_DRIVERS_DB = [
   {
@@ -267,13 +272,96 @@ export class DriverCockpitService {
   }
 
   /**
-   * DRI-009 / DRI-010: Scan Dynamic QR or Manual Boarding
+   * DRI-009 / DRI-010: Scan Dynamic QR, Group QR, Offline PIN, or Offline Signed Ticket (REV-01, REV-03)
    */
-  boardPassengerByQR(tripId, qrString, mockNow = Date.now()) {
+  boardPassengerByQR(tripId, inputString, mockNow = Date.now()) {
     const trip = this.activeTrips.get(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại' };
+    if (!inputString) return { success: false, error: 'Dữ liệu quét không được để trống' };
 
-    const qrCheck = verifyDynamicTicketQR(qrString, this.secretKey, mockNow);
+    // Case 1: Group Boarding QR (BUSGO_GRP|...)
+    if (typeof inputString === 'string' && inputString.startsWith('BUSGO_GRP|')) {
+      const groupCheck = verifyGroupBoardingQR(inputString, this.secretKey, mockNow);
+      if (!groupCheck.isValid) {
+        return { success: false, error: `Mã QR nhóm không hợp lệ (${groupCheck.reason})`, code: groupCheck.reason };
+      }
+
+      const boardedList = [];
+      for (const tktId of groupCheck.ticket_ids) {
+        const passenger = trip.manifest.find(m => m.ticket_id === tktId);
+        if (passenger && passenger.boarding_status !== 'BOARDED') {
+          passenger.boarding_status = 'BOARDED';
+          passenger.boarded_at = new Date(mockNow).toISOString();
+          trip.boarded_count += 1;
+          boardedList.push(passenger);
+        }
+      }
+
+      return {
+        success: true,
+        isGroup: true,
+        message: `Soát vé đoàn thành công: ${boardedList.length} khách đã lên xe`,
+        data: {
+          pnr: groupCheck.pnr,
+          boarded_passengers: boardedList
+        }
+      };
+    }
+
+    // Case 2: 6-digit Offline PIN (PIN:ticketId:pin)
+    if (typeof inputString === 'string' && inputString.startsWith('PIN:')) {
+      const [, ticketId, pin] = inputString.split(':');
+      const pinCheck = verifyTicketPin(ticketId, pin, this.secretKey);
+      if (!pinCheck.isValid) {
+        return { success: false, error: 'Mã PIN vé không chính xác', code: 'INVALID_PIN' };
+      }
+
+      const passenger = trip.manifest.find(m => m.ticket_id === ticketId);
+      if (!passenger) {
+        return { success: false, error: 'Vé không thuộc chuyến xe này', code: 'TICKET_WRONG_TRIP' };
+      }
+      if (passenger.boarding_status === 'BOARDED') {
+        return { success: false, error: `Khách ${passenger.passenger_name} đã lên xe trước đó!`, code: 'ALREADY_BOARDED' };
+      }
+
+      passenger.boarding_status = 'BOARDED';
+      passenger.boarded_at = new Date(mockNow).toISOString();
+      trip.boarded_count += 1;
+
+      return {
+        success: true,
+        message: `Xác thực PIN thành công: ${passenger.passenger_name} · Ghế ${passenger.seat_code}`,
+        data: passenger
+      };
+    }
+
+    // Case 3: Offline Signed JSON Ticket
+    if (typeof inputString === 'string' && inputString.trim().startsWith('{')) {
+      const offlineCheck = verifyOfflineSignedTicket(inputString, this.secretKey);
+      if (!offlineCheck.isValid) {
+        return { success: false, error: `Chữ ký vé offline không hợp lệ (${offlineCheck.reason})`, code: offlineCheck.reason };
+      }
+      const passenger = trip.manifest.find(m => m.ticket_id === offlineCheck.ticket_id || m.pnr === offlineCheck.pnr);
+      if (!passenger) return { success: false, error: 'Vé không thuộc chuyến xe này', code: 'TICKET_WRONG_TRIP' };
+
+      if (passenger.boarding_status === 'BOARDED') {
+        return { success: false, error: `Khách ${passenger.passenger_name} đã lên xe trước đó!`, code: 'ALREADY_BOARDED' };
+      }
+
+      passenger.boarding_status = 'BOARDED';
+      passenger.boarded_at = new Date(mockNow).toISOString();
+      trip.boarded_count += 1;
+
+      return {
+        success: true,
+        isOfflineSigned: true,
+        message: `Soát vé offline thành công: ${passenger.passenger_name} · Ghế ${passenger.seat_code}`,
+        data: passenger
+      };
+    }
+
+    // Case 4: Standard Dynamic TOTP QR (BUSGO|...) with +-2 window tolerance
+    const qrCheck = verifyDynamicTicketQR(inputString, this.secretKey, mockNow);
     if (!qrCheck.isValid) {
       return { success: false, error: `Mã QR không hợp lệ (${qrCheck.reason})`, code: qrCheck.reason };
     }
@@ -310,23 +398,123 @@ export class DriverCockpitService {
   }
 
   /**
-   * DRI-012: Collect COD Cash Fare
+   * DRI-012: Collect COD Cash Fare with change due settlement options (REV-04)
    */
-  collectCod(tripId, ticketId, collectedAmountVnd) {
+  collectCod(tripId, ticketId, payloadOrAmount) {
     const trip = this.activeTrips.get(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại' };
 
     const item = trip.manifest.find(m => m.ticket_id === ticketId);
     if (!item) return { success: false, error: 'Không tìm thấy vé trong danh sách' };
 
+    const payload = typeof payloadOrAmount === 'number'
+      ? { amount_collected_vnd: payloadOrAmount }
+      : (payloadOrAmount || {});
+
+    const fareAmount = payload.fare_amount_vnd || item.cod_amount_vnd || 0;
+    const collectedAmount = payload.amount_collected_vnd || fareAmount;
+    const changeDue = Math.max(0, collectedAmount - fareAmount);
+    const method = payload.change_settlement_method || 'CASH_RETURNED';
+
+    let debtReceiptCode = null;
+    let payoutLocation = null;
+
+    if (method === 'REST_STOP_DEBT_RECEIPT') {
+      debtReceiptCode = `DR-${ticketId.slice(-6).toUpperCase()}-${Math.round(changeDue / 1000)}K`;
+      payoutLocation = 'Trạm dừng nghỉ kế tiếp / Bến xe đích';
+    }
+
     item.cod_collected = true;
-    item.cod_collected_amount = collectedAmountVnd;
-    trip.total_cod_collected_vnd += collectedAmountVnd;
+    item.cod_collected_amount = collectedAmount;
+    item.payment_status = 'SUCCESS';
+    item.boarding_status = 'BOARDED';
+    item.change_settlement = {
+      method,
+      amount_collected_vnd: collectedAmount,
+      fare_amount_vnd: fareAmount,
+      change_due_vnd: changeDue,
+      debt_receipt_code: debtReceiptCode,
+      payout_location: payoutLocation
+    };
+
+    trip.total_cod_collected_vnd += fareAmount;
 
     return {
       success: true,
-      message: `Đã thu COD ${collectedAmountVnd} đ từ khách ${item.passenger_name}`,
+      message: `Đã thu COD ${fareAmount.toLocaleString('vi-VN')} đ từ khách ${item.passenger_name}`,
       data: item
+    };
+  }
+
+  /**
+   * DRI-006 / DRI-007: Onboard Hail Passenger (Đón khách vẫy dọc đường - REV-05)
+   */
+  onboardHailPassenger(tripId, {
+    passenger_name = 'Khách Vẫy Dọc Đường',
+    phone = '0901234567',
+    dropoff_stop_id,
+    dropoff_stop_name,
+    seat_code,
+    fare_amount_vnd = 220000,
+    amount_collected_vnd,
+    payment_method = 'CASH',
+    change_settlement_method = 'CASH_RETURNED'
+  }, mockNow = Date.now()) {
+    const trip = this.activeTrips.get(tripId);
+    if (!trip) return { success: false, error: 'Chuyến xe không tồn tại' };
+
+    // Validate seat availability
+    const isOccupied = trip.manifest.some(m => m.seat_code === seat_code && m.boarding_status !== 'NO_SHOW');
+    if (isOccupied) {
+      return { success: false, error: `Ghế ${seat_code} đã có người ngồi hoặc đã được đặt!`, code: 'SEAT_OCCUPIED' };
+    }
+
+    const pnr = `BG-HAIL-${Math.floor(100 + Math.random() * 900)}`;
+    const ticketId = `tkt_hail_${Date.now()}_${seat_code}`;
+    const collected = amount_collected_vnd || fare_amount_vnd;
+    const changeDue = Math.max(0, collected - fare_amount_vnd);
+
+    let debtReceiptCode = null;
+    if (change_settlement_method === 'REST_STOP_DEBT_RECEIPT') {
+      debtReceiptCode = `DR-${ticketId.slice(-6).toUpperCase()}-${Math.round(changeDue / 1000)}K`;
+    }
+
+    const currentStop = trip.stops[trip.current_stop_index] || trip.stops[0];
+
+    const newPassenger = {
+      ticket_id: ticketId,
+      pnr,
+      seat_code,
+      deck: seat_code.startsWith('A') ? 1 : 2,
+      passenger_name,
+      phone_masked: phone.slice(0, 3) + '***' + phone.slice(-3),
+      pickup_stop_id: currentStop ? currentStop.stop_id : 'stp_hail',
+      dropoff_stop_id: dropoff_stop_id || trip.stops[trip.stops.length - 1]?.stop_id,
+      dropoff_stop_name: dropoff_stop_name || trip.stops[trip.stops.length - 1]?.name,
+      boarding_status: 'BOARDED',
+      boarded_at: new Date(mockNow).toISOString(),
+      payment_method,
+      payment_status: 'SUCCESS',
+      cod_amount_vnd: 0,
+      is_hail_passenger: true,
+      change_settlement: {
+        method: change_settlement_method,
+        amount_collected_vnd: collected,
+        fare_amount_vnd,
+        change_due_vnd: changeDue,
+        debt_receipt_code: debtReceiptCode
+      }
+    };
+
+    trip.manifest.push(newPassenger);
+    trip.boarded_count += 1;
+    trip.booked_passengers_count += 1;
+    trip.total_cod_collected_vnd += fare_amount_vnd;
+
+    return {
+      success: true,
+      message: `Đón khách vẫy thành công! Ghế: ${seat_code}, đã thu ${fare_amount_vnd.toLocaleString('vi-VN')} đ`,
+      data: newPassenger
     };
   }
 
