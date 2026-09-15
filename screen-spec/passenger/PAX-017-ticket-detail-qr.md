@@ -187,21 +187,69 @@ Cached locally in SQLite upon booking confirmation, valid throughout departure d
 }
 ```
 
+### 7.2. Get Group Boarding Pass (REV-01)
+- **Endpoint:** `GET /api/v1/passenger/orders/{orderId}/group-qr`
+- **Auth:** Bearer
+- **Response `200 OK`:**
+```json
+{
+  "status": "success",
+  "data": {
+    "order_id": "ord_88219a",
+    "pnr": "BG-88219",
+    "total_seats": 2,
+    "group_qr_payload": "BUSGO_GRP|BG-88219|2|tkt_88192a,tkt_88192b|59648457|e7b99c12df88a102",
+    "tickets": [
+      { "ticket_id": "tkt_88192a", "seat_code": "A01", "passenger_name": "Nguyễn Văn Nam", "status": "ISSUED" },
+      { "ticket_id": "tkt_88192b", "seat_code": "A02", "passenger_name": "Trần Thị Mai", "status": "ISSUED" }
+    ]
+  }
+}
+```
+
+### 7.3. Delegate Ticket via SMS & Offline PIN (REV-01)
+- **Endpoint:** `POST /api/v1/passenger/tickets/{ticketId}/delegate`
+- **Auth:** Bearer
+- **Request Body:**
+```json
+{
+  "delegate_to_phone": "0987654321",
+  "delegate_to_name": "Lê Văn An"
+}
+```
+- **Response `200 OK`:**
+```json
+{
+  "status": "success",
+  "data": {
+    "ticket_id": "tkt_88192a",
+    "delegate_to_phone": "0987654321",
+    "delegate_to_name": "Lê Văn An",
+    "offline_pin": "682914",
+    "share_token": "sh_99812df09a",
+    "share_url": "https://busgo.vn/pass/sh_99812df09a",
+    "delegated_at": "2026-08-27T14:05:00Z"
+  }
+}
+```
+
 ---
 
 ## 8. Business Rules
 - `BR-TICKET-001`: Screen automatically boosts display brightness to 100% when viewed and restores user brightness upon exit.
 - `BR-TICKET-002`: If driver scans the ticket and marks `BOARDED`, the screen status pill instantly changes to `🟢 ĐÃ LÊN XE` via WebSocket event `PASSENGER_BOARDED`.
 - `BR-TICKET-003`: Offline mode guarantees QR is rendered from SQLite cache even without internet connectivity.
-- `BR-TICKET-004` (Multi-ticket Carousel & Group QR): For bookings with $\ge 2$ seats under the same PNR, the screen displays a horizontal pill switcher. Swiping toggles individual seat QR passes; tapping "QR Đoàn" produces a unified group boarding QR allowing the driver to board all passengers in one scan.
-- `BR-TICKET-005` (Ticket Sharing & Delegation): User can tap "Chia sẻ vé" to enter a recipient's phone number. The system sends an SMS with a secure authenticated web link (`https://busgo.vn/pass/:shareToken`) and displays a 6-digit offline PIN (`offline_pin`) allowing relatives without the mobile app to board seamlessly.
-- `BR-TICKET-006` (Drift Tolerance): Driver verification engine permits $\pm 2$ window steps ($\pm 60$ seconds) to prevent false rejections due to device clock discrepancies.
+- `BR-TICKET-004` (Multi-ticket Carousel & Group QR - REV-01): For bookings with $\ge 2$ seats under the same PNR, the screen displays a horizontal pill switcher. Swiping toggles individual seat QR passes; tapping "QR Đoàn" produces a unified group boarding QR allowing the driver to board all passengers in one scan.
+- `BR-TICKET-005` (Ticket Sharing & Delegation - REV-01): User can tap "Chia sẻ vé" to enter a recipient's phone number. The system sends an SMS with a secure authenticated web link (`https://busgo.vn/pass/:shareToken`) and displays a 6-digit offline PIN (`offline_pin`) allowing relatives without the mobile app to board seamlessly.
+- `BR-TICKET-006` (Drift Tolerance - REV-03): Driver verification engine permits $\pm 2$ window steps ($\pm 60$ seconds) to prevent false rejections due to device clock discrepancies.
 
 ---
 
 ## 9. Analytics & Telemetry
 - `TICKET_DETAIL_VIEWED`: `{ ticket_id: "tkt_88192a", is_offline: false }`
 - `QR_ZOOM_CLICKED`: `{ ticket_id: "tkt_88192a" }`
+- `GROUP_QR_VIEWED`: `{ pnr: "BG-88219", seat_count: 2 }`
+- `TICKET_DELEGATED`: `{ ticket_id: "tkt_88192a", delegate_phone: "098***321" }`
 - `DRIVER_CALL_CLICKED`: `{ trip_id: "trp_991823" }`
 - `CANCEL_TICKET_INTENT`: `{ ticket_id: "tkt_88192a" }`
 
@@ -215,6 +263,8 @@ Cached locally in SQLite upon booking confirmation, valid throughout departure d
 - **Status Boarded:** *"ĐÃ LÊN XE"*
 - **Track CTA:** *"THEO DÕI VỊ TRÍ XE TRỰC TIẾP"*
 - **Cancel CTA:** *"Hủy vé & Yêu cầu hoàn tiền"*
+- **Share Modal Title:** *"Chia sẻ vé cho người đi cùng"*
+- **Offline PIN Label:** *"Mã số dự phòng (Offline PIN)"*
 
 ---
 
@@ -233,6 +283,12 @@ Scenario: Realtime boarding status update
   Given the passenger is displaying PAX-017
   When the driver scans the QR code and submits BOARDED
   Then the status badge instantly updates to "ĐÃ LÊN XE" with a green checkmark animation.
+
+Scenario: Switch to unified group boarding QR
+  Given the passenger has a multi-seat booking (seats A01, A02)
+  When the passenger taps the "QR Đoàn" switcher tab
+  Then the app renders the unified group QR code
+  And driver can board all 2 seats with a single scan.
 ```
 
 ### Test Matrix:
@@ -241,3 +297,5 @@ Scenario: Realtime boarding status update
 | `TC-PAX-017-01` | Offline | Airplane mode | Successfully loads cached QR code from storage |
 | `TC-PAX-017-02` | Realtime | WS event `PASSENGER_BOARDED` | Changes status badge to "ĐÃ LÊN XE" |
 | `TC-PAX-017-03` | OS | App paused / exited | Restores original user screen brightness |
+| `TC-PAX-017-04` | Group Flow | Tap "QR Đoàn" switcher | Generates unified Group QR payload with total seat count |
+| `TC-PAX-017-05` | Delegation | Submit delegate phone | Returns web share link and deterministic 6-digit PIN |

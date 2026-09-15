@@ -22,6 +22,15 @@
   State: CONFIRMED                    State: PAYMENT_FAILED               State: HOLD_EXPIRED
   DB: INSERT booking, ticket          Redis Lock Released                 Redis Key Auto-Purged
   Broadcast WS: SEAT_BOOKED           User can Retry                      Redirect to PAX-009
+
+---
+*Hotline / Call-Center Seat Hold State Progression (MGR-020, REV-06):*
+[MGR-020 POS / Hotline] ── State: HELD_HOTLINE (hold_until = T - 30m or custom minutes)
+         │
+         ├───────────────────────────────────┬───────────────────────────────────┐
+         ▼ Customer Pays at Counter / Boards ▼ Hold Expires (Now > hold_until)   ▼ Clerk Cancels
+[MGR-020 POS Checkout] ── CONFIRMED/BOARDED  [Scheduler Worker] ── RELEASED       [MGR-020] ── CANCELLED
+  Payment: SUCCESS (Cash/POS)                 Seat returns to VACANT inventory     Seat returns to VACANT
 ```
 
 ### 1.1. Cross-Screen Invariant:
@@ -40,7 +49,7 @@
        ┌───────────────┐
        │   INITIATED   │ (Redirect to VNPAY/MoMo or Show Dynamic QR)
        └───────┬───────┘
-               │ Webhook Callback / Polling
+               │ Webhook Callback / Polling (3s fallback + "Tôi đã chuyển tiền" trigger - REV-02)
        ┌───────┴───────────────────────┬───────────────────────────────┐
        ▼                               ▼                               ▼
 ┌───────────────┐              ┌───────────────┐              ┌────────────────┐
@@ -64,10 +73,13 @@
 ## 3. Ticket Boarding & Manifest State Machine
 
 ```text
-[PAX-017 Ticket QR] ── State: ISSUED
+[PAX-017 Individual Ticket QR] ── State: ISSUED
          │
-         ▼ Driver Scans QR in DRI-009 (Offline Cryptographic Verification)
-[DRI-009 Scan QR] ── State: BOARDED (Local SQLite Outbox in DRI-015)
+         ├─► [Group Boarding QR (REV-01)] ── 1-scan check-in for all N seats in PNR
+         ├─► [Delegated SMS + 6-digit PIN (REV-01)] ── Driver checks in via DRI-010 PIN lookup
+         │
+         ▼ Driver Scans QR in DRI-009 (Dynamic TOTP +-2 windows or Offline Signed JSON - REV-03)
+[DRI-009 Scan QR / DRI-010 Manual PIN] ── State: BOARDED (Local SQLite Outbox in DRI-015)
          │
          ├─────────────────────────────────────────┐
          ▼ Network Available                       ▼ Zero Connectivity
@@ -76,6 +88,13 @@
          ▼ WS Broadcast
 [PAX-017 Ticket] -> Badge changes to "ĐÃ LÊN XE"
 [MGR-012 Manifest] -> Realtime Boarding Counter increments (+1)
+
+---
+*Onboard Hail Passenger State Flow (DRI-006 / DRI-007, REV-05):*
+[DRI-007 Manifest] ── Tap "THÊM KHÁCH DỌC ĐƯỜNG" ──► Select Vacant Seat
+         │
+         ▼ Driver collects Cash Fare (with optional Debt Receipt change settlement in DRI-012)
+[New Ticket Created] ── Immediate State: BOARDED ── Payment: SUCCESS ── Trip Counter: (+1)
 ```
 
 ---

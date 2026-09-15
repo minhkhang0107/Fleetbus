@@ -64,6 +64,7 @@
 | Scan Outcome | Visual Banner | Audio Tone | Haptic Pattern | System Action |
 | :--- | :--- | :--- | :--- | :--- |
 | **VALID (Paid)** | Green card: *"HỢP LỆ · ĐÃ LÊN XE"* | High-pitch Double Beep | 1 Short Click | Mark ticket `BOARDED`; queue to SQLite |
+| **VALID (Group QR)** | Green card: *"HỢP LỆ · VÉ ĐOÀN ({n} KHÁCH)"* | Fanfare Chime | 2 Crisp Clicks | Batch board all N tickets in PNR; queue to SQLite |
 | **VALID (COD Pending)** | Amber card: *"CẦN THU TIỀN COD"* | Triple Alert Chime | 2 Quick Pulses | Navigates to `DRI-012-cod.md` to collect cash |
 | **ALREADY BOARDED** | Red card: *"VÉ ĐÃ LÊN XE TRƯỚC ĐÓ"* | Low Buzz | Long Heavy Pulse | Block duplicate; display timestamp of scan |
 | **WRONG TRIP** | Red card: *"SAI CHUYẾN XE / SAI NGÀY"* | Low Buzz | Long Heavy Pulse | Show expected trip info on screen |
@@ -82,12 +83,12 @@
 
 ---
 
-## 6. Offline Validation Algorithm & Dual Format Support
+## 6. Offline Validation Algorithm & Multi-Format Support
 
 The scanner auto-detects payload format and executes instant local validation ($<150\text{ms}$):
 
 ```dart
-// Dart offline verification engine supporting both dynamic TOTP and daily static signature
+// Dart offline verification engine supporting dynamic TOTP, Group QR, and static offline signatures
 ScanResult verifyScannedPayload(String payload, String tripSecret, int currentTimestampMs) {
   // Format 1: Dynamic 30s TOTP string (BUSGO|pnr|tid|window|hmac)
   if (payload.startsWith('BUSGO|')) {
@@ -99,7 +100,7 @@ ScanResult verifyScannedPayload(String payload, String tripSecret, int currentTi
       final hmac = parts[4];
       final currentWindow = currentTimestampMs ~/ 30000;
       
-      // Permit +-2 windows (60s drift tolerance)
+      // Permit +-2 windows (60s drift tolerance - REV-03)
       if ((currentWindow - scannedWindow).abs() <= 2) {
         final expectedHmac = computeHmac16("{\"pnr\":\"$pnr\",\"ticket_id\":\"$tid\",\"w\":$scannedWindow}", tripSecret);
         if (hmac == expectedHmac) {
@@ -109,7 +110,27 @@ ScanResult verifyScannedPayload(String payload, String tripSecret, int currentTi
     }
   }
 
-  // Format 2: Offline JSON signature (Zero connectivity fallback / Printed Ticket)
+  // Format 2: Unified Group Boarding QR (BUSGO_GRP|pnr|seatCount|tids|window|hmac - REV-01)
+  if (payload.startsWith('BUSGO_GRP|')) {
+    final parts = payload.split('|');
+    if (parts.length >= 6) {
+      final pnr = parts[1];
+      final seatCount = int.parse(parts[2]);
+      final ticketIds = parts[3].split(',');
+      final scannedWindow = int.parse(parts[4]);
+      final hmac = parts[5];
+      final currentWindow = currentTimestampMs ~/ 30000;
+      
+      if ((currentWindow - scannedWindow).abs() <= 2) {
+        final expectedHmac = computeHmac16("{\"pnr\":\"$pnr\",\"seats\":$seatCount,\"tids\":\"${parts[3]}\",\"w\":$scannedWindow}", tripSecret);
+        if (hmac == expectedHmac) {
+          return ScanResult.validGroup(pnr: pnr, ticketIds: ticketIds, method: 'GROUP_TOTP');
+        }
+      }
+    }
+  }
+
+  // Format 3: Offline JSON signature (Zero connectivity fallback / Printed Ticket)
   try {
     final Map<String, dynamic> data = jsonDecode(payload);
     final expectedSig = hmacSha256("${data['tid']}:${data['trp']}:${data['seat']}:${data['iat']}", tripSecret);
@@ -126,11 +147,13 @@ ScanResult verifyScannedPayload(String payload, String tripSecret, int currentTi
   - `ticket_id: TEXT PRIMARY KEY`
   - `trip_id: TEXT`
   - `scanned_at: TEXT (ISO 8601)`
-  - `scan_method: TEXT ('DYNAMIC_TOTP' | 'STATIC_OFFLINE' | 'MANUAL_PIN')`
+  - `scan_method: TEXT ('DYNAMIC_TOTP' | 'GROUP_TOTP' | 'STATIC_OFFLINE' | 'MANUAL_PIN')`
   - `synced: INTEGER (0 = false, 1 = true)`
 
 ---
 
 ## 7. Acceptance Criteria & Test Matrix
 - **AC-001:** Scanning a valid signed QR marks ticket `BOARDED`, plays green chime, and queues event to SQLite within $<150\text{ms}$.
+- **AC-002:** Scanning a valid Group QR marks all tickets within the PNR as `BOARDED` simultaneously.
 - **TC-DRI-009-01:** Scanning a QR with an invalid HMAC signature produces red error card with low buzz.
+- **TC-DRI-009-02:** Scanning a valid Group QR successfully batch-boards all tickets and updates trip manifest counter.

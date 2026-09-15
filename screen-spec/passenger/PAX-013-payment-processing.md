@@ -116,9 +116,11 @@ Exit Points:
 ---
 
 ## 7. Business Rules
-- `BR-PAY-001`: Client listens to WebSocket event `PAYMENT_COMPLETED` on room `booking:{bookingId}`.
-- `BR-PAY-002`: When the WebSocket event fires, the client dismisses the webview/QR screen and transitions immediately to `PAX-014-payment-result.md` or `PAX-015-booking-success.md`.
-- `BR-PAY-003`: If user taps "Hủy thanh toán", display confirmation dialog: *"Bạn có chắc chắn muốn hủy giao dịch thanh toán này?"*.
+- `BR-PAY-001` (Payment Initiation & Idempotency): Payment transaction must include a valid idempotency key and match booking total amount exactly. Client listens to WebSocket event `PAYMENT_COMPLETED` on room `booking:{bookingId}`.
+- `BR-PAY-002` (Idempotent Webhooks & Instant Navigation): System accepts IPN webhook callbacks idempotently without re-issuing tickets. When the WebSocket event fires, client immediately navigates to `PAX-014-payment-result.md` or `PAX-015-booking-success.md`.
+- `BR-PAY-003` (App Lifecycle & Active Fallback Polling - REV-02): When the app returns to the foreground (resumes from banking app or multitasking), the client immediately queries `POST /api/v1/passenger/payments/:orderId/verify-status` and initiates a 3-second fallback polling loop to guarantee prompt payment resolution even if WebSocket disconnected during app switching.
+- `BR-PAY-004` (Manual Payment Confirmation Trigger - REV-02): Passenger tapping "Tôi đã chuyển tiền" triggers an immediate server-side bank reconciliation query, displaying a transient spinner without blocking the UI.
+- `BR-PAY-005` (Cancellation Confirmation): Tapping "Hủy thanh toán" displays confirmation dialog: *"Bạn có chắc chắn muốn hủy giao dịch thanh toán này?"* while preserving seat hold for remaining TTL.
 
 ---
 
@@ -127,12 +129,7 @@ Exit Points:
 - `ACCOUNT_NUMBER_COPIED`: `{ account: "9988221100" }`
 - `BANKING_APP_OPENED`: `{ bank_code: "MB" }`
 - `PAYMENT_WEBHOOK_RECEIVED`: `{ status: "SUCCESS", latency_ms: 6200 }`
-
-## 8. Business Rules
-- `BR-PAY-001`: Payment transaction must have a valid idempotency key and match the booking total amount exactly.
-- `BR-PAY-002`: System accepts IPN webhook callbacks idempotently; duplicate callbacks return 200 OK without re-issuing tickets.
-- `BR-PAY-003` (App Lifecycle & Active Fallback Polling): When the app returns to foreground (resumes from banking app or multitasking), the client immediately polls `GET /api/v1/passenger/bookings/:pnr/status` and starts a 3-second fallback polling interval to resolve payment status even if WebSocket connection dropped during app switching.
-- `BR-PAY-004` (Manual Payment Confirmation Trigger): Passenger tapping "Tôi đã chuyển tiền" triggers an immediate server-side bank reconciliation query, displaying a transient spinner without blocking the UI.
+- `MANUAL_PAYMENT_VERIFY_TRIGGERED`: `{ order_id: "ord_88219a", trigger: "USER_CLICK" }`
 
 ---
 

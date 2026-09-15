@@ -38,7 +38,10 @@
 │ │  ┃  Trạm dừng Liêm Tuyền (Điểm đón của bạn)  │  │
 │ │  ┃  [ 📍 Vị trí xe đang ở gần đây ]          │  │
 │ │  ┃                                           │  │
-│ │  ⚪ 16:10 (Dự kiến 16:15)                    │  │
+│ │  ☕ 16:00 (Dự kiến nghỉ 20 phút)             │  │
+│ │  ┃  Trạm dừng nghỉ Cao tốc Km120             │  │
+│ │  ┃                                           │  │
+│ │  ⚪ 16:45 (Dự kiến 16:50)                    │  │
 │ │  ┃  Bến xe Ninh Bình                         │  │
 │ │  ┃                                           │  │
 │ │  🔴 17:30 (Dự kiến 17:40 · Trễ +10p)         │  │
@@ -57,6 +60,7 @@
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `DragHandle` | Widget | Yes | UI Gesture | Interactive | Pull down dismisses to map |
 | `StopTimeline` | Custom Stepper | Yes | ETA API / WS | Passed / Current / Upcoming | Highlights user's pickup and dropoff |
+| `RestStopMilestone`| Timeline Item | Conditional | Segment Metadata | `is_rest_stop === true` | Shows coffee icon & rest minutes |
 | `TrafficPill` | Semantic Pill | Yes | Mapbox Traffic | Smooth / Moderate / Heavy | Displays traffic status |
 | `ProximityAlarmToggle`| Switch | Yes | Local Setting | Enabled (Default ON) | Toggles 2km geofence push notification |
 
@@ -94,6 +98,22 @@
         "is_user_pickup": true
       },
       {
+        "stop_id": "stp_rs_km120",
+        "name": "Trạm dừng nghỉ Cao tốc Km120",
+        "is_rest_stop": true,
+        "rest_duration_minutes": 20,
+        "planned_time": "16:00",
+        "predicted_time": "16:00",
+        "status": "UPCOMING"
+      },
+      {
+        "stop_id": "stp_nb_bx",
+        "name": "Bến xe Ninh Bình",
+        "planned_time": "16:45",
+        "predicted_time": "16:50",
+        "status": "UPCOMING"
+      },
+      {
         "stop_id": "stp_th_pb",
         "name": "Bến xe Phía Bắc",
         "planned_time": "17:30",
@@ -112,10 +132,13 @@
 - **Title:** *"Lộ trình & Dự kiến thời gian"*
 - **Passed Label:** *"Đã qua"*
 - **Next Stop Label:** *"Trạm kế tiếp"*
+- **Rest Stop Label:** *"Trạm dừng nghỉ (Dự kiến: {duration} phút)"*
 - **Proximity Alert:** *"Thông báo khi xe cách điểm đón 2 km"*
 
 ---
 
 ## 6. Acceptance Criteria & Test Matrix
 - **AC-001:** Given the bus passes Stop 1, the timeline updates Stop 1 icon to a green checkmark and recalculates ETA for subsequent stops.
+- **AC-002:** Rest stops are displayed with coffee icon and planned pause duration (`BR-TRACK-004`).
 - **TC-PAX-019-01:** Swipe down drawer smoothly animates back to `PAX-018-live-tracking.md`.
+- **TC-PAX-019-02:** Timeline displays rest stop milestone with estimated duration.

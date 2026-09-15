@@ -89,18 +89,49 @@ Next Screen:
 └───────────────────────────────────────────────────┘
 ```
 
+### 4.3. Pending Verification & Active Resume Polling State Wireframe (REV-02)
+```text
+┌───────────────────────────────────────────────────┐
+│ [←] Xác nhận thanh toán                 [⏳ 06:12]│
+├───────────────────────────────────────────────────┤
+│                                                   │
+│                     [ ⏳ ]                        │
+│         ĐANG XÁC THỰC GIAO DỊCH CHUYỂN TIỀN       │
+│                                                   │
+│  Đơn hàng: BG-88219 · Số tiền: 176.000 đ          │
+│  Ngân hàng: MBBank (STK: 9988221100)              │
+│                                                   │
+│ ┌─ ACTIVE VERIFICATION STATUS ─────────────────┐  │
+│ │ 🔄 Đang tự động đối soát với cổng thanh toán │  │
+│ │    (Tự động kiểm tra mỗi 3 giây)...          │  │
+│ │    Vui lòng không tắt ứng dụng lúc này       │  │
+│ └──────────────────────────────────────────────┘  │
+│                                                   │
+│ ┌─────────────────────────────────────────────┐   │
+│ │    🔄 TÔI ĐÃ CHUYỂN TIỀN — KIỂM TRA NGAY    │   │
+│ │                 (CTA - 64dp)                │   │
+│ └─────────────────────────────────────────────┘   │
+│                                                   │
+│  [ Quay lại trang hiển thị mã VietQR ]            │
+│  [ Cần hỗ trợ? Gọi hotline 1900 6868 ]            │
+│                                                   │
+└───────────────────────────────────────────────────┘
+```
+
 ---
 
 ## 5. Component-by-Component Spec
 
 | Component | Type | Required | Data Source | State | Interaction |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `StatusIconAnimation` | Lottie / SVG | Yes | Payment Status | Success / Failed / Late | Plays status animation |
+| `StatusIconAnimation` | Lottie / SVG | Yes | Payment Status | Success / Failed / Late / Pending | Plays status animation |
 | `StatusTitle` | Typography | Yes | Payment Status | Bold ($22\text{px}$) | None |
 | `ErrorReasonBox` | Alert Box | Conditional | Gateway Error Code | Red border / Slate text | None |
 | `RetryCTA` | Button | Yes | Flow State | Primary Blue | Pops back to PAX-012 with hold active |
 | `SwitchToCodCTA` | Button | Conditional | Trip COD Policy | Secondary Outline | Converts booking to COD mode |
 | `AutoRefundCTA` | Button | Conditional | Late Payment | Emerald Button | Triggers instant refund workflow |
+| `PendingPollingCard` | Progress Card | Conditional | Status === PENDING | Rotating indicator | Visual feedback of active 3s polling |
+| `ManualConfirmTransferCTA` | Button | Conditional | Status === PENDING | Primary Brand (Pulse) | Tapping fires instant server verify query |
 
 ---
 
@@ -126,18 +157,52 @@ Next Screen:
 }
 ```
 
+### 6.2. Active Payment Status Verification (REV-02)
+- **Endpoint:** `POST /api/v1/passenger/payments/{orderId}/verify-status`
+- **Auth:** Optional Bearer
+- **Request Body:**
+```json
+{
+  "manual_trigger": true,
+  "client_timestamp": "2026-08-27T14:03:50Z"
+}
+```
+- **Response `200 OK` (Payment Confirmed):**
+```json
+{
+  "status": "success",
+  "data": {
+    "order_id": "ord_88219a",
+    "pnr": "BG-88219",
+    "payment_status": "SUCCESS",
+    "verified_via": "GATEWAY_ACTIVE_QUERY",
+    "tickets": [
+      {
+        "ticket_id": "tkt_88192a",
+        "seat_code": "A02",
+        "status": "ISSUED"
+      }
+    ]
+  }
+}
+```
+
 ---
 
 ## 7. Business Rules
 - `BR-RESULT-001`: If payment status is `SUCCESS`, automatically advance to `PAX-015-booking-success.md` within $1.5\text{ seconds}$.
 - `BR-RESULT-002`: If user taps "Nhận hoàn tiền 100%", client triggers `POST /api/v1/payments/{id}/refund-request` and displays confirmation toast.
+- `BR-PAY-003` (Active Resume Polling - REV-02): When passenger switches back to the app from mobile banking, client enters pending verification mode and automatically executes active polling every $3\text{ seconds}$ (up to 30s) to guard against dropped WebSocket callbacks.
+- `BR-PAY-004` (Manual "Tôi đã chuyển tiền" Confirmation - REV-02): Tapping "Tôi đã chuyển tiền — Kiểm tra ngay" bypasses wait intervals and immediately calls `POST /api/v1/passenger/payments/{orderId}/verify-status`. If banking confirms settlement, immediately advances to `PAX-015`.
 
 ---
 
 ## 8. Analytics & Telemetry
-- `PAYMENT_RESULT_VIEWED`: `{ payment_id: "pay_99218a", status: "FAILED" | "LATE_SUCCESS" }`
+- `PAYMENT_RESULT_VIEWED`: `{ payment_id: "pay_99218a", status: "FAILED" | "LATE_SUCCESS" | "PENDING" }`
 - `PAYMENT_RETRY_CLICKED`: `{ from_method: "VNPAY" }`
 - `LATE_REFUND_REQUESTED`: `{ payment_id: "pay_99218a", amount: 176000 }`
+- `PAYMENT_RESUME_POLL_STARTED`: `{ order_id: "ord_88219a" }`
+- `MANUAL_PAYMENT_VERIFY_TRIGGERED`: `{ order_id: "ord_88219a", trigger: "USER_BUTTON" }`
 
 ---
 
@@ -147,6 +212,9 @@ Next Screen:
 - **Retry CTA:** *"Thử lại phương thức khác"*
 - **Late Title:** *"Giao dịch thanh toán trễ hạn"*
 - **Refund CTA:** *"Hoàn tiền 100% về tài khoản"*
+- **Pending Title:** *"Đang xác thực giao dịch chuyển tiền"*
+- **Pending Notice:** *"Đang tự động đối soát với cổng thanh toán (kiểm tra mỗi 3s)..."*
+- **Manual Confirm CTA:** *"Tôi đã chuyển tiền — Kiểm tra ngay"*
 
 ---
 
@@ -160,6 +228,13 @@ Scenario: Payment failure with remaining hold time
   When PAX-014 renders
   Then it displays the Payment Failed screen with the remaining timer
   And tapping "Thử lại" returns to PAX-012 with the hold preserved.
+
+Scenario: Active resume polling and manual verification
+  Given passenger completed bank transfer and returns to app
+  When PAX-014 displays pending verification state
+  Then it actively polls verification status every 3s
+  And tapping "Tôi đã chuyển tiền — Kiểm tra ngay" triggers instant backend verification
+  And on success automatically navigates to PAX-015 Booking Success.
 ```
 
 ### Test Matrix:
@@ -167,3 +242,4 @@ Scenario: Payment failure with remaining hold time
 | :--- | :--- | :--- | :--- |
 | `TC-PAX-014-01` | Error | Gateway returns insufficient funds | Displays clear explanation in Vietnamese |
 | `TC-PAX-014-02` | Edge Case | Late webhook arrival after lock expiry | Displays Late Payment refund recovery screen |
+| `TC-PAX-014-03` | Functional | Passenger taps "Tôi đã chuyển tiền" | Queries verify-status API and transitions to success |
