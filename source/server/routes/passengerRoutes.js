@@ -107,8 +107,8 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
-  // POST /api/v1/passenger/bookings/create or /api/v1/bookings/create (PAX-011, PAX-012, PAX-013)
-  if ((pathname === '/api/v1/passenger/bookings/create' || pathname === '/api/v1/bookings/create') && req.method === 'POST') {
+  // POST /api/v1/passenger/bookings/create, /api/v1/passenger/checkout/create-order, or /api/v1/bookings/create (PAX-011, PAX-012, PAX-013)
+  if ((pathname === '/api/v1/passenger/bookings/create' || pathname === '/api/v1/passenger/checkout/create-order' || pathname === '/api/v1/bookings/create') && req.method === 'POST') {
     parseJsonBody(req).then(body => {
       const payerInfo = body.payer || body.payerInfo;
       const passengerList = body.passengers || body.passengerList || [];
@@ -177,6 +177,54 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     } else {
       sendError(res, qrResult.error, qrResult.code, 404);
     }
+    return true;
+  }
+
+  // GET /api/v1/passenger/orders/:orderId/group-qr (PAX-017 / REV-01)
+  if (pathname.startsWith('/api/v1/passenger/orders/') && pathname.endsWith('/group-qr') && req.method === 'GET') {
+    const parts = pathname.split('/');
+    const orderId = parts[5];
+    const groupRes = paymentService.getGroupBoardingPass(orderId);
+    if (groupRes.success) {
+      sendSuccess(res, groupRes.data);
+    } else {
+      sendError(res, groupRes.error, groupRes.code, 404);
+    }
+    return true;
+  }
+
+  // POST /api/v1/passenger/tickets/:ticketId/delegate (PAX-017 / REV-01)
+  if (pathname.startsWith('/api/v1/passenger/tickets/') && pathname.endsWith('/delegate') && req.method === 'POST') {
+    const parts = pathname.split('/');
+    const ticketId = parts[5];
+    parseJsonBody(req).then(body => {
+      const result = paymentService.delegateTicket(ticketId, {
+        delegateToPhone: body.delegateToPhone || body.phone,
+        delegateToName: body.delegateToName || body.name
+      });
+      if (result.success) {
+        sendSuccess(res, result.data);
+      } else {
+        sendError(res, result.error, result.code, 400);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/passenger/payments/:orderId/verify-status (PAX-013 / REV-02)
+  if (pathname.startsWith('/api/v1/passenger/payments/') && pathname.endsWith('/verify-status') && req.method === 'POST') {
+    const parts = pathname.split('/');
+    const orderId = parts[5];
+    parseJsonBody(req).then(body => {
+      const result = paymentService.checkPaymentStatus(orderId, {
+        manualTrigger: Boolean(body.manualTrigger || body.manual_trigger)
+      });
+      if (result.success) {
+        sendSuccess(res, result);
+      } else {
+        sendError(res, result.error, result.code, 400);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 

@@ -85,6 +85,31 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // POST /api/v1/ops/pos/hotline-hold (MGR-020 / REV-06)
+  if (pathname === '/api/v1/ops/pos/hotline-hold' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const result = managerService.createHotlineHold({
+        tripId: body.tripId || body.trip_id,
+        passengerName: body.passengerName || body.passenger_name,
+        phone: body.phone,
+        seatCodes: body.seatCodes || body.seat_codes || [],
+        holdPolicy: body.holdPolicy || body.hold_policy || 'UNTIL_DEPARTURE_OFFSET',
+        departureOffsetMinutes: body.departureOffsetMinutes || body.departure_offset_minutes || 30,
+        customExpiryMinutes: body.customExpiryMinutes || body.custom_expiry_minutes || 60,
+        notes: body.notes || '',
+        agentStaffId: body.agentStaffId || 'stf_hotline_01',
+        mockNow: body.now || Date.now()
+      });
+
+      if (result.success) {
+        sendSuccess(res, result.data || result, 201);
+      } else {
+        sendError(res, result.error, result.code, 400);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
   // POST /api/v1/ops/trips/:tripId/swap-vehicle or /api/v1/ops/trips/:tripId/replace-vehicle (MGR-023)
   if ((pathname.includes('/swap-vehicle') || pathname.includes('/replace-vehicle')) && req.method === 'POST') {
     const parts = pathname.split('/');

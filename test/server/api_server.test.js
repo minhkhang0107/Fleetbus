@@ -194,4 +194,86 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     assert.strictEqual(mgrView.statusCode, 200);
     assert.ok(mgrView.body.includes('BUSGO OPS'));
   });
+
+  it('TC-SRV-06: New Spec APIs (Payment verification, Group QR, Delegation, Onboard Hail, Hotline Hold - REV-01 to REV-06)', async () => {
+    // 1. Hotline Hold (MGR-020, REV-06)
+    const holdRes = await makeRequest('/api/v1/ops/pos/hotline-hold', {
+      method: 'POST',
+      body: {
+        tripId: 'trp_991823',
+        passengerName: 'Trần Thị Lan',
+        phone: '0912988776',
+        seatCodes: ['A04'],
+        holdPolicy: 'UNTIL_DEPARTURE_OFFSET',
+        departureOffsetMinutes: 30
+      }
+    });
+    assert.strictEqual(holdRes.statusCode, 201);
+    assert.strictEqual(holdRes.body.data.hold_status, 'HELD_HOTLINE');
+    assert.ok(holdRes.body.data.hold_until);
+
+    // 2. Onboard Hail Passenger (DRI-006, DRI-007, REV-05)
+    const hailRes = await makeRequest('/api/v1/driver/trips/trp_991823/onboard-hail', {
+      method: 'POST',
+      body: {
+        passenger_name: 'Khách Bắt Dọc Đường',
+        phone: '0988001122',
+        seat_code: 'B04',
+        fare_amount_vnd: 220000,
+        amount_collected_vnd: 250000,
+        change_settlement_method: 'CASH_RETURNED'
+      }
+    });
+    assert.strictEqual(hailRes.statusCode, 201);
+    assert.strictEqual(hailRes.body.data.boarding_status, 'BOARDED');
+    assert.strictEqual(hailRes.body.data.change_settlement.change_due_vnd, 30000);
+
+    // 3. Passenger Order creation and group QR retrieval / status verification (REV-01, REV-02)
+    const orderRes = await makeRequest('/api/v1/passenger/checkout/create-order', {
+      method: 'POST',
+      body: {
+        holdId: 'hld_srv_test',
+        tripId: 'trp_991823',
+        seatCodes: ['A05', 'A06'],
+        payer: { full_name: 'Nguyễn Văn Server', phone: '0919888999' },
+        passengers: [
+          { full_name: 'Khách 1', phone: '0919888999' },
+          { full_name: 'Khách 2', phone: '0919888000' }
+        ],
+        amountVnd: 440000,
+        pickupStop: 'Giáp Bát',
+        dropoffStop: 'Ninh Bình'
+      }
+    });
+    assert.strictEqual(orderRes.statusCode, 201);
+    const orderId = orderRes.body.data.payment.order_id;
+
+    // Verify status with manualTrigger: true (REV-02)
+    const statusRes = await makeRequest(`/api/v1/passenger/payments/${orderId}/verify-status`, {
+      method: 'POST',
+      body: { manual_trigger: true }
+    });
+    assert.strictEqual(statusRes.statusCode, 200);
+    assert.strictEqual(statusRes.body.data.payment_status, 'PAID');
+    assert.strictEqual(statusRes.body.data.is_settled, true);
+
+    // Group QR (REV-01)
+    const groupQrRes = await makeRequest(`/api/v1/passenger/orders/${orderId}/group-qr`);
+    assert.strictEqual(groupQrRes.statusCode, 200);
+    assert.ok(groupQrRes.body.data.group_qr.qr_code_value.startsWith('BUSGO_GRP|'));
+    assert.strictEqual(groupQrRes.body.data.active_tickets_count, 2);
+
+    // Delegate Ticket (REV-01)
+    const ticketId = statusRes.body.data.tickets[1].ticket_id;
+    const delegateRes = await makeRequest(`/api/v1/passenger/tickets/${ticketId}/delegate`, {
+      method: 'POST',
+      body: {
+        delegateToPhone: '0919888000',
+        delegateToName: 'Khách 2'
+      }
+    });
+    assert.strictEqual(delegateRes.statusCode, 200);
+    assert.match(delegateRes.body.data.offline_pin, /^\d{6}$/);
+    assert.ok(delegateRes.body.data.share_link.includes('ticket/share'));
+  });
 });

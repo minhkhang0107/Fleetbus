@@ -117,11 +117,26 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.collectCod(tripId, body.ticketId || body.ticket_id, body.amountVnd || body.amount_vnd);
+      const result = driverService.collectCod(tripId, body.ticketId || body.ticket_id, body);
       if (result.success) {
         sendSuccess(res, result.data || result);
       } else {
         sendError(res, result.error, 'COD_ERROR', 400);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/driver/trips/:tripId/onboard-hail (DRI-006, DRI-007, REV-05)
+  if (pathname.startsWith('/api/v1/driver/trips/') && pathname.endsWith('/onboard-hail') && req.method === 'POST') {
+    const parts = pathname.split('/');
+    const tripId = parts[5];
+    parseJsonBody(req).then(body => {
+      const result = driverService.onboardHailPassenger(tripId, body, body.now);
+      if (result.success) {
+        sendSuccess(res, result.data || result, 201);
+      } else {
+        sendError(res, result.error, result.code || 'HAIL_ERROR', 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
