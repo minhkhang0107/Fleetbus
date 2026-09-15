@@ -172,5 +172,65 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/ops/bookings (MGR-017)
+  if (pathname === '/api/v1/ops/bookings' && req.method === 'GET') {
+    sendSuccess(res, {
+      total: managerService.bookings.length,
+      bookings: managerService.bookings
+    });
+    return true;
+  }
+
+  // GET /api/v1/ops/bookings/:bookingId (MGR-018)
+  if (pathname.startsWith('/api/v1/ops/bookings/') && req.method === 'GET') {
+    const bookingId = pathname.split('/')[5];
+    const booking = managerService.bookings.find(b => b.pnr === bookingId || b.trip_id === bookingId);
+    if (booking) {
+      sendSuccess(res, booking);
+    } else {
+      sendError(res, 'Không tìm thấy thông tin đơn đặt vé', 'BOOKING_NOT_FOUND', 404);
+    }
+    return true;
+  }
+
+  // GET /api/v1/ops/trips/:tripId/seat-inventory (MGR-013)
+  if (pathname.startsWith('/api/v1/ops/trips/') && pathname.endsWith('/seat-inventory') && req.method === 'GET') {
+    const tripId = pathname.split('/')[5];
+    const trip = managerService.findTrip(tripId);
+    if (trip) {
+      sendSuccess(res, {
+        trip_id: tripId,
+        total_seats: trip.total_seats,
+        booked_seats: trip.booked_seats,
+        vacant_seats: trip.total_seats - trip.booked_seats,
+        hotline_holds: managerService.hotlineReservations.filter(r => r.trip_id === tripId && r.status === 'HELD_HOTLINE')
+      });
+    } else {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+    }
+    return true;
+  }
+
+  // GET /api/v1/ops/trips/:tripId (MGR-012)
+  if (pathname.startsWith('/api/v1/ops/trips/') && !pathname.includes('seat-inventory') && !pathname.includes('delay') && !pathname.includes('replace-vehicle') && req.method === 'GET') {
+    const tripId = pathname.split('/')[5];
+    const trip = managerService.findTrip(tripId);
+    if (trip) {
+      sendSuccess(res, trip);
+    } else {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+    }
+    return true;
+  }
+
+  // GET /api/v1/ops/audit-logs (MGR-028)
+  if (pathname === '/api/v1/ops/audit-logs' && req.method === 'GET') {
+    sendSuccess(res, {
+      total: managerService.alerts.length,
+      audit_logs: managerService.alerts
+    });
+    return true;
+  }
+
   return false;
 }

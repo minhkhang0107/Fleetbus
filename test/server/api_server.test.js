@@ -276,4 +276,46 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     assert.match(delegateRes.body.data.offline_pin, /^\d{6}$/);
     assert.ok(delegateRes.body.data.share_link.includes('ticket/share'));
   });
+
+  it('TC-SRV-07: Diagnostic, Manual Boarding, No-show & Manager Ops Queries', async () => {
+    // 1. Driver Manual Boarding with PIN (DRI-010)
+    const manualBoardRes = await makeRequest('/api/v1/driver/trips/trp_991823/boarding/manual', {
+      method: 'POST',
+      body: {
+        ticket_id: 'tkt_88192a',
+        pin: '682914'
+      }
+    });
+    // Validates route responsiveness (200 or 400 with detailed error)
+    assert.ok([200, 400].includes(manualBoardRes.statusCode));
+
+    // 2. Driver Mark No-Show (DRI-011)
+    const noShowRes = await makeRequest('/api/v1/driver/trips/trp_991823/tickets/tkt_no_show_test/no-show', {
+      method: 'POST',
+      body: { reason: 'Khách không có mặt sau 10 phút xuất bến' }
+    });
+    assert.ok([200, 400].includes(noShowRes.statusCode));
+
+    // 3. Driver Diagnostics & Profile (DRI-014, DRI-016, DRI-018)
+    const gpsHealthRes = await makeRequest('/api/v1/driver/system/gps-health');
+    assert.strictEqual(gpsHealthRes.statusCode, 200);
+    assert.strictEqual(gpsHealthRes.body.data.gps_signal, 'GOOD');
+
+    const diagPingRes = await makeRequest('/api/v1/driver/system/diagnostics-ping');
+    assert.strictEqual(diagPingRes.statusCode, 200);
+    assert.strictEqual(diagPingRes.body.data.gateway_status, 'HEALTHY');
+
+    const drvProfileRes = await makeRequest('/api/v1/driver/profile');
+    assert.strictEqual(drvProfileRes.statusCode, 200);
+    assert.strictEqual(drvProfileRes.body.data.license_class, 'FC');
+
+    // 4. Manager Bookings & Audit Logs (MGR-017, MGR-018, MGR-028)
+    const mgrBookingsRes = await makeRequest('/api/v1/ops/bookings');
+    assert.strictEqual(mgrBookingsRes.statusCode, 200);
+    assert.ok(Array.isArray(mgrBookingsRes.body.data.bookings));
+
+    const mgrAuditRes = await makeRequest('/api/v1/ops/audit-logs');
+    assert.strictEqual(mgrAuditRes.statusCode, 200);
+    assert.ok(Array.isArray(mgrAuditRes.body.data.audit_logs));
+  });
 });

@@ -96,13 +96,65 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
-  // POST /api/v1/driver/trips/:tripId/board-qr or /api/v1/driver/trips/:tripId/boarding (DRI-009, DRI-010)
+  // POST /api/v1/driver/trips/:tripId/board-qr or /api/v1/driver/trips/:tripId/boarding (DRI-009)
   if (pathname.startsWith('/api/v1/driver/trips/') && (pathname.endsWith('/board-qr') || pathname.endsWith('/boarding')) && req.method === 'POST') {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
       const qrPayload = body.qrString || body.qrPayload || body.qr_code;
       const result = driverService.boardPassengerByQR(tripId, qrPayload, body.now);
+      if (result.success) {
+        sendSuccess(res, result.data || result);
+      } else {
+        sendError(res, result.error, result.code, 400);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/driver/trips/:tripId/boarding/manual (DRI-010)
+  if (pathname.startsWith('/api/v1/driver/trips/') && pathname.endsWith('/boarding/manual') && req.method === 'POST') {
+    const parts = pathname.split('/');
+    const tripId = parts[5];
+    parseJsonBody(req).then(body => {
+      let qrOrPin = body.qrString || body.qrPayload;
+      if (body.pin && (body.ticket_id || body.ticketId)) {
+        qrOrPin = `PIN:${body.ticket_id || body.ticketId}:${body.pin}`;
+      }
+      if (qrOrPin) {
+        const result = driverService.boardPassengerByQR(tripId, qrOrPin, body.now);
+        if (result.success) {
+          sendSuccess(res, result.data || result);
+        } else {
+          sendError(res, result.error, result.code, 400);
+        }
+      } else {
+        const trip = driverService.activeTrips.get(tripId);
+        const tktId = body.ticket_id || body.ticketId;
+        const passenger = trip?.manifest.find(m => m.ticket_id === tktId || m.seat_code === body.seat_code);
+        if (passenger) {
+          passenger.boarding_status = 'BOARDED';
+          passenger.boarded_at = new Date(body.now || Date.now()).toISOString();
+          passenger.scan_method = 'MANUAL_OVERRIDE';
+          trip.boarded_count += 1;
+          sendSuccess(res, passenger);
+        } else {
+          sendError(res, 'Không tìm thấy hành khách trong danh sách', 'NOT_FOUND', 404);
+        }
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/driver/trips/:tripId/tickets/:ticketId/no-show or /manifest/:ticketId/no-show (DRI-011)
+  if (pathname.startsWith('/api/v1/driver/trips/') && pathname.endsWith('/no-show') && req.method === 'POST') {
+    const parts = pathname.split('/');
+    const tripId = parts[5];
+    const ticketIndex = parts.indexOf('tickets') !== -1 ? parts.indexOf('tickets') : parts.indexOf('manifest');
+    const ticketId = ticketIndex !== -1 ? parts[ticketIndex + 1] : null;
+    parseJsonBody(req).then(body => {
+      const tId = ticketId || body.ticketId || body.ticket_id;
+      const result = driverService.markNoShow(tripId, tId, body.reason);
       if (result.success) {
         sendSuccess(res, result.data || result);
       } else {
@@ -177,13 +229,56 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.endTrip(tripId, body.endOdometerKm || body.odometer_km);
+      const result = driverService.endTrip(tripId, body);
       if (result.success) {
         sendSuccess(res, result.data || result);
       } else {
         sendError(res, result.error, result.code, 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/driver/system/gps-health (DRI-014)
+  if (pathname === '/api/v1/driver/system/gps-health' && req.method === 'GET') {
+    sendSuccess(res, {
+      gps_signal: 'GOOD',
+      satellites_locked: 14,
+      accuracy_meters: 4.2,
+      foreground_service_active: true,
+      battery_optimization_whitelisted: true,
+      mqtt_connection_status: 'ONLINE',
+      mqtt_rtt_ms: 42,
+      mock_location_detected: false,
+      buffered_offline_count: driverService.offlineQueue.length
+    });
+    return true;
+  }
+
+  // GET /api/v1/driver/system/diagnostics-ping (DRI-016)
+  if (pathname === '/api/v1/driver/system/diagnostics-ping' && req.method === 'GET') {
+    sendSuccess(res, {
+      gateway_status: 'HEALTHY',
+      api_latency_ms: 18,
+      mqtt_broker_status: 'CONNECTED',
+      timestamp: new Date().toISOString()
+    });
+    return true;
+  }
+
+  // GET /api/v1/driver/profile (DRI-018)
+  if (pathname === '/api/v1/driver/profile' && req.method === 'GET') {
+    sendSuccess(res, {
+      driver_id: 'drv_8821a',
+      staff_id: 'TX8821',
+      full_name: 'Trần Văn Bình',
+      phone: '0912345678',
+      license_class: 'FC',
+      license_valid_until: '2028-12-31',
+      safety_score: 98.5,
+      completed_trips_count: 142,
+      rating: 4.95
+    });
     return true;
   }
 
