@@ -124,6 +124,20 @@ Last updated: 2026-09-15 13:30
   - Step 5: Driver tactical auth, shift trip inspection, 6-point readiness safety checklist, start trip (`IN_TRANSIT`), camera QR boarding scan, 1Hz live GPS telemetry stream.
   - Step 6: Manager Operations login, executive KPIs (Load Factor, Gross Revenue), 60Hz live fleet radar tracking, hotline POS booking, executive OTP and punctuality report.
 - [x] **Regression & Integrity Guard**:
-  - 15 test suites with 99/99 passing tests (`npm test`).
+  - 15 test suites with 112/112 passing tests (`npm test`).
   - 100% clean syntax and lint (`npm run lint`).
   - Single command orchestration via `make build && make lint && make test && make e2e`.
+
+## 7. Monorepo Build Artifact Git Hygiene & .gitignore Rules
+- [x] **Monorepo Root `.gitignore` Alignment**:
+  - Configured comprehensive ignore rules covering all build targets, platforms, and code generators:
+    1. **Universal & Platform Build Outputs**: `build/`, `**/build/`, `dist/`, `**/dist/`, `web_dist/`, `**/web_dist/`, `out/`, `**/out/`, `build_manifest.json`.
+    2. **Flutter & Dart Build Artifacts**: `.dart_tool/`, `.flutter-plugins`, `.flutter-plugins-dependencies`, `.pub-cache/`, `.pub/`, `.melos_tool/`, `**/doc/api/`, `.buildlog/`.
+    3. **Dart Code Generator Artifacts**: `*.g.dart`, `*.freezed.dart`, `*.mocks.dart`, `*.gr.dart`, `*.config.dart`, `*.mapper.dart`, `*.gen.dart`, `*.graphql.dart`, `resources/lib/src/generated/`, `app/lib/ui/res/generated/`, `data/lib/src/repository/model/generated/`, `*.symbols`, `*.map.json`.
+    4. **Android Build Artifacts**: `.gradle/`, `local.properties`, `**/android/app/debug/`, `**/android/app/profile/`, `**/android/app/release/`, `*.apk`, `*.aab`, `*.ap_`, `*.dex`, `*.class`, `captures/`, `.externalNativeBuild/`, `.cxx/`, `GeneratedPluginRegistrant.java`, `gradle-wrapper.jar`, `key.properties`, `*.keystore`, `*.jks`.
+    5. **iOS Build Artifacts**: `Pods/`, `.symlinks/`, `Flutter.framework`, `Generated.xcconfig`, `app.flx`, `flutter_assets/`, `flutter_export_environment.sh`, `.last_build_id`, `ephemeral/`, `DerivedData/`, `.generated/`, `*.ipa`, `*.dSYM.zip`, `xcuserdata/`.
+    6. **Node.js & Web Artifacts**: `node_modules/`, `.cache/`, `.parcel-cache/`, `.turbo/`, `.next/`, `.nuxt/`.
+    7. **Test & Coverage Outputs**: `coverage/`, `*.lcov`, `lcov.info`, `.nyc_output/`.
+    8. **Logs, IDEs & Secrets**: `*.log`, `npm-debug.log*`, `.env*` (preserving `!*.env.example` and `!source/manager/env/*.env`), `.DS_Store`, `Thumbs.db`, `.idea/`, `.vscode/`.
+  - Untracked `build_manifest.json` from git index while preserving local generation on disk, preventing build timestamp git churn.
+  - Added dedicated `source/manager/.gitignore` to match `source/driver/` and `source/passenger/` structures.
