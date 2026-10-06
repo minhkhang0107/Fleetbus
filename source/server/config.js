@@ -39,12 +39,11 @@ export function getTokenSecret() {
 }
 
 /**
- * "enforce": every non-public endpoint needs a valid Bearer token and the role it requires.
- * "off": identity fields in the request are trusted (development only, until the apps send tokens).
- * Production defaults to "enforce"; FLEETBUS_AUTH overrides it.
+ * "enforce" (the default everywhere): every non-public endpoint needs a valid Bearer token and the role it requires.
+ * "off": identity fields in the request are trusted. For local experiments only: FLEETBUS_AUTH=off.
  */
 export function getAuthMode() {
   const fromEnv = process.env.FLEETBUS_AUTH;
-  if (fromEnv === 'enforce' || fromEnv === 'off') return fromEnv;
-  return isProduction() ? 'enforce' : 'off';
+  if (fromEnv === 'off' && !isProduction()) return 'off';
+  return 'enforce';
 }

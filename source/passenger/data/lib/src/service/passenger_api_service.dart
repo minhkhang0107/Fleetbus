@@ -1,10 +1,14 @@
 /**
  * FleetBus Passenger Flutter API Client Service
- * Connects mobile client with the Node.js Universal API Gateway.
+ * Connects the mobile client with the Node.js API gateway.
+ *
+ * Every request goes through [_get], [_post] or [_delete], which add the session token and, for the
+ * mutations the server marks as idempotent, an Idempotency-Key. The token comes from [verifyOtp] (or is
+ * set by the app); the server derives the user and the phone from it, so no identity is sent in a body.
  */
 
 import 'dart:convert';
-import 'package:domain/domain.dart';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
@@ -21,53 +25,101 @@ String resolvePassengerBaseUrl([String? customUrl]) {
   return 'http://localhost:3000';
 }
 
+/// A new random key for one logical mutation. Reuse the same key when retrying that mutation.
+String newIdempotencyKey() {
+  final random = Random.secure();
+  return List<int>.generate(16, (_) => random.nextInt(256))
+      .map((b) => b.toRadixString(16).padLeft(2, '0'))
+      .join();
+}
+
 class PassengerApiClientService {
   final String baseUrl;
   final http.Client _client;
 
+  /// Session token of the signed-in passenger (set by [verifyOtp]).
+  String? authToken;
+
   PassengerApiClientService({
     String? baseUrl,
     http.Client? client,
+    this.authToken,
   })  : baseUrl = resolvePassengerBaseUrl(baseUrl),
         _client = client ?? http.Client();
 
-  Map<String, String> get _headers => {
+  Map<String, String> _headers({String? idempotencyKey}) => {
     'Content-Type': 'application/json',
     'x-app-version': '3.0.0',
+    if (authToken != null) 'Authorization': 'Bearer $authToken',
+    if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey,
   };
+
+  Map<String, dynamic> _decode(http.Response response) {
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> _get(String path, {Map<String, String>? query}) async {
+    final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
+    return _decode(await _client.get(uri, headers: _headers()));
+  }
+
+  Future<Map<String, dynamic>> _post(
+    String path, {
+    Object? body,
+    bool idempotent = false,
+    String? idempotencyKey,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl$path'),
+      headers: _headers(idempotencyKey: idempotent ? (idempotencyKey ?? newIdempotencyKey()) : null),
+      body: body == null ? null : jsonEncode(body),
+    );
+    return _decode(response);
+  }
+
+  Future<Map<String, dynamic>> _delete(String path, {Map<String, String>? query}) async {
+    final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
+    return _decode(await _client.delete(uri, headers: _headers()));
+  }
 
   /**
    * PAX-001: App Config handshake
    */
-  Future<Map<String, dynamic>> getAppConfig() async {
-    final response = await _client.get(
-      Uri.parse('$baseUrl/api/v1/passenger/config'),
-      headers: _headers,
-    );
-    return jsonDecode(response.body);
+  Future<Map<String, dynamic>> getAppConfig() {
+    return _get('/api/v1/app/config');
   }
 
   /**
    * PAX-002: Request Phone OTP
    */
-  Future<Map<String, dynamic>> requestOtp(String phone) async {
-    final response = await _client.post(
-      Uri.parse('$baseUrl/api/v1/passenger/auth/request-otp'),
-      headers: _headers,
-      body: jsonEncode({'phone': phone}),
-    );
-    return jsonDecode(response.body);
+  Future<Map<String, dynamic>> requestOtp(String phone) {
+    return _post('/api/v1/auth/passenger/otp/request', body: {'phone': phone});
+  }
+
+  /**
+   * PAX-003: Verify Phone OTP. On success the session token is kept for every later request.
+   */
+  Future<Map<String, dynamic>> verifyOtp(String phone, String otp) async {
+    final json = await _post('/api/v1/auth/passenger/otp/verify', body: {'phone': phone, 'otp': otp});
+    final token = json['data']?['token'];
+    if (json['status'] == 'success' && token is String) {
+      authToken = token;
+    }
+    return json;
+  }
+
+  /**
+   * PAX-004: Home Feed Recommendations & Active Ticket
+   */
+  Future<Map<String, dynamic>> getHomeFeed() {
+    return _get('/api/v1/passenger/home-feed');
   }
 
   /**
    * PAX-005: Search Stations
    */
   Future<List<dynamic>> searchStations(String query) async {
-    final response = await _client.get(
-      Uri.parse('$baseUrl/api/v1/passenger/stations?q=${Uri.encodeComponent(query)}'),
-      headers: _headers,
-    );
-    final json = jsonDecode(response.body);
+    final json = await _get('/api/v1/routes/stops/search', query: {'q': query});
     return json['data'] ?? [];
   }
 
@@ -80,163 +132,201 @@ class PassengerApiClientService {
     String? vehicleType,
     String? timeSlot,
   }) async {
-    final queryParams = {
+    final json = await _get('/api/v1/trips/search', query: {
       'origin': origin,
       'destination': destination,
       if (vehicleType != null) 'vehicle_type': vehicleType,
       if (timeSlot != null) 'time_slot': timeSlot,
-    };
-
-    final uri = Uri.parse('$baseUrl/api/v1/passenger/trips').replace(queryParameters: queryParams);
-    final response = await _client.get(uri, headers: _headers);
-    final json = jsonDecode(response.body);
+    });
     return json['data'] ?? [];
-  }
-
-  /**
-   * PAX-009: Get 2D Seat Map
-   */
-  Future<Map<String, dynamic>> getSeatMap(String tripId, {String? pickupId, String? dropoffId}) async {
-    final uri = Uri.parse('$baseUrl/api/v1/passenger/trips/$tripId/seat-map');
-    final response = await _client.get(uri, headers: _headers);
-    return jsonDecode(response.body);
-  }
-
-  /**
-   * PAX-010: Hold Seats
-   */
-  Future<Map<String, dynamic>> holdSeats(String tripId, List<String> seatCodes, String userId) async {
-    final response = await _client.post(
-      Uri.parse('$baseUrl/api/v1/passenger/trips/$tripId/hold-seats'),
-      headers: _headers,
-      body: jsonEncode({'seatCodes': seatCodes, 'userId': userId}),
-    );
-    return jsonDecode(response.body);
-  }
-
-  /**
-   * PAX-003: Verify Phone OTP
-   */
-  Future<Map<String, dynamic>> verifyOtp(String phone, String otp) async {
-    final response = await _client.post(
-      Uri.parse('$baseUrl/api/v1/passenger/auth/verify-otp'),
-      headers: _headers,
-      body: jsonEncode({'phone': phone, 'otp': otp}),
-    );
-    return jsonDecode(response.body);
-  }
-
-  /**
-   * PAX-004: Home Feed Recommendations & Active Ticket
-   */
-  Future<Map<String, dynamic>> getHomeFeed() async {
-    final response = await _client.get(
-      Uri.parse('$baseUrl/api/v1/passenger/home-feed'),
-      headers: _headers,
-    );
-    return jsonDecode(response.body);
   }
 
   /**
    * PAX-007: Trip Itinerary & Amenities Detail
    */
-  Future<Map<String, dynamic>> getTripDetail(String tripId) async {
-    final response = await _client.get(
-      Uri.parse('$baseUrl/api/v1/passenger/trips/$tripId'),
-      headers: _headers,
-    );
-    return jsonDecode(response.body);
+  Future<Map<String, dynamic>> getTripDetail(String tripId) {
+    return _get('/api/v1/trips/$tripId');
   }
 
   /**
-   * PAX-011 / PAX-012 / PAX-013: Create Booking Order with VietQR Payment
+   * PAX-008: Selectable pickup and drop-off stops
+   */
+  Future<Map<String, dynamic>> getTripStops(String tripId) {
+    return _get('/api/v1/trips/$tripId/stops');
+  }
+
+  /**
+   * PAX-009: Get 2D Seat Map
+   */
+  Future<Map<String, dynamic>> getSeatMap(String tripId, {String? pickupId, String? dropoffId}) {
+    return _get('/api/v1/trips/$tripId/seat-map', query: {
+      if (pickupId != null) 'pickup_stop_id': pickupId,
+      if (dropoffId != null) 'dropoff_stop_id': dropoffId,
+    });
+  }
+
+  /**
+   * PAX-010: Hold Seats (10 minutes, at most 5). The response carries the hold_id that the booking needs.
+   */
+  Future<Map<String, dynamic>> holdSeats(String tripId, List<String> seatCodes, {String? idempotencyKey}) {
+    return _post(
+      '/api/v1/trips/$tripId/seats/hold',
+      body: {'seatCodes': seatCodes},
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  /**
+   * PAX-010: Release the hold of the signed-in passenger
+   */
+  Future<Map<String, dynamic>> releaseHold(String tripId) {
+    return _delete('/api/v1/trips/$tripId/seats/hold');
+  }
+
+  /**
+   * PAX-011 / PAX-012 / PAX-013: Create the booking and its VietQR payment order.
+   * The server prices the order; [holdId] must be the live hold of the same passenger on exactly [seatCodes].
    */
   Future<Map<String, dynamic>> createBookingOrder({
     required String tripId,
+    required String holdId,
     required List<String> seatCodes,
     required Map<String, dynamic> payer,
     required List<Map<String, dynamic>> passengers,
     String? voucherCode,
     String? pickupStop,
     String? dropoffStop,
-    int unitPriceVnd = 220000,
-  }) async {
-    final response = await _client.post(
-      Uri.parse('$baseUrl/api/v1/passenger/bookings/create'),
-      headers: _headers,
-      body: jsonEncode({
+    bool insuranceSelected = false,
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/api/v1/bookings/create',
+      body: {
         'tripId': tripId,
+        'holdId': holdId,
         'seatCodes': seatCodes,
         'payer': payer,
         'passengers': passengers,
         'voucherCode': voucherCode,
         'pickupStop': pickupStop,
         'dropoffStop': dropoffStop,
-        'unitPriceVnd': unitPriceVnd,
-      }),
-    );
-    return jsonDecode(response.body);
-  }
-
-  /**
-   * PAX-016: Ticket Wallet
-   */
-  Future<Map<String, dynamic>> getTicketWallet({String phone = '0912345678', String tab = 'UPCOMING'}) async {
-    final uri = Uri.parse('$baseUrl/api/v1/passenger/tickets').replace(queryParameters: {
-      'phone': phone,
-      'tab': tab,
-    });
-    final response = await _client.get(uri, headers: _headers);
-    return jsonDecode(response.body);
-  }
-
-  /**
-   * PAX-017: Dynamic 30s HMAC QR Boarding Pass
-   */
-  Future<Map<String, dynamic>> getTicketQR(String ticketId) async {
-    final response = await _client.get(
-      Uri.parse('$baseUrl/api/v1/passenger/tickets/$ticketId/qr'),
-      headers: _headers,
-    );
-    return jsonDecode(response.body);
-  }
-
-  /**
-   * PAX-018: Get Live GPS Radar HUD
-   */
-  Future<Map<String, dynamic>> getLiveRadarHUD(String tripId) async {
-    final response = await _client.get(
-      Uri.parse('$baseUrl/api/v1/passenger/trips/$tripId/radar'),
-      headers: _headers,
-    );
-    return jsonDecode(response.body);
-  }
-
-  /**
-   * PAX-020: Notifications Center
-   */
-  Future<Map<String, dynamic>> getNotifications({String userId = 'usr_default'}) async {
-    final response = await _client.get(
-      Uri.parse('$baseUrl/api/v1/passenger/notifications'),
-      headers: {
-        ..._headers,
-        'x-user-id': userId,
+        'insuranceSelected': insuranceSelected,
       },
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
     );
-    return jsonDecode(response.body);
   }
 
   /**
-   * PAX-021: Cancel Ticket & Tiered Refund
+   * PAX-013: Resume polling, or ask for an immediate reconciliation after "Tôi đã chuyển tiền".
+   * It never marks the order paid by itself; the bank notification does.
    */
-  Future<Map<String, dynamic>> cancelTicket(String ticketId, {String? departureTime}) async {
-    final response = await _client.post(
-      Uri.parse('$baseUrl/api/v1/passenger/tickets/$ticketId/cancel'),
-      headers: _headers,
-      body: jsonEncode({
-        if (departureTime != null) 'departureTime': departureTime,
-      }),
+  Future<Map<String, dynamic>> verifyPaymentStatus(String orderId, {bool manualTrigger = false}) {
+    return _post(
+      '/api/v1/passenger/payments/$orderId/verify-status',
+      body: {'manualTrigger': manualTrigger},
     );
-    return jsonDecode(response.body);
+  }
+
+  /**
+   * PAX-014: Authoritative payment status
+   */
+  Future<Map<String, dynamic>> getPaymentStatus(String orderId) {
+    return _get('/api/v1/payments/$orderId/status');
+  }
+
+  /**
+   * PAX-015: Booking and its tickets, by order id or PNR
+   */
+  Future<Map<String, dynamic>> getBooking(String bookingId) {
+    return _get('/api/v1/bookings/$bookingId');
+  }
+
+  /**
+   * PAX-016: Ticket Wallet of the signed-in passenger
+   */
+  Future<Map<String, dynamic>> getTicketWallet({String tab = 'UPCOMING'}) {
+    return _get('/api/v1/passenger/tickets', query: {'tab': tab});
+  }
+
+  /**
+   * PAX-017: Ticket with its dynamic 30s HMAC QR boarding pass
+   */
+  Future<Map<String, dynamic>> getTicketQR(String ticketId) {
+    return _get('/api/v1/tickets/$ticketId');
+  }
+
+  /**
+   * PAX-017: Group boarding QR for a multi-seat booking
+   */
+  Future<Map<String, dynamic>> getGroupQr(String orderId) {
+    return _get('/api/v1/passenger/orders/$orderId/group-qr');
+  }
+
+  /**
+   * PAX-017: Share a ticket with a companion (SMS link and offline PIN)
+   */
+  Future<Map<String, dynamic>> delegateTicket(
+    String ticketId, {
+    required String delegateToPhone,
+    required String delegateToName,
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/api/v1/passenger/tickets/$ticketId/delegate',
+      body: {'delegateToPhone': delegateToPhone, 'delegateToName': delegateToName},
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  /**
+   * PAX-018: Live tracking snapshot. When no GPS ping has arrived, `has_position` is false and
+   * `signal_status` is NO_SIGNAL; the screen must say so instead of drawing a bus.
+   */
+  Future<Map<String, dynamic>> getLiveRadarHUD(String tripId) {
+    return _get('/api/v1/trips/$tripId/tracking');
+  }
+
+  /**
+   * PAX-020: Notifications Center of the signed-in passenger
+   */
+  Future<Map<String, dynamic>> getNotifications() {
+    return _get('/api/v1/passenger/notifications');
+  }
+
+  /**
+   * PAX-021: Cancel one ticket and request the tiered refund. The server uses the paid amount and the
+   * departure stored on the ticket.
+   */
+  Future<Map<String, dynamic>> cancelTicket(String ticketId, {String? idempotencyKey}) {
+    return _post(
+      '/api/v1/passenger/tickets/$ticketId/cancel',
+      body: <String, dynamic>{},
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  /**
+   * PAX-022: Profile of the signed-in passenger
+   */
+  Future<Map<String, dynamic>> getProfile() {
+    return _get('/api/v1/passenger/profile');
+  }
+
+  /**
+   * PAX-024: Vehicle replacement notice
+   */
+  Future<Map<String, dynamic>> getReplacementInfo(String tripId) {
+    return _get('/api/v1/trips/$tripId/replacement-info');
+  }
+
+  /**
+   * PAX-025: Delay and disruption notice
+   */
+  Future<Map<String, dynamic>> getDisruptions(String tripId) {
+    return _get('/api/v1/trips/$tripId/disruptions');
   }
 }

@@ -70,7 +70,7 @@ describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
     assert.ok(themeContent.includes("fontFamily: 'Geist'"), 'Theme font family must be Geist');
   });
 
-  it('TC-MOB-05: All required Passenger mobile screens must exist and cover PAX-001 to PAX-025', () => {
+  it('TC-MOB-05: The Passenger screen files must exist (19 of the 25 PAX screens; the 6 missing are listed in docs/review/phase-B-findings.md)', () => {
     const requiredFiles = [
       'passenger_splash_screen.dart',
       'passenger_login_screen.dart',

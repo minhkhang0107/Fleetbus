@@ -24,7 +24,7 @@ describe('Spec conformance: driver lifecycle, COD, privacy and fleet', () => {
   let baseUrl;
 
   before(async () => {
-    ({ server, services } = createFleetBusServer());
+    ({ server, services } = createFleetBusServer({ authMode: 'off' }));
     await new Promise((resolve) => {
       server.listen(0, '127.0.0.1', () => {
         baseUrl = `http://127.0.0.1:${server.address().port}`;

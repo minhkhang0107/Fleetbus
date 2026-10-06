@@ -9,7 +9,8 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
   const TEST_PORT = 3999;
 
   before(async () => {
-    const { server } = createFleetBusServer();
+    // These tests exercise business behaviour through HTTP without tokens; authentication has its own suites
+    const { server } = createFleetBusServer({ authMode: 'off' });
     await new Promise((resolve) => {
       appServer = server.listen(TEST_PORT, () => {
         baseUrl = `http://127.0.0.1:${TEST_PORT}`;

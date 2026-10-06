@@ -11,7 +11,7 @@ import { API_CATALOG } from '../../source/server/core/apiCatalog.js';
 const TRIP = 'trp_hn_th_01';
 
 function boot(options) {
-  const { server, services } = createFleetBusServer(options);
+  const { server, services } = createFleetBusServer({ authMode: 'off', ...options });
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => resolve({ server, services, baseUrl: `http://127.0.0.1:${server.address().port}` }));
   });

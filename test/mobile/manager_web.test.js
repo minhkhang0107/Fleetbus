@@ -49,13 +49,14 @@ describe('Phase Manager Web: Flutter Web Platform & Dashboard Integrity Test Sui
     const content = fs.readFileSync(serviceDartPath, 'utf8');
 
     assert.ok(content.includes('/ops/dashboard/kpis'), 'KPI endpoint must be defined');
-    assert.ok(content.includes('/ops/radar'), 'Radar endpoint must be defined');
-    assert.ok(content.includes('/ops/pos/bookings'), 'POS booking endpoint must be defined');
-    assert.ok(content.includes('/swap-vehicle'), 'Swap vehicle endpoint must be defined');
-    assert.ok(content.includes('/ops/reports/executive'), 'Executive reports endpoint must be defined');
+    // Canonical paths of api-screen-map; the exact set is checked by test/mobile/api_client_contract.test.js
+    assert.ok(content.includes('/ops/fleet/live-positions'), 'Radar endpoint must be defined');
+    assert.ok(content.includes('/ops/pos/orders'), 'POS booking endpoint must be defined');
+    assert.ok(content.includes('/replace-vehicle'), 'Replace vehicle endpoint must be defined');
+    assert.ok(content.includes('/ops/reports/yield'), 'Executive reports endpoint must be defined');
   });
 
-  it('TC-MGR-WEB-05: All required Manager Web screens must exist and cover MGR-001 to MGR-030', () => {
+  it('TC-MGR-WEB-05: The Manager Web screen files must exist (9 of the 30 MGR screens; the 21 missing are listed in docs/review/phase-B-findings.md)', () => {
     const requiredFiles = [
       'manager_login_screen.dart',
       'manager_dashboard_screen.dart',

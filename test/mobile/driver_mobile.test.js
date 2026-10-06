@@ -68,7 +68,7 @@ describe('Phase Driver Mobile: Android & iOS Platform Integrity Test Suite', () 
     assert.ok(themeContent.includes("fontFamily: 'Geist'"), 'Theme font family must be Geist');
   });
 
-  it('TC-DRV-MOB-05: All required Driver screens & API service must exist and cover DRI-001 to DRI-019', () => {
+  it('TC-DRV-MOB-05: The Driver screen files and API service must exist (14 of the 19 DRI screens; the 5 missing are listed in docs/review/phase-B-findings.md)', () => {
     const requiredFiles = [
       'driver_login_screen.dart',
       'driver_today_trips_screen.dart',

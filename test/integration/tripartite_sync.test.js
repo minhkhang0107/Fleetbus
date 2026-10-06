@@ -16,7 +16,7 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
   let baseUrl;
 
   before(async () => {
-    const created = createFleetBusServer();
+    const created = createFleetBusServer({ authMode: 'off' });
     server = created.server;
     services = created.services;
     eventBridge = created.eventBridge;
