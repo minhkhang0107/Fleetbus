@@ -157,3 +157,17 @@ Rows not named here are implemented at the path shown in sections 1 to 3. The ca
 
 **Aliases the server still answers for the apps (remove in Phase B once the Flutter clients use the paths above):** `/passenger/config`, `/passenger/auth/*`, `/passenger/stations`, `/passenger/trips`, `/passenger/trips/{id}/seat-map`, `/passenger/trips/{id}/hold-seats`, `/passenger/trips/{id}/radar`, `/passenger/bookings/create`, `/passenger/checkout/create-order`, `/passenger/tickets/{id}/qr`, `/stations`, `/trips`, `/driver/auth/login`, `.../board-qr`, `.../collect-cod`, `.../incident`, `/ops/auth/login`, `/ops/radar`, `/ops/fleet`, `/ops/fleet/vehicles`, `/ops/crew`, `/ops/crew/drivers`, `/ops/dispatch/board`, `/ops/pos/bookings`, `/ops/trips/{id}`, `/ops/trips/{id}/seat-inventory`, `/ops/trips/{id}/swap-vehicle`, `/ops/reports/executive`.
 
+---
+
+## 6. Client Contract (Phase B review)
+
+The three Flutter API services (`passenger_api_service.dart`, `driver_api_service.dart`, `manager_api_service.dart`) must follow these rules; `test/mobile/api_client_contract.test.js` checks them.
+
+- Use only the canonical paths of sections 1 to 3. Aliases (section 5) are kept for old callers and are not used by the services.
+- Keep the session token from login (`verifyOtp`, `login`) and send `Authorization: Bearer <token>` on every later request. Send no identity: no `userId`, no `phone` for the wallet, no `x-driver-id`.
+- Send an `Idempotency-Key` on every mutation the Idempotency column marks `Yes` (the public auth endpoints are exempt: the OTP cooldown, the attempt limit and the lockout already make them safe to repeat). Create one key per logical action and reuse it when retrying that action.
+- Send no price: the server prices orders, COD and hail fares. Send the `holdId` when creating a booking.
+- Every endpoint of a client's kind has a method in that client.
+
+**Flutter screens are not connected yet (`OQ-029`).** The services exist and follow the contract, but no screen calls them, so no app can yet book, board or dispatch anything against the server.
+
