@@ -58,10 +58,11 @@ async function runLiveE2E() {
     method: 'POST',
     body: {
       tripId,
+      userId: 'usr_pax_live_01',
+      holdId: hold.body.data.hold_id,
+      seatCodes: ['A01'],
       payer: { full_name: 'Nguyễn Văn An', phone: '0912345678', email: 'an.nguyen@email.com' },
       passengers: [{ full_name: 'Nguyễn Văn An', phone: '0912345678', cccd: '001200012345', seat_code: 'A01' }],
-      selectedSeats: [{ seat_code: 'A01', deck: 1, price_vnd: 220000 }],
-      unitPriceVnd: 220000,
       voucherCode: 'BUSGO50K'
     }
   });

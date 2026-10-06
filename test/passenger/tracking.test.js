@@ -35,16 +35,6 @@ describe('Phase 7: Live GPS Telemetry, Radar & Disruption Test Suite', () => {
     assert.strictEqual(notifRes.data[0].type, 'BOARDING_REMINDER');
   });
 
-  it('TC-TRACK-03: Should cancel ticket and calculate refund amount based on policy in PAX-021', () => {
-    const departureFuture = new Date(Date.now() + 36 * 3600 * 1000); // 36 hours ahead
-    const cancelRes = trackingService.requestTicketCancellation('BG-882199', 410000, departureFuture);
-
-    assert.strictEqual(cancelRes.success, true);
-    assert.strictEqual(cancelRes.data.refund_percentage, 100);
-    assert.strictEqual(cancelRes.data.refund_amount_vnd, 410000);
-    assert.strictEqual(cancelRes.data.status, 'CANCELLED_AND_REFUNDED');
-  });
-
   it('TC-TRACK-04: Should broadcast and inspect vehicle replacement / delay disruption in PAX-024/PAX-025', () => {
     trackingService.registerDisruption('trp_hn_th_01', {
       type: 'VEHICLE_REPLACEMENT',

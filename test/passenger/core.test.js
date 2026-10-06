@@ -106,18 +106,26 @@ describe('Phase 1: Core Design System & Utilities Test Suite', () => {
   });
 
   it('TC-CORE-07: Should calculate refund tiers according to business rules', () => {
-    const depDate = new Date(Date.now() + 30 * 3600 * 1000); // 30h ahead (>24h)
-    const fullRefund = calculateRefundAmount(220000, depDate);
+    // PAX-021: >= 12h 100%, 6h to 12h 80%, under 6h 0%
+    const HOUR = 3600 * 1000;
+    const now = Date.now();
+    const fullRefund = calculateRefundAmount(220000, new Date(now + 30 * HOUR), now);
     assert.strictEqual(fullRefund.tier, 'FULL_REFUND');
     assert.strictEqual(fullRefund.refundAmount, 220000);
 
-    const depDate18h = new Date(Date.now() + 18 * 3600 * 1000); // 18h ahead (12-24h)
-    const halfRefund = calculateRefundAmount(220000, depDate18h);
-    assert.strictEqual(halfRefund.tier, 'PARTIAL_REFUND');
-    assert.strictEqual(halfRefund.refundAmount, 110000);
+    const atTwelveHours = calculateRefundAmount(220000, new Date(now + 12 * HOUR), now);
+    assert.strictEqual(atTwelveHours.tier, 'FULL_REFUND');
 
-    const depDate6h = new Date(Date.now() + 6 * 3600 * 1000); // 6h ahead (<12h)
-    const noRefund = calculateRefundAmount(220000, depDate6h);
+    const partial = calculateRefundAmount(220000, new Date(now + 8 * HOUR), now);
+    assert.strictEqual(partial.tier, 'PARTIAL_REFUND');
+    assert.strictEqual(partial.percentage, 80);
+    assert.strictEqual(partial.refundAmount, 176000);
+    assert.strictEqual(partial.feeAmount, 44000);
+
+    const atSixHours = calculateRefundAmount(220000, new Date(now + 6 * HOUR), now);
+    assert.strictEqual(atSixHours.tier, 'PARTIAL_REFUND');
+
+    const noRefund = calculateRefundAmount(220000, new Date(now + 5 * HOUR), now);
     assert.strictEqual(noRefund.tier, 'NO_REFUND');
     assert.strictEqual(noRefund.refundAmount, 0);
   });

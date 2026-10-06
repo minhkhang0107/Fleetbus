@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import http from 'http';
-import { server } from '../../source/server/services/passenger/server.js';
+import { server, trackingService } from '../../source/server/services/passenger/server.js';
 
 describe('Phase 8: End-to-End Passenger Server & API Gateway Test Suite', () => {
   const TEST_PORT = 3099;
@@ -86,10 +86,17 @@ describe('Phase 8: End-to-End Passenger Server & API Gateway Test Suite', () => 
   });
 
   it('TC-E2E-06: Should respond to Live GPS Radar API /api/v1/trips/trp_hn_th_01/radar', async () => {
+    // The radar only shows a bus once a GPS ping has arrived for the trip (REV-07)
+    const silent = JSON.parse((await makeRequest('/api/v1/trips/trp_hn_th_02/radar')).body);
+    assert.strictEqual(silent.data.has_position, false);
+    assert.strictEqual(silent.data.signal_status, 'NO_SIGNAL');
+
+    trackingService.updateBusPosition('trp_hn_th_01', { lat: 20.95, lng: 105.84, speed_kmh: 50, bearing_deg: 90, plate_number: '29B-882.19' });
     const res = await makeRequest('/api/v1/trips/trp_hn_th_01/radar');
     assert.strictEqual(res.statusCode, 200);
     const json = JSON.parse(res.body);
     assert.strictEqual(json.success, true);
+    assert.strictEqual(json.data.has_position, true);
     assert.ok(json.data.distance_meters > 0);
     assert.ok(json.data.eta_minutes >= 0);
   });

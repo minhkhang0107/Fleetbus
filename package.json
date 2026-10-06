@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/**/*.test.js",
-    "lint": "node --check source/**/*.js test/**/*.test.js tools/**/*.js",
+    "lint": "node tools/lint.js",
     "build": "node tools/build_system.js",
     "e2e": "node test/e2e_live_flow.js",
     "render:diagrams": "node tools/render_flow_diagrams.cjs",

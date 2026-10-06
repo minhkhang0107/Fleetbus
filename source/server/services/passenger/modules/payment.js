@@ -12,14 +12,62 @@ import {
   generateTicketPin,
   verifyTicketPin
 } from '../core/cryptoEngine.js';
-import { formatPNR } from '../core/formatters.js';
+import { validateVietnamPhone, calculateRefundAmount } from '../core/formatters.js';
+import { getTicketSecret } from '../../../config.js';
 
 export class PassengerPaymentService {
   constructor(options = {}) {
-    this.secretKey = options.secretKey || 'busgo_master_secret_key_2026';
+    this.secretKey = options.secretKey || getTicketSecret();
     this.orders = new Map(); // orderId -> Order
     this.tickets = new Map(); // ticketId -> Ticket
     this.pnrIndex = new Map(); // PNR -> orderId
+    this.walletCredits = []; // change credited to a passenger wallet (REV-04)
+  }
+
+  /**
+   * REV-04: Credit change owed to a passenger into the BusGo wallet.
+   */
+  creditWallet(phone, amountVnd, ref, reason = 'Tiền thừa COD') {
+    const phoneCheck = validateVietnamPhone(phone);
+    if (!phoneCheck.isValid || !(amountVnd > 0)) {
+      return { success: false, error: 'Không thể cộng tiền vào ví', code: 'INVALID_WALLET_CREDIT' };
+    }
+    const credit = { phone: phoneCheck.normalized, amount_vnd: amountVnd, ref, reason, credited_at: new Date().toISOString() };
+    this.walletCredits.push(credit);
+    return { success: true, data: credit };
+  }
+
+  /**
+   * Who may act on a ticket: the OWNER (the payer) may show, delegate and cancel it; a HOLDER (the named
+   * passenger or the delegate) may show it; anybody else has no access. null when the ticket does not exist.
+   */
+  getTicketAccess(ticketId, phone) {
+    const ticket = this.tickets.get(ticketId);
+    if (!ticket) return null;
+    const normalize = (value) => validateVietnamPhone(value).normalized || value;
+    const caller = normalize(phone);
+    if (!caller) return 'NONE';
+    if (ticket.owner_phone && normalize(ticket.owner_phone) === caller) return 'OWNER';
+    if (normalize(ticket.passenger_phone) === caller) return 'HOLDER';
+    if (ticket.delegated_to?.phone && normalize(ticket.delegated_to.phone) === caller) return 'HOLDER';
+    return 'NONE';
+  }
+
+  /**
+   * The payer of an order (by order id or PNR). null when the order does not exist.
+   */
+  getOrderAccess(orderIdOrPnr, phone) {
+    const order = this.orders.get(orderIdOrPnr) || this.orders.get(this.pnrIndex.get(orderIdOrPnr));
+    if (!order) return null;
+    const normalize = (value) => validateVietnamPhone(value).normalized || value;
+    return order.payer?.phone && normalize(order.payer.phone) === normalize(phone) ? 'OWNER' : 'NONE';
+  }
+
+  getWalletBalance(phone) {
+    const normalized = validateVietnamPhone(phone).normalized || phone;
+    return this.walletCredits
+      .filter(c => c.phone === normalized)
+      .reduce((sum, c) => sum + c.amount_vnd, 0);
   }
 
   /**
@@ -27,8 +75,10 @@ export class PassengerPaymentService {
    */
   createPaymentOrder({ holdId, trip, seatCodes, payer, passengers, amountVnd, pickupStop, dropoffStop, mockNow = Date.now() }) {
     const orderId = `ord_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
-    const rawPnr = `BG${Math.floor(100000 + Math.random() * 900000)}`;
-    const pnr = formatPNR(rawPnr);
+    let pnr;
+    do {
+      pnr = `BG-${Math.floor(100000 + Math.random() * 900000)}`;
+    } while (this.pnrIndex.has(pnr));
 
     const bankBin = '970415'; // VietinBank
     const accountNumber = '1088219999';
@@ -108,6 +158,7 @@ export class PassengerPaymentService {
       const seatCode = order.seat_codes[i];
       const passenger = order.passengers[i] || order.payer;
       const ticketId = `tkt_${order.pnr.replace('-', '')}_${seatCode}`;
+      const seatInfo = this.seatMapService?.getSeatInfo?.(order.trip_id, seatCode);
 
       const ticket = {
         ticket_id: ticketId,
@@ -117,7 +168,9 @@ export class PassengerPaymentService {
         route_name: order.route_name,
         departure_time: order.departure_time,
         seat_code: seatCode,
-        deck: seatCode.startsWith('A0') || seatCode.startsWith('B0') ? 1 : 2,
+        deck: seatInfo ? seatInfo.deck : (seatCode.startsWith('A0') || seatCode.startsWith('B0') ? 1 : 2),
+        fare_vnd: Math.round(order.amount_vnd / order.seat_codes.length),
+        owner_phone: order.payer?.phone || passenger.phone,
         passenger_name: passenger.full_name,
         passenger_phone: passenger.phone,
         pickup_stop: order.pickup_stop,
@@ -148,21 +201,57 @@ export class PassengerPaymentService {
   }
 
   /**
-   * Handle VietQR Webhook Callback
+   * Handle VietQR Webhook Callback (PAX-014, OQ-008)
+   * The order is matched on the PNR inside the transfer memo and the received amount must equal the order amount.
    */
   handleVietQrCallback({ transferMemo, amountVnd, bankRef, now = Date.now() }) {
-    let matchedOrder = null;
-
-    // Match by memo or PNR in memo
-    for (const order of this.orders.values()) {
-      if (transferMemo && (transferMemo.includes(order.pnr.replace('-', '')) || transferMemo.includes(order.pnr))) {
-        matchedOrder = order;
-        break;
-      }
-    }
+    const pnrMatch = /BG-?(\d{6})/i.exec(String(transferMemo || ''));
+    const orderId = pnrMatch ? this.pnrIndex.get(`BG-${pnrMatch[1]}`) : null;
+    const matchedOrder = orderId ? this.orders.get(orderId) : null;
 
     if (!matchedOrder) {
       return { success: false, error: 'Không tìm thấy đơn hàng khớp với nội dung chuyển khoản', code: 'ORDER_NOT_MATCHED' };
+    }
+
+    const issuedTicketsOf = (order) => (order.ticket_ids || []).map(id => this.tickets.get(id)).filter(Boolean);
+
+    if (matchedOrder.payment_status === 'PAID') {
+      return { success: true, pnr: matchedOrder.pnr, order_id: matchedOrder.order_id, issued_tickets: issuedTicketsOf(matchedOrder) };
+    }
+
+    if (matchedOrder.payment_status === 'UNMATCHED_OVERDUE') {
+      return { success: true, settled: false, status: 'UNMATCHED_OVERDUE', pnr: matchedOrder.pnr, order_id: matchedOrder.order_id };
+    }
+
+    if (Number(amountVnd) !== matchedOrder.amount_vnd) {
+      matchedOrder.payment_anomalies = matchedOrder.payment_anomalies || [];
+      matchedOrder.payment_anomalies.push({
+        type: 'AMOUNT_MISMATCH',
+        expected_vnd: matchedOrder.amount_vnd,
+        received_vnd: Number(amountVnd),
+        bank_ref: bankRef || null,
+        at: new Date(now).toISOString()
+      });
+      if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+        this.eventBridge.emit('PAYMENT_ANOMALY', { order: matchedOrder, receivedVnd: Number(amountVnd), bankRef });
+      }
+      return {
+        success: false,
+        error: 'Số tiền chuyển khoản không khớp với đơn hàng',
+        code: 'AMOUNT_MISMATCH',
+        expected_vnd: matchedOrder.amount_vnd,
+        received_vnd: Number(amountVnd)
+      };
+    }
+
+    if (now > new Date(matchedOrder.expires_at).getTime()) {
+      matchedOrder.payment_status = 'UNMATCHED_OVERDUE';
+      matchedOrder.overdue_received_vnd = Number(amountVnd);
+      matchedOrder.overdue_bank_ref = bankRef || null;
+      if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+        this.eventBridge.emit('PAYMENT_OVERDUE', { order: matchedOrder, amountVnd: Number(amountVnd), bankRef });
+      }
+      return { success: true, settled: false, status: 'UNMATCHED_OVERDUE', pnr: matchedOrder.pnr, order_id: matchedOrder.order_id };
     }
 
     const settleResult = this.settlePayment(matchedOrder.order_id, bankRef, now);
@@ -179,14 +268,23 @@ export class PassengerPaymentService {
   }
 
   /**
-   * PAX-016: Get passenger ticket wallet with tab filters (UPCOMING, COMPLETED, CANCELLED)
+   * PAX-016: Get passenger ticket wallet with tab filters (UPCOMING, COMPLETED, CANCELLED).
+   * The phone must be a complete, valid number and is matched exactly.
    */
   getTicketsByPhone(phone, filter = 'UPCOMING') {
-    const normalized = phone.replace(/[\s\-\.]/g, '');
+    const phoneCheck = validateVietnamPhone(phone);
+    if (!phoneCheck.isValid) {
+      return { success: false, error: phoneCheck.message, code: 'INVALID_PHONE' };
+    }
+    const normalized = phoneCheck.normalized;
+    const normalizeStored = (value) => validateVietnamPhone(value).normalized || value;
     const userTickets = [];
 
     for (const ticket of this.tickets.values()) {
-      if (ticket.passenger_phone.includes(normalized) || ticket.pnr.includes(normalized)) {
+      const owns = normalizeStored(ticket.passenger_phone) === normalized
+        || (ticket.owner_phone && normalizeStored(ticket.owner_phone) === normalized);
+      const delegated = ticket.delegated_to?.phone && normalizeStored(ticket.delegated_to.phone) === normalized;
+      if (owns || delegated) {
         userTickets.push(ticket);
       }
     }
@@ -235,7 +333,7 @@ export class PassengerPaymentService {
         dynamic_qr: qrData,
         anti_screenshot_watermark: {
           timestamp: new Date(mockNow).toISOString(),
-          phone_masked: ticket.passenger_phone.slice(0, 3) + '****' + ticket.passenger_phone.slice(-3),
+          phone_masked: ticket.passenger_phone ? ticket.passenger_phone.slice(0, 3) + '****' + ticket.passenger_phone.slice(-3) : null,
           pnr: ticket.pnr
         }
       }
@@ -257,20 +355,19 @@ export class PassengerPaymentService {
       return { success: false, error: 'Đơn hàng đã hết hạn thanh toán', code: 'PAYMENT_EXPIRED', data: order };
     }
 
-    // If user explicitly pressed "Tôi đã chuyển tiền" (manualTrigger) and still pending,
-    // trigger instantaneous bank reconciliation
+    // "Tôi đã chuyển tiền" only asks for an immediate bank reconciliation. An order is
+    // never settled without money received, which arrives through the bank webhook.
     if (manualTrigger && order.payment_status === 'PENDING_PAYMENT') {
-      const settleRes = this.settlePayment(orderId, `manual_tx_${mockNow}`, mockNow);
-      if (settleRes.success) {
-        return {
-          success: true,
-          payment_status: 'PAID',
-          is_settled: true,
-          reconciliation_mode: 'MANUAL_TRIGGER',
-          data: settleRes.data.order,
-          tickets: settleRes.data.tickets
-        };
-      }
+      order.manual_check_requests = (order.manual_check_requests || 0) + 1;
+      return {
+        success: true,
+        payment_status: order.payment_status,
+        is_settled: false,
+        reconciliation_mode: 'MANUAL_RECONCILE_REQUESTED',
+        message: 'Chúng tôi chưa nhận được tiền. Vui lòng chờ trong giây lát, hệ thống sẽ tự cập nhật khi ngân hàng báo có.',
+        data: order,
+        tickets: []
+      };
     }
 
     return {
@@ -280,6 +377,31 @@ export class PassengerPaymentService {
       reconciliation_mode: 'ACTIVE_POLL',
       data: order,
       tickets: order.ticket_ids ? order.ticket_ids.map(id => this.tickets.get(id)).filter(Boolean) : []
+    };
+  }
+
+  /**
+   * PAX-015: A booking (order) with its tickets, by order id or PNR.
+   */
+  getBooking(orderIdOrPnr) {
+    const order = this.orders.get(orderIdOrPnr) || this.orders.get(this.pnrIndex.get(orderIdOrPnr));
+    if (!order) {
+      return { success: false, error: 'Không tìm thấy đơn đặt vé', code: 'BOOKING_NOT_FOUND' };
+    }
+    return {
+      success: true,
+      data: {
+        order_id: order.order_id,
+        pnr: order.pnr,
+        trip_id: order.trip_id,
+        route_name: order.route_name,
+        departure_time: order.departure_time,
+        seat_codes: order.seat_codes,
+        amount_vnd: order.amount_vnd,
+        payment_status: order.payment_status,
+        expires_at: order.expires_at,
+        tickets: (order.ticket_ids || []).map(id => this.tickets.get(id)).filter(Boolean)
+      }
     };
   }
 
@@ -352,6 +474,66 @@ export class PassengerPaymentService {
         offline_pin: pin,
         share_link: shareLink,
         sms_preview: `[BusGo] Bạn nhận được vé xe tuyến ${ticket.route_name}, Ghế ${ticket.seat_code}. Xuất trình mã PIN: ${pin} hoặc mở link: ${shareLink}`
+      }
+    };
+  }
+
+  /**
+   * PAX-021: Cancel a ticket and open a refund request.
+   * Price and departure come from the stored ticket, never from the client. Cancelling is a one-way step.
+   */
+  cancelTicket(ticketId, { now = Date.now(), reason = 'Khách hủy vé trực tuyến' } = {}) {
+    const ticket = this.tickets.get(ticketId);
+    if (!ticket) {
+      return { success: false, error: 'Không tìm thấy vé', code: 'TICKET_NOT_FOUND' };
+    }
+    if (ticket.status !== 'ACTIVE') {
+      return { success: false, error: `Không thể hủy vé đang ở trạng thái ${ticket.status}`, code: 'TICKET_NOT_ACTIVE' };
+    }
+
+    const refundCalc = calculateRefundAmount(ticket.fare_vnd, ticket.departure_time, now);
+    const cancelledAt = new Date(now).toISOString();
+
+    ticket.status = 'CANCELLED';
+    ticket.cancelled_at = cancelledAt;
+
+    const refundRequest = {
+      ticket_id: ticket.ticket_id,
+      pnr: ticket.pnr,
+      trip_id: ticket.trip_id,
+      amount_vnd: refundCalc.refundAmount,
+      reason,
+      policy: { tier: refundCalc.tier, percentage: refundCalc.percentage, fee_vnd: refundCalc.feeAmount }
+    };
+    const refund = this.eventBridge && typeof this.eventBridge.requestRefund === 'function'
+      ? this.eventBridge.requestRefund(refundRequest)
+      : { refund_id: `ref_${Date.now()}`, status: 'REFUND_REQUESTED', ...refundRequest };
+
+    if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('TICKET_CANCELLED', {
+        ticketId: ticket.ticket_id,
+        pnr: ticket.pnr,
+        tripId: ticket.trip_id,
+        seatCode: ticket.seat_code,
+        refundAmountVnd: refundCalc.refundAmount
+      });
+    }
+
+    return {
+      success: true,
+      message: `Đã hủy vé. Yêu cầu hoàn tiền ${refundCalc.refundAmount.toLocaleString('vi-VN')} đ đang chờ xử lý`,
+      data: {
+        ticket_id: ticket.ticket_id,
+        pnr: ticket.pnr,
+        refund_id: refund.refund_id,
+        total_price_vnd: ticket.fare_vnd,
+        refund_percentage: refundCalc.percentage,
+        refund_amount_vnd: refundCalc.refundAmount,
+        fee_amount_vnd: refundCalc.feeAmount,
+        tier: refundCalc.tier,
+        policy_message: refundCalc.message,
+        status: 'REFUND_REQUESTED',
+        cancelled_at: cancelledAt
       }
     };
   }

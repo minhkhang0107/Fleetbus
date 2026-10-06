@@ -101,13 +101,27 @@ describe('Phase 6: Payment, Ticket Wallet & Dynamic HMAC QR Test Suite', () => {
     assert.strictEqual(pollPending.payment_status, 'PENDING_PAYMENT');
     assert.strictEqual(pollPending.is_settled, false);
 
-    // User taps "Tôi đã chuyển tiền" (manualTrigger: true)
+    // User taps "Tôi đã chuyển tiền" (manualTrigger: true): only a reconciliation request, never a settlement
     const pollManual = paymentService.checkPaymentStatus(orderId, { manualTrigger: true, mockNow: t0 + 20000 });
     assert.strictEqual(pollManual.success, true);
-    assert.strictEqual(pollManual.payment_status, 'PAID');
-    assert.strictEqual(pollManual.is_settled, true);
-    assert.strictEqual(pollManual.reconciliation_mode, 'MANUAL_TRIGGER');
-    assert.strictEqual(pollManual.tickets.length, 1);
+    assert.strictEqual(pollManual.payment_status, 'PENDING_PAYMENT');
+    assert.strictEqual(pollManual.is_settled, false);
+    assert.strictEqual(pollManual.reconciliation_mode, 'MANUAL_RECONCILE_REQUESTED');
+    assert.strictEqual(pollManual.tickets.length, 0);
+
+    // The bank webhook is what settles the order
+    const callback = paymentService.handleVietQrCallback({
+      transferMemo: orderRes.data.payment_details.transfer_memo,
+      amountVnd: 150000,
+      bankRef: 'bank_poll_01',
+      now: t0 + 30000
+    });
+    assert.strictEqual(callback.success, true);
+
+    const pollAfterBank = paymentService.checkPaymentStatus(orderId, { mockNow: t0 + 40000 });
+    assert.strictEqual(pollAfterBank.payment_status, 'PAID');
+    assert.strictEqual(pollAfterBank.is_settled, true);
+    assert.strictEqual(pollAfterBank.tickets.length, 1);
   });
 
   it('TC-PAY-06: Should generate aggregate group boarding pass and board entire group (PAX-017, REV-01)', () => {

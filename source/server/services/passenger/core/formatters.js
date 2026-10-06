@@ -39,6 +39,15 @@ export function validateVietnamPhone(phone) {
   return { isValid: true, normalized };
 }
 
+/**
+ * OQ-007: drivers only ever see a masked phone, e.g. 0987123456 -> 098***456.
+ */
+export function maskPhone(phone) {
+  const digits = String(phone || '').replace(/[\s\-\.]/g, '');
+  if (digits.length < 7) return null;
+  return `${digits.slice(0, 3)}***${digits.slice(-3)}`;
+}
+
 export function validateCCCD(cccd) {
   if (!cccd) return { isValid: false, message: 'Số CCCD/Định danh không được để trống' };
   const cleaned = cccd.replace(/\s/g, '');
@@ -64,25 +73,26 @@ export function calculateRefundAmount(totalPrice, departureDate, cancelDate = ne
   const cancelTime = new Date(cancelDate).getTime();
   const hoursUntilDeparture = (depTime - cancelTime) / (1000 * 60 * 60);
 
-  if (hoursUntilDeparture >= 24) {
+  // PAX-021 policy: >= 12h before departure 100%, 6h to 12h 80%, under 6h 0%.
+  if (hoursUntilDeparture >= 12) {
     return {
       percentage: 100,
       feePercentage: 0,
       refundAmount: totalPrice,
       feeAmount: 0,
       tier: 'FULL_REFUND',
-      message: 'Hủy trước 24h: Hoàn tiền 100%'
+      message: 'Hủy từ 12 giờ trở lên trước giờ chạy: Hoàn tiền 100%'
     };
-  } else if (hoursUntilDeparture >= 12) {
-    const refund = Math.floor(totalPrice * 0.5);
+  } else if (hoursUntilDeparture >= 6) {
+    const refund = Math.floor(totalPrice * 0.8);
     const fee = totalPrice - refund;
     return {
-      percentage: 50,
-      feePercentage: 50,
+      percentage: 80,
+      feePercentage: 20,
       refundAmount: refund,
       feeAmount: fee,
       tier: 'PARTIAL_REFUND',
-      message: 'Hủy trước 12-24h: Hoàn tiền 50% (Phí hủy 50%)'
+      message: 'Hủy trước giờ chạy 6-12 giờ: Hoàn tiền 80% (Phí hủy 20%)'
     };
   } else {
     return {
@@ -91,7 +101,7 @@ export function calculateRefundAmount(totalPrice, departureDate, cancelDate = ne
       refundAmount: 0,
       feeAmount: totalPrice,
       tier: 'NO_REFUND',
-      message: 'Hủy dưới 12h: Không hoàn tiền theo quy chế vận tải'
+      message: 'Hủy dưới 6 giờ trước giờ chạy: Không hoàn tiền theo quy chế vận tải'
     };
   }
 }

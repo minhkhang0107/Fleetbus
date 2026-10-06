@@ -23,7 +23,9 @@ describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-03
     assert.strictEqual(kpiRes.success, true);
     assert.strictEqual(kpiRes.data.kpi_metrics.active_vehicles_count, 2);
     assert.strictEqual(kpiRes.data.kpi_metrics.total_fleet_count, 3);
-    assert.ok(kpiRes.data.kpi_metrics.overall_load_factor_pct > 80);
+    const totalBooked = managerService.trips.reduce((sum, t) => sum + t.booked_seats, 0);
+    const totalSeats = managerService.trips.reduce((sum, t) => sum + t.total_seats, 0);
+    assert.strictEqual(kpiRes.data.kpi_metrics.overall_load_factor_pct, parseFloat(((totalBooked / totalSeats) * 100).toFixed(1)));
     assert.ok(kpiRes.data.kpi_metrics.gross_revenue_vnd > 0);
     assert.ok(kpiRes.data.corridors.length >= 2);
   });
@@ -80,11 +82,24 @@ describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-03
     assert.strictEqual(delayRes.success, true);
     assert.strictEqual(delayRes.data.delay_minutes, 45);
 
-    // Process refund
-    const refundRes = managerService.processRefund('BG-88219', 440000, 'Hủy vé trước 24h hoàn tiền 100%');
+    // Refund request is approved exactly once (MGR-022)
+    const request = managerService.createRefundRequest({
+      pnr: 'BG-88219',
+      amount_vnd: 440000,
+      reason: 'Hủy vé trước 12h hoàn tiền 100%'
+    });
+    assert.strictEqual(request.status, 'REFUND_REQUESTED');
+
+    const refundRes = managerService.processRefundApproval(request.refund_id, true, 'Đã đối soát');
     assert.strictEqual(refundRes.success, true);
-    assert.strictEqual(refundRes.data.refund_status, 'REFUNDED');
-    assert.strictEqual(refundRes.data.refund_amount_vnd, 440000);
+    assert.strictEqual(refundRes.data.status, 'REFUNDED');
+    const booking = managerService.bookings.find(b => b.pnr === 'BG-88219');
+    assert.strictEqual(booking.refund_status, 'REFUNDED');
+    assert.strictEqual(booking.refund_amount_vnd, 440000);
+
+    const again = managerService.processRefundApproval(request.refund_id, false);
+    assert.strictEqual(again.success, false);
+    assert.strictEqual(again.code, 'REFUND_ALREADY_PROCESSED');
   });
 
   it('TC-MGR-08: Should manage fleet roster, crew drivers, and routes (MGR-005 to MGR-013)', () => {
@@ -111,7 +126,11 @@ describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-03
     const reportRes = managerService.getExecutiveReport();
     assert.strictEqual(reportRes.success, true);
     assert.ok(reportRes.data.financial_summary.total_revenue_vnd > 0);
-    assert.strictEqual(reportRes.data.punctuality_summary.on_time_departure_rate, '96.8%');
+    // On time means a delay of at most 15 minutes; the rate is computed from the trips
+    const onTime = managerService.trips.filter((t) => (t.delay_minutes || 0) <= 15).length;
+    const expectedRate = `${parseFloat(((onTime / managerService.trips.length) * 100).toFixed(1))}%`;
+    assert.strictEqual(reportRes.data.punctuality_summary.on_time_departure_rate, expectedRate);
+    assert.strictEqual(reportRes.data.financial_summary.net_revenue_vnd, reportRes.data.financial_summary.total_revenue_vnd - reportRes.data.financial_summary.refunded_vnd);
   });
 
   it('TC-MGR-10: Should create configurable hotline seat holds and release on expiry (MGR-020, REV-06)', () => {

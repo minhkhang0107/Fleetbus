@@ -100,7 +100,7 @@ describe('Phase Driver: Driver Tactical Cockpit Test Suite (DRI-001 to DRI-019)'
       seat_code: 'A01',
       trip_id: tripId
     };
-    const qrData = generateDynamicTicketQR(ticketA01, 'busgo_ticket_master_secret', t0);
+    const qrData = generateDynamicTicketQR(ticketA01, driverService.secretKey, t0);
 
     // Driver scans QR
     const boardRes = driverService.boardPassengerByQR(tripId, qrData.qr_code_value, t0);
@@ -186,8 +186,7 @@ describe('Phase Driver: Driver Tactical Cockpit Test Suite (DRI-001 to DRI-019)'
       passenger_name: 'Nguyễn Văn Vẫy',
       phone: '0977889900',
       seat_code: 'B05',
-      fare_amount_vnd: 180000,
-      amount_collected_vnd: 200000,
+      amount_collected_vnd: 250000,
       payment_method: 'CASH',
       change_settlement_method: 'CASH_RETURNED'
     });
@@ -196,14 +195,15 @@ describe('Phase Driver: Driver Tactical Cockpit Test Suite (DRI-001 to DRI-019)'
     assert.strictEqual(hailRes.data.boarding_status, 'BOARDED');
     assert.strictEqual(hailRes.data.seat_code, 'B05');
     assert.strictEqual(hailRes.data.is_hail_passenger, true);
-    assert.strictEqual(hailRes.data.change_settlement.change_due_vnd, 20000);
+    // The fare is set by the server (trip base fare), not by the driver
+    assert.strictEqual(hailRes.data.change_settlement.fare_amount_vnd, 220000);
+    assert.strictEqual(hailRes.data.change_settlement.change_due_vnd, 30000);
 
     // Attempting to onboard another passenger on same seat B05 -> Rejected
     const duplicateSeat = service.onboardHailPassenger(tripId, {
       passenger_name: 'Người Thứ Hai',
       phone: '0911223344',
-      seat_code: 'B05',
-      fare_amount_vnd: 180000
+      seat_code: 'B05'
     });
     assert.strictEqual(duplicateSeat.success, false);
     assert.strictEqual(duplicateSeat.code, 'SEAT_OCCUPIED');

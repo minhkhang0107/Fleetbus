@@ -32,7 +32,9 @@ export function sendError(res, message, code = 'ERROR', statusCode = 400, detail
   });
 }
 
-export async function parseJsonBody(req) {
+export function readRawBody(req) {
+  // The gateway may already have read the body (idempotency fingerprint)
+  if (req.rawBody !== undefined) return Promise.resolve(req.rawBody);
   return new Promise((resolve, reject) => {
     let body = '';
     req.on('data', chunk => {
@@ -42,17 +44,20 @@ export async function parseJsonBody(req) {
         reject(new Error('Payload too large'));
       }
     });
-    req.on('end', () => {
-      if (!body.trim()) {
-        resolve({});
-        return;
-      }
-      try {
-        resolve(JSON.parse(body));
-      } catch (err) {
-        reject(new Error('Invalid JSON format'));
-      }
-    });
+    req.on('end', () => resolve(body));
     req.on('error', err => reject(err));
   });
+}
+
+export function parseJson(raw) {
+  if (!raw.trim()) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error('Invalid JSON format');
+  }
+}
+
+export async function parseJsonBody(req) {
+  return parseJson(await readRawBody(req));
 }

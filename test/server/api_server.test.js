@@ -131,6 +131,24 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     assert.strictEqual(todayRes.statusCode, 200);
     assert.ok(todayRes.body.data.trips.length > 0);
 
+    // Telemetry is only accepted for a running trip: complete the readiness checklist and start it
+    const readinessRes = await makeRequest('/api/v1/driver/trips/trp_991823/readiness', {
+      method: 'POST',
+      body: {
+        checklist: {
+          tires_checked: true,
+          brakes_fluid_checked: true,
+          ac_cleanliness_checked: true,
+          first_aid_extinguisher_checked: true,
+          fuel_level_sufficient: true,
+          gps_telemetry_beacon_active: true
+        }
+      }
+    });
+    assert.strictEqual(readinessRes.statusCode, 200);
+    const startRes = await makeRequest('/api/v1/driver/trips/trp_991823/start', { method: 'POST' });
+    assert.strictEqual(startRes.statusCode, 200);
+
     // Telemetry ping
     const telemetryRes = await makeRequest('/api/v1/driver/trips/trp_991823/telemetry', {
       method: 'POST',
@@ -229,11 +247,18 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     assert.strictEqual(hailRes.body.data.change_settlement.change_due_vnd, 30000);
 
     // 3. Passenger Order creation and group QR retrieval / status verification (REV-01, REV-02)
+    const orderHoldRes = await makeRequest('/api/v1/trips/trp_hn_th_01/seats/hold', {
+      method: 'POST',
+      body: { seatCodes: ['A05', 'A06'], userId: 'usr_srv_test' }
+    });
+    assert.strictEqual(orderHoldRes.statusCode, 200);
+
     const orderRes = await makeRequest('/api/v1/passenger/checkout/create-order', {
       method: 'POST',
       body: {
-        holdId: 'hld_srv_test',
-        tripId: 'trp_991823',
+        holdId: orderHoldRes.body.data.hold_id,
+        userId: 'usr_srv_test',
+        tripId: 'trp_hn_th_01',
         seatCodes: ['A05', 'A06'],
         payer: { full_name: 'Nguyễn Văn Server', phone: '0919888999' },
         passengers: [
@@ -248,10 +273,30 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     assert.strictEqual(orderRes.statusCode, 201);
     const orderId = orderRes.body.data.payment.order_id;
 
-    // Verify status with manualTrigger: true (REV-02)
-    const statusRes = await makeRequest(`/api/v1/passenger/payments/${orderId}/verify-status`, {
+    // "Tôi đã chuyển tiền" (manual_trigger) only asks for reconciliation; it never settles (REV-02)
+    const manualRes = await makeRequest(`/api/v1/passenger/payments/${orderId}/verify-status`, {
       method: 'POST',
       body: { manual_trigger: true }
+    });
+    assert.strictEqual(manualRes.statusCode, 200);
+    assert.strictEqual(manualRes.body.data.payment_status, 'PENDING_PAYMENT');
+    assert.strictEqual(manualRes.body.data.is_settled, false);
+
+    // Money arrives through the bank webhook
+    const ipnRes = await makeRequest('/api/v1/webhooks/vietqr/ipn', {
+      method: 'POST',
+      body: {
+        transferMemo: orderRes.body.data.payment.payment_details.transfer_memo,
+        amountVnd: 440000,
+        bankRef: `tx_srv_${Date.now()}`
+      }
+    });
+    assert.strictEqual(ipnRes.statusCode, 200);
+    assert.strictEqual(ipnRes.body.data.settled, true);
+
+    const statusRes = await makeRequest(`/api/v1/passenger/payments/${orderId}/verify-status`, {
+      method: 'POST',
+      body: {}
     });
     assert.strictEqual(statusRes.statusCode, 200);
     assert.strictEqual(statusRes.body.data.payment_status, 'PAID');
@@ -294,7 +339,8 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
       method: 'POST',
       body: { reason: 'Khách không có mặt sau 10 phút xuất bến' }
     });
-    assert.ok([200, 400].includes(noShowRes.statusCode));
+    assert.strictEqual(noShowRes.statusCode, 404, 'a ticket that is not on the manifest is not found');
+    assert.strictEqual(noShowRes.body.code, 'TICKET_NOT_FOUND');
 
     // 3. Driver Diagnostics & Profile (DRI-014, DRI-016, DRI-018)
     const gpsHealthRes = await makeRequest('/api/v1/driver/system/gps-health');

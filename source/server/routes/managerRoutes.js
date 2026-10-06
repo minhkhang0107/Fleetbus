@@ -4,6 +4,35 @@
  */
 
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { maskPhone } from '../services/passenger/core/formatters.js';
+import { ADMIN_ROLE } from '../core/gateway.js';
+
+// Seat conflicts and reservation mismatches are conflicts (409); a missing trip or reservation is 404.
+function inventoryErrorStatus(code) {
+  if (['SEAT_ALREADY_BOOKED', 'SEAT_LOCKED_BY_OTHER', 'RESERVATION_MISMATCH', 'TRIP_FULL'].includes(code)) return 409;
+  if (['TRIP_NOT_FOUND', 'RESERVATION_NOT_FOUND'].includes(code)) return 404;
+  return 400;
+}
+
+// OQ-007: only the admin role sees full phone numbers of passengers.
+function visibleBooking(req, booking) {
+  if (!req.identity || req.identity.role === ADMIN_ROLE) return booking;
+  return { ...booking, phone: booking.phone ? maskPhone(booking.phone) : booking.phone };
+}
+
+function audit(req, managerService, entry) {
+  managerService.recordAudit({
+    actor: req.identity?.sub || 'anonymous',
+    role: req.identity?.role || null,
+    ip: req.socket?.remoteAddress || null,
+    ...entry
+  });
+}
+
+const FLEET_PATHS = ['/api/v1/ops/fleet', '/api/v1/ops/fleet/vehicles', '/api/v1/ops/vehicles'];
+const CREW_PATHS = ['/api/v1/ops/crew', '/api/v1/ops/crew/drivers', '/api/v1/ops/drivers'];
+const TRIP_DETAIL_RE = /^\/api\/v1\/ops\/trips\/([^/]+)(?:\/master)?$/;
+const SEAT_INVENTORY_RE = /^\/api\/v1\/ops\/trips\/([^/]+)\/(?:seat-inventory|seat-matrix)$/;
 
 export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   const { managerService } = services;
@@ -11,11 +40,14 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   // POST /api/v1/ops/auth/login or /api/v1/auth/staff/login (MGR-001, MGR-029)
   if ((pathname === '/api/v1/ops/auth/login' || pathname === '/api/v1/auth/staff/login') && req.method === 'POST') {
     parseJsonBody(req).then(body => {
-      const result = managerService.authenticateStaff(body.username || body.email, body.password);
+      const username = String(body.username || body.email || '').trim().toLowerCase();
+      const result = managerService.authenticateStaff(username, body.password);
       if (result.success) {
+        managerService.recordAudit({ actor: result.data.user.user_id, role: result.data.user.role, action: 'LOGIN', resource: username, ip: req.socket?.remoteAddress || null });
         sendSuccess(res, result.data || result);
       } else {
-        sendError(res, result.error, result.code, 401, result);
+        managerService.recordAudit({ action: result.code === 'ACCOUNT_LOCKED' ? 'LOGIN_LOCKED' : 'LOGIN_FAILED', resource: username, ip: req.socket?.remoteAddress || null });
+        sendError(res, result.error, result.code, result.code === 'ACCOUNT_LOCKED' ? 429 : 401, result);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -36,14 +68,14 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   }
 
   // GET /api/v1/ops/fleet or /api/v1/ops/vehicles (MGR-005, MGR-006, MGR-007)
-  if ((pathname.startsWith('/api/v1/ops/fleet') || pathname.startsWith('/api/v1/ops/vehicles')) && req.method === 'GET') {
+  if (FLEET_PATHS.includes(pathname) && req.method === 'GET') {
     const fleet = managerService.getFleetRoster();
     sendSuccess(res, fleet.data || fleet);
     return true;
   }
 
   // GET /api/v1/ops/crew or /api/v1/ops/drivers (MGR-008, MGR-009, MGR-010)
-  if ((pathname.startsWith('/api/v1/ops/crew') || pathname.startsWith('/api/v1/ops/drivers')) && req.method === 'GET') {
+  if (CREW_PATHS.includes(pathname) && req.method === 'GET') {
     const crew = managerService.getCrewDrivers();
     sendSuccess(res, crew.data || crew);
     return true;
@@ -73,13 +105,16 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         phone: body.phone,
         seatCodes: body.seatCodes || body.seat_codes || [],
         paymentMethod: body.paymentMethod || body.payment_method || 'CASH_POS',
-        agentStaffId: body.agentStaffId || 'stf_pos_01'
+        agentStaffId: body.agentStaffId || 'stf_pos_01',
+        reservationId: body.reservationId || body.reservation_id || null,
+        mockNow: body.now || Date.now()
       });
 
       if (result.success) {
+        audit(req, managerService, { action: 'POS_ISSUE', resource: result.data.pnr, after: { trip_id: result.data.trip_id, seats: result.data.seat_codes, total_fare_vnd: result.data.total_fare_vnd } });
         sendSuccess(res, result.data || result, 201);
       } else {
-        sendError(res, result.error, result.code, 400);
+        sendError(res, result.error, result.code, inventoryErrorStatus(result.code));
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -102,9 +137,10 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       });
 
       if (result.success) {
+        audit(req, managerService, { action: 'HOTLINE_HOLD', resource: result.data.reservation_id, after: { trip_id: result.data.trip_id, seats: result.data.seat_codes, hold_until: result.data.hold_until } });
         sendSuccess(res, result.data || result, 201);
       } else {
-        sendError(res, result.error, result.code, 400);
+        sendError(res, result.error, result.code, inventoryErrorStatus(result.code));
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -116,6 +152,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     const tripIndex = parts.indexOf('trips');
     const tripId = tripIndex !== -1 ? parts[tripIndex + 1] : parts[4];
     parseJsonBody(req).then(body => {
+      const before = { vehicle_plate: managerService.findTrip(tripId)?.vehicle_plate || null };
       const result = managerService.executeEmergencyVehicleSwap(tripId, {
         newVehiclePlate: body.newVehiclePlate || body.new_vehicle_plate,
         newDriverId: body.newDriverId || body.new_driver_id,
@@ -123,9 +160,11 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       });
 
       if (result.success) {
+        audit(req, managerService, { action: 'VEHICLE_SWAP', resource: tripId, before, after: { vehicle_plate: result.data.new_vehicle_plate } });
         sendSuccess(res, result.data || result);
       } else {
-        sendError(res, result.error, result.code, 400);
+        const status = /_NOT_FOUND$/.test(result.code) ? 404 : (['VEHICLE_UNAVAILABLE', 'CAPACITY_INSUFFICIENT'].includes(result.code) ? 409 : 400);
+        sendError(res, result.error, result.code, status);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -137,8 +176,10 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     const tripIndex = parts.indexOf('trips');
     const tripId = tripIndex !== -1 ? parts[tripIndex + 1] : parts[4];
     parseJsonBody(req).then(body => {
+      const before = { delay_minutes: managerService.findTrip(tripId)?.delay_minutes ?? null };
       const result = managerService.broadcastTripDelay(tripId, body.delayMinutes || body.delay_minutes || 15, body.reason);
       if (result.success) {
+        audit(req, managerService, { action: 'TRIP_DELAY', resource: tripId, before, after: { delay_minutes: result.data.delay_minutes } });
         sendSuccess(res, result.data || result);
       } else {
         sendError(res, result.error, result.code, 400);
@@ -153,11 +194,16 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     const refundIndex = parts.indexOf('refunds');
     const refundId = refundIndex !== -1 ? parts[refundIndex + 1] : parts[4];
     parseJsonBody(req).then(body => {
+      if (typeof body.approved !== 'boolean') {
+        sendError(res, 'Cần chỉ rõ approved: true hoặc false', 'APPROVED_REQUIRED', 400);
+        return;
+      }
       const result = managerService.processRefundApproval(refundId, body.approved, body.notes);
       if (result.success) {
+        audit(req, managerService, { action: body.approved ? 'REFUND_APPROVED' : 'REFUND_REJECTED', resource: refundId, before: { status: 'REFUND_REQUESTED' }, after: { status: result.data.status, amount_vnd: result.data.amount_vnd } });
         sendSuccess(res, result.data || result);
       } else {
-        sendError(res, result.error, result.code, 400);
+        sendError(res, result.error, result.code, result.code === 'REFUND_NOT_FOUND' ? 404 : 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -165,8 +211,8 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
 
   // GET /api/v1/ops/reports/executive or /api/v1/ops/reports/yield (MGR-025, MGR-026, MGR-027)
   if ((pathname === '/api/v1/ops/reports/executive' || pathname === '/api/v1/ops/reports/yield') && req.method === 'GET') {
-    const startDate = parsedUrl.searchParams.get('start_date');
-    const endDate = parsedUrl.searchParams.get('end_date');
+    const startDate = parsedUrl.searchParams.get('from') || parsedUrl.searchParams.get('start_date');
+    const endDate = parsedUrl.searchParams.get('to') || parsedUrl.searchParams.get('end_date');
     const reports = managerService.getExecutiveReports({ startDate, endDate });
     sendSuccess(res, reports.data || reports);
     return true;
@@ -176,17 +222,17 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   if (pathname === '/api/v1/ops/bookings' && req.method === 'GET') {
     sendSuccess(res, {
       total: managerService.bookings.length,
-      bookings: managerService.bookings
+      bookings: managerService.bookings.map(b => visibleBooking(req, b))
     });
     return true;
   }
 
   // GET /api/v1/ops/bookings/:bookingId (MGR-018)
-  if (pathname.startsWith('/api/v1/ops/bookings/') && req.method === 'GET') {
+  if (/^\/api\/v1\/ops\/bookings\/[^/]+$/.test(pathname) && req.method === 'GET') {
     const bookingId = pathname.split('/')[5];
-    const booking = managerService.bookings.find(b => b.pnr === bookingId || b.trip_id === bookingId);
+    const booking = managerService.bookings.find(b => b.pnr === bookingId);
     if (booking) {
-      sendSuccess(res, booking);
+      sendSuccess(res, visibleBooking(req, booking));
     } else {
       sendError(res, 'Không tìm thấy thông tin đơn đặt vé', 'BOOKING_NOT_FOUND', 404);
     }
@@ -194,8 +240,8 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   }
 
   // GET /api/v1/ops/trips/:tripId/seat-inventory (MGR-013)
-  if (pathname.startsWith('/api/v1/ops/trips/') && pathname.endsWith('/seat-inventory') && req.method === 'GET') {
-    const tripId = pathname.split('/')[5];
+  if (SEAT_INVENTORY_RE.test(pathname) && req.method === 'GET') {
+    const tripId = pathname.match(SEAT_INVENTORY_RE)[1];
     const trip = managerService.findTrip(tripId);
     if (trip) {
       sendSuccess(res, {
@@ -212,8 +258,8 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   }
 
   // GET /api/v1/ops/trips/:tripId (MGR-012)
-  if (pathname.startsWith('/api/v1/ops/trips/') && !pathname.includes('seat-inventory') && !pathname.includes('delay') && !pathname.includes('replace-vehicle') && req.method === 'GET') {
-    const tripId = pathname.split('/')[5];
+  if (TRIP_DETAIL_RE.test(pathname) && req.method === 'GET') {
+    const tripId = pathname.match(TRIP_DETAIL_RE)[1];
     const trip = managerService.findTrip(tripId);
     if (trip) {
       sendSuccess(res, trip);
@@ -223,11 +269,17 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/ops/alerts (MGR-025)
+  if (pathname === '/api/v1/ops/alerts' && req.method === 'GET') {
+    sendSuccess(res, { total: managerService.alerts.length, alerts: managerService.alerts });
+    return true;
+  }
+
   // GET /api/v1/ops/audit-logs (MGR-028)
   if (pathname === '/api/v1/ops/audit-logs' && req.method === 'GET') {
     sendSuccess(res, {
-      total: managerService.alerts.length,
-      audit_logs: managerService.alerts
+      total: managerService.auditLog.length,
+      audit_logs: [...managerService.auditLog].reverse()
     });
     return true;
   }

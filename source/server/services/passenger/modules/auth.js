@@ -4,6 +4,8 @@
  */
 
 import { validateVietnamPhone } from '../core/formatters.js';
+import { isProduction } from '../../../config.js';
+import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 
 export class PassengerAuthService {
   constructor(options = {}) {
@@ -89,8 +91,8 @@ export class PassengerAuthService {
         phone: normalized,
         cooldown_seconds: this.otpCooldownSeconds,
         expires_in_seconds: this.otpTtlSeconds,
-        // In testing/dev, expose mock OTP for verification
-        mock_otp: otp
+        // The OTP is only echoed outside production, where no SMS gateway exists
+        ...(isProduction() ? {} : { mock_otp: otp })
       }
     };
   }
@@ -133,7 +135,6 @@ export class PassengerAuthService {
 
     // OTP Verified -> Create Auth Session
     this.otpStore.delete(normalized);
-    const token = `pax_jwt_${Buffer.from(`${normalized}_${mockNow}`).toString('base64').replace(/=/g, '')}`;
     const user = {
       user_id: `usr_${normalized.slice(-6)}`,
       phone: normalized,
@@ -143,6 +144,10 @@ export class PassengerAuthService {
       created_at: new Date(mockNow).toISOString()
     };
 
+    const token = signToken(
+      { sub: user.user_id, phone: normalized, role: user.role, kind: 'passenger' },
+      { prefix: TOKEN_PREFIXES.passenger, ttlSeconds: 12 * 3600, now: mockNow }
+    );
     this.sessions.set(token, user);
 
     return {

@@ -84,10 +84,15 @@ export class PassengerCheckoutService {
   /**
    * PAX-012: Build Order Summary and Calculate Breakdown
    */
-  calculateOrderReview({ trip = {}, seatCodes = [], pickupStop = 'Bến xe Giáp Bát', dropoffStop = 'Bến xe Phía Bắc Thanh Hóa', voucherCode, insuranceSelected = true, seats, seatPriceVnd }) {
+  calculateOrderReview({ trip = {}, seatCodes = [], pickupStop = 'Bến xe Giáp Bát', dropoffStop = 'Bến xe Phía Bắc Thanh Hóa', voucherCode, insuranceSelected = false, seats, seatPriceVnd }) {
     const effectiveSeatCodes = seatCodes.length > 0 ? seatCodes : (seats ? seats.map(s => typeof s === 'string' ? s : s.seat_code) : []);
     const seatPrice = seatPriceVnd || trip.base_fare_vnd || 220000;
-    const subtotalFare = effectiveSeatCodes.length * seatPrice;
+    const perSeatPrices = Array.isArray(seats) && seats.length > 0 && seats.every(s => s && Number.isFinite(s.price_vnd))
+      ? seats.map(s => s.price_vnd)
+      : null;
+    const subtotalFare = perSeatPrices
+      ? perSeatPrices.reduce((sum, price) => sum + price, 0)
+      : effectiveSeatCodes.length * seatPrice;
     
     // Optional travel insurance (10,000 VND / passenger)
     const insuranceFare = insuranceSelected ? effectiveSeatCodes.length * 10000 : 0;
@@ -95,6 +100,7 @@ export class PassengerCheckoutService {
     // Voucher computation
     let voucherDiscount = 0;
     let appliedVoucher = null;
+    let voucherError = null;
 
     if (voucherCode) {
       const promo = PROMO_VOUCHERS[voucherCode.toUpperCase().trim()];
@@ -110,6 +116,8 @@ export class PassengerCheckoutService {
           description: promo.description,
           discount_amount: voucherDiscount
         };
+      } else {
+        voucherError = 'Mã không hợp lệ hoặc đã hết lượt';
       }
     }
 
@@ -128,13 +136,14 @@ export class PassengerCheckoutService {
         dropoff_stop: dropoffStop,
         total_payment_vnd: finalTotal,
         price_breakdown: {
-          seat_fare_unit: seatPrice,
+          seat_fare_unit: perSeatPrices ? perSeatPrices[0] : seatPrice,
           subtotal_fare: subtotalFare,
           insurance_fare: insuranceFare,
           voucher_discount: voucherDiscount,
           final_total_vnd: finalTotal
         },
-        applied_voucher: appliedVoucher
+        applied_voucher: appliedVoucher,
+        voucher_error: voucherError
       }
     };
   }

@@ -12,6 +12,17 @@ export class FleetBusEventBridge extends EventEmitter {
   }
 
   /**
+   * Open a refund request in the manager ledger and return it (MGR-022).
+   */
+  requestRefund(request) {
+    const { managerService } = this.services || {};
+    if (managerService && typeof managerService.createRefundRequest === 'function') {
+      return managerService.createRefundRequest(request);
+    }
+    return { refund_id: `ref_${Date.now()}`, status: 'REFUND_REQUESTED', ...request };
+  }
+
+  /**
    * Bind all active server service instances and setup cross-subsystem event listeners.
    */
   bindServices(services) {
@@ -30,6 +41,7 @@ export class FleetBusEventBridge extends EventEmitter {
     if (managerService) managerService.eventBridge = this;
     if (trackingService) trackingService.eventBridge = this;
     if (seatMapService) seatMapService.eventBridge = this;
+    if (paymentService && seatMapService) paymentService.seatMapService = seatMapService;
 
     // -------------------------------------------------------------------------
     // 1. TICKET_SETTLED: Passenger Booking & VietQR Payment -> Driver & Manager
@@ -44,11 +56,7 @@ export class FleetBusEventBridge extends EventEmitter {
 
       // B. Driver Cockpit: Append newly issued tickets to Driver Manifest
       if (driverService && driverService.activeTrips) {
-        let driverTrip = driverService.activeTrips.get(tripId);
-        // Fallback: If trip not yet in activeTrips map, check if default trip matches route
-        if (!driverTrip && driverService.activeTrips.size > 0) {
-          driverTrip = Array.from(driverService.activeTrips.values())[0];
-        }
+        const driverTrip = driverService.activeTrips.get(tripId);
 
         if (driverTrip) {
           for (const tkt of tickets) {
@@ -76,7 +84,7 @@ export class FleetBusEventBridge extends EventEmitter {
       // C. Manager Operations: Update Booked Seats, Load Factor & Gross Revenue
       if (managerService) {
         if (managerService.trips) {
-          const mgrTrip = managerService.trips.find(t => t.trip_id === tripId) || managerService.trips[0];
+          const mgrTrip = managerService.trips.find(t => t.trip_id === tripId);
           if (mgrTrip) {
             mgrTrip.booked_seats = (mgrTrip.booked_seats || 0) + tickets.length;
           }
@@ -93,6 +101,7 @@ export class FleetBusEventBridge extends EventEmitter {
               seat_codes: order.seat_codes,
               total_fare_vnd: order.amount_vnd,
               payment_status: 'PAID',
+              issued_at: new Date().toISOString(),
               channel: 'PASSENGER_APP'
             });
           }
@@ -141,7 +150,7 @@ export class FleetBusEventBridge extends EventEmitter {
 
       // C. Manager Operations: Update boarded metric in trip
       if (managerService && managerService.trips) {
-        const mgrTrip = managerService.trips.find(t => t.trip_id === tripId) || managerService.trips[0];
+        const mgrTrip = managerService.trips.find(t => t.trip_id === tripId);
         if (mgrTrip) {
           mgrTrip.boarded_passengers = (mgrTrip.boarded_passengers || 0) + 1;
         }
@@ -165,10 +174,7 @@ export class FleetBusEventBridge extends EventEmitter {
 
       // B. Manager 60Hz Fleet Radar Map
       if (managerService && managerService.vehicles) {
-        let vehicle = managerService.vehicles.find(v => v.plate_number === telemetry.vehicle_plate || v.vehicle_id === telemetry.vehicle_id);
-        if (!vehicle && managerService.vehicles.length > 0) {
-          vehicle = managerService.vehicles[0];
-        }
+        const vehicle = managerService.vehicles.find(v => v.plate_number === telemetry.vehicle_plate || v.vehicle_id === telemetry.vehicle_id);
         if (vehicle) {
           vehicle.lat = telemetry.lat;
           vehicle.lng = telemetry.lng;
@@ -210,7 +216,7 @@ export class FleetBusEventBridge extends EventEmitter {
 
         // Broadcast notification to all passengers booked on this trip
         if (driverService && driverService.activeTrips) {
-          const trip = driverService.activeTrips.get(tripId) || Array.from(driverService.activeTrips.values())[0];
+          const trip = driverService.activeTrips.get(tripId);
           if (trip && trip.manifest) {
             for (const p of trip.manifest) {
               if (p.passenger_phone) {
@@ -240,7 +246,7 @@ export class FleetBusEventBridge extends EventEmitter {
 
       // B. Driver Cockpit Manifest
       if (driverService && driverService.activeTrips) {
-        const driverTrip = driverService.activeTrips.get(tripId) || Array.from(driverService.activeTrips.values())[0];
+        const driverTrip = driverService.activeTrips.get(tripId);
         if (driverTrip) {
           for (const seatCode of seatCodes) {
             const ticketId = `tkt_pos_${booking.pnr.replace('-', '')}_${seatCode}`;
@@ -262,8 +268,11 @@ export class FleetBusEventBridge extends EventEmitter {
         }
       }
 
-      // C. Payment Service: Record ticket in paymentService for dynamic QR lookup
+      // C. Payment Service: Record ticket in paymentService for dynamic QR lookup.
+      // The ticket carries the real route, departure and fare so cancellation and refunds are computed correctly.
       if (paymentService && paymentService.tickets) {
+        const mgrTrip = managerService?.findTrip?.(tripId);
+        const route = managerService?.routes?.find(r => r.route_id === mgrTrip?.route_id);
         for (const seatCode of seatCodes) {
           const ticketId = `tkt_pos_${booking.pnr.replace('-', '')}_${seatCode}`;
           paymentService.tickets.set(ticketId, {
@@ -271,10 +280,12 @@ export class FleetBusEventBridge extends EventEmitter {
             pnr: booking.pnr,
             order_id: `ord_pos_${booking.pnr}`,
             trip_id: tripId,
-            route_name: 'Vé đặt qua Quầy POS / Hotline',
-            departure_time: new Date().toISOString(),
+            route_name: route?.name || tripId,
+            departure_time: mgrTrip?.departure_time || new Date().toISOString(),
+            fare_vnd: Math.round(booking.total_fare_vnd / seatCodes.length),
+            owner_phone: booking.phone,
             seat_code: seatCode,
-            deck: seatCode.startsWith('A') ? 1 : 2,
+            deck: seatMapService?.getSeatInfo?.(tripId, seatCode)?.deck ?? (seatCode.startsWith('A') ? 1 : 2),
             passenger_name: booking.passenger_name,
             passenger_phone: booking.phone,
             pickup_stop: 'Bến xe trung tâm',
@@ -293,7 +304,7 @@ export class FleetBusEventBridge extends EventEmitter {
     this.on('VEHICLE_SWAPPED', ({ tripId, oldPlate, newPlate, reason }) => {
       // A. Driver Cockpit: Update assigned vehicle plate
       if (driverService && driverService.activeTrips) {
-        const trip = driverService.activeTrips.get(tripId) || Array.from(driverService.activeTrips.values())[0];
+        const trip = driverService.activeTrips.get(tripId);
         if (trip) {
           trip.vehicle_plate = newPlate;
         }
@@ -311,7 +322,7 @@ export class FleetBusEventBridge extends EventEmitter {
         }
 
         if (driverService && driverService.activeTrips) {
-          const trip = driverService.activeTrips.get(tripId) || Array.from(driverService.activeTrips.values())[0];
+          const trip = driverService.activeTrips.get(tripId);
           if (trip && trip.manifest) {
             for (const p of trip.manifest) {
               if (p.passenger_phone) {
@@ -333,7 +344,7 @@ export class FleetBusEventBridge extends EventEmitter {
     // -------------------------------------------------------------------------
     this.on('TRIP_DELAYED', ({ tripId, delayMinutes, reason }) => {
       if (driverService && driverService.activeTrips) {
-        const trip = driverService.activeTrips.get(tripId) || Array.from(driverService.activeTrips.values())[0];
+        const trip = driverService.activeTrips.get(tripId);
         if (trip) {
           trip.delay_minutes = delayMinutes;
         }
@@ -350,7 +361,7 @@ export class FleetBusEventBridge extends EventEmitter {
         }
 
         if (driverService && driverService.activeTrips) {
-          const trip = driverService.activeTrips.get(tripId) || Array.from(driverService.activeTrips.values())[0];
+          const trip = driverService.activeTrips.get(tripId);
           if (trip && trip.manifest) {
             for (const p of trip.manifest) {
               if (p.passenger_phone) {
@@ -370,7 +381,7 @@ export class FleetBusEventBridge extends EventEmitter {
     // -------------------------------------------------------------------------
     // 8. TICKET_CANCELLED: Passenger Cancel & Refund -> SeatMap, Driver & Manager
     // -------------------------------------------------------------------------
-    this.on('TICKET_CANCELLED', ({ ticketId, pnr, tripId, seatCode, refundAmountVnd }) => {
+    this.on('TICKET_CANCELLED', ({ ticketId, pnr, tripId, seatCode }) => {
       let resolvedTripId = tripId;
       let resolvedSeatCode = seatCode;
       let resolvedPnr = pnr;
@@ -387,13 +398,21 @@ export class FleetBusEventBridge extends EventEmitter {
       }
 
       // B. Seat Map: Release seat back to AVAILABLE
-      if (seatMapService && resolvedSeatCode && typeof seatMapService.releaseBooking === 'function') {
-        seatMapService.releaseBooking(resolvedTripId || 'trp_hn_th_01', [resolvedSeatCode]);
+      if (seatMapService && resolvedTripId && resolvedSeatCode && typeof seatMapService.releaseBooking === 'function') {
+        seatMapService.releaseBooking(resolvedTripId, [resolvedSeatCode]);
+      }
+
+      // B2. Manager: one seat less sold on the trip
+      if (managerService && managerService.trips && resolvedTripId) {
+        const mgrTrip = managerService.trips.find(t => t.trip_id === resolvedTripId);
+        if (mgrTrip) {
+          mgrTrip.booked_seats = Math.max(0, (mgrTrip.booked_seats || 0) - 1);
+        }
       }
 
       // C. Driver Manifest: Update status to CANCELLED
       if (driverService && driverService.activeTrips) {
-        const trip = driverService.activeTrips.get(resolvedTripId) || Array.from(driverService.activeTrips.values())[0];
+        const trip = driverService.activeTrips.get(resolvedTripId);
         if (trip && trip.manifest) {
           const item = trip.manifest.find(m => m.ticket_id === ticketId || (m.pnr === resolvedPnr && m.seat_code === resolvedSeatCode));
           if (item) {
@@ -402,9 +421,84 @@ export class FleetBusEventBridge extends EventEmitter {
         }
       }
 
-      // D. Manager Accounting: Record refund
-      if (managerService && typeof managerService.processRefund === 'function') {
-        managerService.processRefund(resolvedPnr || ticketId, refundAmountVnd, 'Hủy vé trực tuyến qua app hành khách');
+      // The refund request is opened by the cancellation itself and waits for manager approval (MGR-022).
+    });
+
+    // -------------------------------------------------------------------------
+    // 8b. PAYMENT_OVERDUE / PAYMENT_ANOMALY: money received but order cannot be fulfilled (OQ-008)
+    // -------------------------------------------------------------------------
+    this.on('PAYMENT_OVERDUE', ({ order, amountVnd }) => {
+      this.requestRefund({
+        pnr: order.pnr,
+        trip_id: order.trip_id,
+        amount_vnd: amountVnd,
+        reason: 'Thanh toán đến sau khi hết hạn giữ chỗ (UNMATCHED_OVERDUE)',
+        source: 'UNMATCHED_OVERDUE'
+      });
+      if (managerService && managerService.alerts) {
+        managerService.alerts.unshift({
+          alert_id: `alt_overdue_${Date.now()}`,
+          vehicle_plate: null,
+          type: 'PAYMENT_UNMATCHED_OVERDUE',
+          severity: 'AMBER',
+          message: `Đơn ${order.pnr} nhận ${amountVnd} đ sau khi hết hạn. Đã tạo yêu cầu hoàn tiền`,
+          created_at: new Date().toISOString()
+        });
+      }
+    });
+
+    this.on('PAYMENT_ANOMALY', ({ order, receivedVnd }) => {
+      if (managerService && managerService.alerts) {
+        managerService.alerts.unshift({
+          alert_id: `alt_amount_${Date.now()}`,
+          vehicle_plate: null,
+          type: 'PAYMENT_AMOUNT_MISMATCH',
+          severity: 'AMBER',
+          message: `Đơn ${order.pnr} nhận ${receivedVnd} đ, cần ${order.amount_vnd} đ. Chưa xuất vé`,
+          created_at: new Date().toISOString()
+        });
+      }
+    });
+
+    // -------------------------------------------------------------------------
+    // 8c. COD_COLLECTED / HAIL_BOARDED / WALLET_CREDIT_REQUESTED: driver cash events -> Manager & Passenger wallet
+    // -------------------------------------------------------------------------
+    this.on('COD_COLLECTED', ({ pnr, fareVnd }) => {
+      const booking = managerService?.bookings?.find(b => b.pnr === pnr);
+      if (booking) {
+        booking.payment_status = 'PAID';
+        booking.cod_collected_vnd = (booking.cod_collected_vnd || 0) + fareVnd;
+      }
+    });
+
+    this.on('HAIL_BOARDED', ({ tripId, passenger, fareVnd }) => {
+      // The seat is sold for good in the shared inventory (OQ-014)
+      if (seatMapService && typeof seatMapService.confirmBooking === 'function') {
+        seatMapService.confirmBooking(tripId, [passenger.seat_code]);
+      }
+      if (!managerService) return;
+      const mgrTrip = managerService.trips?.find(t => t.trip_id === tripId);
+      if (mgrTrip) {
+        mgrTrip.booked_seats = (mgrTrip.booked_seats || 0) + 1;
+      }
+      if (managerService.bookings && !managerService.bookings.some(b => b.pnr === passenger.pnr)) {
+        managerService.bookings.push({
+          pnr: passenger.pnr,
+          trip_id: tripId,
+          passenger_name: passenger.passenger_name,
+          phone: passenger.passenger_phone || null,
+          seat_codes: [passenger.seat_code],
+          total_fare_vnd: fareVnd,
+          payment_status: 'PAID',
+          issued_at: new Date().toISOString(),
+          channel: 'DRIVER_HAIL'
+        });
+      }
+    });
+
+    this.on('WALLET_CREDIT_REQUESTED', ({ ticketId, phone, amountVnd }) => {
+      if (paymentService && typeof paymentService.creditWallet === 'function') {
+        paymentService.creditWallet(phone, amountVnd, ticketId, 'Tiền thừa khi lên xe');
       }
     });
 
@@ -414,13 +508,13 @@ export class FleetBusEventBridge extends EventEmitter {
     this.on('TRIP_COMPLETED', ({ tripId, summary }) => {
       if (managerService) {
         if (managerService.trips) {
-          const trip = managerService.findTrip ? managerService.findTrip(tripId) : (managerService.trips.find(t => t.trip_id === tripId) || managerService.trips[0]);
+          const trip = managerService.findTrip(tripId);
           if (trip) {
             trip.status = 'COMPLETED';
           }
         }
         if (managerService.vehicles) {
-          const veh = managerService.vehicles.find(v => v.plate_number === summary?.vehicle_plate || v.status === 'IN_TRANSIT');
+          const veh = managerService.vehicles.find(v => v.plate_number === summary?.vehicle_plate);
           if (veh) {
             veh.status = 'STANDBY';
             veh.speed_kmh = 0;

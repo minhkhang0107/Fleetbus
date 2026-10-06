@@ -3,11 +3,18 @@
  * Implements MGR-001 through MGR-030 for Fleet Managers, Dispatchers, and Controllers.
  */
 
+import { validateVietnamPhone } from '../../passenger/core/formatters.js';
+import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
+import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
+
+const POS_PAYMENT_METHODS = ['CASH_POS', 'CARD_POS', 'BANK_TRANSFER'];
+const HOLD_POLICIES = ['UNTIL_DEPARTURE_OFFSET', 'CUSTOM_EXPIRY_MINUTES'];
+
 export const MOCK_MANAGERS_DB = [
   {
     user_id: 'mgr_01',
     username: 'admin@busgo.vn',
-    password_hash: 'admin123',
+    password_hash: hashSecret('admin123'),
     full_name: 'Nguyễn Tiến Dũng',
     role: 'FLEET_DIRECTOR', // FLEET_DIRECTOR | DISPATCHER | CASHIER | FINANCIAL_CONTROLLER
     permissions: ['ALL']
@@ -15,15 +22,24 @@ export const MOCK_MANAGERS_DB = [
   {
     user_id: 'mgr_02',
     username: 'dispatcher@busgo.vn',
-    password_hash: 'disp123',
+    password_hash: hashSecret('disp123'),
     full_name: 'Phạm Hồng Quân',
     role: 'DISPATCHER',
     permissions: ['DISPATCH_MANAGE', 'TRIP_EDIT', 'INCIDENT_BROADCAST', 'RADAR_VIEW']
+  },
+  {
+    user_id: 'mgr_03',
+    username: 'cashier@busgo.vn',
+    password_hash: hashSecret('cash123'),
+    full_name: 'Đỗ Thu Hà',
+    role: 'CASHIER',
+    permissions: ['POS_ISSUE', 'BOOKING_SEARCH']
   }
 ];
 
 export class ManagerOperationsService {
   constructor() {
+    this.loginGuard = new LoginGuard();
     this.vehicles = [
       { vehicle_id: 'veh_01', plate_number: '29B-123.45', model: 'Limousine 34 Phòng VIP', total_seats: 34, status: 'IN_TRANSIT', driver_name: 'Trần Văn Bình', lat: 20.9812, lng: 105.8430, speed_kmh: 62, heading: 180, gps_status: 'LIVE', gps_health: 'LIVE' },
       { vehicle_id: 'veh_02', plate_number: '29B-444.11', model: 'Cabin Cung Điện VIP 22', total_seats: 22, status: 'IN_TRANSIT', driver_name: 'Lê Văn Toàn', lat: 20.4500, lng: 105.9200, speed_kmh: 55, heading: 175, gps_status: 'STALE', gps_health: 'STALE' },
@@ -42,13 +58,14 @@ export class ManagerOperationsService {
     ];
 
     this.trips = [
-      { trip_id: 'trp_991823', route_id: 'rt_hn_th', vehicle_id: 'veh_01', vehicle_plate: '29B-123.45', departure_time: '2026-08-28T14:00:00+07:00', status: 'IN_TRANSIT', booked_seats: 28, total_seats: 34, delay_minutes: 0 },
-      { trip_id: 'trp_991824', route_id: 'rt_hn_hp', vehicle_id: 'veh_02', vehicle_plate: '29B-444.11', departure_time: '2026-08-28T15:30:00+07:00', status: 'SCHEDULED', booked_seats: 20, total_seats: 22, delay_minutes: 35 }
+      { trip_id: 'trp_991823', driver_id: 'drv_8821a', route_id: 'rt_hn_th', vehicle_id: 'veh_01', vehicle_plate: '29B-123.45', departure_time: '2026-08-28T14:00:00+07:00', status: 'IN_TRANSIT', booked_seats: 28, total_seats: 34, delay_minutes: 0 },
+      { trip_id: 'trp_991824', driver_id: 'drv_8821a', route_id: 'rt_hn_hp', vehicle_id: 'veh_02', vehicle_plate: '29B-444.11', departure_time: '2026-08-28T15:30:00+07:00', status: 'SCHEDULED', booked_seats: 20, total_seats: 22, delay_minutes: 35 },
+      { trip_id: 'trp_hn_th_01', driver_id: 'drv_8821a', route_id: 'rt_hn_th', vehicle_id: 'veh_01', vehicle_plate: '29B-882.19', departure_time: '2026-08-28T07:00:00+07:00', status: 'IN_TRANSIT', booked_seats: 14, total_seats: 22, delay_minutes: 0 }
     ];
 
     this.bookings = [
-      { pnr: 'BG-88219', trip_id: 'trp_991823', passenger_name: 'Trần Văn Hùng', phone: '0981112233', seat_codes: ['A01', 'A02'], total_fare_vnd: 440000, payment_status: 'PAID', channel: 'PASSENGER_APP' },
-      { pnr: 'BG-99412', trip_id: 'trp_991823', passenger_name: 'Nguyễn Thị Hoa', phone: '0912334455', seat_codes: ['B01'], total_fare_vnd: 220000, payment_status: 'PAID', channel: 'POS_HOTLINE' }
+      { pnr: 'BG-88219', trip_id: 'trp_991823', passenger_name: 'Trần Văn Hùng', phone: '0981112233', seat_codes: ['A01', 'A02'], total_fare_vnd: 440000, payment_status: 'PAID', channel: 'PASSENGER_APP', issued_at: '2026-08-27T09:00:00+07:00' },
+      { pnr: 'BG-99412', trip_id: 'trp_991823', passenger_name: 'Nguyễn Thị Hoa', phone: '0912334455', seat_codes: ['B01'], total_fare_vnd: 220000, payment_status: 'PAID', channel: 'POS_HOTLINE', issued_at: '2026-08-27T10:30:00+07:00' }
     ];
 
     this.alerts = [
@@ -57,18 +74,57 @@ export class ManagerOperationsService {
     ];
 
     this.hotlineReservations = [];
+    this.refundRequests = [];
+    this.auditLog = [];
+  }
+
+  /**
+   * MGR-028: Append-only record of who did what, to what, from where, with the values before and after.
+   * Entries are frozen and never edited; secrets are never written to it.
+   */
+  recordAudit({ actor = 'anonymous', role = null, action, resource = null, ip = null, before = null, after = null, now = Date.now() }) {
+    const entry = Object.freeze({
+      audit_id: `aud_${now}_${this.auditLog.length + 1}`,
+      at: new Date(now).toISOString(),
+      actor,
+      role,
+      action,
+      resource,
+      ip,
+      before,
+      after
+    });
+    this.auditLog.push(entry);
+    return entry;
   }
 
   /**
    * MGR-001: Manager Authentication & RBAC Session
    */
-  authenticateManager(username, password) {
-    const user = MOCK_MANAGERS_DB.find(u => u.username === (username || '').trim() && u.password_hash === password);
-    if (!user) {
-      return { success: false, error: 'Tên đăng nhập hoặc mật khẩu không chính xác', code: 'INVALID_CREDENTIALS' };
+  authenticateManager(username, password, mockNow = Date.now()) {
+    const key = (username || '').trim().toLowerCase();
+
+    const lockedFor = this.loginGuard.isLocked(key, mockNow);
+    if (lockedFor > 0) {
+      return {
+        success: false,
+        error: `Tài khoản tạm khóa do nhập sai nhiều lần. Thử lại sau ${Math.ceil(lockedFor / 60)} phút`,
+        code: 'ACCOUNT_LOCKED',
+        retry_after_seconds: lockedFor
+      };
     }
 
-    const token = `mgr_session_${Buffer.from(`${user.user_id}_${Date.now()}`).toString('base64').replace(/=/g, '')}`;
+    const user = MOCK_MANAGERS_DB.find(u => u.username === key);
+    if (!user || !verifySecret(String(password ?? ''), user.password_hash)) {
+      this.loginGuard.fail(key, mockNow);
+      return { success: false, error: 'Tên đăng nhập hoặc mật khẩu không chính xác', code: 'INVALID_CREDENTIALS' };
+    }
+    this.loginGuard.succeed(key);
+
+    const token = signToken(
+      { sub: user.user_id, role: user.role, permissions: user.permissions, kind: 'staff' },
+      { prefix: TOKEN_PREFIXES.staff, ttlSeconds: 8 * 3600, now: mockNow }
+    );
 
     return {
       success: true,
@@ -92,13 +148,41 @@ export class ManagerOperationsService {
   /**
    * MGR-002: Operations Dashboard Executive KPIs
    */
+  /**
+   * Money figures over a set of bookings: gross fares, refunds paid back, and what is left.
+   */
+  _moneyFigures(bookings) {
+    const gross = bookings.reduce((sum, b) => sum + b.total_fare_vnd, 0);
+    const refunded = bookings.reduce((sum, b) => sum + (b.refund_amount_vnd || 0), 0);
+    return { gross_revenue_vnd: gross, refunded_vnd: refunded, net_revenue_vnd: gross - refunded };
+  }
+
   getDashboardKPIs() {
+    this.releaseExpiredHotlineHolds();
+    const round1 = (n) => parseFloat(n.toFixed(1));
     const totalVehicles = this.vehicles.length;
     const activeVehicles = this.vehicles.filter(v => v.status === 'IN_TRANSIT').length;
     const totalBookedSeats = this.trips.reduce((acc, t) => acc + t.booked_seats, 0);
     const totalCapacity = this.trips.reduce((acc, t) => acc + t.total_seats, 0);
-    const loadFactorPct = totalCapacity > 0 ? ((totalBookedSeats / totalCapacity) * 100).toFixed(1) : '0.0';
-    const totalRevenueVnd = this.bookings.reduce((acc, b) => acc + b.total_fare_vnd, 0);
+
+    // A trip leaves on time when its delay is at most 15 minutes (MGR-002)
+    const onTimeTrips = this.trips.filter(t => (t.delay_minutes || 0) <= 15).length;
+    const moving = this.vehicles.filter(v => v.status === 'IN_TRANSIT' && v.speed_kmh > 0);
+
+    const corridors = this.routes
+      .map(route => {
+        const routeTrips = this.trips.filter(t => t.route_id === route.route_id);
+        const booked = routeTrips.reduce((acc, t) => acc + t.booked_seats, 0);
+        const capacity = routeTrips.reduce((acc, t) => acc + t.total_seats, 0);
+        return {
+          corridor: route.name,
+          load_factor_pct: capacity > 0 ? round1((booked / capacity) * 100) : 0,
+          active_trips: routeTrips.filter(t => t.status === 'IN_TRANSIT').length,
+          trips: routeTrips.length
+        };
+      })
+      .filter(c => c.trips > 0)
+      .map(({ trips, ...corridor }) => corridor);
 
     return {
       success: true,
@@ -107,16 +191,13 @@ export class ManagerOperationsService {
         kpi_metrics: {
           active_vehicles_count: activeVehicles,
           total_fleet_count: totalVehicles,
-          overall_load_factor_pct: parseFloat(loadFactorPct),
-          gross_revenue_vnd: totalRevenueVnd,
-          on_time_departure_rate_pct: 96.8,
+          overall_load_factor_pct: totalCapacity > 0 ? round1((totalBookedSeats / totalCapacity) * 100) : 0,
+          ...this._moneyFigures(this.bookings),
+          on_time_departure_rate_pct: this.trips.length > 0 ? round1((onTimeTrips / this.trips.length) * 100) : 100,
           active_alerts_count: this.alerts.length,
-          fleet_average_speed_kmh: 58.5
+          fleet_average_speed_kmh: moving.length > 0 ? round1(moving.reduce((acc, v) => acc + v.speed_kmh, 0) / moving.length) : 0
         },
-        corridors: [
-          { corridor: 'Hà Nội — Thanh Hóa', load_factor_pct: 94.2, active_trips: 1 },
-          { corridor: 'Hà Nội — Hải Phòng', load_factor_pct: 90.9, active_trips: 1 }
-        ],
+        corridors,
         recent_alerts: this.alerts
       }
     };
@@ -244,6 +325,7 @@ export class ManagerOperationsService {
    * MGR-014: Dispatch Board Timeline
    */
   getDispatchBoard(shiftDate = new Date().toISOString().split('T')[0]) {
+    this.releaseExpiredHotlineHolds();
     return {
       success: true,
       data: {
@@ -264,30 +346,68 @@ export class ManagerOperationsService {
   }
 
   findTrip(tripId) {
-    let trip = this.trips.find(t => t.trip_id === tripId);
-    if (!trip && tripId === 'trp_hn_th_01') {
-      trip = {
-        trip_id: 'trp_hn_th_01',
-        route_id: 'rt_hn_th',
-        vehicle_id: 'veh_01',
-        vehicle_plate: '29B-882.19',
-        departure_time: '2026-08-28T07:00:00+07:00',
-        status: 'IN_TRANSIT',
-        booked_seats: 14,
-        total_seats: 22,
-        delay_minutes: 0
-      };
-      this.trips.push(trip);
-    }
-    return trip;
+    return this.trips.find(t => t.trip_id === tripId);
   }
 
   /**
-   * MGR-019 / MGR-020: Counter POS & Hotline Telephone Ticket Booking
+   * The seat inventory shared with online sales (bound by the event bridge), or null when running stand-alone.
    */
-  createPosBooking({ tripId, passengerName, phone, seatCodes, paymentMethod = 'CASH_POS', agentStaffId = 'stf_pos_01' }) {
+  _inventory() {
+    return this.eventBridge?.services?.seatMapService || null;
+  }
+
+  /**
+   * MGR-019 / MGR-020: Counter POS ticket issuance.
+   * Seats are checked against the same inventory as online sales; a hotline caller collects the seats
+   * that were locked for them by passing the reservation id.
+   */
+  createPosBooking({
+    tripId,
+    passengerName,
+    phone,
+    seatCodes,
+    paymentMethod = 'CASH_POS',
+    agentStaffId = 'stf_pos_01',
+    reservationId = null,
+    mockNow = Date.now()
+  }) {
+    this.releaseExpiredHotlineHolds(mockNow);
+
     const trip = this.findTrip(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+    if (!Array.isArray(seatCodes) || seatCodes.length === 0) {
+      return { success: false, error: 'Vui lòng chọn ít nhất 1 ghế', code: 'NO_SEAT_SELECTED' };
+    }
+    if (!passengerName || !String(passengerName).trim()) {
+      return { success: false, error: 'Thiếu họ tên hành khách', code: 'INVALID_PASSENGER_NAME' };
+    }
+    if (phone && !validateVietnamPhone(phone).isValid) {
+      return { success: false, error: 'Số điện thoại không hợp lệ', code: 'INVALID_PHONE' };
+    }
+    if (!POS_PAYMENT_METHODS.includes(paymentMethod)) {
+      return { success: false, error: 'Hình thức thanh toán không hợp lệ', code: 'INVALID_PAYMENT_METHOD' };
+    }
+
+    let reservation = null;
+    if (reservationId) {
+      reservation = this.hotlineReservations.find(r => r.reservation_id === reservationId && r.trip_id === tripId && r.hold_status === 'HELD_HOTLINE');
+      if (!reservation) {
+        return { success: false, error: 'Không tìm thấy lệnh giữ chỗ còn hiệu lực', code: 'RESERVATION_NOT_FOUND' };
+      }
+      const sameSeats = reservation.seat_codes.length === seatCodes.length && seatCodes.every(code => reservation.seat_codes.includes(code));
+      if (!sameSeats) {
+        return { success: false, error: 'Ghế xuất vé không khớp với lệnh giữ chỗ', code: 'RESERVATION_MISMATCH' };
+      }
+    }
+
+    const inventory = this._inventory();
+    const owner = reservation ? `hotline:${reservation.reservation_id}` : null;
+    if (inventory) {
+      const check = inventory.checkSellable(tripId, seatCodes, mockNow, owner);
+      if (!check.success) return check;
+    } else if (!reservation && trip.booked_seats + seatCodes.length > trip.total_seats) {
+      return { success: false, error: 'Chuyến xe đã hết chỗ', code: 'TRIP_FULL' };
+    }
 
     const route = this.routes.find(r => r.route_id === trip.route_id);
     const unitPrice = route ? route.base_fare_vnd : 220000;
@@ -305,12 +425,20 @@ export class ManagerOperationsService {
       payment_method: paymentMethod,
       payment_status: 'PAID',
       agent_staff_id: agentStaffId,
-      issued_at: new Date().toISOString(),
+      issued_at: new Date(mockNow).toISOString(),
       channel: 'POS_HOTLINE'
     };
 
     this.bookings.push(newBooking);
-    trip.booked_seats += seatCodes.length;
+    if (reservation) {
+      // The seats were counted when they were held
+      inventory?.unlockSeats(tripId, reservation.seat_codes, owner);
+      reservation.hold_status = 'CONVERTED';
+      reservation.converted_at = new Date(mockNow).toISOString();
+      reservation.pnr = pnr;
+    } else {
+      trip.booked_seats += seatCodes.length;
+    }
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
       this.eventBridge.emit('POS_BOOKING_CREATED', { booking: newBooking, seatCodes });
@@ -324,7 +452,9 @@ export class ManagerOperationsService {
   }
 
   /**
-   * MGR-020 / REV-06: Configurable Hotline Telephone Seat Hold Reservation
+   * MGR-020 / REV-06: Hotline telephone seat hold.
+   * The seats are locked in the shared inventory until `hold_until`, so online and counter sales cannot
+   * take them, and the lock lapses by itself when the hold expires.
    */
   createHotlineHold({
     tripId,
@@ -338,32 +468,60 @@ export class ManagerOperationsService {
     agentStaffId = 'stf_hotline_01',
     mockNow = Date.now()
   }) {
+    this.releaseExpiredHotlineHolds(mockNow);
+
     const trip = this.findTrip(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+    if (!Array.isArray(seatCodes) || seatCodes.length === 0) {
+      return { success: false, error: 'Vui lòng chọn ít nhất 1 ghế', code: 'NO_SEAT_SELECTED' };
+    }
+    if (!passengerName || !String(passengerName).trim()) {
+      return { success: false, error: 'Thiếu họ tên khách gọi điện', code: 'INVALID_PASSENGER_NAME' };
+    }
+    if (!validateVietnamPhone(phone).isValid) {
+      return { success: false, error: 'Số điện thoại khách không hợp lệ', code: 'INVALID_PHONE' };
+    }
+    if (!HOLD_POLICIES.includes(holdPolicy)) {
+      return { success: false, error: 'Chế độ giữ chỗ không hợp lệ', code: 'INVALID_HOLD_POLICY' };
+    }
+    const offsetOk = Number.isFinite(Number(departureOffsetMinutes)) && Number(departureOffsetMinutes) >= 0;
+    const customOk = Number.isFinite(Number(customExpiryMinutes)) && Number(customExpiryMinutes) >= 1;
+    if ((holdPolicy === 'UNTIL_DEPARTURE_OFFSET' && !offsetOk) || (holdPolicy === 'CUSTOM_EXPIRY_MINUTES' && !customOk)) {
+      return { success: false, error: 'Thời hạn giữ chỗ không hợp lệ', code: 'INVALID_HOLD_DURATION' };
+    }
+
+    const inventory = this._inventory();
+    if (inventory) {
+      const check = inventory.checkSellable(tripId, seatCodes, mockNow);
+      if (!check.success) return check;
+    } else if (trip.booked_seats + seatCodes.length > trip.total_seats) {
+      return { success: false, error: 'Chuyến xe đã hết chỗ', code: 'TRIP_FULL' };
+    }
 
     let holdUntilMs;
     if (holdPolicy === 'UNTIL_DEPARTURE_OFFSET') {
       const departureTimeMs = new Date(trip.departure_time).getTime();
-      holdUntilMs = departureTimeMs - (departureOffsetMinutes * 60 * 1000);
+      holdUntilMs = departureTimeMs - (Number(departureOffsetMinutes) * 60 * 1000);
       // If departure is very close or in the past relative to mockNow, fallback to 15m hold
       if (holdUntilMs <= mockNow) {
         holdUntilMs = mockNow + (15 * 60 * 1000);
       }
     } else {
-      holdUntilMs = mockNow + (customExpiryMinutes * 60 * 1000);
+      holdUntilMs = mockNow + (Number(customExpiryMinutes) * 60 * 1000);
     }
 
     const holdUntil = new Date(holdUntilMs).toISOString();
+    const reservationId = `rsv_pos_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`;
 
     const reservation = {
-      reservation_id: `rsv_pos_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`,
+      reservation_id: reservationId,
       pnr: `BG-RSV-${Math.floor(100 + Math.random() * 900)}`,
       trip_id: tripId,
       passenger_name: passengerName,
       phone,
       seat_codes: seatCodes,
       hold_policy: holdPolicy,
-      departure_offset_minutes: departureOffsetMinutes,
+      departure_offset_minutes: Number(departureOffsetMinutes),
       hold_status: 'HELD_HOTLINE',
       hold_until: holdUntil,
       created_at: new Date(mockNow).toISOString(),
@@ -371,6 +529,7 @@ export class ManagerOperationsService {
       notes
     };
 
+    inventory?.lockSeats(tripId, seatCodes, `hotline:${reservationId}`, holdUntilMs);
     this.hotlineReservations.push(reservation);
     trip.booked_seats += seatCodes.length;
 
@@ -382,7 +541,7 @@ export class ManagerOperationsService {
   }
 
   /**
-   * Automatically release expired hotline reservations (REV-06)
+   * Release hotline holds whose time is up (REV-06). Called before any read or sale, so no timer is needed.
    */
   releaseExpiredHotlineHolds(mockNow = Date.now()) {
     const releasedList = [];
@@ -391,6 +550,7 @@ export class ManagerOperationsService {
       if (rsv.hold_status === 'HELD_HOTLINE' && mockNow > new Date(rsv.hold_until).getTime()) {
         rsv.hold_status = 'EXPIRED_RELEASED';
         rsv.released_at = new Date(mockNow).toISOString();
+        this._inventory()?.unlockSeats(rsv.trip_id, rsv.seat_codes, `hotline:${rsv.reservation_id}`);
 
         const trip = this.findTrip(rsv.trip_id);
         if (trip) {
@@ -418,6 +578,7 @@ export class ManagerOperationsService {
       rsv.hold_status = 'CANCELLED';
       rsv.cancel_reason = reason;
       rsv.cancelled_at = new Date(mockNow).toISOString();
+      this._inventory()?.unlockSeats(rsv.trip_id, rsv.seat_codes, `hotline:${rsv.reservation_id}`);
 
       const trip = this.findTrip(rsv.trip_id);
       if (trip) {
@@ -429,18 +590,43 @@ export class ManagerOperationsService {
   }
 
   /**
-   * MGR-023: Emergency Vehicle Replacement Wizard
+   * MGR-023: Emergency Vehicle Replacement Wizard (OQ-005)
+   * The replacement must be a real vehicle that is free and has at least as many seats as are booked,
+   * so every passenger keeps the same seat code. Nothing changes unless every check passes.
    */
-  replaceTripVehicle(tripId, newVehicleIdOrPlate, reason = 'Sự cố hỏng hóc kỹ thuật động cơ') {
+  replaceTripVehicle(tripId, newVehicleIdOrPlate, reason = 'Sự cố hỏng hóc kỹ thuật động cơ', newDriverId = null) {
     const trip = this.findTrip(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
 
-    const targetVehicle = this.vehicles.find(v => v.vehicle_id === newVehicleIdOrPlate || v.plate_number === newVehicleIdOrPlate) || {
-      vehicle_id: newVehicleIdOrPlate,
-      plate_number: newVehicleIdOrPlate.startsWith('29B') ? newVehicleIdOrPlate : '29B-888.22'
-    };
+    const targetVehicle = this.vehicles.find(v => v.vehicle_id === newVehicleIdOrPlate || v.plate_number === newVehicleIdOrPlate);
+    if (!targetVehicle) {
+      return { success: false, error: 'Không tìm thấy xe thay thế trong đội xe', code: 'VEHICLE_NOT_FOUND' };
+    }
+    if (targetVehicle.status !== 'STANDBY') {
+      return { success: false, error: `Xe ${targetVehicle.plate_number} đang ở trạng thái ${targetVehicle.status}, không thể điều thay thế`, code: 'VEHICLE_UNAVAILABLE' };
+    }
+    if (targetVehicle.total_seats < trip.booked_seats) {
+      return {
+        success: false,
+        error: `Xe thay thế chỉ có ${targetVehicle.total_seats} chỗ, chuyến đã bán ${trip.booked_seats} chỗ`,
+        code: 'CAPACITY_INSUFFICIENT'
+      };
+    }
+    const newDriver = newDriverId ? this.drivers.find(d => d.driver_id === newDriverId) : null;
+    if (newDriverId && !newDriver) {
+      return { success: false, error: 'Không tìm thấy tài xế thay thế', code: 'DRIVER_NOT_FOUND' };
+    }
 
     const oldPlate = trip.vehicle_plate;
+    const oldVehicle = this.vehicles.find(v => v.vehicle_id === trip.vehicle_id);
+    if (oldVehicle && oldVehicle.vehicle_id !== targetVehicle.vehicle_id) {
+      oldVehicle.status = 'MAINTENANCE';
+    }
+    targetVehicle.status = trip.status === 'IN_TRANSIT' ? 'IN_TRANSIT' : 'ASSIGNED';
+    if (newDriver) {
+      trip.driver_id = newDriver.driver_id;
+      targetVehicle.driver_name = newDriver.full_name;
+    }
     trip.vehicle_id = targetVehicle.vehicle_id;
     trip.vehicle_plate = targetVehicle.plate_number;
     trip.emergency_swap = {
@@ -455,7 +641,7 @@ export class ManagerOperationsService {
       vehicle_plate: targetVehicle.plate_number,
       type: 'EMERGENCY_VEHICLE_SWAP',
       severity: 'RED',
-      message: `Chuyến ${tripId}: Đã thay xe từ ${oldPlate} sang ${targetVehicle.plate_number} do "${reason}". Đã tự động remap ghế & gửi SMS cho ${trip.booked_seats} hành khách.`,
+      message: `Chuyến ${tripId}: Đã thay xe từ ${oldPlate} sang ${targetVehicle.plate_number} do "${reason}". Hành khách giữ nguyên mã ghế và đã được gửi thông báo.`,
       created_at: new Date().toISOString()
     });
 
@@ -482,7 +668,7 @@ export class ManagerOperationsService {
   }
 
   executeEmergencyVehicleSwap(tripId, { newVehiclePlate, newDriverId, reason }) {
-    return this.replaceTripVehicle(tripId, newVehiclePlate, reason);
+    return this.replaceTripVehicle(tripId, newVehiclePlate, reason, newDriverId);
   }
 
   /**
@@ -524,59 +710,96 @@ export class ManagerOperationsService {
   }
 
   /**
-   * MGR-021 / MGR-022: Automated Reconciliation & Refund Processing
+   * MGR-022: A refund request opened by a cancellation (PAX-021) or an overdue payment (OQ-008).
    */
-  processRefund(pnr, refundAmountVnd, reason = 'Khách hủy vé theo chính sách') {
-    const booking = this.bookings.find(b => b.pnr === pnr);
-    if (!booking) return { success: false, error: 'Mã PNR không tồn tại' };
-
-    booking.refund_status = 'REFUNDED';
-    booking.refund_amount_vnd = refundAmountVnd;
-    booking.refund_reason = reason;
-
-    return {
-      success: true,
-      message: `Đã phê duyệt hoàn trả ${refundAmountVnd} đ cho mã vé ${pnr}`,
-      data: booking
+  createRefundRequest({ pnr, ticket_id = null, trip_id = null, amount_vnd, reason, source = 'PASSENGER_CANCEL', policy = null }) {
+    const request = {
+      refund_id: `ref_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`,
+      pnr,
+      ticket_id,
+      trip_id,
+      amount_vnd,
+      reason,
+      source,
+      policy,
+      status: 'REFUND_REQUESTED',
+      requested_at: new Date().toISOString()
     };
+    this.refundRequests.push(request);
+    return request;
   }
 
-  processRefundApproval(refundId, approved = true, notes = '') {
+  /**
+   * MGR-022: Approve or reject an open refund request, exactly once.
+   */
+  processRefundApproval(refundId, approved, notes = '') {
+    const request = this.refundRequests.find(r => r.refund_id === refundId);
+    if (!request) {
+      return { success: false, error: 'Không tìm thấy yêu cầu hoàn tiền', code: 'REFUND_NOT_FOUND' };
+    }
+    if (request.status !== 'REFUND_REQUESTED') {
+      return { success: false, error: `Yêu cầu hoàn tiền đã được xử lý (${request.status})`, code: 'REFUND_ALREADY_PROCESSED' };
+    }
+
+    request.status = approved ? 'REFUNDED' : 'REFUND_REJECTED';
+    request.notes = notes;
+    request.processed_at = new Date().toISOString();
+
+    if (approved) {
+      const booking = this.bookings.find(b => b.pnr === request.pnr);
+      if (booking) {
+        booking.refund_status = 'REFUNDED';
+        booking.refund_amount_vnd = (booking.refund_amount_vnd || 0) + request.amount_vnd;
+      }
+    }
+
     return {
       success: true,
-      message: `Đã xử lý hoàn tiền cho yêu cầu ${refundId}`,
-      data: {
-        refund_id: refundId,
-        approved,
-        notes,
-        processed_at: new Date().toISOString()
-      }
+      message: approved ? `Đã duyệt hoàn ${request.amount_vnd} đ cho yêu cầu ${refundId}` : `Đã từ chối yêu cầu hoàn tiền ${refundId}`,
+      data: request
     };
   }
 
   /**
-   * MGR-025 / MGR-026: Executive Reports
+   * MGR-027: Executive report for a period (inclusive dates, YYYY-MM-DD). Without a period, everything.
    */
-  getExecutiveReport() {
+  getExecutiveReport({ startDate, endDate } = {}) {
+    const round1 = (n) => parseFloat(n.toFixed(1));
+    const inPeriod = (booking) => {
+      const day = String(booking.issued_at || '').slice(0, 10);
+      return (!startDate || day >= startDate) && (!endDate || day <= endDate);
+    };
+    const bookings = this.bookings.filter(inPeriod);
+    const money = this._moneyFigures(bookings);
+    const share = (channels) => money.gross_revenue_vnd > 0
+      ? round1((bookings.filter(b => channels.includes(b.channel)).reduce((sum, b) => sum + b.total_fare_vnd, 0) / money.gross_revenue_vnd) * 100)
+      : 0;
+
+    const delays = this.trips.map(t => t.delay_minutes || 0);
+    const onTimeTrips = delays.filter(d => d <= 15).length;
+
     return {
       success: true,
       data: {
+        period: { start_date: startDate || null, end_date: endDate || null },
         financial_summary: {
-          total_revenue_vnd: this.bookings.reduce((acc, b) => acc + b.total_fare_vnd, 0),
-          total_tickets_sold: this.bookings.length,
-          pos_share_pct: 50.0,
-          app_share_pct: 50.0
+          total_revenue_vnd: money.gross_revenue_vnd,
+          refunded_vnd: money.refunded_vnd,
+          net_revenue_vnd: money.net_revenue_vnd,
+          total_tickets_sold: bookings.reduce((sum, b) => sum + b.seat_codes.length, 0),
+          pos_share_pct: share(['POS_HOTLINE']),
+          app_share_pct: share(['PASSENGER_APP']),
+          hail_share_pct: share(['DRIVER_HAIL'])
         },
         punctuality_summary: {
-          on_time_departure_rate: '96.8%',
-          average_delay_minutes: 3.5,
-          zero_incident_days: 42
+          on_time_departure_rate: `${delays.length ? round1((onTimeTrips / delays.length) * 100) : 100}%`,
+          average_delay_minutes: delays.length ? round1(delays.reduce((a, b) => a + b, 0) / delays.length) : 0
         }
       }
     };
   }
 
-  getExecutiveReports() {
-    return this.getExecutiveReport();
+  getExecutiveReports(options) {
+    return this.getExecutiveReport(options);
   }
 }

@@ -89,6 +89,7 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
       method: 'POST',
       body: {
         tripId: 'trp_hn_th_01',
+        userId: 'usr_pax_sync_01',
         holdId: holdRes.body.data.hold_id,
         selectedSeats: [{ seat_code: 'A02', price_vnd: 220000 }],
         payer: { full_name: 'Nguyễn Văn Đồng', phone: '0988223344', email: 'dong@example.com' },
@@ -184,6 +185,10 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
   });
 
   it('TC-SYNC-03: Driver GPS telemetry updates Passenger live radar HUD & Manager 60Hz fleet map', async () => {
+    // Telemetry is only accepted while the trip is running (trp_hn_th_01 has a completed readiness checklist)
+    const startRes = await api(`/api/v1/driver/trips/${driverTripId}/start`, { method: 'POST' });
+    assert.strictEqual(startRes.statusCode, 200);
+
     // 1. Driver records live GPS telemetry ping
     const ping = {
       lat: 20.8524,
@@ -289,7 +294,7 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
   });
 
   it('TC-SYNC-07: Manager Emergency Vehicle Swap updates Driver plate & notifies Passenger', async () => {
-    const newPlate = '29B-999.88';
+    const newPlate = '29B-888.22'; // a free vehicle of the fleet (MGR-023 needs a real, available vehicle)
     const swapRes = await api(`/api/v1/ops/trips/${driverTripId}/swap-vehicle`, {
       method: 'POST',
       body: {
@@ -312,24 +317,55 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
   });
 
   it('TC-SYNC-08: Passenger ticket cancellation releases seat in seat map & updates Driver manifest', async () => {
-    // Cancel ticket booked in TC-SYNC-01
-    const cancelRes = await api(`/api/v1/passenger/tickets/${bookedTicketId}/cancel`, {
+    // A boarded ticket (TC-SYNC-02) can no longer be cancelled, so buy a fresh ticket for seat B04 and cancel it
+    const holdRes = await api('/api/v1/passenger/trips/trp_hn_th_01/hold-seats', {
+      method: 'POST',
+      body: { seatCodes: ['B04'], userId: 'usr_pax_sync_08' }
+    });
+    assert.strictEqual(holdRes.statusCode, 200);
+    const bookingRes = await api('/api/v1/passenger/bookings/create', {
       method: 'POST',
       body: {
-        departureTime: new Date(Date.now() + 86400000 * 2).toISOString()
+        tripId: 'trp_hn_th_01',
+        userId: 'usr_pax_sync_08',
+        holdId: holdRes.body.data.hold_id,
+        seatCodes: ['B04'],
+        payer: { full_name: 'Nguyễn Văn Đồng', phone: '0988223344' },
+        passengers: [{ full_name: 'Nguyễn Văn Đồng', seat_code: 'B04' }]
+      }
+    });
+    assert.strictEqual(bookingRes.statusCode, 201);
+    const ipnRes = await api('/api/v1/webhooks/vietqr/ipn', {
+      method: 'POST',
+      body: {
+        transferMemo: bookingRes.body.data.payment.payment_details.transfer_memo,
+        amountVnd: bookingRes.body.data.payment.amount_vnd,
+        bankRef: `tx_sync08_${Date.now()}`
+      }
+    });
+    assert.strictEqual(ipnRes.statusCode, 200);
+    const cancelTicketId = ipnRes.body.data.issued_tickets[0].ticket_id;
+
+    const cancelRes = await api(`/api/v1/passenger/tickets/${cancelTicketId}/cancel`, {
+      method: 'POST',
+      body: {
+        // Departure of trp_hn_th_01 is 2026-08-28T07:00+07:00; cancel two days earlier (PAX-021: 100% refund)
+        now: Date.parse('2026-08-26T07:00:00+07:00')
       }
     });
     assert.strictEqual(cancelRes.statusCode, 200);
-    assert.strictEqual(cancelRes.body.data.status, 'CANCELLED_AND_REFUNDED');
+    assert.strictEqual(cancelRes.body.data.status, 'REFUND_REQUESTED');
+    assert.strictEqual(cancelRes.body.data.refund_amount_vnd, 220000);
+    assert.ok(cancelRes.body.data.refund_id, 'Refund request must be opened for the manager (MGR-022)');
 
-    // Verification A: Seat A02 is released back to AVAILABLE in seat map
+    // Verification A: Seat B04 is released back to AVAILABLE in seat map
     const seatMap = await api(`/api/v1/passenger/trips/${driverTripId}/seat-map`);
-    const seatA02 = seatMap.body.data.seats.find(s => s.seat_code === 'A02');
-    assert.strictEqual(seatA02.state, 'AVAILABLE', 'Seat A02 must be restored to AVAILABLE');
+    const seatB04 = seatMap.body.data.seats.find(s => s.seat_code === 'B04');
+    assert.strictEqual(seatB04.state, 'AVAILABLE', 'Seat B04 must be restored to AVAILABLE');
 
     // Verification B: Ticket in passenger wallet is CANCELLED
     const wallet = await api('/api/v1/passenger/tickets?phone=0988223344&tab=CANCELLED');
-    const cancelledTicket = wallet.body.data.find(t => t.ticket_id === bookedTicketId);
+    const cancelledTicket = wallet.body.data.find(t => t.ticket_id === cancelTicketId);
     assert.ok(cancelledTicket, 'Ticket must be found in CANCELLED tab');
   });
 
