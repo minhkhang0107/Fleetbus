@@ -134,6 +134,7 @@ Exit Points:
 ---
 
 ## 7. Business Rules
+- `BR-DRI-003` (Lockout - review FND-A51): Five wrong PINs lock the staff id for 15 minutes (`429 ACCOUNT_LOCKED`); a correct login clears the counter. PINs are stored as salted hashes. The session token is signed, identifies the driver and expires after 12 hours (one shift). An expired license is refused with `403 LICENSE_EXPIRED`.
 - `BR-DRI-001`: If driver's commercial driver license (`license_valid_until`) is expired, login is rejected with HTTP 403: *"Bằng lái của bạn đã hết hạn. Vui lòng liên hệ phòng Nhân sự."*.
 - `BR-DRI-002`: Device ID is registered with the session to ensure all telemetry published via MQTT is cryptographically tied to this active shift.
 

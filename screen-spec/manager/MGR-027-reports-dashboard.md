@@ -20,4 +20,5 @@
 
 ## 2. API Contract & Data Schema
 - **Endpoint:** `GET /api/v1/ops/reports/yield?from=2026-08-01&to=2026-08-27`
+- **Period and figures (review FND-A49):** `from` and `to` are inclusive dates (`YYYY-MM-DD`) applied to the booking issue date; without them the report covers everything. The summary reports `total_revenue_vnd` (gross), `refunded_vnd`, `net_revenue_vnd`, `total_tickets_sold` (seats), the channel shares `pos_share_pct`, `app_share_pct` and `hail_share_pct` (shares of gross revenue, adding up to 100), and the punctuality figures computed as in `MGR-002`. A figure with no data behind it (for example days without incidents) is not reported.
 - **TC-MGR-027-01:** Verifies export report downloads structured XLSX sheet with matching summary totals.

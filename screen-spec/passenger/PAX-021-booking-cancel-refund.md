@@ -16,6 +16,9 @@
 - **Actor:** Passenger.
 - **Entry Condition:** Tapped "Hủy vé & Yêu cầu hoàn tiền" on `PAX-017-ticket-detail-qr.md` or Booking Detail.
 - **Outcome:** Cancellation submitted; tickets marked `CANCELLED`; refund request generated (`REFUND_REQUESTED`); seats released back into segment inventory.
+- **Refund lifecycle (review FND-A20):** `REFUND_REQUESTED` -> `REFUNDED` (approved in `MGR-022`) or `REFUND_REJECTED`. The passenger sees `REFUND_REQUESTED` as "Đang xử lý".
+- **Server is the only source of price and time (review FND-A19):** The refund quote uses the amount actually paid for the ticket and the trip departure stored on the ticket. Any price or departure time sent by the client is ignored.
+- **One-way and once only:** Only an `ACTIVE` ticket can be cancelled. A `BOARDED` or already `CANCELLED` ticket is rejected with `TICKET_NOT_ACTIVE`, so a refund can never be issued twice.
 
 ---
 
@@ -126,14 +129,20 @@ Exit Points:
 {
   "status": "success",
   "data": {
-    "booking_id": "bkg_77192a83",
-    "status": "CANCELLED",
+    "ticket_id": "tkt_BG123456_A02",
+    "pnr": "BG-123456",
+    "status": "REFUND_REQUESTED",
     "refund_id": "ref_88192a",
-    "refund_status": "PROCESSING",
-    "refund_amount_vnd": 176000
+    "total_price_vnd": 220000,
+    "refund_percentage": 80,
+    "refund_amount_vnd": 176000,
+    "fee_amount_vnd": 44000,
+    "tier": "PARTIAL_REFUND"
   }
 }
 ```
+- **Errors:** `404 TICKET_NOT_FOUND`, `400 TICKET_NOT_ACTIVE`.
+- **Granularity (review FND-A08):** Cancellation is per ticket (`POST /api/v1/passenger/tickets/{ticketId}/cancel`), so one passenger of a group can cancel without cancelling the others. The booking-level endpoint above cancels every `ACTIVE` ticket of the booking by calling this rule once per ticket.
 
 ---
 

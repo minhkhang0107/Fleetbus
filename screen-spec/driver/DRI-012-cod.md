@@ -56,6 +56,7 @@
 ---
 
 ## 3. Business Rules & API Contract
+- `BR-COD-003` (Server-side fare and one collection per ticket - review FND-A39): The fare is the COD amount stored on the ticket; the client cannot change it. `fare_amount_vnd`, when sent, must equal the stored amount (`400 FARE_MISMATCH`). Only a COD ticket can be collected (`400 NOT_COD_TICKET`), only once (`400 ALREADY_COLLECTED`), and the cash received must cover the fare (`400 INSUFFICIENT_AMOUNT`). `change_settlement_method` must be one of the three methods above (`400 INVALID_SETTLEMENT_METHOD`); `WALLET_CREDIT` needs the passenger phone (`400 WALLET_PHONE_REQUIRED`) and credits the passenger wallet; `REST_STOP_DEBT_RECEIPT` opens an `OUTSTANDING` debt whose code is unique per ticket (`DR-<ticket>-<thousands>K`, for example `DR-88219A02-280K`) and is listed in `DRI-017`. Collecting also boards the passenger through the same single boarding path as a scan.
 - `BR-COD-001`: Submitting cash receipt transitions `Payment` to `SUCCESS` and queues transaction in SQLite for shift reconciliation at depot end (`DRI-017`).
 - `BR-COD-002` (Xử lý thối tiền lẻ khi phụ xe thiếu tiền mặt - REV-04):
   - Hỗ trợ 3 hình thức giải quyết tiền thừa:

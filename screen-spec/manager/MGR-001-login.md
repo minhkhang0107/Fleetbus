@@ -54,6 +54,7 @@
 ---
 
 ## 3. Business Rules & API Contract
+- `BR-MGR-AUTH-002` (Lockout and secrets - review FND-A51): Five wrong passwords lock the account for 15 minutes (`429 ACCOUNT_LOCKED`, with `retry_after_seconds`); a correct login clears the counter. Passwords are stored as salted hashes and compared in constant time. The session token is signed, carries the role and expires after 8 hours. **The TOTP 2FA of `BR-MGR-AUTH-001` is not implemented yet** (it needs a secret store and an enrollment screen); it stays open as `OQ-027`.
 - `BR-MGR-AUTH-001`: Staff accounts with `ROLE_OPS_ADMIN` or `ROLE_FINANCE` require mandatory TOTP 2FA token on every login.
 - **API Endpoint:** `POST /api/v1/auth/staff/login`
 - **TC-MGR-001-01:** Verifies staff login returns scoped JWT with permissions list.

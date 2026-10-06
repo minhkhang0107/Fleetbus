@@ -140,6 +140,7 @@ Exit Points:
 
 ## 7. Business Rules
 - `BR-CHECKOUT-001`: If payment method is `COD` (Cash on Delivery), maximum booking value is capped at $1,000,000\text{ VND}$ (max 3 seats) to protect operator from no-show fraud.
+- `BR-CHECKOUT-003` (Server-side pricing - review FND-A13): All amounts are computed by the server from the trip seat prices. Client-sent prices are ignored. No optional add-on (for example travel insurance) is pre-selected; an add-on is charged only when the passenger turns it on explicitly.
 - `BR-CHECKOUT-002`: Applying a valid voucher code dynamically re-computes `total_amount_vnd` and displays the discount line in emerald green (`#16A34A`).
 - `BR-CHECKOUT-003`: Clicking "Thanh toán ngay" sets CTA to loading state and creates PostgreSQL Booking transaction within a single atomic database commit.
 

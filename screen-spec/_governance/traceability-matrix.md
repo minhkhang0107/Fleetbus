@@ -72,3 +72,43 @@ Acceptance Criteria & Test Matrix
 | **BR-REP-001** | `UC-MGR-REP-001` | `MGR-023` | `RemapSeatWizard` | `POST /ops/trips/{id}/replace-vehicle`| `VEHICLE_REPLACED`| `VEHICLE_REPLACEMENT_DONE`| `TC-MGR-023-01` |
 | **BR-REF-001** | `UC-MGR-REF-001` | `MGR-022` | `RefundApproval` | `POST /ops/refunds/{id}/process` | `PAYMENT_REFUNDED`| `REFUND_APPROVED` | `TC-MGR-022-01` |
 | **BR-AUD-001** | `UC-MGR-AUD-001` | `MGR-028` | `AuditTimeline` | `GET /ops/audit-logs` | N/A | `AUDIT_SEARCHED` | `TC-MGR-028-01` |
+
+---
+
+## 3. Server Verification Matrix (Phase A review)
+
+Each rule below is enforced by the server and proved by an automated test (`npm test`, files `test/server/spec_conformance_*.test.js` unless stated). Test names are `TC-SPEC-<finding>`; the findings are listed in `docs/review/phase-A-findings.md`.
+
+| Rule | Screen | Endpoint | Code | Automated test |
+| :--- | :--- | :--- | :--- | :--- |
+| Server prices the order; client prices ignored (`BR-CHECKOUT-003`, `BR-PAY-006`) | `PAX-012` | `POST /bookings/create` | `routes/passengerRoutes.js`, `modules/checkout.js` | `TC-SPEC-A13` |
+| Booking needs a live hold of the same user; hold becomes a payment lock (`BR-PAY-006`) | `PAX-010`, `PAX-012` | `POST /bookings/create` | `modules/seatMap.js` (`validateHold`, `extendHold`) | `TC-SPEC-A16`, `A16b` |
+| One active hold per user and trip, no extension by repeating | `PAX-010` | `POST /trips/{id}/seats/hold` | `modules/seatMap.js` | `TC-SPEC-A31`, `A31b` |
+| "Tôi đã chuyển tiền" never settles by itself (`BR-PAY-004`) | `PAX-013` | `POST /passenger/payments/{id}/verify-status` | `modules/payment.js` | `TC-SPEC-A15`, `TC-PAY-05`, `TC-SRV-06` |
+| Webhook: signature, exact PNR, exact amount, late money (`OQ-018`, `OQ-008`) | `PAX-014` | `POST /webhooks/vietqr/ipn` | `routes/webhookRoutes.js`, `modules/payment.js` | `TC-SPEC-A14`, `A14b` |
+| Wallet by exact phone, ownership of tickets (`BR-MYTICKETS-003`) | `PAX-016`, `PAX-017` | `GET /passenger/tickets`, `GET /tickets/{id}` | `modules/payment.js`, `routes/passengerRoutes.js` | `TC-SPEC-A29`, `A30` |
+| Refund tiers and one-way cancel (`OQ-019`) | `PAX-021` | `POST /passenger/tickets/{id}/cancel` | `core/formatters.js`, `modules/payment.js` | `TC-SPEC-A18`, `A18b`, `TC-CORE-07` |
+| Refund approved exactly once (`OQ-019`) | `MGR-022` | `POST /ops/refunds/{id}/process` | `modules/managerService.js` | `TC-SPEC-A48`, `TC-MGR-07` |
+| QR signature verified, ticket matched in its trip (`OQ-021`) | `DRI-009` | `POST /driver/trips/{id}/boarding` | `core/cryptoEngine.js`, `modules/driverService.js` | `TC-SPEC-A24`, `A36`, `A37`, `TC-CORE-04` |
+| Driver sees only masked phones (`OQ-007`) | `DRI-007` | `GET /driver/trips/{id}/manifest` | `modules/driverService.js` | `TC-SPEC-A38` |
+| Driver sees only assigned trips | `DRI-002` | `GET /driver/trips/today` | `modules/driverService.js`, `routes/driverRoutes.js` | `TC-SPEC-A42`, `A01c` |
+| Trip lifecycle and telemetry rules (`OQ-023`) | `DRI-004`, `DRI-005`, `DRI-006` | `.../readiness`, `.../start`, `.../telemetry` | `modules/driverService.js` | `TC-SPEC-A41a`, `A41b` |
+| COD once, server fare, change methods (`OQ-024`) | `DRI-012` | `POST .../payments/cod-collect` | `modules/driverService.js` | `TC-SPEC-A39` |
+| Hail passenger: server fare, free seat (`OQ-024`, `OQ-026`) | `DRI-007` | `POST .../onboard-hail` | `modules/driverService.js` | `TC-SPEC-A40` |
+| No-show grace period and state (`OQ-028`) | `DRI-011` | `POST .../tickets/{id}/no-show` | `modules/driverService.js` | `TC-SPEC-A43` |
+| Ordered, duplicate-safe replay | `DRI-015` | `POST /driver/telemetry/batch-replay` | `modules/driverService.js` | `TC-SPEC-A44` |
+| End of trip computed by the server, once | `DRI-017` | `POST .../end` | `modules/driverService.js` | `TC-SPEC-A41c` |
+| Driver profile of the caller | `DRI-018` | `GET /driver/profile` | `modules/driverService.js` | `TC-SPEC-A09` |
+| One inventory for counter, hotline, hail (`OQ-026`) | `MGR-020`, `DRI-007` | `POST /ops/pos/orders`, `POST /ops/pos/hotline-hold` | `modules/managerService.js`, `modules/seatMap.js` | `TC-SPEC-A45`, `A45b`, `A46`, `A46b`, `A46c`, `A40` |
+| Vehicle replacement preconditions (`OQ-025`) | `MGR-023` | `POST /ops/trips/{id}/replace-vehicle` | `modules/managerService.js` | `TC-SPEC-A47` |
+| Dashboard and report figures computed from data | `MGR-002`, `MGR-027` | `GET /ops/dashboard/kpis`, `GET /ops/reports/yield` | `modules/managerService.js` | `TC-SPEC-A49`, `A49b` |
+| Alerts and audit log are separate; audit has actor, IP, before and after | `MGR-025`, `MGR-028` | `GET /ops/alerts`, `GET /ops/audit-logs` | `routes/managerRoutes.js`, `modules/managerService.js` | `TC-SPEC-A05a`, `A05b` |
+| Booking found by PNR only | `MGR-018` | `GET /ops/bookings/{pnr}` | `routes/managerRoutes.js` | `TC-SPEC-A11` |
+| Trip tracking reports no signal instead of an invented bus (`REV-07`) | `PAX-018` | `GET /trips/{id}/tracking` | `modules/tracking.js` | `TC-SPEC-A32` |
+| Event bridge never falls back to another trip; cancel frees the seat count | cross-app | event bridge | `core/fleetBusEventBridge.js` | `TC-SPEC-A50`, `A50b` |
+| Bearer token per endpoint kind, role matrix, ownership (`OQ-022`) | all | all non-public | `core/gateway.js`, `core/tokens.js` | `TC-SPEC-A01a`, `A01b`, `A01d`, `A30` |
+| Idempotency-Key on mutations | all | POSTs marked `Yes` | `core/gateway.js`, `apiServer.js` | `TC-SPEC-A02` |
+| Login lockout, hashed credentials, 403 for expired license | `MGR-001`, `DRI-001` | login endpoints | `core/passwords.js`, services | `TC-SPEC-A51`, `A51b` |
+| OTP login works over HTTP | `PAX-002`, `PAX-003` | OTP endpoints | `routes/passengerRoutes.js` | `TC-SPEC-A35` |
+| Unknown paths answer 404; OpenAPI lists the real API | all | all | `core/apiCatalog.js`, routes | `TC-SPEC-A04`, `A07`, `A07b`, `A10` |
+

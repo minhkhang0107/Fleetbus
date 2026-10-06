@@ -53,6 +53,7 @@
 ---
 
 ## 3. Business Rules & API Contract
+- `BR-NOSHOW-002` (State and timing enforced by the server - review FND-A43): The grace period is 10 minutes after the scheduled departure (`400 NO_SHOW_TOO_EARLY` before it). `passenger_requested_cancel: true` waives it. Only a passenger who is still waiting can be marked: a passenger already `BOARDED`, `NO_SHOW` or `CANCELLED` gives `400 INVALID_PASSENGER_STATE`; a ticket not on the manifest gives `404 TICKET_NOT_FOUND`. Releasing the seat for the remaining segments needs a segment model and is not part of this phase (`OQ-028`).
 - `BR-NOSHOW-001`: Driver cannot mark No-Show prior to scheduled departure time $+10\text{ minutes}$ unless passenger explicitly requested cancellation via phone.
 - **API Endpoint:** `POST /api/v1/driver/trips/{tripId}/tickets/{ticketId}/no-show`
 - **TC-DRI-011-01:** Verifies No-show updates ticket to `NO_SHOW` and logs call timestamp.

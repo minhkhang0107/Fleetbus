@@ -52,6 +52,7 @@
 ---
 
 ## 3. Business Rules & API Contract
+- `BR-REPLACE-002` (Validated replacement - review FND-A47): The replacement must be an existing vehicle of the fleet (`404 VEHICLE_NOT_FOUND`) with status `STANDBY` (`409 VEHICLE_UNAVAILABLE`) and with at least as many seats as are booked (`409 CAPACITY_INSUFFICIENT`, carrying the overflow so the dispatcher can resolve it first, see `BR-REPLACE-001`). A replacement driver, when given, must exist (`404 DRIVER_NOT_FOUND`). The checks run before any change; on success the old vehicle becomes `MAINTENANCE`, the new vehicle becomes `IN_TRANSIT` (or `ASSIGNED` for a trip not yet running), passengers keep their seat codes and are notified. The system never invents a vehicle for an unknown plate.
 - `BR-REPLACE-001`: If the replacement bus has lower capacity than total booked passengers (e.g. 40-seat replaced by 34-seat), the system forces the dispatcher to resolve the overflow passengers (by offering priority transfers to next trip or 100% refund $+ 50\text{k VND}$ voucher) before committing the swap.
 - **API Endpoint:** `POST /api/v1/ops/trips/{tripId}/replace-vehicle`
 - **Request Body:**

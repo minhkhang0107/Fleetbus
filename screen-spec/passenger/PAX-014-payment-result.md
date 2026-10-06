@@ -21,6 +21,7 @@
 
 ## 2. Business Context & Invariants
 - **Requirements Trace:** `BR-PAY-002` (Late Payment Recovery Policy), `UC-PAS-PAY-002`.
+- **WEBHOOK ACCEPTANCE RULES (review FND-A14):** A bank notification is accepted only when (1) its `X-Signature` header equals the HMAC-SHA256 of the raw body with the shared webhook secret (`401 INVALID_SIGNATURE` otherwise), (2) the PNR in the transfer memo matches exactly one order, and (3) the amount equals the order total (`400 AMOUNT_MISMATCH` otherwise: no ticket is issued, the order stays `PENDING_PAYMENT` and the manager receives an alert). A repeated notification for a paid order is answered idempotently without issuing tickets again.
 - **LATE SUCCESS RESOLUTION RULE:** If webhook arrives after hold expiry and the seat is no longer available:
   1. Payment is marked `UNMATCHED_OVERDUE`.
   2. Booking status transitions to `PAYMENT_EXPIRED_REFUND_PENDING`.

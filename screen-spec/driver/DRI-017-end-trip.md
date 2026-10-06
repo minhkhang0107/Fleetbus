@@ -118,6 +118,7 @@
 ---
 
 ## 5. Business Rules
+- `BR-END-004` (Server-side reconciliation, one time - review FND-A41): All totals in the end report are computed by the server from the manifest, the COD collections, the hail fares and the debt receipts; totals in the request body are informational and are ignored. Only a trip in `IN_TRANSIT` can end (`400 INVALID_TRIP_STATE`), so a trip cannot be ended twice and its events are published once. The response also reports `unresolved_passenger_count` (passengers neither boarded, no-show nor cancelled) so the depot can follow up.
 - `BR-END-001` (Offline Outbox Synchronization): If local SQLite queue (`DRI-015`) contains unsynced events, the app displays warning: *"Đang có 2 sự kiện chưa đồng bộ. Hệ thống sẽ tự động đồng bộ khi kết nối lại."* and queues the end trip event locally.
 - `BR-END-002` (GPS Lifecycle): Ending a trip immediately halts the Android Foreground GPS tracking notification and frees native location provider resources.
 - `BR-END-003` (Cash & Debt Reconciliation - REV-04, REV-05): Total cash to handover is computed as:

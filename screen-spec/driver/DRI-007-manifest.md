@@ -156,5 +156,7 @@
 - **AC-001:** Manifest groups passengers by current stop by default; tapping "Lên xe" updates status to `BOARDED` and decrements pending count.
 - **AC-002:** Tapping "THÊM KHÁCH DỌC ĐƯỜNG" allows assigning an empty seat, instantly issuing a boarded ticket and recording cash payment.
 - **TC-DRI-007-01:** Verifies COD pending badge is visible only for unpaid tickets.
+- **BR-HAIL-002 (Server-side fare and checks - review FND-A40):** The hail fare is the trip fare set by the server; `fare_amount_vnd` sent by the client is ignored. The trip must be `IN_TRANSIT` (`400 TRIP_NOT_ACTIVE`), `seat_code` is required (`400 SEAT_REQUIRED`) and must be free (`409 SEAT_OCCUPIED`), cash received must cover the fare (`400 INSUFFICIENT_AMOUNT`), and a phone, when given, must be valid. `WALLET_CREDIT` for the change needs a phone (`400 WALLET_PHONE_REQUIRED`). No fabricated default phone is stored. Hail cash is tracked separately from COD cash (`total_hail_collected_vnd`).
+- **Privacy (OQ-007):** Every driver response shows only `phone_masked` (for example `098***456`). The full phone stays on the server for notifications.
 - **TC-DRI-007-02:** Verifies onboard hail passenger assigns vacant seat and marks ticket boarded.
 

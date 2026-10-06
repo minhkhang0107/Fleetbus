@@ -21,7 +21,10 @@
 
 ## 2. Business Context & Invariants
 - **Requirements Trace:** `BR-SCAN-001` (Offline Cryptographic Ticket Validation), `BR-SCAN-002` (Duplicate Scan Prevention), `UC-DRI-SCAN-001`.
-- **OFFLINE VERIFICATION INVARIANT:** The app verifies the ticket payload signature against the daily secret key pre-cached during `DRI-001` login. No network connection is needed at the moment of scanning.
+- **OFFLINE VERIFICATION INVARIANT:** The app verifies the ticket payload signature against the secret key pre-cached during `DRI-001` login. No network connection is needed at the moment of scanning.
+- **SIGNATURE INVARIANT (review FND-A24):** Every payload carries an HMAC that is **always recomputed and compared in constant time before any other check**. A payload with a missing or wrong signature is rejected with `INVALID_SIGNATURE`, even when its window and ticket id look valid. The server (`POST /driver/trips/{tripId}/boarding`) applies the same rule, because it is the single source of truth when the device is online.
+- **TRIP-SCOPE INVARIANT (review FND-A36):** A ticket is matched on `ticket_id` inside the manifest of the trip being scanned. A valid signature for a ticket that is not on this trip returns `WRONG TRIP`; the PNR alone never selects a passenger.
+- **SINGLE BOARDING PATH (review FND-A37):** QR, group QR, PIN, offline ticket and manual boarding all end in the same step, which marks the passenger `BOARDED` and publishes `PASSENGER_BOARDED`, so the passenger wallet and the manager dashboard stay in sync.
 
 ---
 
@@ -90,7 +93,7 @@ The scanner auto-detects payload format and executes instant local validation ($
 ```dart
 // Dart offline verification engine supporting dynamic TOTP, Group QR, and static offline signatures
 ScanResult verifyScannedPayload(String payload, String tripSecret, int currentTimestampMs) {
-  // Format 1: Dynamic 30s TOTP string (BUSGO|pnr|tid|window|hmac)
+  // Format 1: Dynamic 30s TOTP string (BUSGO|pnr|tid|window|hmac); hmac = HMAC16("QR|pnr|tid|window")
   if (payload.startsWith('BUSGO|')) {
     final parts = payload.split('|');
     if (parts.length >= 5) {
@@ -100,42 +103,49 @@ ScanResult verifyScannedPayload(String payload, String tripSecret, int currentTi
       final hmac = parts[4];
       final currentWindow = currentTimestampMs ~/ 30000;
       
-      // Permit +-2 windows (60s drift tolerance - REV-03)
-      if ((currentWindow - scannedWindow).abs() <= 2) {
-        final expectedHmac = computeHmac16("{\"pnr\":\"$pnr\",\"ticket_id\":\"$tid\",\"w\":$scannedWindow}", tripSecret);
-        if (hmac == expectedHmac) {
-          return ScanResult.valid(ticketId: tid, pnr: pnr, method: 'DYNAMIC_TOTP');
-        }
+      // Signature first, constant-time compare; then permit +-2 windows (60s drift tolerance - REV-03)
+      final expectedHmac = computeHmac16("QR|$pnr|$tid|${parts[3]}", tripSecret);
+      if (!constantTimeEquals(hmac, expectedHmac)) {
+        return ScanResult.invalid(reason: 'INVALID_SIGNATURE');
       }
+      if ((currentWindow - scannedWindow).abs() <= 2) {
+        return ScanResult.valid(ticketId: tid, pnr: pnr, method: 'DYNAMIC_TOTP');
+      }
+      return ScanResult.invalid(reason: 'QR_EXPIRED');
     }
   }
 
-  // Format 2: Unified Group Boarding QR (BUSGO_GRP|pnr|seatCount|tids|window|hmac - REV-01)
+  // Format 2: Unified Group Boarding QR (BUSGO_GRP|pnr|orderId|seatCount|tids|window|hmac - REV-01)
+  // hmac = HMAC16("GRP|pnr|orderId|seatCount|tids|window")
   if (payload.startsWith('BUSGO_GRP|')) {
     final parts = payload.split('|');
-    if (parts.length >= 6) {
+    if (parts.length >= 7) {
       final pnr = parts[1];
-      final seatCount = int.parse(parts[2]);
-      final ticketIds = parts[3].split(',');
-      final scannedWindow = int.parse(parts[4]);
-      final hmac = parts[5];
+      final orderId = parts[2];
+      final seatCount = int.parse(parts[3]);
+      final ticketIds = parts[4].split(',');
+      final scannedWindow = int.parse(parts[5]);
+      final hmac = parts[6];
       final currentWindow = currentTimestampMs ~/ 30000;
-      
-      if ((currentWindow - scannedWindow).abs() <= 2) {
-        final expectedHmac = computeHmac16("{\"pnr\":\"$pnr\",\"seats\":$seatCount,\"tids\":\"${parts[3]}\",\"w\":$scannedWindow}", tripSecret);
-        if (hmac == expectedHmac) {
-          return ScanResult.validGroup(pnr: pnr, ticketIds: ticketIds, method: 'GROUP_TOTP');
-        }
+
+      final expectedHmac = computeHmac16("GRP|$pnr|$orderId|${parts[3]}|${parts[4]}|${parts[5]}", tripSecret);
+      if (!constantTimeEquals(hmac, expectedHmac)) {
+        return ScanResult.invalid(reason: 'INVALID_SIGNATURE');
       }
+      if ((currentWindow - scannedWindow).abs() <= 2) {
+        return ScanResult.validGroup(pnr: pnr, ticketIds: ticketIds, method: 'GROUP_TOTP');
+      }
+      return ScanResult.invalid(reason: 'QR_EXPIRED');
     }
   }
 
   // Format 3: Offline JSON signature (Zero connectivity fallback / Printed Ticket)
+  // {"tkt","pnr","seat","trip","sig"}; sig = HMAC16("tkt|pnr|seat|trip"); valid only for the ticket's own trip
   try {
     final Map<String, dynamic> data = jsonDecode(payload);
-    final expectedSig = hmacSha256("${data['tid']}:${data['trp']}:${data['seat']}:${data['iat']}", tripSecret);
-    if (data['sig'] == expectedSig && data['trp'] == currentTripId) {
-      return ScanResult.valid(ticketId: data['tid'], pnr: data['pnr'], method: 'STATIC_OFFLINE');
+    final expectedSig = computeHmac16("${data['tkt']}|${data['pnr']}|${data['seat']}|${data['trip']}", tripSecret);
+    if (constantTimeEquals(data['sig'], expectedSig) && data['trip'] == currentTripId) {
+      return ScanResult.valid(ticketId: data['tkt'], pnr: data['pnr'], method: 'STATIC_OFFLINE');
     }
   } catch (_) {}
 

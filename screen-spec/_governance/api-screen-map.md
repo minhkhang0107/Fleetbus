@@ -5,6 +5,16 @@
 
 ---
 
+## 0. Gateway rules (review FND-A01, FND-A02, OQ-022)
+
+- **Auth column:** `Public` needs no token. `Bearer` needs a signed token of the right kind (passenger, driver, staff) and, for staff, a role allowed by the matrix in `MGR-029`. A missing or invalid token gives `401 UNAUTHORIZED` / `INVALID_TOKEN` / `TOKEN_EXPIRED`; a token of the wrong kind or role gives `403 FORBIDDEN`.
+- **Identity comes from the token,** not from the request: the passenger phone, the passenger user id and the driver id of a request are read from the token when authentication is enforced.
+- **Ownership:** a ticket can be shown by its owner (the payer), by the named passenger and by a delegate, and can be delegated or cancelled only by its owner; an order can only be paid-checked by its payer; a driver only reaches the trips assigned to them.
+- **Idempotency column:** `Yes` means the request must carry `Idempotency-Key` (`400 IDEMPOTENCY_KEY_REQUIRED` otherwise). The first response is stored for 24 hours and returned again, with `Idempotent-Replay: true`, to a retry with the same key and body; the same key with a different body gives `422 IDEMPOTENCY_KEY_REUSED`.
+- **Switch:** enforcement is on by default in production (`FLEETBUS_AUTH=enforce`) and off in development until the apps send tokens.
+
+---
+
 ## 1. Passenger App Screen API Mapping
 
 | Screen ID | Screen Name | Endpoint | Method | Auth | Idempotency | Primary Purpose |
@@ -21,7 +31,7 @@
 | **PAX-010** | Seat Hold | `POST /api/v1/trips/{tripId}/seats/hold` | `POST` | Bearer | Yes (`Idempotency-Key`) | Acquire 600s Redis distributed seat lock |
 | **PAX-010** | Seat Release | `DELETE /api/v1/trips/{tripId}/seats/hold` | `DELETE` | Bearer | Yes | Explicitly release temporary hold before expiry |
 | **PAX-011** | Passenger Info | `GET /api/v1/passenger/saved-travelers` | `GET` | Bearer | No | Fetch saved traveler profiles for fast form autofill |
-| **PAX-012** | Checkout | `POST /api/v1/bookings/create` | `POST` | Bearer | Yes (`Idempotency-Key`) | Create formal Booking record in `PENDING_PAYMENT` state |
+| **PAX-012** | Checkout | `POST /api/v1/bookings/create` | `POST` | Bearer | Yes (`Idempotency-Key`) | Create formal Booking record in `PENDING_PAYMENT` state. Requires `trip_id`, `hold_id`, `seat_codes`; the server prices the order (OQ-020) |
 | **PAX-013** | Payment Processing| `POST /api/v1/payments/initiate` | `POST` | Bearer | Yes (`Idempotency-Key`) | Generate Gateway URL (VNPAY/MoMo) or Dynamic VietQR |
 | **PAX-013** | Payment Polling | `POST /api/v1/passenger/payments/{orderId}/verify-status` | `POST` | Bearer | No | Active resume polling & manual confirmation trigger ("Tôi đã chuyển tiền") |
 | **PAX-014** | Payment Result | `GET /api/v1/payments/{paymentId}/status` | `GET` | Bearer | No | Poll payment authoritative state from PostgreSQL |
@@ -34,6 +44,7 @@
 | **PAX-019** | ETA Detail | `GET /api/v1/trips/{tripId}/eta` | `GET` | Bearer/Public | No | Fetch per-stop map-matched ETA predictions |
 | **PAX-020** | Notifications | `GET /api/v1/passenger/notifications` | `GET` | Bearer | No | Paginated operational and marketing push notifications |
 | **PAX-021** | Cancel / Refund | `POST /api/v1/bookings/{bookingId}/cancel` | `POST` | Bearer | Yes (`Idempotency-Key`) | Request booking cancellation and policy refund calculation |
+| **PAX-021** | Cancel Ticket | `POST /api/v1/passenger/tickets/{ticketId}/cancel` | `POST` | Bearer | Yes (`Idempotency-Key`) | Cancel one ticket and open a `REFUND_REQUESTED` request; the price and departure come from the stored ticket (OQ-019) |
 | **PAX-022** | Profile | `GET /api/v1/passenger/profile` | `GET` | Bearer | No | User profile details, loyalty points, preferences |
 | **PAX-023** | Saved Contacts | `POST /api/v1/passenger/saved-travelers` | `POST` | Bearer | Yes | Create / update saved travelers |
 | **PAX-024** | Replacement Notice| `GET /api/v1/trips/{tripId}/replacement-info` | `GET` | Bearer | No | Query updated vehicle specs and seat reassignment details |
@@ -104,3 +115,45 @@
 | **MGR-028** | Audit Logs | `GET /api/v1/ops/audit-logs` | `GET` | Bearer (Staff) | No | Immutable system audit log with actor, IP, before/after diff |
 | **MGR-029** | Roles & RBAC | `POST / PUT /api/v1/ops/rbac/roles` | `POST/PUT` | Bearer (Admin) | Yes | Manage staff roles, resource permissions, depot scoping |
 | **MGR-030** | System Settings| `POST / PUT /api/v1/ops/settings` | `POST/PUT` | Bearer (Admin) | Yes | Configure lock TTLs, GPS sampling rates, gateway keys |
+
+---
+
+## 4. Integration Endpoints (not tied to a screen)
+
+| Reference | Endpoint | Method | Auth | Purpose |
+| :--- | :--- | :--- | :--- | :--- |
+| PAX-014 | `POST /api/v1/webhooks/vietqr/ipn` | `POST` | HMAC `X-Signature` | Bank transfer notification. Signature, exact PNR match and exact amount are enforced (OQ-018) |
+| Ops | `GET /health` | `GET` | Public | Liveness and service status |
+| Ops | `GET /api/v1/openapi.json` | `GET` | Public | Machine-readable API description |
+
+---
+
+## 5. Implementation Status of the Listed Endpoints (Phase A review)
+
+Rows not named here are implemented at the path shown in sections 1 to 3. The catalog of what the server really serves is `source/server/core/apiCatalog.js` (also published as `/api/v1/openapi.json`) and a test checks that every entry is served.
+
+**Decided as merged or narrowed (review FND-A08):**
+
+| Screen | Spec endpoint | Decision |
+| :--- | :--- | :--- |
+| `PAX-013` | `POST /payments/initiate` | Merged into `POST /bookings/create`: creating the booking also creates its payment order (VietQR) and returns it under `payment`. A separate initiate call would only add a state in which a booking has no way to pay. |
+| `PAX-021` | `POST /bookings/{id}/cancel` | Cancellation is per ticket (`POST /passenger/tickets/{id}/cancel`), see `PAX-021`. A booking-level call is deferred. |
+| `DRI-006` | MQTT `busgo/telemetry/{vehicleId}` | Telemetry uses REST (`POST /driver/trips/{id}/telemetry`) until a broker exists (`OQ-002`). |
+
+**Deferred (no data model or screen behind them in this phase):**
+
+| Screen | Endpoint | Reason |
+| :--- | :--- | :--- |
+| `PAX-011`, `PAX-023` | `GET`, `POST /passenger/saved-travelers` | No traveler store. |
+| `PAX-019` | `GET /trips/{id}/eta` | Needs stop coordinates; today only the ETA to the pickup point exists, inside `tracking`. |
+| `DRI-013` | `GET /routes/{id}/geometry` | No route geometry data. |
+| `MGR-004` | `GET /ops/vehicles/{id}/telemetry-trail` | No telemetry history store. |
+| `MGR-006`, `MGR-007`, `MGR-009`, `MGR-011` | `POST`, `PUT` on vehicles, seat layouts, routes, trips | Admin CRUD screens; data is seeded. |
+| `MGR-016` | `GET /ops/drivers/{id}/performance` | No performance data. |
+| `MGR-019` | `GET /ops/pos/trips` | The counter uses the trip list. |
+| `MGR-021` | `GET /ops/payments` | No payment ledger view. |
+| `MGR-026` | `POST /ops/notifications/broadcast` | No outbound channel. |
+| `MGR-029`, `MGR-030` | `POST`, `PUT` on roles and settings | Roles are fixed (see `MGR-029`); settings are configuration. |
+
+**Aliases the server still answers for the apps (remove in Phase B once the Flutter clients use the paths above):** `/passenger/config`, `/passenger/auth/*`, `/passenger/stations`, `/passenger/trips`, `/passenger/trips/{id}/seat-map`, `/passenger/trips/{id}/hold-seats`, `/passenger/trips/{id}/radar`, `/passenger/bookings/create`, `/passenger/checkout/create-order`, `/passenger/tickets/{id}/qr`, `/stations`, `/trips`, `/driver/auth/login`, `.../board-qr`, `.../collect-cod`, `.../incident`, `/ops/auth/login`, `/ops/radar`, `/ops/fleet`, `/ops/fleet/vehicles`, `/ops/crew`, `/ops/crew/drivers`, `/ops/dispatch/board`, `/ops/pos/bookings`, `/ops/trips/{id}`, `/ops/trips/{id}/seat-inventory`, `/ops/trips/{id}/swap-vehicle`, `/ops/reports/executive`.
+

@@ -21,6 +21,7 @@
 
 ## 2. Business Context & Invariants
 - **Requirements Trace:** `BR-SEAT-002` (Redis Lua distributed lock with TTL 600s), `UC-PAS-LOCK-001`.
+- **ONE ACTIVE HOLD PER USER AND TRIP (review FND-A31):** A user has at most one hold per trip, of at most 5 seats. Holding a different set of seats replaces the previous hold. Holding the same set again returns the existing hold with its original expiry; repeating the call never extends the 600s. The seat map shows that a seat is locked and until when, but never who holds it. Every sellable trip, including the search trips and the trips of the driver and manager boards, has a seat inventory; an unknown trip is never created on the fly.
 - **CRITICAL INVARIANT:** Lock key format: `lock:trip:{tripId}:seat:{seatCode}:seg:{segmentId}`.
 - If lock acquisition fails (seat snatched by another user in the same millisecond window), the system returns HTTP 409 Conflict with the conflicting seat codes.
 

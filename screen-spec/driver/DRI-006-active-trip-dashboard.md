@@ -130,6 +130,7 @@ Child Modals / Sub-screens:
 ---
 
 ## 7. Business Rules & Offline Resilience
+- `BR-COCKPIT-003` (Telemetry accepted only while running - review FND-A41): The server accepts a telemetry ping only for a trip in `IN_TRANSIT` (`400 TRIP_NOT_ACTIVE`) and only with a latitude in [-90, 90], a longitude in [-180, 180] and a non-negative speed (`400 INVALID_TELEMETRY`). Starting a trip (`DRI-005`) requires status `READY`, which is reached only after the whole readiness checklist is complete (`400 INVALID_TRIP_STATE`).
 - `BR-COCKPIT-001`: If cellular network is lost, the native Android service automatically diverts MQTT payloads into a local SQLite table (`offline_telemetry_queue`) with zero dropped frames.
 - `BR-COCKPIT-002`: When network returns, `DRI-015-offline-sync-center.md` flushes buffered telemetry in batched HTTP chunks (`POST /api/v1/driver/telemetry/batch-replay`).
 - `BR-COCKPIT-003`: The app acquires an Android WakeLock (`PARTIAL_WAKE_LOCK`) and screen stay-awake lock while in active trip mode.
