@@ -29,8 +29,8 @@ Last updated: 2026-09-15 13:30
 - [x] **Design Tokens & Typography (`resources/lib/src/theme/`)**: `#2563EB` Sapphire, `#F8FAFC` Canvas, `#0F172A` Charcoal, `#FB9821` PNR, `Geist` body font, `JetBrains Mono` code font. 0 emojis in presentation code.
 - [x] **API Client Service (`data/lib/src/service/passenger_api_service.dart`)**:
   - Platform-adaptive base URL (`resolvePassengerBaseUrl`): `10.0.2.2:3000` for Android emulator, `localhost:3000` for iOS simulator/web, overridable for physical LAN.
-  - Complete typed HTTP integration covering `getAppConfig`, `requestOtp`, `verifyOtp`, `getHomeFeed`, `searchStations`, `searchTrips`, `getTripDetail`, `getSeatMap`, `holdSeats`, `createBookingOrder`, `getTicketWallet`, `getTicketQR`, `getLiveRadarHUD`, `getNotifications`, `cancelTicket`.
-- [x] **Flutter Presentation Suite (`app/lib/src/presentation/passenger/`)**: 15 screens covering PAX-001 to PAX-025:
+  - Typed HTTP client covering every passenger endpoint of the spec (token, Idempotency-Key, canonical paths; Phase B). **No screen calls it yet** (`OQ-029`).
+- [x] **Flutter Presentation Suite (`app/lib/src/presentation/passenger/`)**: 15 static screens (hard-coded data) covering 19 of the 25 spec screens; missing: PAX-008, 015, 022, 023, 024, 025:
   - `passenger_splash_screen.dart` (PAX-001: Splash & handshake)
   - `passenger_login_screen.dart` (PAX-002: Phone & OTP login)
   - `passenger_home_screen.dart` (PAX-004: Home feed with location pickers & recommendations)
@@ -60,8 +60,8 @@ Last updated: 2026-09-15 13:30
 - [x] **Tactical Design Tokens & Typography (`resources/lib/src/theme/`)**: `#0F172A` Ops Canvas, `#1E293B` Surface Panel, `#16A34A` Emerald Safe, `#DC2626` Alert Critical, `#2563EB` Action, `#D97706` Amber Warning, `Geist` & `JetBrains Mono`. Large touch targets (64–72dp). 0 emojis in presentation code.
 - [x] **API Client Service (`app/lib/src/service/driver_api_service.dart`)**:
   - Platform-adaptive base URL (`resolveDriverBaseUrl`): `10.0.2.2:3000` for Android emulator, `localhost:3000` for iOS simulator/web, overridable for physical LAN.
-  - Complete typed HTTP integration covering `login`, `getTodayTrips`, `submitReadinessCheck`, `startTrip`, `sendTelemetry`, `getManifest`, `boardWithQr`, `collectCod`, `replayOfflineTelemetry`, `endTrip`, `reportIncident`.
-- [x] **Flutter Tactical Presentation Suite (`app/lib/src/presentation/`)**: 12 screens & dialogs covering DRI-001 to DRI-019:
+  - Typed HTTP client covering every driver endpoint of the spec (token, Idempotency-Key, canonical paths; Phase B). **No screen calls it yet** (`OQ-029`).
+- [x] **Flutter Tactical Presentation Suite (`app/lib/src/presentation/`)**: 12 static screens and dialogs covering 14 of the 19 spec screens; missing: DRI-005, 014, 016, 017, 018:
   - `driver_login_screen.dart` (DRI-001: Staff ID & PIN login)
   - `driver_today_trips_screen.dart` (DRI-002: Shift trip assignment list)
   - `driver_trip_detail_screen.dart` (DRI-003: Pre-start route overview & stop timeline)
@@ -80,8 +80,8 @@ Last updated: 2026-09-15 13:30
 - [x] **Melos & Make Orchestration**: `source/manager/melos.yaml` & `source/manager/makefile` supporting `make run_web`, `make build_dev_web`, `make build_prod_web`.
 - [x] **Web Entrypoint (`source/manager/app/web/index.html`, `manifest.json`)**: Configured with Canvaskit WASM renderer, Geist font typography, and dark enterprise styling.
 - [x] **Theme Tokens (`source/manager/resources/lib/src/theme/app_colors.dart`)**: Enterprise Slate & Cyan palette matching DESIGN.md (`#0B0F17`, `#131B2A`, `#06B6D4`, `#10B981`, `#EF4444`).
-- [x] **API Client Service (`source/manager/app/lib/src/service/manager_api_service.dart`)**: Full integration with `/api/v1/ops/*`.
-- [x] **Presentation Web Suite (`source/manager/app/lib/src/presentation/manager/`)**:
+- [x] **API Client Service (`source/manager/app/lib/src/service/manager_api_service.dart`)**: Typed client covering every operations endpoint of the spec. **No screen calls it yet** (`OQ-029`).
+- [x] **Presentation Web Suite (`source/manager/app/lib/src/presentation/manager/`)** (static screens, 9 of the 30 spec screens; the screen codes below follow an older numbering, see `docs/review/phase-B-findings.md`):
   - `manager_login_screen.dart` (`MGR-001`, `MGR-029` RBAC Login)
   - `manager_dashboard_screen.dart` (`MGR-002` Executive KPIs & Load Factor)
   - `manager_radar_map_screen.dart` (`MGR-003`, `MGR-004` 60Hz Live Fleet Radar Map)
@@ -151,4 +151,12 @@ Review and fixes of `source/server/` against `screen-spec/`, with the spec corre
 - [x] **Authentication layer**: signed tokens, role matrix, ownership checks, Idempotency-Key, login lockout. **Not yet enforced in development** (`FLEETBUS_AUTH=off` by default; `enforce` in production) because the Flutter apps do not send tokens yet.
 - [ ] **Open**: Flutter clients (Phase B), TOTP 2FA (`OQ-027`), 16 deferred endpoints (`api-screen-map` section 5), segment-level seat release (`OQ-028`).
 - Environment variables: `FLEETBUS_TICKET_SECRET`, `FLEETBUS_TOKEN_SECRET`, `FLEETBUS_WEBHOOK_SECRET` (required in production), `FLEETBUS_AUTH` (`enforce` | `off`).
+
+## 9. Phase B Review: Flutter Apps (2026-10-06)
+
+Record: `docs/review/phase-B-plan.md`, `phase-B-findings.md`, `decision-log.md` (D59 to D66). No Flutter or Dart SDK on this machine, so the Dart code was read, not compiled.
+
+- [x] **The three API clients follow the server contract** (token, Idempotency-Key, canonical paths, no identity or price sent, a method for every endpoint). Checked by `test/mobile/api_client_contract.test.js`.
+- [x] **Authentication is enforced by default** (`FLEETBUS_AUTH=off` only outside production). `npm run e2e` now logs in as a passenger, a driver and a staff member and checks every step.
+- [ ] **Open (`OQ-029`)**: no screen calls the API; 32 spec screens do not exist (Passenger 6, Driver 5, Manager 21); the new Dart has not been compiled. Needs a Flutter SDK.
 

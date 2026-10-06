@@ -96,6 +96,19 @@ Cột "Duyệt" ghi những quyết định ảnh hưởng nhiều nhất để 
 | D57 | Hồ sơ tài xế lấy theo người gọi, không lộ PIN, không báo điểm đánh giá vì không có dữ liệu | A09 | Giữ hồ sơ cố định | Tài xế nào cũng thấy tên Trần Văn Bình | Thấp |
 | D58 | Tra cứu đơn theo PNR, không theo mã chuyến | A11 | Giữ hai khóa | Một mã chuyến bất kỳ trả về một đơn | Thấp |
 
+## Giai đoạn B: ba app Flutter
+
+| # | Quyết định | Phát hiện | Đã cân nhắc | Lý do | Duyệt |
+|---|---|---|---|---|---|
+| D59 | Giai đoạn B giới hạn ở lớp client (service API) và test hợp đồng tĩnh. Không nối màn hình, không viết màn hình mới vì máy không có Flutter SDK để biên dịch và kiểm chứng | B01, B11 | Viết hàng nghìn dòng Dart mù; tải SDK | Mã chưa từng chạy tạo ra cảm giác an toàn giả. Tải SDK hàng GB lên máy của bạn cần bạn đồng ý | Cao |
+| D60 | Ba service dùng cùng một mẫu (`_get`, `_post`, `_delete`), giữ token từ đăng nhập, gửi khóa idempotency ở các thao tác server yêu cầu. Mỗi phương thức mutating nhận `idempotencyKey` tùy chọn để thử lại đúng một thao tác bằng cùng khóa | B02 | Sinh khóa mới mỗi lần gọi | Thử lại bằng khóa mới sẽ tạo đơn hoặc thu COD lần hai, chính là điều Idempotency-Key ngăn | Cao |
+| D61 | Client không gửi danh tính (`userId`, `phone`, `x-driver-id`) hay giá. Token cho server biết người dùng | B03, B05, B06, B07 | Giữ tham số tùy chọn cho tiện dev | Mọi tham số danh tính tùy chọn là một cánh cửa để giả mạo | Cao |
+| D62 | `FLEETBUS_AUTH` mặc định `enforce` ở mọi môi trường, `off` chỉ khi không phải production. Các test logic nghiệp vụ qua HTTP đặt `authMode: 'off'` tường minh; test xác thực, test hình dạng API chế độ bật và e2e chạy dưới `enforce` | D45 | Giữ `off` mặc định ở dev | Client đã gửi token nên không còn lý do để mặc định yếu hơn | Cao |
+| D63 | `arrive` (DRI-008) cần Idempotency-Key theo spec; thêm vào quy tắc cổng | B09 | Giữ như cũ | Spec ghi `Yes` | Thấp |
+| D64 | Giữ các alias phía server cho đến khi biết chắc không còn client dùng | B08 | Xóa ngay | Không có Flutter để xác nhận không còn gọi alias nào | Thấp |
+| D65 | Viết lại e2e thành client đúng hợp đồng với kiểm bắt buộc từng bước, gồm các thử nghiệm phản chứng (không token 401, QR giả bị từ chối, sai số tiền bị từ chối, bán ghế hai lần 409) | B12 | Giữ bản in kết quả | Bản cũ không bao giờ thất bại | Trung bình |
+| D66 | Sửa ba tiêu đề test mobile và `STATE.md` để nêu đúng độ phủ (19/25, 14/19, 9/30) | B10 | Giữ | Tuyên bố phủ đủ khi chỉ kiểm vài file có tồn tại | Trung bình |
+
 ## Thay đổi test hiện có (theo hợp đồng mới)
 
 Không có assertion nào bị nới lỏng. Những test dưới đây từng khẳng định hành vi không an toàn và được viết lại theo spec:
@@ -118,6 +131,10 @@ Không có assertion nào bị nới lỏng. Những test dưới đây từng k
 | TC-SRV-07 | Vé không có trong manifest trả `404 TICKET_NOT_FOUND` thay vì chấp nhận `200` hoặc `400` | D47 |
 | TC-MGR-09 | Tỷ lệ đúng giờ so với giá trị tính từ chuyến, kiểm doanh thu ròng | D49 |
 | TC-E2E-06 | Gửi một ping GPS trước khi hỏi radar, kiểm cả nhánh không có tín hiệu | D51 |
+| TC-MGR-WEB-04 | Kiểm đường dẫn chuẩn thay vì alias | D60 |
+| TC-MOB-05, TC-DRV-MOB-05, TC-MGR-WEB-05 | Tiêu đề nêu đúng độ phủ | D66 |
+| `e2e_live_flow.js` (lần hai) | Viết lại thành client có token và kiểm bắt buộc | D65 |
+| Test logic nghiệp vụ qua HTTP | `authMode: 'off'` tường minh | D62 |
 | TC-TRACK-03 (xóa) | Thay bằng TC-SPEC-A18, A18b, A48 chạy qua HTTP | D12 |
 | `e2e_live_flow.js` | Đặt vé gửi `holdId` và `userId`, bỏ giá do client gửi | D9, D10 |
 

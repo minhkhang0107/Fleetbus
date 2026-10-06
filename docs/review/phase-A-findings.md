@@ -321,7 +321,7 @@ Kiểm thử cuối: `npm test` **165/165 pass** (trước giai đoạn: 112), `
 | **Đã sửa một phần** | A01, A02: phía server xong, mặc định `off` ở môi trường dev cho đến khi app Flutter gửi token (D45). A07: 10 endpoint đã làm, 16 hoãn có lý do (D55). A09: hồ sơ tài xế đã sửa, `gps-health`, `diagnostics-ping` và `home-feed` vẫn là dữ liệu mô phỏng. A51: có băm, khóa tài khoản, nhật ký, thiếu 2FA |
 | **Còn mở có chủ đích** | A12 (2FA TOTP, `OQ-027`), A25 (`paymentService.validateAndBoardTicket` là bản logic lên xe thừa, chỉ test dùng; để lại vì test hiện có phụ thuộc), A32 (điểm đón mặc định vẫn là toạ độ cố định, chưa có toạ độ điểm dừng), `OQ-028` (nhả ghế khi vắng mặt cần mô hình đoạn đường) |
 
-## Việc bắt buộc ở Giai đoạn B (Flutter)
+## Việc bắt buộc ở Giai đoạn B (Flutter) (đã xử lý: xem `phase-B-findings.md`)
 
 1. Gửi token Bearer và `Idempotency-Key` ở các POST đánh dấu `Yes`, rồi đổi mặc định `FLEETBUS_AUTH` sang `enforce` ở mọi môi trường (D45, `OQ-022`).
 2. Gửi `holdId` (và `userId` cho đến khi dùng token) khi tạo đơn; đọc `status: REFUND_REQUESTED`; gọi ví vé bằng token thay vì `?phone=`; gửi `trip_id`, `seat_codes` khi đặt vé.
