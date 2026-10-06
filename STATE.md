@@ -10,8 +10,8 @@ Last updated: 2026-09-15 13:30
   - Manager Operations Gateway: `/api/v1/ops/*` (Auth, KPIs, Fleet Radar, POS, Dispatch, Emergency Swap, Fleet & Crew, Reports).
   - External Webhooks: `/api/v1/webhooks/vietqr/ipn` and `/health` + `/api/v1/openapi.json`.
   - Static Web Portals: `/passenger`, `/driver`, `/manager` served directly from built `web_dist/` distributions with fallback to `docs/designs/`.
-  - **Automated Tests**: 99/99 unit and integration tests passing 100% Green across 15 suites (`npm test` / `make test`).
-  - **Lint Check**: 100% Clean (`npm run lint` / `make lint`).
+  - **Automated Tests**: 165/165 unit and integration tests passing across 22 suites (`npm test` / `make test`), see section 8.
+  - **Lint Check**: `npm run lint` runs `tools/lint.js`, a syntax check of every JavaScript file (54 files). The earlier command checked only the first file.
   - **Universal System Build**: `npm run build` / `make build` compiles and packages all platforms, generates `build_manifest.json`, and aligns Android `local.properties`.
   - **Live E2E Flow**: Full tripartite end-to-end live flow verified (`npm run e2e` / `make e2e` / `node test/e2e_live_flow.js`).
   - **Cross-Service Event Bridge**: `FleetBusEventBridge` pub-sub linking Passenger, Driver, and Manager in real time.
@@ -124,8 +124,8 @@ Last updated: 2026-09-15 13:30
   - Step 5: Driver tactical auth, shift trip inspection, 6-point readiness safety checklist, start trip (`IN_TRANSIT`), camera QR boarding scan, 1Hz live GPS telemetry stream.
   - Step 6: Manager Operations login, executive KPIs (Load Factor, Gross Revenue), 60Hz live fleet radar tracking, hotline POS booking, executive OTP and punctuality report.
 - [x] **Regression & Integrity Guard**:
-  - 15 test suites with 112/112 passing tests (`npm test`).
-  - 100% clean syntax and lint (`npm run lint`).
+  - 165/165 passing tests (`npm test`), see section 8.
+  - Syntax check of every file (`npm run lint`).
   - Single command orchestration via `make build && make lint && make test && make e2e`.
 
 ## 7. Monorepo Build Artifact Git Hygiene & .gitignore Rules
@@ -141,3 +141,14 @@ Last updated: 2026-09-15 13:30
     8. **Logs, IDEs & Secrets**: `*.log`, `npm-debug.log*`, `.env*` (preserving `!*.env.example` and `!source/manager/env/*.env`), `.DS_Store`, `Thumbs.db`, `.idea/`, `.vscode/`.
   - Untracked `build_manifest.json` from git index while preserving local generation on disk, preventing build timestamp git churn.
   - Added dedicated `source/manager/.gitignore` to match `source/driver/` and `source/passenger/` structures.
+
+## 8. Phase A Review: Server and API Conformance to the Spec (2026-10-06)
+
+Review and fixes of `source/server/` against `screen-spec/`, with the spec corrected where it was inconsistent. Full record: `docs/review/` (`design.md`, `phase-A-plan.md`, `phase-A-findings.md`, `decision-log.md`).
+
+- [x] **53 findings reviewed**; the money, ticket, seat, QR and privacy ones fixed with tests that failed first. Highlights: prices set by the server, a live hold required to book, bank webhook checks signature and amount, "Tôi đã chuyển tiền" no longer issues tickets, QR signatures are verified, refunds follow the `PAX-021` tiers and are approved once, one seat inventory for app, counter, hotline and hail, drivers see masked phones only, OTP login works over HTTP.
+- [x] **Spec updated** (screens `PAX-010/012/013/014/016/021`, `DRI-001/002/005-007/009/011/012/015/017`, `MGR-001/002/020/023/027/029`, `OQ-017` to `OQ-028`, `api-screen-map`, `traceability-matrix` section 3).
+- [x] **Authentication layer**: signed tokens, role matrix, ownership checks, Idempotency-Key, login lockout. **Not yet enforced in development** (`FLEETBUS_AUTH=off` by default; `enforce` in production) because the Flutter apps do not send tokens yet.
+- [ ] **Open**: Flutter clients (Phase B), TOTP 2FA (`OQ-027`), 16 deferred endpoints (`api-screen-map` section 5), segment-level seat release (`OQ-028`).
+- Environment variables: `FLEETBUS_TICKET_SECRET`, `FLEETBUS_TOKEN_SECRET`, `FLEETBUS_WEBHOOK_SECRET` (required in production), `FLEETBUS_AUTH` (`enforce` | `off`).
+
