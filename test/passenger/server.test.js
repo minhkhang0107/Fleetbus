@@ -47,7 +47,7 @@ describe('Phase 8: End-to-End Passenger Server & API Gateway Test Suite', () => 
     assert.ok(res.body.includes('BusGo'));
     assert.ok(res.body.includes('Geist'));
     assert.ok(res.body.includes('JetBrains Mono'));
-    assert.ok(res.body.includes('2D Interactive Seat Grid') || res.body.includes('seat-grid-container'));
+    assert.ok(res.body.includes('id="seat-grid"'), 'the passenger suite has the seat map (PAX-009)');
   });
 
   it('TC-E2E-02: Should respond to App Config API /api/v1/app/config', async () => {

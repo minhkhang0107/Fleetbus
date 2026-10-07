@@ -1,1000 +1,948 @@
 <!DOCTYPE html>
-<html lang="vi" class="h-full">
+<html lang="vi">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>BusGo Passenger — Hệ Thống Đặt Vé & Telemetry Thời Gian Thực</title>
-  
-  <!-- Fonts: Geist & JetBrains Mono as per DESIGN.md (Strictly NO Inter) -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            canvas: '#F8FAFC',
-            surface: '#FFFFFF',
-            charcoal: '#0F172A',
-            muted: '#64748B',
-            whisper: 'rgba(226, 232, 240, 0.7)',
-            sapphire: '#2563EB',
-            'sapphire-soft': '#EFF6FF',
-            emerald: '#16A34A',
-            'emerald-soft': '#F0FDF4',
-            amber: '#D97706',
-            'amber-soft': '#FEF3C7',
-            crimson: '#DC2626',
-            'crimson-soft': '#FEE2E2',
-            pnr: '#FB9821',
-            'pnr-soft': '#FFF7ED',
-          },
-          fontFamily: {
-            sans: ['Geist', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
-          }
-        }
-      }
-    }
-  </script>
-
-  <style>
-    body {
-      background-color: #0F172A;
-      font-family: 'Geist', sans-serif;
-      color: #0F172A;
-      -webkit-font-smoothing: antialiased;
-    }
-    .font-mono-data {
-      font-family: 'JetBrains Mono', monospace;
-      font-feature-settings: "tnum";
-      font-variant-numeric: tabular-nums;
-    }
-    .mobile-frame {
-      max-width: 412px;
-      height: 890px;
-      margin: 20px auto;
-      background: #F8FAFC;
-      border-radius: 40px;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 12px #1E293B;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      position: relative;
-    }
-    .screen-container {
-      flex: 1;
-      overflow-y: auto;
-      overflow-x: hidden;
-      display: none;
-      flex-direction: column;
-    }
-    .screen-container.active {
-      display: flex;
-    }
-    .whisper-card {
-      background: #FFFFFF;
-      border: 1px solid rgba(226, 232, 240, 0.7);
-      border-radius: 16px;
-    }
-    .safe-bottom {
-      padding-bottom: max(16px, env(safe-area-inset-bottom));
-    }
-    /* Pulse animation for Live GPS Telemetry Radar */
-    @keyframes radar-pulse {
-      0% { transform: scale(0.95); opacity: 0.8; }
-      50% { transform: scale(1.2); opacity: 0.3; }
-      100% { transform: scale(0.95); opacity: 0.8; }
-    }
-    .radar-beacon {
-      animation: radar-pulse 2s infinite ease-in-out;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BusGo Passenger — Đặt vé xe liên tỉnh</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<!--
+  Prototype of the passenger app, redesigned on 2026-10-07 (docs/review/design-review-findings.md, D95 to D102).
+  Design source: Claude Design canvas "FleetBus — Thiết kế lại 3 app". Static data, no API calls.
+  Demo controls live outside the phone frame so that product screens carry no developer copy (D101).
+-->
+<style>
+:root{
+  --canvas:#F8FAFC;--surface:#FFFFFF;--ink:#0F172A;--muted:#475569;--line:#E2E8F0;--line-strong:#CBD5E1;
+  --primary:#2563EB;--primary-dark:#1D4ED8;--primary-soft:#EFF6FF;
+  --success:#15803D;--success-soft:#F0FDF4;--warn:#D97706;--warn-ink:#78350F;--warn-soft:#FEF3C7;
+  --danger:#B91C1C;--danger-soft:#FEF2F2;--pnr:#C2410C;--pnr-soft:#FFF7ED;
+  --mono:'JetBrains Mono',ui-monospace,monospace;--sans:Geist,system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html,body{margin:0;height:100%}
+body{background:#E2E8F0;font-family:var(--sans);color:var(--ink);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+button:disabled{cursor:not-allowed}
+a{color:var(--primary-dark)}
+.mono{font-family:var(--mono)}
+.stage{min-height:100%;display:flex;gap:32px;align-items:center;justify-content:center;padding:24px;flex-wrap:wrap}
+.device{width:390px;height:844px;background:var(--canvas);border-radius:28px;box-shadow:0 0 0 10px #0F172A,0 30px 60px rgba(15,23,42,.35);overflow:hidden;position:relative;display:flex}
+@media (max-width:640px){.stage{padding:0;display:block}.device{width:100%;height:100dvh;border-radius:0;box-shadow:none}.demo{display:none}}
+.screen{display:none;flex-direction:column;width:100%;height:100%}
+.screen.active{display:flex}
+.bar{background:var(--surface);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;align-items:center;gap:8px;flex:none}
+.bar h1{margin:0;font-size:17px;font-weight:600}
+.bar .sub{font-size:13px;color:var(--muted)}
+.icon-btn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:0;background:transparent;border-radius:9999px;color:var(--ink)}
+.icon-btn:hover{background:#F1F5F9}
+.back{margin-left:-10px}
+.body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px}
+.foot{background:var(--surface);border-top:1px solid var(--line);padding:12px 16px 20px;display:flex;gap:12px;align-items:center;flex:none}
+.foot.col{flex-direction:column;align-items:stretch;gap:8px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.pad{padding:14px 16px}
+.btn{height:48px;padding:0 20px;border-radius:8px;border:0;font-weight:600;font-size:15px;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{background:var(--primary-dark)}
+.btn-primary:disabled{background:#E2E8F0;color:#64748B}
+.btn-ghost{background:var(--surface);border:1px solid var(--line-strong);color:var(--ink)}
+.btn-danger-text{background:transparent;color:var(--danger);height:44px}
+.btn-block{width:100%}
+.btn-sm{height:36px;padding:0 12px;font-size:13px;border-radius:6px}
+.field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#334155}
+.input{height:44px;border:1px solid var(--line-strong);border-radius:8px;padding:0 12px;font-size:15px;font-weight:500;background:#fff;width:100%}
+.input:focus{outline:2px solid var(--primary);outline-offset:-1px}
+.input.err{border-color:var(--danger)}
+.err-text{font-size:13px;color:var(--danger)}
+.ok-text{font-size:13px;color:var(--success);font-weight:500}
+.pill{font-size:12px;font-weight:600;padding:2px 8px;border-radius:9999px;white-space:nowrap}
+.pill-ok{color:var(--success);background:var(--success-soft)}
+.pill-warn{color:#92400E;background:var(--warn-soft)}
+.pill-info{color:var(--primary-dark);background:var(--primary-soft)}
+.pill-mute{color:#334155;background:#F1F5F9}
+.pill-danger{color:var(--danger);background:#FEE2E2}
+.pnr{font:600 13px var(--mono);color:var(--pnr);background:var(--pnr-soft);padding:2px 8px;border-radius:4px}
+.h2{font-size:15px;font-weight:600;margin:0}
+.muted{color:var(--muted)}
+.row{display:flex;align-items:center;gap:8px}
+.between{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.seg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;background:#F1F5F9;padding:4px;border-radius:8px}
+.seg button{height:40px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-weight:600;font-size:14px}
+.seg button[aria-selected=true]{background:#fff;color:var(--primary-dark);box-shadow:0 1px 2px rgba(15,23,42,.08)}
+.hold{background:var(--warn-soft);border-bottom:1px solid #FCD34D;padding:10px 16px;display:flex;align-items:center;gap:10px;color:var(--warn-ink);font-size:13px;flex:none}
+.hold.urgent{background:#FEE2E2;border-color:#FCA5A5;color:#7F1D1D}
+.hold .t{font:700 15px var(--mono)}
+.tabbar{height:64px;border-top:1px solid var(--line);background:#fff;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));flex:none}
+.tabbar button{border:0;background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:12px;color:var(--muted);position:relative}
+.tabbar button[aria-current=page]{color:var(--primary-dark);font-weight:600}
+.badge-dot{position:absolute;top:10px;left:calc(50% + 6px);width:8px;height:8px;border-radius:9999px;background:var(--danger)}
+.chip{height:44px;padding:0 14px;border:1px solid var(--line);border-radius:9999px;background:#fff;font-size:14px}
+.chip-sm{height:36px;padding:0 12px;border:1px solid var(--line);border-radius:9999px;background:#fff;font-size:13px;font-weight:500}
+.chip-sm[aria-pressed=true]{border-color:var(--primary);background:var(--primary-soft);color:var(--primary-dark)}
+.trip{text-align:left;width:100%;padding:16px;display:flex;flex-direction:column;gap:12px;border:1px solid var(--line);border-radius:12px;background:#fff}
+.trip:hover{border-color:var(--primary)}
+.trip:disabled{background:transparent;border-style:dashed;border-color:var(--line-strong)}
+.t-time{font:700 20px var(--mono)}
+.radio-row{display:grid;grid-template-columns:20px 1fr auto;gap:12px;align-items:center;min-height:56px;padding:0 14px;background:#fff;border:1px solid var(--line);border-radius:8px;cursor:pointer}
+.radio-row:has(input:checked){background:var(--primary-soft);border-color:var(--primary)}
+.radio-row input{accent-color:var(--primary);width:20px;height:20px;margin:0}
+.radio-row:has(input:disabled){opacity:.5;cursor:not-allowed}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:#334155}
+.legend span{display:flex;align-items:center;gap:6px}
+.sw{width:14px;height:14px;border-radius:4px;display:inline-block}
+.seats{display:flex;flex-direction:column;gap:10px;padding:0 16px}
+.seat-row{display:grid;grid-template-columns:1fr 56px 1fr;gap:12px}
+.seat{height:60px;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font:600 15px var(--mono);border:1.5px solid #94A3B8;background:#fff;color:var(--ink)}
+.seat small{font:500 11px var(--sans)}
+.seat.sel{background:var(--primary);border-color:var(--primary-dark);color:#fff}
+.seat.held{background:var(--warn-soft);border-color:var(--warn);color:#92400E}
+.seat.booked{background:#E2E8F0;border-color:#E2E8F0;color:#64748B}
+.qr{display:grid;background:#fff;border:1px solid var(--line);border-radius:8px}
+.qr span{aspect-ratio:1}
+.kv{display:flex;flex-direction:column;gap:2px}
+.kv .k{font-size:12px;color:var(--muted)}
+.kv .v{font-size:14px;font-weight:600}
+.list-row{display:flex;align-items:center;min-height:48px;gap:8px;border-bottom:1px solid #F1F5F9}
+.list-row:last-child{border-bottom:0}
+.toast{position:absolute;left:16px;right:16px;top:16px;background:#0F172A;color:#fff;padding:12px 14px;border-radius:10px;font-size:14px;display:none;z-index:30;box-shadow:0 8px 20px rgba(15,23,42,.3)}
+.toast.show{display:block}
+.scrim{position:absolute;inset:0;background:rgba(15,23,42,.5);display:none;z-index:20;align-items:flex-end}
+.scrim.show{display:flex}
+.sheet{background:#fff;width:100%;border-radius:16px 16px 0 0;padding:12px 16px 24px;display:flex;flex-direction:column;gap:14px;max-height:85%;overflow-y:auto}
+.grab{align-self:center;width:40px;height:4px;border-radius:9999px;background:#CBD5E1}
+.map{flex:1;position:relative;background:#EEF2F6;overflow:hidden;min-height:300px}
+.notice{border-radius:12px;padding:12px 14px;font-size:13px;line-height:1.5}
+.otp{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.otp input{height:52px;text-align:center;font:700 20px var(--mono);border:1px solid var(--line-strong);border-radius:8px}
+.demo{width:300px;background:#fff;border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:14px;box-shadow:0 10px 30px rgba(15,23,42,.12);font-size:14px}
+.demo h2{margin:0;font-size:15px}
+.demo p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
+.demo fieldset{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0;display:flex;flex-direction:column;gap:8px}
+.demo legend{font-size:12px;font-weight:600;color:var(--muted);padding:0 4px}
+.demo label{display:flex;gap:8px;align-items:center}
+@media (prefers-reduced-motion:no-preference){.screen.active{animation:fade .18s ease-out}@keyframes fade{from{opacity:.4}to{opacity:1}}}
+</style>
 </head>
-<body class="flex items-center justify-center min-h-screen p-2 md:p-6 bg-slate-950 text-slate-900">
+<body>
+<div class="stage">
+<div class="device" id="app">
 
-  <!-- Mobile Simulator Frame -->
-  <div class="mobile-frame relative bg-canvas">
-    
-    <!-- Top Hardware Status Bar -->
-    <div class="h-11 bg-white/90 backdrop-blur-md border-b border-slate-100 flex items-center justify-between px-6 z-50 select-none">
-      <span class="font-mono-data text-xs font-semibold text-charcoal" id="top-clock">07:00</span>
-      <div class="w-20 h-4 bg-slate-900 rounded-full mx-auto"></div>
-      <div class="flex items-center space-x-1.5 text-xs text-charcoal">
-        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
-        <span class="font-mono-data text-[10px] font-bold">5G</span>
-        <svg class="w-4 h-4 text-emerald" viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="7" width="16" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M22 11v2"/><rect x="4" y="9" width="10" height="6" rx="1"/></svg>
+  <!-- PAX-001 Splash -->
+  <section class="screen" data-screen="splash" aria-label="Màn hình chào">
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center">
+      <span style="width:72px;height:72px;border-radius:18px;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="15" rx="2"/><path d="M4 11h16M8 21v-3M16 21v-3"/></svg>
+      </span>
+      <h1 style="margin:0;font-size:32px;font-weight:700;letter-spacing:-.02em">BusGo</h1>
+      <p style="margin:0;color:var(--muted);font-size:15px">Đặt vé xe liên tỉnh, giữ ghế 10 phút, theo dõi xe trên đường.</p>
+    </div>
+    <div class="foot col" style="border:0;background:transparent">
+      <button class="btn btn-primary" data-go="login">Đăng nhập bằng số điện thoại</button>
+      <button class="btn btn-ghost" data-go="home">Xem chuyến, đăng nhập sau</button>
+    </div>
+  </section>
+
+  <!-- PAX-002/003 Login + OTP -->
+  <section class="screen" data-screen="login" aria-label="Đăng nhập">
+    <div class="bar"><button class="icon-btn back" data-back aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button><h1>Đăng nhập</h1></div>
+    <div class="body">
+      <div id="login-phone-step" style="display:flex;flex-direction:column;gap:12px">
+        <p style="margin:0;font-size:15px">Nhập số điện thoại để nhận mã xác thực.</p>
+        <label class="field">Số điện thoại
+          <input class="input mono" id="login-phone" type="tel" inputmode="numeric" placeholder="0912 345 678" autocomplete="tel">
+        </label>
+        <span class="err-text" id="login-phone-err" hidden>Số điện thoại cần 10 chữ số, bắt đầu bằng 0.</span>
+      </div>
+      <div id="login-otp-step" style="display:none;flex-direction:column;gap:12px">
+        <p style="margin:0;font-size:15px">Nhập mã 6 số đã gửi tới <strong class="mono" id="otp-phone"></strong></p>
+        <div class="otp" id="otp-boxes"></div>
+        <span class="err-text" id="otp-err" hidden>Mã chưa đúng. Kiểm tra tin nhắn và nhập lại.</span>
+        <button class="btn btn-ghost" id="otp-resend" disabled>Gửi lại mã sau 60 giây</button>
       </div>
     </div>
+    <div class="foot col"><button class="btn btn-primary" id="login-submit">Gửi mã</button></div>
+  </section>
 
-    <!-- Active 10-Minute Seat Hold Global Floating Banner (PAX-010) -->
-    <div id="global-hold-banner" class="hidden bg-amber text-white px-4 py-2 flex items-center justify-between z-40 text-xs shadow-md">
-      <div class="flex items-center space-x-2">
-        <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        <span>Đang giữ chỗ ghế: <b id="hold-banner-seats" class="font-mono-data">A01</b></span>
+  <!-- PAX-004 Home -->
+  <section class="screen" data-screen="home" aria-label="Trang chủ">
+    <div class="body" style="padding-top:24px;gap:20px">
+      <div class="between">
+        <div class="kv"><span style="font-size:13px;color:var(--muted)" id="home-greet">Xin chào</span><span style="font-size:22px;font-weight:700;letter-spacing:-.01em">Bạn muốn đi đâu?</span></div>
+        <button class="icon-btn" data-tab="profile" aria-label="Tài khoản" style="background:var(--primary-soft);color:var(--primary-dark);font-weight:600;font-size:14px" id="home-avatar">?</button>
       </div>
-      <span id="hold-banner-timer" class="font-mono-data font-bold text-sm bg-black/20 px-2 py-0.5 rounded">09:59</span>
+      <form class="card" style="padding:16px;display:flex;flex-direction:column;gap:12px" onsubmit="return false">
+        <div style="position:relative;border:1px solid var(--line);border-radius:8px">
+          <button type="button" class="loc-field" data-pick="origin" style="width:100%;text-align:left;border:0;background:transparent;padding:10px 56px 10px 12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:2px">
+            <span style="font-size:12px;color:var(--muted)">Điểm đi</span><span style="font-size:15px;font-weight:600" id="origin-label"></span></button>
+          <button type="button" class="loc-field" data-pick="dest" style="width:100%;text-align:left;border:0;background:transparent;padding:10px 56px 10px 12px;display:flex;flex-direction:column;gap:2px">
+            <span style="font-size:12px;color:var(--muted)">Điểm đến</span><span style="font-size:15px;font-weight:600" id="dest-label"></span></button>
+          <button type="button" id="swap" aria-label="Đổi chiều điểm đi và điểm đến" class="icon-btn" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);border:1px solid var(--line);background:#fff;color:var(--primary)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M7 4 3 8M7 4l4 4M17 20V4m0 16-4-4m4 4 4-4"/></svg></button>
+        </div>
+        <div class="grid2">
+          <label class="field">Ngày đi<select class="input" id="date-select"></select></label>
+          <label class="field">Số khách<select class="input" id="pax-select"><option value="1">1 người</option><option value="2">2 người</option><option value="3">3 người</option><option value="4">4 người</option><option value="5">5 người</option></select></label>
+        </div>
+        <span class="err-text" id="search-err" hidden>Điểm đi và điểm đến phải khác nhau.</span>
+        <button type="button" class="btn btn-primary" id="search-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Tìm chuyến</button>
+      </form>
+      <section style="display:flex;flex-direction:column;gap:10px" id="home-upcoming-wrap">
+        <h2 class="h2">Chuyến sắp đi</h2>
+        <div id="home-upcoming"></div>
+      </section>
+      <section style="display:flex;flex-direction:column;gap:10px">
+        <h2 class="h2">Tìm lại gần đây</h2>
+        <div class="row" style="flex-wrap:wrap">
+          <button class="chip" data-recent="hn|th">Hà Nội → Thanh Hóa</button>
+          <button class="chip" data-recent="hn|nb">Hà Nội → Ninh Bình</button>
+        </div>
+      </section>
     </div>
+  </section>
 
-    <!-- ========================================================================= -->
-    <!-- SCREEN 1: PAX-001 SPLASH & INITIALIZATION -->
-    <!-- ========================================================================= -->
-    <div id="screen-splash" class="screen-container active justify-between items-center p-8 bg-white">
-      <div class="w-full flex justify-end pt-2">
-        <span class="text-[11px] font-mono-data text-muted bg-slate-100 px-2.5 py-1 rounded-full">v3.0.0 (Build 412)</span>
-      </div>
-      
-      <div class="flex flex-col items-center text-center space-y-4">
-        <div class="w-20 h-20 bg-sapphire rounded-3xl flex items-center justify-center text-white shadow-xl shadow-sapphire/20">
-          <svg class="w-11 h-11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.8-.7-1.5-1.5-1.5H3.5c-.8 0-1.5.7-1.5 1.5 0 .4.1.8.2 1.2.3 1.1.8 2.8.8 2.8h3"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/><path d="M4 11V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7"/></svg>
-        </div>
-        <h1 class="text-3xl font-bold tracking-tight text-charcoal">BusGo</h1>
-        <p class="text-sm text-muted max-w-[240px]">Hệ thống đặt xe & theo dõi telemetry thời gian thực</p>
-      </div>
+  <!-- PAX-005 Location picker -->
+  <section class="screen" data-screen="picker" aria-label="Chọn địa điểm">
+    <div class="bar"><button class="icon-btn back" data-back aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button><h1 id="picker-title">Chọn điểm đi</h1></div>
+    <div style="padding:12px 16px;background:#fff;border-bottom:1px solid var(--line)"><input class="input" id="picker-q" type="search" placeholder="Tỉnh, thành phố hoặc bến xe" aria-label="Tìm địa điểm"></div>
+    <div class="body" style="gap:0;padding:0 16px" id="picker-list"></div>
+  </section>
 
-      <div class="w-full space-y-3 safe-bottom">
-        <button onclick="navigateTo('screen-home')" class="w-full h-13 py-3.5 bg-sapphire text-white font-semibold rounded-2xl shadow-lg shadow-sapphire/25 hover:bg-blue-700 transition flex items-center justify-center space-x-2">
-          <span>BẮT ĐẦU ĐẶT VÉ</span>
-          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-        </button>
-        <button onclick="navigateTo('screen-login')" class="w-full h-12 py-3 bg-slate-50 text-charcoal border border-whisper font-medium rounded-2xl hover:bg-slate-100 transition text-sm">
-          Đăng nhập tài khoản
-        </button>
-      </div>
+  <!-- PAX-006 Results -->
+  <section class="screen" data-screen="results" aria-label="Kết quả tìm chuyến">
+    <div class="bar" style="flex-direction:column;align-items:stretch;gap:12px">
+      <div class="row"><button class="icon-btn back" data-back aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
+        <div class="kv"><h1 id="res-title"></h1><span class="sub" id="res-sub"></span></div></div>
+      <div class="grid3" id="res-dates"></div>
+      <div class="row"><button class="chip-sm" data-sort="time" aria-pressed="true">Sớm nhất</button><button class="chip-sm" data-sort="price" aria-pressed="false">Giá thấp</button><button class="chip-sm" data-sort="seats" aria-pressed="false">Nhiều chỗ</button></div>
     </div>
+    <div class="body" id="res-list" style="gap:12px"></div>
+  </section>
 
-    <!-- ========================================================================= -->
-    <!-- SCREEN 2: PAX-002 & PAX-003 LOGIN & OTP -->
-    <!-- ========================================================================= -->
-    <div id="screen-login" class="screen-container p-6 bg-white justify-between">
-      <div>
-        <button onclick="navigateTo('screen-splash')" class="p-2 -ml-2 text-muted hover:text-charcoal">
-          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
-        </button>
-        <div class="mt-4">
-          <h2 class="text-2xl font-bold text-charcoal">Đăng nhập tài khoản</h2>
-          <p class="text-sm text-muted mt-1">Nhập số điện thoại để nhận mã xác thực OTP</p>
-        </div>
-
-        <div class="mt-8 space-y-4">
-          <div>
-            <label class="block text-xs font-semibold text-charcoal uppercase tracking-wider mb-2">Số điện thoại</label>
-            <div class="relative">
-              <span class="absolute left-4 top-3.5 font-mono-data text-sm font-semibold text-charcoal">+84</span>
-              <input id="login-phone-input" type="tel" value="0912345678" placeholder="912 345 678" class="w-full h-13 pl-14 pr-4 bg-slate-50 border border-whisper rounded-2xl font-mono-data text-base font-semibold text-charcoal focus:outline-none focus:ring-2 focus:ring-sapphire focus:bg-white" />
-            </div>
-          </div>
-
-          <div id="otp-section" class="hidden space-y-3 pt-2">
-            <div class="flex justify-between items-center">
-              <label class="block text-xs font-semibold text-charcoal uppercase tracking-wider">Mã OTP (6 chữ số)</label>
-              <span id="otp-timer-badge" class="font-mono-data text-xs text-sapphire font-semibold">Gửi lại sau 59s</span>
-            </div>
-            <input id="otp-input" type="text" maxlength="6" value="882199" placeholder="● ● ● ● ● ●" class="w-full h-13 text-center tracking-widest font-mono-data text-xl font-bold bg-slate-50 border border-whisper rounded-2xl focus:outline-none focus:ring-2 focus:ring-sapphire focus:bg-white" />
-            <p class="text-xs text-muted text-center">Mã thử nghiệm mặc định: <b class="font-mono-data text-sapphire">882199</b></p>
-          </div>
-        </div>
-      </div>
-
-      <div class="safe-bottom space-y-3">
-        <button id="btn-request-otp" onclick="handleRequestOTP()" class="w-full h-13 py-3.5 bg-sapphire text-white font-semibold rounded-2xl shadow-lg shadow-sapphire/25 hover:bg-blue-700 transition">
-          GỬI MÃ OTP
-        </button>
-        <button id="btn-verify-otp" onclick="handleVerifyOTP()" class="hidden w-full h-13 py-3.5 bg-sapphire text-white font-semibold rounded-2xl shadow-lg shadow-sapphire/25 hover:bg-blue-700 transition">
-          XÁC NHẬN ĐĂNG NHẬP
-        </button>
-      </div>
+  <!-- PAX-008 Pickup / dropoff -->
+  <section class="screen" data-screen="stops" aria-label="Điểm đón và điểm trả">
+    <div class="bar"><button class="icon-btn back" data-back aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
+      <div class="kv"><h1>Điểm đón và điểm trả</h1><span class="sub" id="stops-sub"></span></div></div>
+    <div class="body" style="gap:20px">
+      <fieldset style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:8px"><legend class="h2" style="margin-bottom:8px">Bạn lên xe ở đâu?</legend><div id="pickup-list" style="display:flex;flex-direction:column;gap:8px"></div></fieldset>
+      <fieldset style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:8px"><legend class="h2" style="margin-bottom:8px">Bạn xuống xe ở đâu?</legend><div id="dropoff-list" style="display:flex;flex-direction:column;gap:8px"></div></fieldset>
+      <p style="margin:0;font-size:13px;color:var(--muted);line-height:1.5">Ghế trống ở bước sau tính theo đoạn bạn đi. Giá vé hiện là giá chung của chuyến, dù bạn đi đoạn nào.</p>
     </div>
+    <div class="foot"><div class="kv" style="flex:1"><span style="font-size:12px;color:var(--muted)" id="stops-seg"></span><span style="font:700 17px var(--mono)" id="stops-price"></span></div><button class="btn btn-primary" id="stops-next">Chọn ghế</button></div>
+  </section>
 
-    <!-- ========================================================================= -->
-    <!-- SCREEN 3: PAX-004 HOME & SEARCH BAR -->
-    <!-- ========================================================================= -->
-    <div id="screen-home" class="screen-container bg-canvas pb-20">
-      <!-- Header Banner -->
-      <div class="bg-sapphire text-white p-6 pt-4 rounded-b-3xl shadow-lg shadow-sapphire/15">
-        <div class="flex justify-between items-center mb-4">
-          <div class="flex items-center space-x-2">
-            <div class="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center">
-              <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.8-.7-1.5-1.5-1.5H3.5c-.8 0-1.5.7-1.5 1.5 0 .4.1.8.2 1.2.3 1.1.8 2.8.8 2.8h3"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
-            </div>
-            <span class="font-bold text-lg">BusGo</span>
-          </div>
-          <button onclick="navigateTo('screen-notifications')" class="relative p-2 bg-white/15 rounded-xl">
-            <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-            <span class="absolute top-1.5 right-1.5 w-2 h-2 bg-pnr rounded-full"></span>
-          </button>
-        </div>
-
-        <h2 class="text-xl font-bold leading-snug">Tìm kiếm chuyến xe liên tỉnh chất lượng cao</h2>
-      </div>
-
-      <!-- Search Card Form (PAX-004 & PAX-005) -->
-      <div class="px-4 -mt-4">
-        <div class="whisper-card p-5 shadow-sm space-y-4">
-          <div>
-            <label class="block text-xs font-semibold text-muted uppercase">Điểm đi</label>
-            <div class="flex items-center space-x-3 mt-1.5 p-3 bg-slate-50 border border-whisper rounded-xl cursor-pointer" onclick="openLocationPicker('origin')">
-              <svg class="w-5 h-5 text-sapphire" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
-              <div class="flex-1">
-                <p id="home-origin-text" class="text-sm font-semibold text-charcoal">Hà Nội (Bến xe Giáp Bát)</p>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label class="block text-xs font-semibold text-muted uppercase">Điểm đến</label>
-            <div class="flex items-center space-x-3 mt-1.5 p-3 bg-slate-50 border border-whisper rounded-xl cursor-pointer" onclick="openLocationPicker('dest')">
-              <svg class="w-5 h-5 text-crimson" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-              <div class="flex-1">
-                <p id="home-dest-text" class="text-sm font-semibold text-charcoal">Thanh Hóa (Bến xe Phía Bắc)</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs font-semibold text-muted uppercase">Ngày đi</label>
-              <div class="flex items-center space-x-2 mt-1.5 p-3 bg-slate-50 border border-whisper rounded-xl">
-                <svg class="w-4 h-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                <span class="font-mono-data text-xs font-bold text-charcoal">Hôm nay (28/08)</span>
-              </div>
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-muted uppercase">Loại xe</label>
-              <div class="flex items-center space-x-2 mt-1.5 p-3 bg-slate-50 border border-whisper rounded-xl">
-                <svg class="w-4 h-4 text-sapphire" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/></svg>
-                <span class="text-xs font-bold text-charcoal">Cabin VIP</span>
-              </div>
-            </div>
-          </div>
-
-          <button onclick="handleSearchTrips()" class="w-full h-13 py-3.5 bg-sapphire text-white font-semibold rounded-2xl shadow-lg shadow-sapphire/25 hover:bg-blue-700 transition flex items-center justify-center space-x-2 mt-2">
-            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-            <span>TÌM CHUYẾN XE</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Quick Shortcuts & Active Trips -->
-      <div class="px-4 mt-6 space-y-4">
-        <div class="flex items-center justify-between">
-          <h3 class="text-sm font-bold text-charcoal">Tuyến phổ biến hôm nay</h3>
-          <span class="text-xs text-sapphire font-semibold cursor-pointer">Xem tất cả</span>
-        </div>
-
-        <div class="space-y-3">
-          <div onclick="quickSelectRoute('Hà Nội', 'Thanh Hóa')" class="whisper-card p-4 flex items-center justify-between cursor-pointer hover:border-sapphire transition">
-            <div class="space-y-1">
-              <div class="flex items-center space-x-2">
-                <span class="font-bold text-sm text-charcoal">Hà Nội</span>
-                <svg class="w-3.5 h-3.5 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-                <span class="font-bold text-sm text-charcoal">Thanh Hóa</span>
-              </div>
-              <p class="text-xs text-muted">2h 30m · Cao tốc Bắc - Nam</p>
-            </div>
-            <div class="text-right">
-              <span class="font-mono-data font-bold text-sm text-sapphire">220.000 đ</span>
-              <span class="block text-[10px] text-emerald font-semibold">14 chuyến/ngày</span>
-            </div>
-          </div>
-
-          <div onclick="quickSelectRoute('Hà Nội', 'Sầm Sơn')" class="whisper-card p-4 flex items-center justify-between cursor-pointer hover:border-sapphire transition">
-            <div class="space-y-1">
-              <div class="flex items-center space-x-2">
-                <span class="font-bold text-sm text-charcoal">Hà Nội</span>
-                <svg class="w-3.5 h-3.5 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-                <span class="font-bold text-sm text-charcoal">Sầm Sơn (Biển)</span>
-              </div>
-              <p class="text-xs text-muted">2h 45m · Đưa đón tận nơi</p>
-            </div>
-            <div class="text-right">
-              <span class="font-mono-data font-bold text-sm text-sapphire">250.000 đ</span>
-              <span class="block text-[10px] text-emerald font-semibold">8 chuyến/ngày</span>
-            </div>
-          </div>
-        </div>
-      </div>
+  <!-- PAX-009 Seat map -->
+  <section class="screen" data-screen="seats" aria-label="Chọn ghế">
+    <div class="bar" style="flex-direction:column;align-items:stretch;gap:12px">
+      <div class="row"><button class="icon-btn back" data-back aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
+        <div class="kv"><h1>Chọn ghế</h1><span class="sub" id="seats-sub"></span></div></div>
+      <div class="seg" role="tablist"><button role="tab" data-deck="1" id="deck1"></button><button role="tab" data-deck="2" id="deck2"></button></div>
+      <div class="legend"><span><i class="sw" style="border:1.5px solid #94A3B8;background:#fff"></i>Trống</span><span><i class="sw" style="background:var(--primary)"></i>Bạn chọn</span><span><i class="sw" style="border:1.5px solid var(--warn);background:var(--warn-soft)"></i>Người khác giữ</span><span><i class="sw" style="background:#E2E8F0"></i>Đã bán</span></div>
     </div>
-
-    <!-- ========================================================================= -->
-    <!-- SCREEN 4: PAX-006 SEARCH RESULTS & TRIP SELECTION -->
-    <!-- ========================================================================= -->
-    <div id="screen-search-results" class="screen-container bg-canvas pb-20">
-      <div class="bg-white border-b border-whisper p-4 sticky top-0 z-30">
-        <div class="flex items-center space-x-3">
-          <button onclick="navigateTo('screen-home')" class="p-1 text-muted hover:text-charcoal">
-            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
-          </button>
-          <div class="flex-1">
-            <h3 class="text-sm font-bold text-charcoal">Hà Nội ➔ Thanh Hóa</h3>
-            <p class="text-xs text-muted">Hôm nay, 28/08/2026 · Tìm thấy 3 chuyến</p>
-          </div>
-        </div>
-      </div>
-
-      <div class="p-4 space-y-3.5" id="trip-list-container">
-        <!-- Generated Dynamically via JS -->
-      </div>
+    <div class="body" style="padding:16px 16px">
+      <div class="row muted" style="font-size:12px;padding:0 16px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/></svg>Đầu xe</div>
+      <div class="seats" id="seat-grid"></div>
+      <span class="err-text" id="seat-max" hidden style="padding:0 16px">Mỗi lần đặt tối đa 5 ghế.</span>
     </div>
+    <div class="foot"><div class="kv" style="flex:1;min-width:0"><span style="font-size:12px;color:var(--muted)" id="seats-label">Chưa chọn ghế</span><span style="font:700 17px var(--mono)" id="seats-total">0 đ</span></div><button class="btn btn-primary" id="hold-btn" disabled>Chọn ít nhất 1 ghế</button></div>
+  </section>
 
-    <!-- ========================================================================= -->
-    <!-- SCREEN 5: PAX-009 & PAX-010 2D SEAT MAP & REDIS LOCK -->
-    <!-- ========================================================================= -->
-    <div id="screen-seat-map" class="screen-container bg-canvas pb-24">
-      <div class="bg-white border-b border-whisper p-4 sticky top-0 z-30">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center space-x-3">
-            <button onclick="navigateTo('screen-search-results')" class="p-1 text-muted hover:text-charcoal">
-              <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
-            </button>
-            <div>
-              <h3 class="text-sm font-bold text-charcoal">Chọn chỗ ngồi (Cabin VIP)</h3>
-              <p class="text-xs text-muted">Tối đa chọn 5 ghế / giao dịch</p>
-            </div>
-          </div>
-          <span class="font-mono-data text-xs bg-sapphire-soft text-sapphire font-bold px-2 py-1 rounded-lg">22 Phòng</span>
-        </div>
-
-        <!-- Deck Switcher Tabs -->
-        <div class="grid grid-cols-2 gap-2 mt-3 bg-slate-100 p-1 rounded-xl">
-          <button id="btn-deck-1" onclick="switchDeck(1)" class="py-2 text-xs font-bold rounded-lg bg-white text-charcoal shadow-sm transition">
-            TẦNG DƯỚI (Deck 1)
-          </button>
-          <button id="btn-deck-2" onclick="switchDeck(2)" class="py-2 text-xs font-bold rounded-lg text-muted hover:text-charcoal transition">
-            TẦNG TRÊN (Deck 2)
-          </button>
-        </div>
-      </div>
-
-      <!-- Seat Legend -->
-      <div class="flex items-center justify-around py-3 px-4 bg-white border-b border-whisper text-[11px] font-medium text-muted">
-        <div class="flex items-center space-x-1.5">
-          <div class="w-4 h-4 bg-white border border-slate-300 rounded"></div>
-          <span>Trống</span>
-        </div>
-        <div class="flex items-center space-x-1.5">
-          <div class="w-4 h-4 bg-sapphire rounded"></div>
-          <span>Đang chọn</span>
-        </div>
-        <div class="flex items-center space-x-1.5">
-          <div class="w-4 h-4 bg-amber-soft border border-amber rounded"></div>
-          <span>Đang giữ</span>
-        </div>
-        <div class="flex items-center space-x-1.5">
-          <div class="w-4 h-4 bg-slate-200 border border-slate-300 rounded"></div>
-          <span>Đã đặt</span>
-        </div>
-      </div>
-
-      <!-- 2D Vehicle Cockpit & Seat Matrix Layout -->
-      <div class="p-4">
-        <!-- Front of Bus Indicator -->
-        <div class="whisper-card py-2 text-center text-xs font-bold text-muted uppercase tracking-wider mb-4 bg-slate-100 flex items-center justify-center space-x-2">
-          <svg class="w-4 h-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/></svg>
-          <span>Đầu xe / Bác tài</span>
-        </div>
-
-        <!-- 2D Interactive Seat Grid -->
-        <div id="seat-grid-container" class="space-y-3">
-          <!-- Dynamically populated rows -->
-        </div>
-      </div>
-
-      <!-- Sticky Seat Selection Bottom Bar -->
-      <div class="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-whisper p-4 safe-bottom flex items-center justify-between z-30 shadow-lg">
-        <div>
-          <p class="text-xs text-muted">Ghế đã chọn: <b id="selected-seats-label" class="font-mono-data text-charcoal">Chưa chọn</b></p>
-          <p class="text-base font-bold text-sapphire font-mono-data" id="selected-seats-price">0 đ</p>
-        </div>
-        <button id="btn-proceed-manifest" onclick="handleProceedToManifest()" disabled class="px-6 py-3 bg-slate-200 text-slate-400 font-bold text-sm rounded-xl transition">
-          TIẾP TỤC (0)
-        </button>
-      </div>
+  <!-- PAX-011/012 Checkout -->
+  <section class="screen" data-screen="checkout" aria-label="Xác nhận đặt vé">
+    <div class="bar"><button class="icon-btn back" data-back aria-label="Quay lại chọn ghế"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button><h1>Xác nhận đặt vé</h1></div>
+    <div class="hold" role="status" data-hold></div>
+    <div class="body">
+      <section class="card pad" style="display:flex;flex-direction:column;gap:6px"><div class="between"><span style="font-size:15px;font-weight:600" id="co-route"></span><span class="mono" style="font-weight:600;font-size:14px" id="co-seats"></span></div><span style="font-size:13px;color:var(--muted)" id="co-time"></span></section>
+      <section style="display:flex;flex-direction:column;gap:10px">
+        <h2 class="h2">Người đi</h2>
+        <label class="field">Họ và tên<input class="input" id="co-name" autocomplete="name"></label>
+        <span class="err-text" id="co-name-err" hidden>Nhập họ và tên người đi.</span>
+        <label class="field">Số điện thoại nhận vé<input class="input mono" id="co-phone" type="tel" inputmode="numeric" autocomplete="tel"></label>
+        <span class="err-text" id="co-phone-err" hidden>Số điện thoại cần 10 chữ số, bắt đầu bằng 0.</span>
+      </section>
+      <section style="display:flex;flex-direction:column;gap:8px">
+        <label for="co-voucher" class="h2">Mã giảm giá</label>
+        <div class="row"><input class="input mono" id="co-voucher" placeholder="Nhập mã" style="flex:1"><button class="btn btn-ghost" id="co-voucher-btn" style="height:44px">Áp dụng</button></div>
+        <span id="co-voucher-msg" hidden></span>
+      </section>
+      <label class="card" style="display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer">
+        <span style="flex:1" class="kv"><span style="font-size:14px;font-weight:600">Bảo hiểm chuyến đi</span><span style="font-size:12px;color:var(--muted)">Không bắt buộc · 10.000 đ mỗi ghế</span></span>
+        <input type="checkbox" id="co-ins" style="width:22px;height:22px;accent-color:var(--primary);margin:0">
+      </label>
+      <section style="display:flex;flex-direction:column;gap:6px;font-size:14px" id="co-lines"></section>
     </div>
+    <div class="foot"><div class="kv" style="flex:1"><span style="font-size:12px;color:var(--muted)">Tổng thanh toán</span><span style="font:700 19px var(--mono)" id="co-total"></span></div><button class="btn btn-primary" id="co-pay">Tạo mã thanh toán</button></div>
+  </section>
 
-    <!-- ========================================================================= -->
-    <!-- SCREEN 6: PAX-011 & PAX-012 MANIFEST & ORDER REVIEW -->
-    <!-- ========================================================================= -->
-    <div id="screen-checkout" class="screen-container bg-canvas pb-24">
-      <div class="bg-white border-b border-whisper p-4 sticky top-0 z-30">
-        <div class="flex items-center space-x-3">
-          <button onclick="navigateTo('screen-seat-map')" class="p-1 text-muted hover:text-charcoal">
-            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
-          </button>
-          <div>
-            <h3 class="text-sm font-bold text-charcoal">Xác nhận thông tin & Thanh toán</h3>
-            <p class="text-xs text-muted">Kiểm tra thông tin hành khách</p>
-          </div>
-        </div>
-      </div>
-
-      <div class="p-4 space-y-4">
-        <!-- Trip Brief Card -->
-        <div class="whisper-card p-4 space-y-3">
-          <div class="flex justify-between items-start">
-            <div>
-              <span class="font-mono-data text-xs font-bold text-pnr bg-pnr-soft px-2 py-0.5 rounded">HÀ NỘI — THANH HÓA</span>
-              <h4 class="text-base font-bold text-charcoal mt-1">07:00 · 28/08/2026</h4>
-            </div>
-            <span class="font-mono-data text-xs font-semibold text-muted">29B-882.19</span>
-          </div>
-          <div class="border-t border-whisper pt-2 text-xs text-muted space-y-1">
-            <p>Đón: <b class="text-charcoal">Bến xe Giáp Bát (07:00)</b></p>
-            <p>Trả: <b class="text-charcoal">Bến xe Phía Bắc Thanh Hóa (09:30)</b></p>
-          </div>
-        </div>
-
-        <!-- Passenger Forms (PAX-011) -->
-        <div class="whisper-card p-4 space-y-3">
-          <h4 class="text-xs font-bold text-charcoal uppercase tracking-wider">Thông tin người đặt vé</h4>
-          <div>
-            <label class="block text-xs text-muted mb-1">Họ và tên</label>
-            <input id="checkout-payer-name" type="text" value="Nguyễn Văn An" class="w-full h-11 px-3 bg-slate-50 border border-whisper rounded-xl text-sm font-semibold text-charcoal focus:outline-none focus:ring-2 focus:ring-sapphire focus:bg-white" />
-          </div>
-          <div>
-            <label class="block text-xs text-muted mb-1">Số điện thoại nhận vé</label>
-            <input id="checkout-payer-phone" type="tel" value="0912345678" class="w-full h-11 px-3 bg-slate-50 border border-whisper rounded-xl font-mono-data text-sm font-semibold text-charcoal focus:outline-none focus:ring-2 focus:ring-sapphire focus:bg-white" />
-          </div>
-        </div>
-
-        <!-- Voucher & Breakdown (PAX-012) -->
-        <div class="whisper-card p-4 space-y-3">
-          <h4 class="text-xs font-bold text-charcoal uppercase tracking-wider">Mã giảm giá (Voucher)</h4>
-          <div class="flex space-x-2">
-            <input id="checkout-voucher-input" type="text" value="BUSGO50K" placeholder="Nhập mã voucher" class="flex-1 h-11 px-3 bg-slate-50 border border-whisper rounded-xl font-mono-data text-sm font-bold uppercase text-charcoal focus:outline-none focus:ring-2 focus:ring-sapphire" />
-            <button onclick="applyVoucher()" class="px-4 h-11 bg-slate-100 hover:bg-slate-200 text-charcoal text-xs font-bold rounded-xl transition">Áp dụng</button>
-          </div>
-
-          <div class="border-t border-whisper pt-3 space-y-2 text-xs">
-            <div class="flex justify-between text-muted">
-              <span>Tiền vé (<span id="summary-seats-count">1</span> ghế)</span>
-              <span id="summary-subtotal" class="font-mono-data text-charcoal font-semibold">220.000 đ</span>
-            </div>
-            <div class="flex justify-between text-muted">
-              <span>Bảo hiểm chuyến đi</span>
-              <span id="summary-insurance" class="font-mono-data text-charcoal font-semibold">10.000 đ</span>
-            </div>
-            <div class="flex justify-between text-emerald">
-              <span>Giảm giá voucher (BUSGO50K)</span>
-              <span id="summary-discount" class="font-mono-data font-bold">-50.000 đ</span>
-            </div>
-            <div class="flex justify-between text-sm font-bold text-charcoal border-t border-whisper pt-2">
-              <span>Tổng thanh toán</span>
-              <span id="summary-final-total" class="font-mono-data text-sapphire text-base">180.000 đ</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Checkout CTA -->
-      <div class="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-whisper p-4 safe-bottom flex items-center justify-between z-30 shadow-lg">
-        <div>
-          <p class="text-xs text-muted">Tổng tiền</p>
-          <p class="text-lg font-bold text-sapphire font-mono-data" id="checkout-cta-price">180.000 đ</p>
-        </div>
-        <button onclick="handleCreatePaymentOrder()" class="px-8 py-3.5 bg-sapphire text-white font-bold text-sm rounded-xl shadow-lg shadow-sapphire/25 hover:bg-blue-700 transition">
-          THANH TOÁN VIETQR ➔
-        </button>
-      </div>
+  <!-- PAX-013 VietQR -->
+  <section class="screen" data-screen="vietqr" aria-label="Chuyển khoản VietQR">
+    <div class="bar"><h1 style="flex:1">Chuyển khoản</h1><span class="pnr" id="qr-pnr"></span></div>
+    <div class="hold" role="status" data-hold></div>
+    <div class="body" style="gap:14px">
+      <section class="card" style="padding:16px;display:flex;flex-direction:column;align-items:center;gap:10px">
+        <div class="qr" id="pay-qr" style="width:188px;height:188px;padding:10px"></div>
+        <span style="font-size:13px;color:var(--muted)">Quét bằng app ngân hàng bất kỳ</span>
+        <button class="btn btn-ghost" style="height:44px;font-size:14px" data-toast="Đã lưu ảnh mã QR vào thư viện">Lưu ảnh mã QR</button>
+      </section>
+      <section class="card" style="padding:4px 16px">
+        <div class="list-row"><span style="font-size:13px;color:var(--muted);width:96px">Ngân hàng</span><span style="flex:1;font-size:14px;font-weight:600">VietinBank</span></div>
+        <div class="list-row"><span style="font-size:13px;color:var(--muted);width:96px">Số tài khoản</span><span class="mono" style="flex:1;font-size:14px;font-weight:600">1088 2199 99</span><button class="btn btn-sm" style="background:var(--primary-soft);color:var(--primary-dark)" data-copy="1088219999">Sao chép</button></div>
+        <div class="list-row"><span style="font-size:13px;color:var(--muted);width:96px">Số tiền</span><span class="mono" style="flex:1;font-size:15px;font-weight:700" id="qr-amount"></span><button class="btn btn-sm" style="background:var(--primary-soft);color:var(--primary-dark)" data-copy-amount>Sao chép</button></div>
+        <div class="list-row"><span style="font-size:13px;color:var(--muted);width:96px">Nội dung</span><span class="mono" style="flex:1;font-size:15px;font-weight:700;color:var(--pnr)" id="qr-memo"></span><button class="btn btn-sm" style="background:var(--primary-soft);color:var(--primary-dark)" data-copy-memo>Sao chép</button></div>
+      </section>
+      <p style="margin:0;font-size:13px;line-height:1.5;color:#334155">Chuyển đúng số tiền và nội dung. Vé được xuất tự động khi ngân hàng báo tiền về, thường dưới 1 phút.</p>
+      <div role="status" class="row" style="font-size:13px;color:var(--muted)" id="pay-status"><span style="width:8px;height:8px;border-radius:9999px;background:var(--primary)"></span>Đang chờ ngân hàng xác nhận</div>
     </div>
+    <div class="foot col"><button class="btn btn-primary" id="pay-check">Tôi đã chuyển tiền, kiểm tra ngay</button><button class="btn btn-danger-text" id="pay-cancel">Hủy đơn và nhả ghế</button></div>
+  </section>
 
-    <!-- ========================================================================= -->
-    <!-- SCREEN 7: PAX-013 & PAX-014 VIETQR PAYMENT & VERIFICATION -->
-    <!-- ========================================================================= -->
-    <div id="screen-payment" class="screen-container bg-canvas pb-24">
-      <div class="bg-white border-b border-whisper p-4 sticky top-0 z-30 flex items-center justify-between">
-        <h3 class="text-sm font-bold text-charcoal">Thanh toán VietQR Napas247</h3>
-        <span class="font-mono-data text-xs bg-amber-soft text-amber font-bold px-2.5 py-1 rounded-full animate-pulse" id="payment-timer">09:45</span>
-      </div>
-
-      <div class="p-5 text-center space-y-4">
-        <!-- VietQR Box -->
-        <div class="whisper-card p-6 bg-white shadow-md flex flex-col items-center space-y-4">
-          <div class="w-full flex justify-between items-center border-b border-whisper pb-3">
-            <span class="text-xs font-bold text-charcoal">VietinBank · Napas247</span>
-            <span class="font-mono-data text-xs text-pnr font-bold" id="pay-pnr-badge">BG-882199</span>
-          </div>
-
-          <!-- Dynamic QR Graphic placeholder with BusGo Security Shield -->
-          <div class="w-52 h-52 bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center p-3 relative">
-            <svg class="w-32 h-32 text-charcoal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
-            <span class="text-[10px] font-mono-data text-muted mt-2">Mã QR Chuyển khoản Tự động</span>
-          </div>
-
-          <div class="w-full space-y-2 text-left bg-slate-50 p-3 rounded-xl border border-whisper text-xs">
-            <div class="flex justify-between">
-              <span class="text-muted">Số tài khoản:</span>
-              <b class="font-mono-data text-charcoal">1088219999</b>
-            </div>
-            <div class="flex justify-between">
-              <span class="text-muted">Số tiền:</span>
-              <b class="font-mono-data text-sapphire text-sm" id="pay-amount-label">180.000 đ</b>
-            </div>
-            <div class="flex justify-between">
-              <span class="text-muted">Nội dung CK:</span>
-              <b class="font-mono-data text-pnr" id="pay-memo-label">BUSGO BG882199</b>
-            </div>
-          </div>
-        </div>
-
-        <p class="text-xs text-muted">Hệ thống sẽ tự động xuất vé ngay khi nhận được biến động số dư từ ngân hàng.</p>
-      </div>
-
-      <!-- Mock Fast Settlement Button for Automated Demo & Verification -->
-      <div class="absolute bottom-0 left-0 right-0 bg-white border-t border-whisper p-4 safe-bottom z-30">
-        <button onclick="handleSimulateSuccessfulPayment()" class="w-full h-13 py-3.5 bg-emerald text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald/25 hover:bg-emerald-700 transition flex items-center justify-center space-x-2">
-          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-          <span>GIẢ LẬP ĐÃ THANH TOÁN (WEBHOOK SUCCESS)</span>
-        </button>
-      </div>
+  <!-- PAX-015 Success -->
+  <section class="screen" data-screen="success" aria-label="Đặt vé thành công">
+    <div style="padding:12px 16px;display:flex;justify-content:flex-end"><button class="icon-btn" data-tab="home" aria-label="Đóng và về trang chủ"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="body" style="align-items:center;padding:8px 24px 16px;gap:20px">
+      <span style="width:72px;height:72px;border-radius:9999px;background:#DCFCE7;color:var(--success);display:flex;align-items:center;justify-content:center;flex:none"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg></span>
+      <div style="text-align:center;display:flex;flex-direction:column;gap:6px"><h1 style="margin:0;font-size:24px;font-weight:700">Đặt vé thành công</h1><p style="margin:0;font-size:14px;color:var(--muted);line-height:1.5" id="ok-sub"></p></div>
+      <section class="card" style="width:100%;overflow:hidden">
+        <div class="between" style="padding:16px;border-bottom:1px dashed var(--line-strong)"><span style="font-size:13px;color:var(--muted)">Mã đặt chỗ</span><span style="font:700 18px var(--mono);color:var(--pnr)" id="ok-pnr"></span></div>
+        <div class="grid2" style="padding:16px;gap:14px" id="ok-grid"></div>
+      </section>
+      <p style="margin:0;font-size:13px;color:var(--muted);line-height:1.5;text-align:center">Có mặt ở điểm đón trước 15 phút. Mã QR trên vé đổi liên tục, hãy mở vé trong app khi lên xe thay vì chụp màn hình.</p>
     </div>
+    <div class="foot col" style="border:0;background:transparent"><button class="btn btn-primary" id="ok-view">Xem vé lên xe</button><button class="btn btn-ghost" data-tab="home">Về trang chủ</button></div>
+  </section>
 
-    <!-- ========================================================================= -->
-    <!-- SCREEN 8: PAX-015, PAX-016, PAX-017 TICKET PASS & DYNAMIC QR -->
-    <!-- ========================================================================= -->
-    <div id="screen-ticket-qr" class="screen-container bg-canvas pb-20">
-      <div class="bg-white border-b border-whisper p-4 sticky top-0 z-30 flex items-center justify-between">
-        <h3 class="text-sm font-bold text-charcoal">Vé điện tử lên xe</h3>
-        <span class="font-mono-data text-xs bg-emerald-soft text-emerald font-bold px-2.5 py-1 rounded-full">HỢP LỆ</span>
-      </div>
-
-      <div class="p-4 space-y-4">
-        <!-- E-Ticket Card -->
-        <div class="whisper-card p-5 bg-white shadow-md space-y-4 border-t-4 border-t-sapphire">
-          <div class="flex justify-between items-start">
-            <div>
-              <p class="text-xs text-muted">Mã vé (PNR)</p>
-              <h3 class="font-mono-data text-lg font-bold text-pnr" id="ticket-pnr-label">BG-882199</h3>
-            </div>
-            <div class="text-right">
-              <p class="text-xs text-muted">Ghế</p>
-              <h3 class="font-mono-data text-xl font-bold text-sapphire" id="ticket-seat-label">A01</h3>
-            </div>
-          </div>
-
-          <div class="border-t border-b border-dashed border-slate-200 py-3 space-y-2 text-xs">
-            <div class="flex justify-between">
-              <span class="text-muted">Hành khách:</span>
-              <b class="text-charcoal" id="ticket-pax-name">Nguyễn Văn An</b>
-            </div>
-            <div class="flex justify-between">
-              <span class="text-muted">Chuyến:</span>
-              <b class="text-charcoal">Hà Nội ➔ Thanh Hóa (07:00)</b>
-            </div>
-            <div class="flex justify-between">
-              <span class="text-muted">Điểm đón:</span>
-              <b class="text-charcoal">Bến xe Giáp Bát</b>
-            </div>
-          </div>
-
-          <!-- Dynamic Rotating HMAC QR (PAX-017) -->
-          <div class="flex flex-col items-center py-2 space-y-2">
-            <div class="w-44 h-44 bg-slate-900 text-white rounded-2xl p-4 flex flex-col items-center justify-center relative shadow-inner">
-              <svg class="w-28 h-28 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
-              <div class="absolute bottom-2 text-[9px] font-mono-data text-emerald font-bold tracking-wider" id="qr-hmac-sig">HMAC: 9B7C12EF8821</div>
-            </div>
-
-            <!-- 30s Countdown Bar -->
-            <div class="w-44 flex items-center justify-between text-[11px] text-muted">
-              <span>Mã QR tự xoay sau:</span>
-              <b class="font-mono-data text-sapphire" id="qr-refresh-timer">28s</b>
-            </div>
-          </div>
-        </div>
-
-        <button onclick="navigateTo('screen-radar')" class="w-full h-13 py-3 bg-slate-900 text-white font-semibold rounded-2xl flex items-center justify-center space-x-2 shadow-lg">
-          <svg class="w-5 h-5 text-emerald" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
-          <span>THEO DÕI VỊ TRÍ XE TRỰC TIẾP (RADAR GPS)</span>
-        </button>
-      </div>
+  <!-- PAX-016 My tickets -->
+  <section class="screen" data-screen="tickets" aria-label="Vé của tôi">
+    <div class="bar" style="flex-direction:column;align-items:stretch;gap:14px;padding-top:20px">
+      <h1 style="font-size:22px;font-weight:700">Vé của tôi</h1>
+      <div class="seg" role="tablist"><button role="tab" data-ttab="up" id="ttab-up"></button><button role="tab" data-ttab="past" id="ttab-past">Lịch sử</button></div>
     </div>
+    <div class="body" id="ticket-list" style="gap:12px"></div>
+  </section>
 
-    <!-- ========================================================================= -->
-    <!-- SCREEN 9: PAX-018 & PAX-019 LIVE GPS RADAR TELEMETRY -->
-    <!-- ========================================================================= -->
-    <div id="screen-radar" class="screen-container bg-slate-900 text-white pb-20">
-      <div class="bg-slate-900/90 border-b border-slate-800 p-4 flex items-center justify-between sticky top-0 z-30">
-        <div class="flex items-center space-x-3">
-          <button onclick="navigateTo('screen-ticket-qr')" class="p-1 text-slate-400 hover:text-white">
-            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
-          </button>
-          <div>
-            <h3 class="text-sm font-bold text-white">Live Radar GPS</h3>
-            <p class="text-xs text-slate-400">Xe 29B-882.19 (Cabin VIP)</p>
-          </div>
-        </div>
-        <span class="font-mono-data text-xs bg-emerald/20 text-emerald border border-emerald/40 px-2.5 py-0.5 rounded-full font-bold">ONLINE</span>
-      </div>
-
-      <!-- Radar HUD Graphic -->
-      <div class="relative h-72 bg-slate-950 flex items-center justify-center overflow-hidden border-b border-slate-800">
-        <!-- Radar rings -->
-        <div class="absolute w-60 h-60 border border-slate-800 rounded-full"></div>
-        <div class="absolute w-40 h-40 border border-slate-800 rounded-full"></div>
-        <div class="absolute w-20 h-20 border border-slate-800 rounded-full"></div>
-
-        <!-- Bus Marker Pulse -->
-        <div class="relative z-10 flex flex-col items-center">
-          <div class="w-12 h-12 bg-sapphire rounded-full flex items-center justify-center shadow-lg shadow-sapphire/50 text-white radar-beacon">
-            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
-          </div>
-          <span class="font-mono-data text-[11px] font-bold bg-slate-900 px-2 py-0.5 rounded-md border border-slate-700 mt-2">29B-882.19</span>
-        </div>
-
-        <!-- Live Speed & Bearing HUD -->
-        <div class="absolute bottom-3 left-4 bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-mono-data">
-          Tốc độ: <b class="text-emerald">58.2 km/h</b>
-        </div>
-        <div class="absolute bottom-3 right-4 bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-mono-data">
-          ETA: <b class="text-sapphire">~12 phút</b>
-        </div>
-      </div>
-
-      <!-- Live Route Segment Info -->
-      <div class="p-4 space-y-3">
-        <div class="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 space-y-3">
-          <h4 class="text-xs font-bold text-slate-300 uppercase tracking-wider">Trạng thái lộ trình</h4>
-          <div class="space-y-2 text-xs text-slate-300">
-            <div class="flex justify-between">
-              <span>Khoảng cách đến điểm đón:</span>
-              <b class="font-mono-data text-white">8.5 km</b>
-            </div>
-            <div class="flex justify-between">
-              <span>Dự kiến đến Bến Giáp Bát:</span>
-              <b class="font-mono-data text-emerald">06:55 (Sớm 5 phút)</b>
-            </div>
-          </div>
-        </div>
-
-        <button onclick="navigateTo('screen-home')" class="w-full h-12 bg-slate-800 text-slate-300 font-semibold rounded-2xl hover:bg-slate-700 transition text-sm">
-          Về Trang Chủ
-        </button>
-      </div>
+  <!-- PAX-017 Ticket QR -->
+  <section class="screen" data-screen="ticket" aria-label="Vé lên xe">
+    <div class="bar"><button class="icon-btn back" data-back aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button><h1 style="flex:1">Vé lên xe</h1><span class="pill" id="tk-status"></span></div>
+    <div class="body" style="gap:14px">
+      <div id="tk-delay"></div>
+      <section class="card" style="padding:20px 16px 16px;display:flex;flex-direction:column;align-items:center;gap:12px" id="tk-qr-card">
+        <div class="qr" id="tk-qr" style="width:232px;height:232px;padding:12px"></div>
+        <div style="width:232px;display:flex;flex-direction:column;gap:6px"><div style="height:4px;border-radius:9999px;background:var(--line);overflow:hidden"><div id="tk-bar" style="height:100%;background:var(--primary);width:100%"></div></div>
+          <span style="font-size:12px;color:var(--muted);text-align:center">Mã tự đổi sau <strong class="mono" style="color:var(--ink)" id="tk-sec">30 giây</strong> · màn hình đã tăng độ sáng</span></div>
+        <div id="tk-pin" hidden class="notice" style="background:var(--primary-soft);color:#1E3A8A;text-align:center;width:100%">Mã PIN dự phòng: <strong class="mono" style="font-size:18px;letter-spacing:.1em">482 107</strong><br>Đọc mã này cho tài xế nếu không quét được.</div>
+      </section>
+      <section class="card" style="padding:16px" ><div class="grid2" style="gap:14px" id="tk-grid"></div></section>
+      <div class="grid2" style="gap:8px"><button class="btn btn-primary" data-go="tracking">Xe đang ở đâu?</button><button class="btn btn-ghost" id="tk-share">Chia sẻ vé</button></div>
+      <button class="btn" style="background:transparent;color:var(--primary-dark);height:44px" id="tk-pin-btn">Không quét được? Hiện mã PIN dự phòng</button>
+      <button class="btn btn-danger-text" id="tk-cancel">Hủy vé</button>
     </div>
+  </section>
 
-    <!-- ========================================================================= -->
-    <!-- SCREEN 10: PAX-020 NOTIFICATIONS -->
-    <!-- ========================================================================= -->
-    <div id="screen-notifications" class="screen-container bg-canvas pb-20">
-      <div class="bg-white border-b border-whisper p-4 sticky top-0 z-30 flex items-center space-x-3">
-        <button onclick="navigateTo('screen-home')" class="p-1 text-muted hover:text-charcoal">
-          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
-        </button>
-        <h3 class="text-sm font-bold text-charcoal">Trung tâm thông báo</h3>
-      </div>
-
-      <div class="p-4 space-y-3">
-        <div class="whisper-card p-4 space-y-1 border-l-4 border-l-emerald">
-          <div class="flex justify-between items-center">
-            <h4 class="text-xs font-bold text-charcoal">Đặt vé thành công</h4>
-            <span class="text-[10px] font-mono-data text-muted">Vừa xong</span>
-          </div>
-          <p class="text-xs text-muted">Mã PNR <b class="font-mono-data text-pnr">BG-882199</b> cho chuyến Hà Nội - Thanh Hóa lúc 07:00 đã được xác nhận.</p>
-        </div>
-
-        <div class="whisper-card p-4 space-y-1 border-l-4 border-l-sapphire">
-          <div class="flex justify-between items-center">
-            <h4 class="text-xs font-bold text-charcoal">Nhắc nhở chuẩn bị đón xe</h4>
-            <span class="text-[10px] font-mono-data text-muted">10 phút trước</span>
-          </div>
-          <p class="text-xs text-muted">Xe 29B-882.19 đang cách điểm đón Bến xe Giáp Bát khoảng 8.5 km.</p>
-        </div>
-      </div>
+  <!-- PAX-018 Tracking -->
+  <section class="screen" data-screen="tracking" aria-label="Theo dõi xe">
+    <div class="bar"><button class="icon-btn back" data-back aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button><div class="kv" style="flex:1"><h1 id="tr-title"></h1><span class="sub" id="tr-sub"></span></div><span class="pill" id="tr-pill"></span></div>
+    <div id="tr-banner"></div>
+    <div class="map">
+      <svg width="100%" height="100%" viewBox="0 0 390 420" preserveAspectRatio="xMidYMid slice" style="position:absolute;inset:0" aria-hidden="true">
+        <path d="M-10 90 H400 M-10 230 H400 M-10 350 H400 M70 -10 V430 M210 -10 V430 M320 -10 V430" stroke="#E2E8F0" stroke-width="10" fill="none"/>
+        <path d="M40 400 C 80 330, 120 300, 170 260 S 260 170, 300 80" stroke="#94A3B8" stroke-width="5" fill="none" stroke-dasharray="2 10" stroke-linecap="round"/>
+        <path d="M40 400 C 80 330, 120 300, 170 260" stroke="#2563EB" stroke-width="5" fill="none" stroke-linecap="round"/>
+        <circle cx="300" cy="80" r="9" fill="#fff" stroke="#0F172A" stroke-width="3"/>
+      </svg>
+      <div style="position:absolute;left:62%;top:9%;background:#0F172A;color:#fff;font-size:12px;font-weight:600;padding:4px 8px;border-radius:6px">Điểm đón của bạn</div>
+      <div id="tr-bus" style="position:absolute;left:38%;top:57%;width:40px;height:40px;border-radius:9999px;display:flex;align-items:center;justify-content:center">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="15" rx="2"/><path d="M4 11h16M8 21v-3M16 21v-3"/></svg></div>
+      <div id="tr-buslabel" style="position:absolute;left:27%;top:69%;background:#fff;border:1px solid var(--line-strong);color:#334155;font-size:12px;padding:4px 8px;border-radius:6px"></div>
     </div>
+    <section style="background:#fff;border-top:1px solid var(--line);border-radius:12px 12px 0 0;padding:16px 16px 24px;display:flex;flex-direction:column;gap:14px;margin-top:-12px;position:relative">
+      <div class="grid2"><div class="kv"><span class="k">Dự kiến đến điểm đón</span><span style="font:700 22px var(--mono)" id="tr-eta"></span></div><div class="kv"><span class="k">Cách điểm đón</span><span style="font:700 22px var(--mono)" id="tr-dist"></span></div></div>
+      <a href="tel:19006868" class="btn btn-ghost">Gọi tổng đài 1900 6868</a>
+    </section>
+  </section>
 
-    <!-- ========================================================================= -->
-    <!-- UNIFIED 4-ITEM PASSENGER BOTTOM MENU (Strict adherence to STATE.md standard) -->
-    <!-- ========================================================================= -->
-    <div id="bottom-nav-bar" class="h-16 bg-white/95 backdrop-blur-md border-t border-slate-200 grid grid-cols-4 items-center z-40 select-none">
-      <button onclick="navigateTo('screen-home')" class="flex flex-col items-center justify-center space-y-1 text-sapphire" id="nav-item-home">
-        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-        <span class="text-[10px] font-bold">Trang chủ</span>
-      </button>
-
-      <button onclick="navigateTo('screen-ticket-qr')" class="flex flex-col items-center justify-center space-y-1 text-muted hover:text-sapphire" id="nav-item-trips">
-        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
-        <span class="text-[10px] font-medium">Chuyến đi</span>
-      </button>
-
-      <button onclick="navigateTo('screen-notifications')" class="flex flex-col items-center justify-center space-y-1 text-muted hover:text-sapphire relative" id="nav-item-notifs">
-        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-        <span class="absolute top-2 right-6 w-2 h-2 bg-crimson rounded-full"></span>
-        <span class="text-[10px] font-medium">Thông báo</span>
-      </button>
-
-      <button onclick="navigateTo('screen-login')" class="flex flex-col items-center justify-center space-y-1 text-muted hover:text-sapphire" id="nav-item-profile">
-        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        <span class="text-[10px] font-medium">Cá nhân</span>
-      </button>
+  <!-- PAX-025 Delay -->
+  <section class="screen" data-screen="delay" aria-label="Chuyến bị chậm">
+    <div class="bar"><button class="icon-btn back" data-back aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button><h1>Thông báo chuyến</h1></div>
+    <div class="body" style="gap:18px;padding-top:20px">
+      <div style="display:flex;flex-direction:column;gap:8px"><span class="pill pill-warn" style="align-self:flex-start;padding:3px 10px">Nhà xe công bố lúc 06:35</span>
+        <h1 style="margin:0;font-size:24px;font-weight:700;line-height:1.25">Chuyến của bạn khởi hành chậm 40 phút</h1>
+        <p style="margin:0;font-size:14px;color:var(--muted);line-height:1.5">Lý do: ùn tắc kéo dài ở nút giao Pháp Vân. Ghế và mã vé của bạn giữ nguyên.</p></div>
+      <section class="card" style="padding:16px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px">
+        <div class="kv"><span class="k">Giờ cũ</span><span style="font:700 22px var(--mono);color:#64748B;text-decoration:line-through" id="dl-old"></span></div>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2" stroke-linecap="round"><path d="M5 12h14m-5-5 5 5-5 5"/></svg>
+        <div class="kv" style="align-items:flex-end"><span class="k">Giờ mới</span><span style="font:700 22px var(--mono)" id="dl-new"></span></div>
+        <span style="grid-column:span 3;font-size:13px;color:var(--muted);border-top:1px solid #F1F5F9;padding-top:10px" id="dl-meta"></span>
+      </section>
+      <section class="notice" style="background:var(--primary-soft);border:1px solid #BFDBFE;color:#1E40AF"><strong style="color:#1E3A8A">Bạn được hủy vé miễn phí.</strong> Chuyến chậm hơn 30 phút nên hủy lúc này được hoàn đủ <span id="dl-refund"></span> về tài khoản đã chuyển, không mất phí.</section>
     </div>
+    <div class="foot col"><button class="btn btn-primary" id="dl-keep"></button><button class="btn btn-ghost" style="color:var(--danger);border-color:#FCA5A5" id="dl-cancel"></button></div>
+  </section>
 
-  </div>
+  <!-- PAX-020 Notifications -->
+  <section class="screen" data-screen="notifications" aria-label="Thông báo">
+    <div class="bar" style="padding-top:20px"><h1 style="font-size:22px;font-weight:700">Thông báo</h1></div>
+    <div class="body" id="notif-list" style="gap:8px"></div>
+  </section>
 
-  <!-- Interactive Client State Engine -->
-  <script>
-    // State Store
-    const appState = {
-      currentDeck: 1,
-      selectedSeats: new Set(['A01']),
-      activeTrip: {
-        trip_id: 'trp_hn_th_01',
-        route_name: 'Hà Nội — Thanh Hóa (Cao tốc)',
-        departure_time: '07:00, 28/08/2026',
-        plate_number: '29B-882.19',
-        price_vnd: 220000
-      },
-      holdSecondsLeft: 600,
-      holdTimerInterval: null,
-      qrSecondsLeft: 30,
-      qrInterval: null
+  <!-- PAX-022 Profile -->
+  <section class="screen" data-screen="profile" aria-label="Cá nhân">
+    <div class="bar" style="padding-top:20px"><h1 style="font-size:22px;font-weight:700">Cá nhân</h1></div>
+    <div class="body">
+      <section class="card pad row" style="gap:12px"><span style="width:48px;height:48px;border-radius:9999px;background:var(--primary-soft);color:var(--primary-dark);display:flex;align-items:center;justify-content:center;font-weight:600" id="pf-avatar"></span><div class="kv"><span style="font-size:16px;font-weight:600" id="pf-name"></span><span class="mono muted" style="font-size:13px" id="pf-phone"></span></div></section>
+      <section class="card" style="padding:4px 16px"><div class="list-row"><span style="flex:1">Hành khách thường đi</span><span class="muted">2</span></div><div class="list-row"><span style="flex:1">Điểm đón đã lưu</span><span class="muted">Giáp Bát</span></div><div class="list-row"><span style="flex:1">Tổng đài hỗ trợ</span><a href="tel:19006868" class="mono">1900 6868</a></div></section>
+      <button class="btn btn-ghost" id="pf-logout">Đăng xuất</button>
+    </div>
+  </section>
+
+  <nav class="tabbar" id="tabbar" aria-label="Điều hướng chính" style="position:absolute;left:0;right:0;bottom:0">
+    <button data-tab="home"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z"/></svg>Trang chủ</button>
+    <button data-tab="tickets"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7h18v3a2 2 0 0 0 0 4v3H3v-3a2 2 0 0 0 0-4z"/></svg>Vé của tôi</button>
+    <button data-tab="notifications"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 16V11a6 6 0 1 1 12 0v5l2 2H4zM10 21h4"/></svg>Thông báo<i class="badge-dot" id="notif-dot" hidden></i></button>
+    <button data-tab="profile"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Cá nhân</button>
+  </nav>
+
+  <div class="scrim" id="scrim"><div class="sheet" role="dialog" aria-modal="true" id="sheet"></div></div>
+  <div class="toast" role="status" id="toast"></div>
+</div>
+
+<aside class="demo" aria-label="Bảng điều khiển demo">
+  <h2>Bảng điều khiển demo</h2>
+  <p>Mô phỏng phía ngân hàng, nhà xe và GPS. Không thuộc giao diện của app.</p>
+  <fieldset><legend>Ngân hàng khi khách bấm "Tôi đã chuyển tiền"</legend>
+    <label><input type="radio" name="bank" value="paid" checked> Đã nhận đúng số tiền</label>
+    <label><input type="radio" name="bank" value="none"> Chưa nhận được tiền</label>
+  </fieldset>
+  <fieldset><legend>Nhà xe</legend>
+    <button class="btn btn-ghost btn-sm" id="demo-delay">Công bố chuyến của vé mới nhất chậm 40 phút</button>
+  </fieldset>
+  <fieldset><legend>Tín hiệu GPS của xe</legend>
+    <label><input type="radio" name="gps" value="LIVE" checked> Trực tiếp</label>
+    <label><input type="radio" name="gps" value="STALE"> Mất tín hiệu hơn 60 giây</label>
+    <label><input type="radio" name="gps" value="OFFLINE"> Ngoại tuyến hơn 3 phút</label>
+  </fieldset>
+  <fieldset><legend>Thời gian giữ ghế</legend>
+    <button class="btn btn-ghost btn-sm" id="demo-expire">Tua đến còn 1:30</button>
+  </fieldset>
+</aside>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const vnd = (n) => n.toLocaleString('vi-VN') + ' đ';
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const mmss = (s) => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+
+  // ---------- Data ----------
+  const PLACES = {
+    hn: { city: 'Hà Nội', station: 'Bến xe Giáp Bát', alt: ['Bến xe Mỹ Đình', 'Bến xe Nước Ngầm'] },
+    th: { city: 'Thanh Hóa', station: 'Bến xe Phía Bắc', alt: ['Bến xe Phía Nam'] },
+    nb: { city: 'Ninh Bình', station: 'Bến xe Ninh Bình', alt: [] },
+    hp: { city: 'Hải Phòng', station: 'Bến xe Niệm Nghĩa', alt: ['Bến xe Cầu Rào'] },
+    ss: { city: 'Sầm Sơn', station: 'Điểm đón Sầm Sơn', alt: [] }
+  };
+  const DATES = [{ id: '27/08', label: 'T5 · 27/08', long: 'Thứ Năm, 27/08' }, { id: '28/08', label: 'T6 · 28/08', long: 'Thứ Sáu, 28/08' }, { id: '29/08', label: 'T7 · 29/08', long: 'Thứ Bảy, 29/08' }];
+  const STOP_PLAN = [
+    { id: 'gb', name: null, note: null, offset: 0, pick: true, drop: false },
+    { id: 'pv', name: 'Nút giao Pháp Vân', note: 'Điểm đón ven đường, đứng đợi trước 10 phút', offset: 25, pick: true, drop: false },
+    { id: 'nb', name: 'Bến xe Ninh Bình', note: 'Đón và trả khách', offset: 80, pick: true, drop: true },
+    { id: 'pb', name: 'Bến xe Phía Bắc Thanh Hóa', note: 'Điểm cuối', offset: 150, pick: false, drop: true }
+  ];
+  // Stops of a trip: the first stop is the trip's departure station, times follow its departure.
+  function stopsFor(trip) {
+    const first = trip && trip.from === 'Mỹ Đình' ? ['Bến xe Mỹ Đình', 'Cửa ra số 3'] : ['Bến xe Giáp Bát', 'Cổng số 2, quầy 14'];
+    const dep = trip ? trip.dep : '07:00';
+    return STOP_PLAN.map((s) => ({ ...s, name: s.name || first[0], note: s.note || first[1], time: addMin(dep, s.offset) }));
+  }
+  function tripsFor(o, d) {
+    if (!(o === 'hn' && (d === 'th' || d === 'nb'))) return [];
+    return [
+      { id: 't1', dep: '07:00', arr: d === 'nb' ? '08:20' : '09:30', dur: d === 'nb' ? '1 giờ 20 phút' : '2 giờ 30 phút', type: 'Cabin VIP 22 phòng', vip: true, price: 220000, from: 'Giáp Bát', to: d === 'nb' ? 'Ninh Bình' : 'Phía Bắc TH', via: d === 'nb' ? 'Thẳng' : 'Qua Ninh Bình', left: 14, plate: '29B-882.19' },
+      { id: 't2', dep: '14:00', arr: d === 'nb' ? '15:20' : '16:30', dur: d === 'nb' ? '1 giờ 20 phút' : '2 giờ 30 phút', type: 'Giường nằm 34 chỗ', price: 180000, from: 'Mỹ Đình', to: d === 'nb' ? 'Ninh Bình' : 'Phía Bắc TH', via: 'Thẳng', left: 3, plate: '29B-123.45' },
+      { id: 't3', dep: '19:30', arr: '22:00', dur: '2 giờ 30 phút', type: 'Giường nằm 34 chỗ', price: 180000, from: 'Mỹ Đình', to: 'Phía Bắc TH', via: 'Thẳng', left: 0, plate: '29B-123.45' }
+    ];
+  }
+  const DECKS = {
+    1: { A01: 'free', A02: 'free', A03: 'booked', A04: 'free', A05: 'held', A06: 'free', B01: 'free', B02: 'held', B03: 'free', B04: 'booked', B05: 'free', B06: 'booked' },
+    2: { A07: 'free', A08: 'booked', A09: 'free', A10: 'free', A11: 'booked', B07: 'booked', B08: 'free', B09: 'free', B10: 'held', B11: 'free' }
+  };
+  const VOUCHERS = { BUSGO50K: 50000 };
+
+  // ---------- State ----------
+  const S = {
+    stack: ['splash'], user: null, origin: 'hn', dest: 'th', date: '28/08', pax: 1, sort: 'time',
+    trip: null, pickup: 'gb', dropoff: 'pb', deck: 1, seats: [], voucher: null, insured: false,
+    holdLeft: 0, holdTimer: null, holdPhase: null, order: null,
+    tickets: [{ pnr: 'BG-771204', route: 'Thanh Hóa → Hà Nội', date: 'T2 31/08', dep: '15:00', seat: 'B04', pickup: 'Phía Bắc TH', plate: '29B-123.45', paid: 220000, name: 'Nguyễn Văn An', status: 'ACTIVE', delay: 0 }],
+    ttab: 'up', currentTicket: null, gps: 'LIVE', pickerFor: null,
+    notifs: [{ title: 'Chào mừng đến BusGo', body: 'Đặt vé trong app để được giữ ghế 10 phút và theo dõi xe trên đường.', time: 'Hôm qua', go: null }],
+    unread: false
+  };
+
+  // ---------- Navigation ----------
+  const TAB_ROOTS = ['home', 'tickets', 'notifications', 'profile'];
+  function show(id) {
+    $$('.screen').forEach((s) => s.classList.toggle('active', s.dataset.screen === id));
+    const tabs = TAB_ROOTS.includes(id);
+    $('#tabbar').style.display = tabs ? 'grid' : 'none';
+    $$('.screen.active .body').forEach((b) => { b.style.paddingBottom = tabs ? '80px' : ''; });
+    $$('#tabbar button').forEach((t) => { if (t.dataset.tab === id) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current'); });
+    if (b(id)) b(id)();
+    renderHold();
+  }
+  function b(id) { return RENDER[id]; }
+  function go(id) { S.stack.push(id); show(id); }
+  function back() { if (S.stack.length > 1) S.stack.pop(); show(S.stack[S.stack.length - 1]); }
+  function reset(id) { S.stack = [id]; show(id); }
+
+  function toast(msg) {
+    const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2800);
+  }
+  function openSheet(html, bind) {
+    $('#sheet').innerHTML = '<span class="grab"></span>' + html; $('#scrim').classList.add('show');
+    if (bind) bind($('#sheet'));
+    const f = $('#sheet button, #sheet input'); if (f) f.focus();
+  }
+  function closeSheet() { $('#scrim').classList.remove('show'); }
+  $('#scrim').addEventListener('click', (e) => { if (e.target.id === 'scrim' && !S.sheetLocked) closeSheet(); });
+
+  // ---------- QR pattern (illustration of a rotating code) ----------
+  function qrCells(el, n, seed) {
+    const finder = (r, c) => {
+      const box = (r < 7 && c < 7) ? [0, 0] : (r < 7 && c >= n - 7) ? [0, n - 7] : (r >= n - 7 && c < 7) ? [n - 7, 0] : null;
+      if (!box) return null;
+      const rr = r - box[0], cc = c - box[1];
+      return rr === 0 || rr === 6 || cc === 0 || cc === 6 || (rr >= 2 && rr <= 4 && cc >= 2 && cc <= 4);
     };
-
-    function navigateTo(screenId) {
-      document.querySelectorAll('.screen-container').forEach(el => el.classList.remove('active'));
-      const target = document.getElementById(screenId);
-      if (target) {
-        target.classList.add('active');
-        target.scrollTop = 0;
-      }
-      updateBottomNav(screenId);
+    el.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
+    let h = '';
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      const f = finder(r, c);
+      const on = f === null ? ((r * 7 + c * 13 + r * c * (seed % 5 + 1) + seed) % 5 < 2) : f;
+      h += `<span style="background:${on ? '#0F172A' : '#fff'}"></span>`;
     }
+    el.innerHTML = h;
+  }
 
-    function updateBottomNav(screenId) {
-      const nav = document.getElementById('bottom-nav-bar');
-      if (screenId === 'screen-splash' || screenId === 'screen-login') {
-        nav.style.display = 'none';
-      } else {
-        nav.style.display = 'grid';
-      }
-    }
-
-    function handleRequestOTP() {
-      document.getElementById('otp-section').classList.remove('hidden');
-      document.getElementById('btn-request-otp').classList.add('hidden');
-      document.getElementById('btn-verify-otp').classList.remove('hidden');
-    }
-
-    function handleVerifyOTP() {
-      navigateTo('screen-home');
-    }
-
-    function handleSearchTrips() {
-      const container = document.getElementById('trip-list-container');
-      container.innerHTML = `
-        <div onclick="selectTrip('trp_hn_th_01')" class="whisper-card p-4 space-y-3 cursor-pointer hover:border-sapphire transition bg-white">
-          <div class="flex justify-between items-start">
-            <div>
-              <span class="font-mono-data text-xs font-bold text-sapphire bg-sapphire-soft px-2 py-0.5 rounded">CABIN CUNG ĐIỆN VIP</span>
-              <div class="flex items-center space-x-2 mt-1.5">
-                <span class="font-mono-data font-bold text-base text-charcoal">07:00</span>
-                <span class="text-xs text-muted">➔ 09:30</span>
-              </div>
-            </div>
-            <div class="text-right">
-              <span class="font-mono-data font-bold text-base text-sapphire">220.000 đ</span>
-              <span class="block text-[11px] text-emerald font-semibold">Còn 14 chỗ</span>
-            </div>
-          </div>
-          <div class="flex items-center space-x-3 text-xs text-muted border-t border-whisper pt-2">
-            <span>Bến Giáp Bát ➔ Bến Phía Bắc</span>
-            <span>·</span>
-            <span>2h 30m</span>
-          </div>
-        </div>
-
-        <div onclick="selectTrip('trp_hn_th_02')" class="whisper-card p-4 space-y-3 cursor-pointer hover:border-sapphire transition bg-white">
-          <div class="flex justify-between items-start">
-            <div>
-              <span class="font-mono-data text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">GIƯỜNG NẰM 34 CHỖ</span>
-              <div class="flex items-center space-x-2 mt-1.5">
-                <span class="font-mono-data font-bold text-base text-charcoal">14:00</span>
-                <span class="text-xs text-muted">➔ 16:30</span>
-              </div>
-            </div>
-            <div class="text-right">
-              <span class="font-mono-data font-bold text-base text-sapphire">180.000 đ</span>
-              <span class="block text-[11px] text-emerald font-semibold">Còn 8 chỗ</span>
-            </div>
-          </div>
-          <div class="flex items-center space-x-3 text-xs text-muted border-t border-whisper pt-2">
-            <span>Bến Mỹ Đình ➔ Bến Phía Bắc</span>
-            <span>·</span>
-            <span>2h 30m</span>
-          </div>
-        </div>
-      `;
-      navigateTo('screen-search-results');
-    }
-
-    function selectTrip(tripId) {
-      renderSeatMap(1);
-      navigateTo('screen-seat-map');
-    }
-
-    function switchDeck(deckNum) {
-      appState.currentDeck = deckNum;
-      document.getElementById('btn-deck-1').className = deckNum === 1
-        ? 'py-2 text-xs font-bold rounded-lg bg-white text-charcoal shadow-sm transition'
-        : 'py-2 text-xs font-bold rounded-lg text-muted hover:text-charcoal transition';
-      document.getElementById('btn-deck-2').className = deckNum === 2
-        ? 'py-2 text-xs font-bold rounded-lg bg-white text-charcoal shadow-sm transition'
-        : 'py-2 text-xs font-bold rounded-lg text-muted hover:text-charcoal transition';
-      renderSeatMap(deckNum);
-    }
-
-    function renderSeatMap(deck) {
-      const container = document.getElementById('seat-grid-container');
-      const rows = deck === 1
-        ? [
-            { a: 'A01', b: 'B01', stateA: 'AVAILABLE', stateB: 'AVAILABLE' },
-            { a: 'A02', b: 'B02', stateA: 'AVAILABLE', stateB: 'LOCKED_BY_OTHER' },
-            { a: 'A03', b: 'B03', stateA: 'BOOKED', stateB: 'AVAILABLE' },
-            { a: 'A04', b: 'B04', stateA: 'AVAILABLE', stateB: 'AVAILABLE' },
-            { a: 'A05', b: 'B05', stateA: 'AVAILABLE', stateB: 'AVAILABLE' },
-            { a: 'A06', b: null, stateA: 'AVAILABLE', stateB: null }
-          ]
-        : [
-            { a: 'A07', b: 'B06', stateA: 'AVAILABLE', stateB: 'BOOKED' },
-            { a: 'A08', b: 'B07', stateA: 'AVAILABLE', stateB: 'AVAILABLE' },
-            { a: 'A09', b: 'B08', stateA: 'AVAILABLE', stateB: 'AVAILABLE' },
-            { a: 'A10', b: 'B09', stateA: 'AVAILABLE', stateB: 'AVAILABLE' },
-            { a: 'A11', b: 'B10', stateA: 'AVAILABLE', stateB: 'AVAILABLE' }
-          ];
-
-      let html = '';
-      rows.forEach(r => {
-        html += `<div class="grid grid-cols-3 gap-3 items-center">`;
-        
-        // Col A
-        html += renderSeatButton(r.a, r.stateA);
-        
-        // Aisle
-        html += `<div class="text-center text-[10px] text-slate-300 font-mono-data">LỐI ĐI</div>`;
-        
-        // Col B
-        html += r.b ? renderSeatButton(r.b, r.stateB) : `<div></div>`;
-        
-        html += `</div>`;
-      });
-
-      container.innerHTML = html;
-      updateSelectionSummary();
-    }
-
-    function renderSeatButton(code, state) {
-      const isSelected = appState.selectedSeats.has(code);
-      let btnClass = 'h-14 whisper-card flex flex-col items-center justify-center font-mono-data transition ';
-      
-      if (isSelected) {
-        btnClass += 'bg-sapphire text-white border-blue-700 shadow-md scale-98';
-      } else if (state === 'BOOKED') {
-        btnClass += 'bg-slate-200 text-slate-400 border-slate-300 cursor-not-allowed opacity-60';
-      } else if (state === 'LOCKED_BY_OTHER') {
-        btnClass += 'bg-amber-soft text-amber border-amber cursor-not-allowed';
-      } else {
-        btnClass += 'bg-white text-charcoal hover:border-sapphire cursor-pointer';
-      }
-
-      const label = state === 'BOOKED' ? 'Đã đặt' : state === 'LOCKED_BY_OTHER' ? 'Đang giữ' : '220k';
-
-      return `
-        <button onclick="toggleSeat('${code}', '${state}')" class="${btnClass}">
-          <span class="text-xs font-bold">${code}</span>
-          <span class="text-[10px] ${isSelected ? 'text-blue-100' : 'text-muted'}">${label}</span>
-        </button>
-      `;
-    }
-
-    function toggleSeat(code, state) {
-      if (state === 'BOOKED' || state === 'LOCKED_BY_OTHER') return;
-      if (appState.selectedSeats.has(code)) {
-        appState.selectedSeats.delete(code);
-      } else {
-        if (appState.selectedSeats.size >= 5) {
-          alert('Bạn chỉ được chọn tối đa 5 ghế trong một lần đặt!');
-          return;
-        }
-        appState.selectedSeats.add(code);
-      }
-      renderSeatMap(appState.currentDeck);
-    }
-
-    function updateSelectionSummary() {
-      const count = appState.selectedSeats.size;
-      const seatsArr = Array.from(appState.selectedSeats);
-      const total = count * 220000;
-
-      document.getElementById('selected-seats-label').innerText = count > 0 ? seatsArr.join(', ') : 'Chưa chọn';
-      document.getElementById('selected-seats-price').innerText = new Intl.NumberFormat('vi-VN').format(total) + ' đ';
-
-      const btn = document.getElementById('btn-proceed-manifest');
-      if (count > 0) {
-        btn.disabled = false;
-        btn.className = 'px-6 py-3 bg-sapphire text-white font-bold text-sm rounded-xl shadow-lg shadow-sapphire/25 hover:bg-blue-700 transition';
-        btn.innerText = `TIẾP TỤC (${count})`;
-      } else {
-        btn.disabled = true;
-        btn.className = 'px-6 py-3 bg-slate-200 text-slate-400 font-bold text-sm rounded-xl transition';
-        btn.innerText = 'TIẾP TỤC (0)';
-      }
-    }
-
-    function handleProceedToManifest() {
-      startHoldTimer();
-      navigateTo('screen-checkout');
-    }
-
-    function startHoldTimer() {
-      const banner = document.getElementById('global-hold-banner');
-      banner.classList.remove('hidden');
-      document.getElementById('hold-banner-seats').innerText = Array.from(appState.selectedSeats).join(', ');
-
-      if (appState.holdTimerInterval) clearInterval(appState.holdTimerInterval);
-      appState.holdSecondsLeft = 600;
-
-      appState.holdTimerInterval = setInterval(() => {
-        appState.holdSecondsLeft--;
-        if (appState.holdSecondsLeft <= 0) {
-          clearInterval(appState.holdTimerInterval);
-          banner.classList.add('hidden');
-          alert('Hết thời gian giữ chỗ! Vui lòng chọn lại ghế.');
-          navigateTo('screen-seat-map');
-        } else {
-          const m = Math.floor(appState.holdSecondsLeft / 60);
-          const s = appState.holdSecondsLeft % 60;
-          const str = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-          document.getElementById('hold-banner-timer').innerText = str;
-          const payTimer = document.getElementById('payment-timer');
-          if (payTimer) payTimer.innerText = str;
-        }
-      }, 1000);
-    }
-
-    function applyVoucher() {
-      alert('Áp dụng mã giảm giá BUSGO50K thành công! Giảm 50.000 đ');
-    }
-
-    function handleCreatePaymentOrder() {
-      navigateTo('screen-payment');
-    }
-
-    function handleSimulateSuccessfulPayment() {
-      if (appState.holdTimerInterval) clearInterval(appState.holdTimerInterval);
-      document.getElementById('global-hold-banner').classList.add('hidden');
-      startDynamicQRRotation();
-      navigateTo('screen-ticket-qr');
-    }
-
-    function startDynamicQRRotation() {
-      if (appState.qrInterval) clearInterval(appState.qrInterval);
-      appState.qrSecondsLeft = 30;
-
-      appState.qrInterval = setInterval(() => {
-        appState.qrSecondsLeft--;
-        if (appState.qrSecondsLeft <= 0) {
-          appState.qrSecondsLeft = 30;
-          // Rotate signature
-          const mockSig = Math.floor(10000000 + Math.random() * 90000000).toString(16).toUpperCase();
-          document.getElementById('qr-hmac-sig').innerText = `HMAC: ${mockSig}`;
-        }
-        document.getElementById('qr-refresh-timer').innerText = `${appState.qrSecondsLeft}s`;
-      }, 1000);
-    }
-
-    // Initialize UI on load
-    window.addEventListener('DOMContentLoaded', () => {
-      // Clock timer
-      setInterval(() => {
-        const d = new Date();
-        document.getElementById('top-clock').innerText = 
-          `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-      }, 1000);
+  // ---------- Hold / payment countdown (BR-HOLD-001..004) ----------
+  function startHold(seconds, phase) {
+    clearInterval(S.holdTimer); S.holdLeft = seconds; S.holdPhase = phase;
+    S.holdTimer = setInterval(() => { S.holdLeft--; renderHold(); if (S.holdLeft <= 0) expireHold(); }, 1000);
+    renderHold();
+  }
+  function stopHold() { clearInterval(S.holdTimer); S.holdTimer = null; S.holdPhase = null; }
+  function renderHold() {
+    $$('[data-hold]').forEach((el) => {
+      if (!S.holdPhase) { el.style.display = 'none'; return; }
+      el.style.display = 'flex';
+      el.classList.toggle('urgent', S.holdLeft <= 120);
+      const label = S.holdPhase === 'pay' ? 'Hoàn tất chuyển khoản trong' : 'Đang giữ ghế ' + S.seats.join(', ') + ' cho bạn';
+      el.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></svg>'
+        + `<span style="flex:1">${S.holdLeft <= 120 ? 'Sắp hết giờ. ' : ''}${esc(label)}</span><span class="t">${mmss(Math.max(0, S.holdLeft))}</span>`;
     });
-  </script>
+  }
+  function expireHold() {
+    stopHold();
+    const wasPay = !!S.order;
+    S.order = null; S.seats = [];
+    S.sheetLocked = true;
+    openSheet(`<h2 style="margin:0;font-size:18px">Hết thời gian ${wasPay ? 'thanh toán' : 'giữ ghế'}</h2>
+      <p style="margin:0;color:var(--muted);line-height:1.5">Ghế đã được nhả cho người khác. ${wasPay ? 'Nếu bạn đã chuyển tiền sau giờ này, nhà xe sẽ hoàn lại tiền.' : ''} Bạn có thể chọn lại ghế.</p>
+      <button class="btn btn-primary" id="exp-ok">Chọn lại ghế</button>`, (s) => {
+      $('#exp-ok', s).onclick = () => { S.sheetLocked = false; closeSheet(); S.stack = ['home', 'results', 'stops', 'seats']; show('seats'); };
+    });
+  }
+
+  // ---------- Renderers ----------
+  const RENDER = {
+    home() {
+      $('#origin-label').textContent = PLACES[S.origin].city + ' · ' + PLACES[S.origin].station;
+      $('#dest-label').textContent = PLACES[S.dest].city + ' · ' + PLACES[S.dest].station;
+      $('#home-greet').textContent = S.user ? 'Xin chào, ' + S.user.name.split(' ').pop() : 'Xin chào';
+      $('#home-avatar').textContent = S.user ? initials(S.user.name) : '?';
+      const up = S.tickets.filter((t) => t.status === 'ACTIVE');
+      $('#home-upcoming-wrap').style.display = up.length ? 'flex' : 'none';
+      if (up.length) {
+        const t = up[up.length - 1];
+        $('#home-upcoming').innerHTML = ticketCard(t, true);
+      }
+    },
+    picker() {
+      $('#picker-title').textContent = S.pickerFor === 'origin' ? 'Chọn điểm đi' : 'Chọn điểm đến';
+      renderPicker('');
+    },
+    results() {
+      const o = PLACES[S.origin].city, d = PLACES[S.dest].city;
+      const list = tripsFor(S.origin, S.dest);
+      const open = list.filter((t) => t.left > 0);
+      $('#res-title').textContent = o + ' → ' + d;
+      $('#res-sub').textContent = S.pax + ' khách · ' + (open.length ? open.length + ' chuyến còn chỗ' : 'không có chuyến còn chỗ');
+      $('#res-dates').innerHTML = DATES.map((x) => `<button class="chip-sm" style="height:48px;border-radius:8px" data-date="${x.id}" aria-pressed="${x.id === S.date}">${x.label}</button>`).join('');
+      $$('[data-sort]').forEach((x) => x.setAttribute('aria-pressed', x.dataset.sort === S.sort));
+      const sorted = open.slice().sort((a, b2) => S.sort === 'price' ? a.price - b2.price : S.sort === 'seats' ? b2.left - a.left : a.dep.localeCompare(b2.dep));
+      const full = list.filter((t) => t.left === 0);
+      if (!list.length) {
+        $('#res-list').innerHTML = `<div class="card pad" style="display:flex;flex-direction:column;gap:8px"><strong>Chưa có chuyến cho tuyến này</strong><span class="muted" style="font-size:14px">Thử Hà Nội → Thanh Hóa hoặc Hà Nội → Ninh Bình, hoặc gọi 1900 6868.</span></div>`;
+        return;
+      }
+      $('#res-list').innerHTML = sorted.map((t) => `
+        <button class="trip" data-trip="${t.id}">
+          <div class="between" style="width:100%"><span class="pill ${t.vip ? 'pill-info' : 'pill-mute'}" style="border-radius:4px;padding:3px 8px">${t.type}</span><span style="font:700 17px var(--mono)">${vnd(t.price)}</span></div>
+          <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;width:100%">
+            <div class="kv"><span class="t-time">${t.dep}</span><span style="font-size:12px" class="muted">${t.from}</span></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-size:12px" class="muted">${t.dur}</span><span style="height:1px;width:100%;background:#CBD5E1"></span><span style="font-size:12px" class="muted">${t.via}</span></div>
+            <div class="kv" style="align-items:flex-end"><span class="t-time">${t.arr}</span><span style="font-size:12px" class="muted">${t.to}</span></div>
+          </div>
+          <div class="between" style="width:100%;font-size:13px;border-top:1px solid #F1F5F9;padding-top:10px"><span style="font-weight:600;color:${t.left <= 3 ? '#B45309' : 'var(--success)'}">${t.left <= 3 ? 'Sắp hết: còn ' + t.left + ' chỗ' : 'Còn ' + t.left + ' chỗ'}</span><span class="muted">Xe ${t.plate}</span></div>
+        </button>`).join('') + full.map((t) => `
+        <button class="trip" disabled><span style="font-size:14px;font-weight:600" class="muted">${t.dep} · ${t.type} · Hết chỗ</span><span style="font-size:13px" class="muted">Bến xe ${t.from} → ${t.to}</span></button>`).join('');
+    },
+    stops() {
+      const t = S.trip;
+      $('#stops-sub').textContent = t.dep + ' · ' + dateLabel() + ' · ' + t.type.split(' ')[0] + ' ' + t.plate;
+      const STOPS = stopsFor(t).filter((x) => S.dest !== 'nb' || x.id !== 'pb');
+      const idx = (id) => STOPS.findIndex((s) => s.id === id);
+      const valid = idx(S.dropoff) > idx(S.pickup);
+      if (!valid) S.dropoff = STOPS.slice(idx(S.pickup) + 1).find((s) => s.drop).id;
+      $('#pickup-list').innerHTML = STOPS.filter((s) => s.pick).map((s) => radioRow('pickup', s, s.id === S.pickup, false)).join('');
+      $('#dropoff-list').innerHTML = STOPS.filter((s) => s.drop).map((s) => radioRow('dropoff', s, s.id === S.dropoff, idx(s.id) <= idx(S.pickup))).join('');
+      const p = STOPS[idx(S.pickup)], d = STOPS[idx(S.dropoff)];
+      $('#stops-seg').textContent = short(p.name) + ' → ' + short(d.name);
+      $('#stops-price').textContent = vnd(t.price);
+    },
+    seats() {
+      const t = S.trip;
+      $('#seats-sub').textContent = short(stop(S.pickup).name) + ' → ' + short(stop(S.dropoff).name) + ' · tối đa 5 ghế';
+      const free = (d) => Object.entries(DECKS[d]).filter(([c, v]) => v === 'free' && !S.seats.includes(c)).length;
+      $('#deck1').textContent = 'Tầng dưới · ' + free(1) + ' trống'; $('#deck2').textContent = 'Tầng trên · ' + free(2) + ' trống';
+      $('#deck1').setAttribute('aria-selected', S.deck === 1); $('#deck2').setAttribute('aria-selected', S.deck === 2);
+      const seats = DECKS[S.deck];
+      const left = Object.keys(seats).filter((c) => c[0] === 'A'), right = Object.keys(seats).filter((c) => c[0] === 'B');
+      let h = '';
+      for (let i = 0; i < Math.max(left.length, right.length); i++) h += `<div class="seat-row">${seatBtn(left[i], seats)}<span></span>${seatBtn(right[i], seats)}</div>`;
+      $('#seat-grid').innerHTML = h;
+      $('#seats-label').textContent = S.seats.length ? 'Ghế ' + S.seats.join(', ') : 'Chưa chọn ghế';
+      $('#seats-total').textContent = vnd(t.price * S.seats.length);
+      const hb = $('#hold-btn'); hb.disabled = !S.seats.length; hb.textContent = S.seats.length ? 'Giữ ghế 10 phút' : 'Chọn ít nhất 1 ghế';
+    },
+    checkout() {
+      const t = S.trip;
+      $('#co-route').textContent = PLACES[S.origin].city + ' → ' + PLACES[S.dest].city;
+      $('#co-seats').textContent = 'Ghế ' + S.seats.join(', ');
+      $('#co-time').textContent = dateLabel() + ' · Đón ' + stop(S.pickup).time + ' ' + short(stop(S.pickup).name) + ' · Trả ' + stop(S.dropoff).time + ' ' + short(stop(S.dropoff).name);
+      if (S.user) { if (!$('#co-name').value) $('#co-name').value = S.user.name; if (!$('#co-phone').value) $('#co-phone').value = S.user.phone; }
+      $('#co-ins').checked = S.insured;
+      const n = S.seats.length, base = t.price * n, ins = S.insured ? 10000 * n : 0, disc = S.voucher ? Math.min(VOUCHERS[S.voucher], base) : 0;
+      S.total = base + ins - disc;
+      $('#co-lines').innerHTML = `<div class="between"><span class="muted">Giá vé (${n} ghế)</span><span class="mono">${vnd(base)}</span></div>`
+        + (ins ? `<div class="between"><span class="muted">Bảo hiểm</span><span class="mono">${vnd(ins)}</span></div>` : '')
+        + (disc ? `<div class="between"><span class="muted">Mã ${S.voucher}</span><span class="mono" style="color:var(--success)">−${vnd(disc)}</span></div>` : '')
+        + `<div class="between" style="border-top:1px solid var(--line);padding-top:8px"><span style="font-weight:600">Thanh toán qua</span><span class="row" style="font-weight:600;gap:6px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM20 20h-3"/></svg>VietQR chuyển khoản</span></div>`;
+      $('#co-total').textContent = vnd(S.total);
+    },
+    vietqr() {
+      const o = S.order;
+      $('#qr-pnr').textContent = o.pnr; $('#qr-amount').textContent = vnd(o.amount); $('#qr-memo').textContent = 'BUSGO ' + o.pnr.replace('-', '');
+      qrCells($('#pay-qr'), 21, 3);
+      setPayStatus('wait');
+    },
+    success() {
+      const tk = S.lastTicket;
+      $('#ok-sub').textContent = 'Đã nhận ' + vnd(tk.paid) + '. Vé và mã đặt chỗ đã gửi qua SMS tới ' + maskPhone(tk.phone) + '.';
+      $('#ok-pnr').textContent = tk.pnr;
+      $('#ok-grid').innerHTML = kv('Chuyến', tk.route) + kv('Khởi hành', tk.dep + ' · ' + tk.date.split(' ')[1], true) + kv('Điểm đón', tk.pickupFull) + kv('Ghế', tk.seat, true) + kv('Xe', tk.plate, true) + kv('Hành khách', tk.name);
+    },
+    tickets() {
+      const up = S.tickets.filter((t) => t.status === 'ACTIVE'), past = S.tickets.filter((t) => t.status !== 'ACTIVE');
+      $('#ttab-up').textContent = 'Sắp đi · ' + up.length;
+      $('#ttab-up').setAttribute('aria-selected', S.ttab === 'up'); $('#ttab-past').setAttribute('aria-selected', S.ttab === 'past');
+      const list = (S.ttab === 'up' ? up : past).slice().reverse();
+      $('#ticket-list').innerHTML = list.length ? list.map((t) => ticketCard(t, false)).join('')
+        : `<div class="card pad" style="text-align:center;display:flex;flex-direction:column;gap:10px;align-items:center"><strong>${S.ttab === 'up' ? 'Chưa có chuyến sắp đi' : 'Chưa có vé nào trong lịch sử'}</strong>${S.ttab === 'up' ? '<button class="btn btn-primary" data-tab="home">Tìm chuyến</button>' : ''}</div>`;
+    },
+    ticket() {
+      const t = S.currentTicket;
+      const st = $('#tk-status');
+      st.className = 'pill ' + (t.status === 'ACTIVE' ? 'pill-ok' : 'pill-mute'); st.textContent = t.status === 'ACTIVE' ? 'Hợp lệ' : 'Đã hủy';
+      $('#tk-delay').innerHTML = t.delay ? `<button class="notice row" data-open-delay="${t.pnr}" style="width:100%;border:0;background:var(--warn-soft);color:var(--warn-ink);font-weight:600;text-align:left"><span style="flex:1">Chậm ${t.delay} phút · được hủy miễn phí</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></button>` : '';
+      $('#tk-grid').innerHTML = `<div class="kv"><span class="k">Mã đặt chỗ</span><span style="font:700 15px var(--mono);color:var(--pnr)">${t.pnr}</span></div>` + kv('Ghế', t.seat, true) + kv('Đón', t.pickup + ' · ' + depOf(t)) + kv('Xe', t.plate, true) + `<div class="kv" style="grid-column:span 2"><span class="k">Hành khách</span><span class="v">${esc(t.name)}</span></div>`;
+      $('#tk-qr-card').style.display = t.status === 'ACTIVE' ? 'flex' : 'none';
+      $('#tk-cancel').style.display = t.status === 'ACTIVE' ? '' : 'none';
+      $('#tk-pin').hidden = true;
+      startQrRotation();
+    },
+    tracking() {
+      const t = S.currentTicket || S.tickets[S.tickets.length - 1];
+      $('#tr-title').textContent = 'Xe ' + t.plate; $('#tr-sub').textContent = 'Chuyến ' + depOf(t) + ' · ' + t.route;
+      const g = S.gps, pill = $('#tr-pill'), bus = $('#tr-bus');
+      pill.className = 'pill ' + (g === 'LIVE' ? 'pill-ok' : g === 'STALE' ? 'pill-warn' : 'pill-mute');
+      pill.textContent = g === 'LIVE' ? 'Trực tiếp' : g === 'STALE' ? 'Mất tín hiệu' : 'Ngoại tuyến';
+      $('#tr-banner').innerHTML = g === 'LIVE' ? '' : `<div class="hold" role="status" style="${g === 'OFFLINE' ? 'background:#F1F5F9;border-color:var(--line);color:#334155' : ''}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l20 20M8.5 16.5a5 5 0 0 1 7 0M12 20h.01"/></svg><span><strong>${g === 'STALE' ? 'Mất tín hiệu từ 07:52.' : 'Xe ngoại tuyến từ 07:49.'}</strong> Vị trí dưới đây đã cũ; giờ đến chỉ là ước tính.</span></div>`;
+      bus.style.cssText += g === 'LIVE' ? ';background:#2563EB;color:#fff;border:3px solid #fff;box-shadow:0 2px 6px rgba(15,23,42,.3)' : ';background:#fff;color:#64748B;border:3px dashed #94A3B8;box-shadow:none';
+      $('#tr-buslabel').textContent = g === 'LIVE' ? '58 km/h · vừa cập nhật' : g === 'STALE' ? 'Vị trí lúc 07:52' : 'Vị trí lúc 07:49';
+      $('#tr-eta').textContent = g === 'LIVE' ? '07:58' : '~08:05'; $('#tr-dist').textContent = g === 'LIVE' ? '5,2 km' : '~6 km';
+    },
+    delay() {
+      const t = S.currentTicket;
+      $('#dl-old').textContent = t.dep; $('#dl-new').textContent = depOf(t);
+      $('#dl-meta').textContent = t.pnr + ' · Ghế ' + t.seat + ' · Đón tại ' + t.pickup;
+      $('#dl-refund').textContent = vnd(t.paid);
+      $('#dl-keep').textContent = 'Giữ vé, đi lúc ' + depOf(t); $('#dl-cancel').textContent = 'Hủy vé, hoàn ' + vnd(t.paid);
+    },
+    notifications() {
+      S.unread = false; $('#notif-dot').hidden = true;
+      $('#notif-list').innerHTML = S.notifs.slice().reverse().map((n, i) => `
+        <button class="card pad" style="text-align:left;display:flex;flex-direction:column;gap:4px;width:100%" ${n.go ? `data-notif="${S.notifs.length - 1 - i}"` : 'disabled'}>
+          <span class="between" style="width:100%"><strong style="font-size:14px">${esc(n.title)}</strong><span class="muted" style="font-size:12px">${n.time}</span></span>
+          <span class="muted" style="font-size:13px;line-height:1.5">${esc(n.body)}</span></button>`).join('');
+    },
+    profile() {
+      if (!S.user) {
+        $('#pf-avatar').textContent = '?'; $('#pf-name').textContent = 'Chưa đăng nhập'; $('#pf-phone').textContent = '';
+        $('#pf-logout').textContent = 'Đăng nhập';
+      } else {
+        $('#pf-avatar').textContent = initials(S.user.name); $('#pf-name').textContent = S.user.name; $('#pf-phone').textContent = S.user.phone;
+        $('#pf-logout').textContent = 'Đăng xuất';
+      }
+    },
+    login() {}
+  };
+
+  // ---------- Helpers ----------
+  function initials(n) { const p = n.trim().split(/\s+/); return (p[0][0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase(); }
+  function dateLabel() { return DATES.find((d) => d.id === S.date).label.replace(' · ', ' '); }
+  function stop(id) { return stopsFor(S.trip).find((s) => s.id === id); }
+  function short(n) { return n.replace('Bến xe ', '').replace('Phía Bắc Thanh Hóa', 'Phía Bắc TH'); }
+  function maskPhone(p) { return p.slice(0, 4) + ' *** ' + p.slice(-3); }
+  function kv(k, v, mono) { return `<div class="kv"><span class="k">${k}</span><span class="v${mono ? ' mono' : ''}">${esc(v)}</span></div>`; }
+  function addMin(hhmm, m) { const [h, mi] = hhmm.split(':').map(Number); const t = h * 60 + mi + m; return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); }
+  function depOf(t) { return t.delay ? addMin(t.dep, t.delay) : t.dep; }
+  function radioRow(name, s, checked, disabled) {
+    return `<label class="radio-row"><input type="radio" name="${name}" value="${s.id}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
+      <span class="kv"><span style="font-size:15px;font-weight:600">${s.name}</span><span style="font-size:12px" class="muted">${s.note}</span></span><span class="mono" style="font-weight:600;font-size:14px">${s.time}</span></label>`;
+  }
+  function seatBtn(code, seats) {
+    if (!code) return '<span></span>';
+    const st = seats[code], sel = S.seats.includes(code);
+    if (sel) return `<button class="seat sel" data-seat="${code}" aria-pressed="true" aria-label="Ghế ${code}, bạn đang chọn">${code}<small>Bạn chọn</small></button>`;
+    if (st === 'held') return `<button class="seat held" disabled aria-label="Ghế ${code}, người khác đang giữ">${code}<small>Đang giữ</small></button>`;
+    if (st === 'booked') return `<button class="seat booked" disabled aria-label="Ghế ${code}, đã bán">${code}<small>Đã bán</small></button>`;
+    return `<button class="seat" data-seat="${code}" aria-pressed="false" aria-label="Ghế ${code}, trống">${code}<small>${S.trip.price / 1000}k</small></button>`;
+  }
+  function ticketCard(t, compact) {
+    const banner = t.delay && t.status === 'ACTIVE' ? `<button data-open-delay="${t.pnr}" class="row" style="width:100%;border:0;padding:10px 16px;background:var(--warn-soft);color:var(--warn-ink);font-size:13px;font-weight:600;text-align:left"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span style="flex:1">Chậm ${t.delay} phút · Được hủy miễn phí</span></button>` : '';
+    const st = t.status === 'ACTIVE' ? '<span class="pill pill-ok">Đã thanh toán</span>' : t.status === 'REFUND' ? '<span class="pill pill-info">Đang hoàn tiền</span>' : '<span class="pill pill-mute">Đã hủy</span>';
+    const time = t.delay ? `<span class="t-time" style="color:#94A3B8;text-decoration:line-through">${t.dep}</span><span class="t-time">${depOf(t)}</span>` : `<span class="t-time">${t.dep}</span>`;
+    const actions = t.status !== 'ACTIVE' ? '' : compact
+      ? `<div class="between" style="font-size:13px"><span class="muted">${t.date} · Ghế ${t.seat}</span><button class="btn btn-sm" style="background:transparent;color:var(--primary-dark);padding:0" data-open-ticket="${t.pnr}">Mở vé</button></div>`
+      : `<span style="font-size:13px" class="muted">${t.date} · Ghế ${t.seat} · Đón tại ${t.pickup}</span><div class="grid2" style="gap:8px"><button class="btn btn-primary" style="height:44px;font-size:14px" data-open-ticket="${t.pnr}">Mở vé</button><button class="btn btn-ghost" style="height:44px;font-size:14px" data-track="${t.pnr}">Theo dõi xe</button></div>`;
+    return `<article class="card" style="overflow:hidden">${banner}<div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+      <div class="between"><span class="pnr">${t.pnr}</span>${st}</div>
+      <div class="row" style="align-items:baseline;gap:8px">${time}<span style="font-size:15px;font-weight:600">${t.route}</span></div>
+      ${t.status !== 'ACTIVE' ? `<span style="font-size:13px" class="muted">${t.date} · Ghế ${t.seat}${t.refund != null ? ' · hoàn ' + vnd(t.refund) : ''}</span>` : ''}${actions}</div></article>`;
+  }
+  function renderPicker(q) {
+    const norm = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
+    const nq = norm(q);
+    const items = Object.entries(PLACES).filter(([, p]) => !nq || norm(p.city + ' ' + p.station + ' ' + p.alt.join(' ')).includes(nq));
+    $('#picker-list').innerHTML = items.length ? items.map(([k, p]) => `
+      <button data-place="${k}" style="text-align:left;border:0;border-bottom:1px solid var(--line);background:transparent;padding:14px 0;display:flex;flex-direction:column;gap:2px;width:100%">
+        <span style="font-size:15px;font-weight:600">${p.city}</span><span class="muted" style="font-size:13px">${[p.station].concat(p.alt).join(' · ')}</span></button>`).join('')
+      : '<p class="muted" style="padding:16px 0">Không tìm thấy địa điểm. Thử gõ tên tỉnh, ví dụ "Thanh Hoa".</p>';
+  }
+  function setPayStatus(kind) {
+    const el = $('#pay-status');
+    const m = { wait: ['var(--primary)', 'Đang chờ ngân hàng xác nhận'], check: ['var(--primary)', 'Đang kiểm tra với ngân hàng…'], none: ['var(--warn)', 'Chưa nhận được tiền. Hệ thống vẫn kiểm tra mỗi 3 giây; kiểm tra lại nội dung chuyển khoản.'] }[kind];
+    el.innerHTML = `<span style="width:8px;height:8px;border-radius:9999px;background:${m[0]};flex:none"></span>${m[1]}`;
+  }
+  function startQrRotation() {
+    clearInterval(S.qrTimer); let sec = 30, seed = 1;
+    const draw = () => { qrCells($('#tk-qr'), 25, seed); };
+    draw();
+    S.qrTimer = setInterval(() => {
+      if (!$('[data-screen=ticket]').classList.contains('active')) { clearInterval(S.qrTimer); return; }
+      sec--; if (sec <= 0) { sec = 30; seed++; draw(); }
+      $('#tk-sec').textContent = sec + ' giây'; $('#tk-bar').style.width = (sec / 30 * 100) + '%';
+    }, 1000);
+  }
+  function refundFor(t) {
+    if (t.delay > 30) return { pct: 100, tier: 'Chuyến chậm hơn 30 phút: hoàn 100%, không phí' };
+    const hoursLeft = t.pnr === 'BG-771204' ? 80 : 0.5;
+    if (hoursLeft >= 12) return { pct: 100, tier: 'Hủy trước giờ chạy từ 12 giờ: hoàn 100%' };
+    if (hoursLeft >= 6) return { pct: 80, tier: 'Hủy trước 6 đến 12 giờ: hoàn 80%' };
+    return { pct: 0, tier: 'Hủy trong vòng 6 giờ trước giờ chạy: không hoàn tiền' };
+  }
+  function cancelTicket(t) {
+    const r = refundFor(t), amt = Math.round(t.paid * r.pct / 100);
+    openSheet(`<h2 style="margin:0;font-size:18px">Hủy vé ${t.pnr}?</h2>
+      <div class="card pad" style="display:flex;flex-direction:column;gap:6px;font-size:14px"><div class="between"><span class="muted">Đã trả</span><span class="mono">${vnd(t.paid)}</span></div><div class="between"><span class="muted">Được hoàn</span><span class="mono" style="font-weight:700">${vnd(amt)}</span></div><span class="muted" style="font-size:13px">${r.tier}</span></div>
+      <p style="margin:0;font-size:13px;color:var(--muted);line-height:1.5">Ghế ${t.seat} được nhả ngay cho người khác và không lấy lại được.</p>
+      <button class="btn btn-primary" style="background:var(--danger)" id="cx-yes">${amt ? 'Hủy vé, hoàn ' + vnd(amt) : 'Hủy vé, không hoàn tiền'}</button>
+      <button class="btn btn-ghost" id="cx-no">Giữ vé</button>`, (s) => {
+      $('#cx-no', s).onclick = closeSheet;
+      $('#cx-yes', s).onclick = () => {
+        t.status = amt ? 'REFUND' : 'CANCELLED'; t.refund = amt; closeSheet();
+        S.notifs.push({ title: 'Đã hủy vé ' + t.pnr, body: amt ? 'Yêu cầu hoàn ' + vnd(amt) + ' đã gửi, tiền về tài khoản trong 1 đến 3 ngày làm việc.' : 'Vé đã hủy, không hoàn tiền theo chính sách.', time: 'Vừa xong', go: null });
+        S.ttab = 'past'; reset('tickets'); toast(amt ? 'Đã gửi yêu cầu hoàn ' + vnd(amt) : 'Đã hủy vé');
+      };
+    });
+  }
+
+  // ---------- Events ----------
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('button, a'); if (!el) return;
+    const d = el.dataset;
+    if ('back' in d) return back();
+    if (d.go) return go(d.go);
+    if (d.tab) { closeSheet(); return reset(d.tab); }
+    if (d.toast) return toast(d.toast);
+    if (d.pick) { S.pickerFor = d.pick; $('#picker-q').value = ''; return go('picker'); }
+    if (d.place) {
+      if (S.pickerFor === 'origin') S.origin = d.place; else S.dest = d.place;
+      return back();
+    }
+    if (d.recent) { const [o, de] = d.recent.split('|'); S.origin = o; S.dest = de; return go('results'); }
+    if (d.date) { S.date = d.date; return RENDER.results(); }
+    if (d.sort) { S.sort = d.sort; return RENDER.results(); }
+    if (d.trip) { S.trip = tripsFor(S.origin, S.dest).find((t) => t.id === d.trip); S.pickup = 'gb'; S.dropoff = S.dest === 'nb' ? 'nb' : 'pb'; S.seats = []; return go('stops'); }
+    if (d.deck) { S.deck = Number(d.deck); return RENDER.seats(); }
+    if (d.seat) {
+      const c = d.seat, i = S.seats.indexOf(c);
+      if (i >= 0) S.seats.splice(i, 1);
+      else if (S.seats.length >= 5) { $('#seat-max').hidden = false; return; }
+      else S.seats.push(c);
+      $('#seat-max').hidden = true; return RENDER.seats();
+    }
+    if (d.openTicket) { S.currentTicket = S.tickets.find((t) => t.pnr === d.openTicket); return go('ticket'); }
+    if (d.track) { S.currentTicket = S.tickets.find((t) => t.pnr === d.track); return go('tracking'); }
+    if (d.openDelay) { S.currentTicket = S.tickets.find((t) => t.pnr === d.openDelay); return go('delay'); }
+    if (d.ttab) { S.ttab = d.ttab; return RENDER.tickets(); }
+    if (d.notif) { const n = S.notifs[Number(d.notif)]; S.currentTicket = S.tickets.find((t) => t.pnr === n.go); return go('delay'); }
+    if (d.copy || 'copyAmount' in d || 'copyMemo' in d) {
+      const v = d.copy || ('copyAmount' in d ? String(S.order.amount) : 'BUSGO ' + S.order.pnr.replace('-', ''));
+      if (navigator.clipboard) navigator.clipboard.writeText(v).catch(() => {});
+      return toast('Đã sao chép ' + v);
+    }
+  });
+
+  $('#swap').onclick = () => { [S.origin, S.dest] = [S.dest, S.origin]; RENDER.home(); };
+  $('#search-btn').onclick = () => {
+    S.date = $('#date-select').value; S.pax = Number($('#pax-select').value);
+    const same = S.origin === S.dest; $('#search-err').hidden = !same; if (same) return;
+    go('results');
+  };
+  $('#picker-q').addEventListener('input', (e) => renderPicker(e.target.value));
+  $('#date-select').innerHTML = DATES.map((x) => `<option value="${x.id}" ${x.id === S.date ? 'selected' : ''}>${x.long}</option>`).join('');
+
+  document.addEventListener('change', (e) => {
+    if (e.target.name === 'pickup') { S.pickup = e.target.value; RENDER.stops(); }
+    if (e.target.name === 'dropoff') { S.dropoff = e.target.value; RENDER.stops(); }
+    if (e.target.name === 'gps') { S.gps = e.target.value; if ($('[data-screen=tracking]').classList.contains('active')) RENDER.tracking(); }
+  });
+  $('#stops-next').onclick = () => { S.deck = 1; go('seats'); };
+  $('#hold-btn').onclick = () => { startHold(600, 'hold'); go('checkout'); };
+  $('#co-ins').onchange = (e) => { S.insured = e.target.checked; RENDER.checkout(); };
+  $('#co-voucher-btn').onclick = () => {
+    const code = $('#co-voucher').value.trim().toUpperCase(), msg = $('#co-voucher-msg');
+    msg.hidden = false;
+    if (S.voucher && code === S.voucher) { S.voucher = null; $('#co-voucher').value = ''; $('#co-voucher-btn').textContent = 'Áp dụng'; msg.hidden = true; $('#co-voucher').classList.remove('err'); return RENDER.checkout(); }
+    if (VOUCHERS[code]) { S.voucher = code; msg.className = 'ok-text'; msg.textContent = 'Đã áp dụng: giảm ' + vnd(VOUCHERS[code]); $('#co-voucher-btn').textContent = 'Bỏ mã'; $('#co-voucher').classList.remove('err'); }
+    else { S.voucher = null; msg.className = 'err-text'; msg.textContent = code ? 'Mã không hợp lệ hoặc đã hết hạn.' : 'Nhập mã giảm giá.'; $('#co-voucher').classList.add('err'); }
+    RENDER.checkout();
+  };
+  $('#co-pay').onclick = () => {
+    const name = $('#co-name').value.trim(), phone = $('#co-phone').value.replace(/\s/g, '');
+    const okName = name.length >= 2, okPhone = /^0\d{9}$/.test(phone);
+    $('#co-name-err').hidden = okName; $('#co-phone-err').hidden = okPhone;
+    $('#co-name').classList.toggle('err', !okName); $('#co-phone').classList.toggle('err', !okPhone);
+    if (!okName || !okPhone) return;
+    S.order = { pnr: 'BG-' + (882199 + S.tickets.length - 1), amount: S.total, name, phone };
+    startHold(600, 'pay');
+    S.stack.push('vietqr'); show('vietqr');
+  };
+  $('#pay-check').onclick = () => {
+    const btn = $('#pay-check'); btn.disabled = true; setPayStatus('check');
+    setTimeout(() => {
+      btn.disabled = false;
+      if (document.querySelector('input[name=bank]:checked').value === 'paid') issueTicket(); else setPayStatus('none');
+    }, 1400);
+  };
+  $('#pay-cancel').onclick = () => openSheet(`<h2 style="margin:0;font-size:18px">Hủy đơn ${S.order.pnr}?</h2>
+    <p style="margin:0;color:var(--muted);line-height:1.5">Ghế ${S.seats.join(', ')} sẽ được nhả ngay. Nếu bạn đã chuyển tiền, đừng hủy: vé sẽ được xuất khi ngân hàng báo tiền về.</p>
+    <button class="btn btn-primary" style="background:var(--danger)" id="pc-yes">Hủy đơn và nhả ghế</button><button class="btn btn-ghost" id="pc-no">Tiếp tục thanh toán</button>`, (s) => {
+    $('#pc-no', s).onclick = closeSheet;
+    $('#pc-yes', s).onclick = () => { closeSheet(); stopHold(); S.order = null; S.seats = []; S.stack = ['home', 'results', 'stops', 'seats']; show('seats'); toast('Đã hủy đơn và nhả ghế'); };
+  });
+  function issueTicket() {
+    stopHold();
+    const o = S.order, t = S.trip, p = stop(S.pickup);
+    const tk = { pnr: o.pnr, route: PLACES[S.origin].city + ' → ' + PLACES[S.dest].city, date: dateLabel(), dep: p.time, seat: S.seats.join(', '), pickup: short(p.name), pickupFull: p.name, plate: t.plate, paid: o.amount, name: o.name, phone: o.phone, status: 'ACTIVE', delay: 0 };
+    S.tickets.push(tk); S.lastTicket = tk; S.order = null; S.seats = []; S.voucher = null; S.insured = false;
+    $('#co-voucher').value = ''; $('#co-voucher-msg').hidden = true; $('#co-voucher-btn').textContent = 'Áp dụng';
+    S.notifs.push({ title: 'Đặt vé thành công', body: 'Mã ' + tk.pnr + ' cho chuyến ' + tk.route + ' lúc ' + tk.dep + ' đã được xác nhận.', time: 'Vừa xong', go: null });
+    S.unread = true; $('#notif-dot').hidden = false;
+    reset('success'); S.stack = ['home', 'success'];
+  }
+  $('#ok-view').onclick = () => { S.currentTicket = S.lastTicket; S.stack = ['tickets']; go('ticket'); };
+  $('#tk-pin-btn').onclick = () => { $('#tk-pin').hidden = !$('#tk-pin').hidden; };
+  $('#tk-cancel').onclick = () => cancelTicket(S.currentTicket);
+  $('#dl-keep').onclick = () => { S.stack = ['tickets']; go('ticket'); };
+  $('#dl-cancel').onclick = () => cancelTicket(S.currentTicket);
+  $('#tk-share').onclick = () => openSheet(`<h2 style="margin:0;font-size:18px">Chia sẻ vé cho người đi cùng</h2>
+    <p style="margin:0;color:var(--muted);font-size:14px;line-height:1.5">Người nhận có vé riêng trong app và mã PIN dự phòng. Bạn vẫn quản lý được vé.</p>
+    <label class="field">Số điện thoại người nhận<input class="input mono" id="sh-phone" type="tel" inputmode="numeric"></label><span class="err-text" id="sh-err" hidden>Số điện thoại cần 10 chữ số.</span>
+    <button class="btn btn-primary" id="sh-yes">Gửi vé</button><button class="btn btn-ghost" id="sh-no">Đóng</button>`, (s) => {
+    $('#sh-no', s).onclick = closeSheet;
+    $('#sh-yes', s).onclick = () => { const p = $('#sh-phone', s).value.replace(/\s/g, ''); if (!/^0\d{9}$/.test(p)) { $('#sh-err', s).hidden = false; return; } closeSheet(); toast('Đã gửi vé tới ' + maskPhone(p)); };
+  });
+
+  // Login
+  let otpTimer = null;
+  $('#login-submit').onclick = () => {
+    const step2 = $('#login-otp-step').style.display === 'flex';
+    if (!step2) {
+      const p = $('#login-phone').value.replace(/\s/g, '');
+      const ok = /^0\d{9}$/.test(p); $('#login-phone-err').hidden = ok; $('#login-phone').classList.toggle('err', !ok); if (!ok) return;
+      S.pendingPhone = p; $('#otp-phone').textContent = maskPhone(p);
+      $('#login-phone-step').style.display = 'none'; $('#login-otp-step').style.display = 'flex'; $('#login-submit').textContent = 'Xác nhận';
+      $('#otp-boxes').innerHTML = Array.from({ length: 6 }, (_, i) => `<input inputmode="numeric" maxlength="1" aria-label="Chữ số ${i + 1}">`).join('');
+      $$('#otp-boxes input').forEach((inp, i, all) => { inp.addEventListener('input', () => { inp.value = inp.value.replace(/\D/g, ''); if (inp.value && all[i + 1]) all[i + 1].focus(); }); });
+      $('#otp-boxes input').focus();
+      let s = 60; const r = $('#otp-resend'); r.disabled = true; clearInterval(otpTimer);
+      otpTimer = setInterval(() => { s--; r.textContent = s > 0 ? 'Gửi lại mã sau ' + s + ' giây' : 'Gửi lại mã'; if (s <= 0) { r.disabled = false; clearInterval(otpTimer); } }, 1000);
+      return;
+    }
+    const code = $$('#otp-boxes input').map((i) => i.value).join('');
+    const ok = code.length === 6 && code !== '000000'; $('#otp-err').hidden = ok; if (!ok) return;
+    clearInterval(otpTimer);
+    S.user = { name: 'Nguyễn Văn An', phone: S.pendingPhone };
+    $('#login-phone-step').style.display = 'flex'; $('#login-otp-step').style.display = 'none'; $('#login-submit').textContent = 'Gửi mã';
+    reset('home'); toast('Đã đăng nhập');
+  };
+  $('#otp-resend').onclick = () => { toast('Đã gửi lại mã'); };
+  $('#pf-logout').onclick = () => { if (S.user) { S.user = null; reset('splash'); } else go('login'); };
+
+  // Demo panel
+  $('#demo-delay').onclick = () => {
+    const t = S.tickets.filter((x) => x.status === 'ACTIVE').pop();
+    if (!t) return toast('Chưa có vé nào đang hiệu lực');
+    t.delay = 40;
+    S.notifs.push({ title: 'Chuyến ' + t.dep + ' chậm 40 phút', body: 'Giờ mới ' + depOf(t) + '. Bạn được hủy vé miễn phí, hoàn ' + vnd(t.paid) + '.', time: 'Vừa xong', go: t.pnr });
+    S.unread = true; $('#notif-dot').hidden = false;
+    const cur = S.stack[S.stack.length - 1]; show(cur); toast('Thông báo: chuyến ' + t.dep + ' chậm 40 phút');
+  };
+  $('#demo-expire').onclick = () => { if (!S.holdPhase) return toast('Chưa có phiên giữ ghế'); S.holdLeft = 90; renderHold(); };
+
+  show('splash');
+})();
+</script>
 </body>
 </html>

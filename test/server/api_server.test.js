@@ -168,7 +168,7 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     // Radar
     const radarRes = await makeRequest('/api/v1/ops/radar');
     assert.strictEqual(radarRes.statusCode, 200);
-    assert.strictEqual(radarRes.body.data.total_tracked_vehicles, 3);
+    assert.strictEqual(radarRes.body.data.total_tracked_vehicles, 4);
 
     // Fleet Roster
     const fleetRes = await makeRequest('/api/v1/ops/fleet/vehicles');
@@ -207,11 +207,18 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
 
     const drvView = await makeRequest('/driver');
     assert.strictEqual(drvView.statusCode, 200);
-    assert.ok(drvView.body.includes('BUSGO FLEET DRIVER'));
+    assert.ok(drvView.body.includes('BusGo Driver'));
 
     const mgrView = await makeRequest('/manager');
     assert.strictEqual(mgrView.statusCode, 200);
-    assert.ok(mgrView.body.includes('BUSGO OPS'));
+    assert.ok(mgrView.body.includes('BusGo Operations'));
+
+    // Design review D99 and D101: no browser dialogs, no emoji, no simulation control inside a product screen
+    for (const view of [passView, drvView, mgrView]) {
+      assert.ok(!/\b(alert|confirm|prompt)\(/.test(view.body), 'feedback is shown in the page, never in a browser dialog');
+      assert.ok(!/\p{Extended_Pictographic}/u.test(view.body), 'no emoji in the UI');
+      assert.ok(!/GIẢ LẬP/i.test(view.body), 'simulation controls stay out of the product screens');
+    }
   });
 
   it('TC-SRV-06: New Spec APIs (Payment verification, Group QR, Delegation, Onboard Hail, Hotline Hold - REV-01 to REV-06)', async () => {
