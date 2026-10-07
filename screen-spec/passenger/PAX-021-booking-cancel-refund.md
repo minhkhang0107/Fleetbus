@@ -147,7 +147,7 @@ Exit Points:
 ---
 
 ## 7. Business Rules
-- `BR-CANCEL-001`: If `hours_until_departure < 6`, cancellation is blocked by server unless trip was officially marked `DELAYED` ($>30\text{m}$) or `CANCELLED` by operator.
+- `BR-CANCEL-001` (Phase C review FND-C03): Inside 6 hours a passenger may still cancel, which frees the seat, but the refund is 0% (tier `NO_REFUND`). If the manager declared an official delay over $30\text{m}$ (`MGR-024`) the cancellation is free at any time: refund 100%, no fee, tier `DELAY_WAIVER`. A delay of 30 minutes or less, or an estimate reported by the driver (`DRI-019`), does not waive the fee. A trip cancelled by the operator is not available yet (no endpoint); when it is, it takes the same 100% rule plus the apology voucher.
 - `BR-CANCEL-002`: Submitting cancellation immediately frees up the seat in Redis and PostgreSQL and broadcasts `SEAT_RELEASED` to realtime subscribers.
 
 ---

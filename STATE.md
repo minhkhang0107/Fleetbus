@@ -1,6 +1,6 @@
 # FleetBus Real-Time Bus Booking & Telemetry System State
 
-Last updated: 2026-09-15 13:30
+Last updated: 2026-10-07
 
 ## 1. Unified Node.js API Server & Gateway Status (`source/server/`)
 - [x] **Universal REST API Server (`source/server/apiServer.js`)**:
@@ -10,8 +10,8 @@ Last updated: 2026-09-15 13:30
   - Manager Operations Gateway: `/api/v1/ops/*` (Auth, KPIs, Fleet Radar, POS, Dispatch, Emergency Swap, Fleet & Crew, Reports).
   - External Webhooks: `/api/v1/webhooks/vietqr/ipn` and `/health` + `/api/v1/openapi.json`.
   - Static Web Portals: `/passenger`, `/driver`, `/manager` served directly from built `web_dist/` distributions with fallback to `docs/designs/`.
-  - **Automated Tests**: 165/165 unit and integration tests passing across 22 suites (`npm test` / `make test`), see section 8.
-  - **Lint Check**: `npm run lint` runs `tools/lint.js`, a syntax check of every JavaScript file (54 files). The earlier command checked only the first file.
+  - **Automated Tests**: 198/198 unit and integration tests passing across 34 suites (`npm test` / `make test`), see section 8.
+  - **Lint Check**: `npm run lint` runs `tools/lint.js`, a syntax check of every JavaScript file (56 files). The earlier command checked only the first file.
   - **Universal System Build**: `npm run build` / `make build` compiles and packages all platforms, generates `build_manifest.json`, and aligns Android `local.properties`.
   - **Live E2E Flow**: Full tripartite end-to-end live flow verified (`npm run e2e` / `make e2e` / `node test/e2e_live_flow.js`).
   - **Cross-Service Event Bridge**: `FleetBusEventBridge` pub-sub linking Passenger, Driver, and Manager in real time.
@@ -124,7 +124,7 @@ Last updated: 2026-09-15 13:30
   - Step 5: Driver tactical auth, shift trip inspection, 6-point readiness safety checklist, start trip (`IN_TRANSIT`), camera QR boarding scan, 1Hz live GPS telemetry stream.
   - Step 6: Manager Operations login, executive KPIs (Load Factor, Gross Revenue), 60Hz live fleet radar tracking, hotline POS booking, executive OTP and punctuality report.
 - [x] **Regression & Integrity Guard**:
-  - 165/165 passing tests (`npm test`), see section 8.
+  - 198/198 passing tests (`npm test`), see sections 8 to 10.
   - Syntax check of every file (`npm run lint`).
   - Single command orchestration via `make build && make lint && make test && make e2e`.
 
@@ -160,3 +160,41 @@ Record: `docs/review/phase-B-plan.md`, `phase-B-findings.md`, `decision-log.md` 
 - [x] **Authentication is enforced by default** (`FLEETBUS_AUTH=off` only outside production). `npm run e2e` now logs in as a passenger, a driver and a staff member and checks every step.
 - [ ] **Open (`OQ-029`)**: no screen calls the API; 32 spec screens do not exist (Passenger 6, Driver 5, Manager 21); the new Dart has not been compiled. Needs a Flutter SDK.
 
+## 10. Phase C Review: Cross-App Flows (2026-10-07)
+
+Record: `docs/review/phase-C-findings.md`, `decision-log.md` (D67 to D82). Each of `FLOW-01` to `FLOW-07` is played over HTTP with real logins by `test/flows/flow_conformance.test.js` (16 tests, 15 of them failed before the fixes).
+
+- [x] **Dispatcher sees the real inventory** (`MGR-013`): one row per seat (`AVAILABLE`, `HELD`, `HOTLINE_HOLD`, `BOOKED` with PNR, `BLOCKED`); seats can be blocked and opened with a reason (`POST /ops/trips/{id}/seats/override-lock`).
+- [x] **Money rules**: a delay over 30 minutes declared by the manager makes cancellation free (`PAX-025`); change debt receipts are capped at 1.000.000 đ per trip and paid out once by the cashier (`POST /ops/debt-receipts/{code}/redeem`); a phone number holds at most 4 hotline seats.
+- [x] **Every side sees the same trip**: ticket wallet tabs follow the trip (a boarded ticket stays under "Sắp đi" until the trip ends, used tickets open without a QR); a no-show reaches the passenger and the manager; starting a trip puts the manager trip and vehicle in transit; a GPS ping reaches the manager radar through the trip, with `STALE` after 60 s and `OFFLINE` after 180 s on both sides; a vehicle replacement moves the trip to the new driver in the driver app and refuses a driver with an expired licence.
+- [x] **Flow documents rewritten** to match the server and the screens (real endpoints and codes, current architecture apart from the target one); stale diagram images removed.
+- [ ] **Open**: rest-stop status (`OQ-030`), extras dropped from the old flows (`OQ-031`), seed data of `trp_991823`, the same Flutter and WebSocket limits as before. Phase D follows.
+
+## 11. Phase D Review: Whole-System Pass (2026-10-07)
+
+Record: `docs/review/phase-D-findings.md`, `decision-log.md` (D83 to D86). Scripted checks over the 79 screens, the governance files and the server catalog.
+
+- [x] **Every screen has a row** in the traceability matrix (sections 5 and 6 added) and in the navigation map (section 6 added); the evidence column says "none: spec only" where no automated test names the screen.
+- [x] **No orphan requirement in the matrix**: all 83 rules and every cited spec test exist. 63 rules that no row cited are now listed; five source labels without a rule text are marked as such.
+- [x] **Demo data and links**: trip `trp_991823` is `DISPATCHED` until the driver starts it; absolute `file:///` links in `README.md` and `walkthrough.md` fixed; `PAX-024` route and `gps-health` documented.
+- [ ] **Open, blocks delivery**: `OQ-029` (no Flutter screen calls the API, 32 spec screens missing, new Dart not compiled; needs a Flutter SDK). Also `OQ-027`, `OQ-028`, `OQ-030`, WebSocket and MQTT (`OQ-002`). The review plan A to D is complete.
+
+## 12. Phase E: Remaining Server Items (2026-10-07)
+
+Record: `docs/review/phase-E-findings.md`, `decision-log.md` (D87 to D94). 213 tests, 61 files pass the syntax check (`rtk proxy npm run lint`; plain `npm run lint` is garbled by the RTK filter), `npm run e2e` passes.
+
+- [x] **Staff 2FA (`OQ-027`)**: the director and the finance controller sign in with a TOTP code (`core/totp.js`, RFC 6238 vectors tested); secrets come from `FLEETBUS_TOTP_SECRET_<USER_ID>`; no enrollment screen.
+- [x] **Rest-stop status (`OQ-030`)**: derived from the pings (still over 5 minutes within 300 m of a stop of `core/restStops.js`).
+- [x] **Seat inventory by segment (`OQ-028`)**: holds, counter and hotline sales, hail rides and the dispatcher matrix work per segment between two stops; cancelling frees only the ticket's segment; a no-show frees the seat from the stop the bus has reached. Demo trip `trp_hn_th_01` now has five stops (Ninh Bình added).
+- [ ] **Open**: `OQ-029` (needs a Flutter SDK; 32 screens missing, new Dart uncompiled), `OQ-032` (fare is flat, not by segment), WebSocket and MQTT (`OQ-002`).
+
+
+## 13. Design Review by Using the Apps (2026-10-07)
+
+Record: `docs/review/design-review-findings.md` (DSG-01 to DSG-25), `decision-log.md` (D95 to D103). 217 tests, lint passes.
+
+- [x] **Experienced the three HTML prototypes** (`/passenger`, `/driver`, `/manager`) end to end with headless Chrome and compared them with the flows and screen specs.
+- [x] **Spec fixed**: one primary `#2563EB`, radius scale, no emoji or developer copy, no browser dialogs (`design-system.md` section 7); bottom tab bar only on tab roots and pickup/dropoff before the seat map (`navigation-map.md` 1.2b); VietQR only at checkout (`BR-CHECKOUT-004`, `OQ-033`); COD boarding rule `BR-COD-006` in DRI-007, 009, 010, 012.
+- [x] **Server fixed (D100)**: an unpaid COD ticket boards only through the COD collection; manual, PIN and QR boarding answer `409 COD_PAYMENT_REQUIRED` with the fare (`test/server/cod_boarding_gate.test.js`).
+- [x] **New design** on Claude Design, 23 screens across the three apps: https://claude.ai/artifact/Ai5drXHQWjV2oAvyY41PSY
+- [x] **HTML prototypes rewritten to the new design** (`docs/designs/*.html`, copied to each `web_dist`): passenger 16 screens, driver 11 screens, manager 6 pages with staff login and 2FA; the flows of the design work end to end, results show in the page, and demo controls sit outside the phone frame. Walked with headless Chrome: 59 steps, no script error. `TC-SRV-05` now also checks no browser dialog, no emoji and no simulation control in the served pages.

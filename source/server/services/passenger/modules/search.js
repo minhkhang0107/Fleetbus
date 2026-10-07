@@ -88,8 +88,9 @@ export const MOCK_TRIPS_DATABASE = [
     stops: [
       { stop_id: 'stp_hn_gb', name: 'Bến xe Giáp Bát', city: 'Hà Nội', order: 1, pickup_allowed: true, dropoff_allowed: false },
       { stop_id: 'stp_hn_nuoc_ngam', name: 'Bến xe Nước Ngầm', city: 'Hà Nội', order: 2, pickup_allowed: true, dropoff_allowed: false },
-      { stop_id: 'stp_th_pb', name: 'Bến xe Phía Bắc Thanh Hóa', city: 'Thanh Hóa', order: 3, pickup_allowed: false, dropoff_allowed: true },
-      { stop_id: 'stp_th_sam_son', name: 'Bến xe Sầm Sơn', city: 'Thanh Hóa', order: 4, pickup_allowed: false, dropoff_allowed: true }
+      { stop_id: 'stp_nb', name: 'Bến xe Ninh Bình', city: 'Ninh Bình', order: 3, pickup_allowed: true, dropoff_allowed: true },
+      { stop_id: 'stp_th_pb', name: 'Bến xe Phía Bắc Thanh Hóa', city: 'Thanh Hóa', order: 4, pickup_allowed: false, dropoff_allowed: true },
+      { stop_id: 'stp_th_sam_son', name: 'Bến xe Sầm Sơn', city: 'Thanh Hóa', order: 5, pickup_allowed: false, dropoff_allowed: true }
     ]
   },
   {

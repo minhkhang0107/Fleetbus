@@ -1,58 +1,23 @@
 sequenceDiagram
     autonumber
-    actor PAX as 📱 Hành Khách (Passenger App)
-    actor DRI as 🚍 Phụ Xe / Tài Xế (Driver Tablet)
-    participant LOC as 💾 Driver Local SQLite Cache
-    participant GW as ⚙️ API Gateway Server
-    participant WS as ⚡ WebSocket Event Bus
-    actor MGR as 🖥️ Điều Hành Trung Tâm (Manager Portal)
+    actor PAX as Hành khách (PAX-017)
+    actor DRI as Tài xế (DRI-009/010/011)
+    participant GW as API server
+    participant BR as Event Bridge
+    actor MGR as Điều hành (MGR-012)
 
-    %% Giai đoạn tải dữ liệu trước chuyến đi
-    Note over DRI,GW: 0. Chuẩn bị trước chuyến đi (Pre-trip Synchronization)
-    DRI->>GW: GET /api/v1/driver/trips/TRIP101/manifest
-    activate GW
-    GW-->>DRI: 200 OK {tickets: [...], pinList: [...], publicKeys: [...]}
-    deactivate GW
-    DRI->>LOC: Lưu toàn bộ danh sách vé & mã hash PIN vào bảng local_manifest
-
-    %% Chế độ 1: Dynamic QR Check-in
-    Note over PAX,DRI: Chế độ 1: Quét Dynamic QR (Hành khách có mạng hoặc App đã lưu OTP)
-    PAX->>PAX: Mở màn hình PAX-015: Sinh mã QR TOTP (cập nhật mỗi 30s)
-    DRI->>DRI: Mở camera quét trên DRI-009 (Quét siêu tốc < 500ms)
-    
-    alt Xe có kết nối mạng (Online)
-        DRI->>GW: POST /api/v1/driver/trips/TRIP101/boarding/scan<br/>{qrPayload: "BUSGO:TK101:1726416000:a8f9c...", method: "QR"}
-        activate GW
-        GW->>GW: Xác thực HMAC Signature & Cửa sổ thời gian (+-2 window)
-        GW->>GW: Kiểm tra trạng thái vé (Tránh Double Check-in)
-        GW-->>DRI: 200 OK {status: "BOARDED", passengerName: "Nguyễn Văn A", seat: "A01"}
-        GW->>WS: Broadcast room "trip:TRIP101" event: "passenger_boarded"<br/>{ticketId: "TK101", seat: "A01", time: "14:30"}
-        deactivate GW
-    else Xe mất mạng (Offline 0G/2G)
-        DRI->>LOC: Kiểm tra chữ ký cục bộ & mã vé TK101 trong local_manifest
-        LOC-->>DRI: Hợp lệ -> Đánh dấu status='BOARDED_OFFLINE'
-        DRI->>LOC: Ghi nhật ký vào local_outbox_queue (pending sync)
-        DRI->>DRI: Phát âm thanh Ting! & Màn hình xanh báo "HỢP LỆ (NGOẠI TUYẾN)"
-    end
-
-    %% Chế độ 2: Mã PIN dự phòng
-    Note over PAX,DRI: Chế độ 2: Điện thoại khách hết pin / Hỏng màn hình (PIN Fallback)
-    PAX-->>DRI: Đọc mã PIN 6 số nhận qua SMS (VD: 829104)
-    DRI->>DRI: Chuyển sang màn hình DRI-010 (Nhập PIN thủ công)
-    DRI->>LOC: SELECT * FROM local_manifest WHERE pin_code='829104'
-    LOC-->>DRI: Tìm thấy vé hợp lệ cho ghế B03 (Trần Thị B)
-    DRI->>DRI: Chạm "Xác nhận lên xe" -> Cập nhật trạng thái
-
-    %% Chế độ 3: Khách vắng mặt (No-Show)
-    Note over DRI,MGR: Chế độ 3: Xử lý khách không đến (No-Show Workflow)
-    DRI->>DRI: Đến giờ xuất bến, kiểm tra danh sách khách chưa lên trên DRI-008
-    DRI->>DRI: Chọn khách ghế A05 -> Nhấn "Báo vắng mặt (No-show)" (DRI-011)
-    DRI->>GW: POST /api/v1/driver/trips/TRIP101/tickets/TK105/no-show<br/>{reason: "GỌI_3_CUỘC_KHÔNG_NGHE_MÁY", waitMinutes: 10}
-    activate GW
-    GW->>WS: Broadcast event: "seat_status_changed" {seat: "A05", status: "VACANT"}
-    GW-->>DRI: 200 OK {status: "NO_SHOW_RECORDED"}
-    deactivate GW
-
-    %% Đồng bộ dữ liệu lên Trung tâm
-    WS-->>MGR: Cập nhật MGR-004: Khách đã lên xe: 34/36, Vắng mặt: 1, Còn lại: 1
-    WS-->>PAX: Màn hình PAX-016 chuyển sang giao diện "Đã lên xe - Theo dõi lộ trình"
+    PAX->>GW: GET /tickets/{id}
+    GW-->>PAX: ticket + QR 30 giây
+    DRI->>GW: POST /driver/trips/{id}/boarding {qrPayload}
+    GW->>GW: kiểm chữ ký, cửa sổ thời gian, vé thuộc chuyến, chưa lên xe
+    GW-->>DRI: 200 BOARDED, số điện thoại đã che
+    GW->>BR: PASSENGER_BOARDED
+    BR-->>PAX: vé BOARDED, thông báo chào mừng
+    BR-->>MGR: boarded_passengers + 1
+    DRI->>GW: POST /driver/trips/{id}/boarding {qrPayload}
+    GW-->>DRI: 400 ALREADY_BOARDED
+    DRI->>GW: POST /driver/trips/{id}/tickets/{ticketId}/no-show
+    GW->>GW: sau giờ xuất bến 10 phút, khách còn chờ lên xe
+    GW->>BR: PASSENGER_NO_SHOW
+    BR-->>PAX: vé NO_SHOW, thông báo
+    BR-->>MGR: no_show_passengers + 1

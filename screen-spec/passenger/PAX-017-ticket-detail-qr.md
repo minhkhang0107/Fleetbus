@@ -242,6 +242,7 @@ Cached locally in SQLite upon booking confirmation, valid throughout departure d
 - `BR-TICKET-004` (Multi-ticket Carousel & Group QR - REV-01): For bookings with $\ge 2$ seats under the same PNR, the screen displays a horizontal pill switcher. Swiping toggles individual seat QR passes; tapping "QR Đoàn" produces a unified group boarding QR allowing the driver to board all passengers in one scan.
 - `BR-TICKET-005` (Ticket Sharing & Delegation - REV-01): User can tap "Chia sẻ vé" to enter a recipient's phone number. The system sends an SMS with a secure authenticated web link (`https://busgo.vn/pass/:shareToken`) and displays a 6-digit offline PIN (`offline_pin`) allowing relatives without the mobile app to board seamlessly.
 - `BR-TICKET-006` (Drift Tolerance - REV-03): Driver verification engine permits $\pm 2$ window steps ($\pm 60$ seconds) to prevent false rejections due to device clock discrepancies.
+- `BR-TICKET-007` (Used tickets still open - Phase C review FND-C06): `GET /tickets/{ticketId}` for a `BOARDED` or `NO_SHOW` ticket returns `200` with the ticket and `dynamic_qr: null`; the screen shows the status pill (`ĐÃ LÊN XE` or `VẮNG MẶT`) and no QR, so a used ticket cannot be shared. A cancelled ticket still gives `404 TICKET_NOT_ACTIVE`.
 
 ---
 

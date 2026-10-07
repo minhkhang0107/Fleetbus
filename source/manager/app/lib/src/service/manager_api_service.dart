@@ -60,8 +60,9 @@ class ManagerApiService {
   }
 
   // MGR-001 / MGR-029: RBAC Login. Five wrong passwords lock the account (429 ACCOUNT_LOCKED).
-  Future<Map<String, dynamic>> login(String username, String password) async {
-    final data = await _post('/auth/staff/login', body: {'username': username, 'password': password});
+  // The director and the finance controller must also send the 6-digit TOTP code (401 TOTP_REQUIRED without it).
+  Future<Map<String, dynamic>> login(String username, String password, {String? totp}) async {
+    final data = await _post('/auth/staff/login', body: {'username': username, 'password': password, if (totp != null) 'totp': totp});
     final token = data['data']?['token'];
     if (data['status'] == 'success' && token is String) {
       authToken = token;
@@ -173,6 +174,32 @@ class ManagerApiService {
         'customExpiryMinutes': customExpiryMinutes,
         if (notes != null) 'notes': notes,
       },
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  // MGR-013: Block seats for a technical reason (a reason is required) or open them again
+  Future<Map<String, dynamic>> setSeatLock(
+    String tripId, {
+    required List<String> seatCodes,
+    required bool locked,
+    String? reason,
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/trips/$tripId/seats/override-lock',
+      body: {'seatCodes': seatCodes, 'locked': locked, if (reason != null) 'reason': reason},
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  // MGR-022: Pay out a change debt receipt at the cash desk, once
+  Future<Map<String, dynamic>> redeemDebtReceipt(String receiptCode, {String? stationId, String? idempotencyKey}) {
+    return _post(
+      '/ops/debt-receipts/$receiptCode/redeem',
+      body: {if (stationId != null) 'station_id': stationId},
       idempotent: true,
       idempotencyKey: idempotencyKey,
     );

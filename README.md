@@ -28,7 +28,7 @@ Từ thư mục gốc của dự án, bạn có thể thực hiện toàn bộ q
 
 ## 2. Chi Tiết Cơ Chế Build Hợp Nhất (Universal Build Engine)
 
-Khi chạy `make build` hoặc `npm run build` ([tools/build_system.js](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/tools/build_system.js)):
+Khi chạy `make build` hoặc `npm run build` ([tools/build_system.js](tools/build_system.js)):
 
 1. **Đóng gói phân phối Web độc lập (`web_dist/`)**:
    - `source/passenger/web_dist/index.html` (54.5 KB): Giao diện đặt vé hành khách hoàn chỉnh.
@@ -45,7 +45,7 @@ Khi chạy `make build` hoặc `npm run build` ([tools/build_system.js](file:///
 
 ## 3. Kịch Bản Kiểm Thử Full Luồng (Live End-to-End Flow)
 
-Khi chạy `make e2e` hoặc `npm run e2e` ([test/e2e_live_flow.js](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/test/e2e_live_flow.js)), hệ thống tự khởi động server API trên `http://localhost:3000` và kiểm tra chuỗi 6 bước liên thông thực tế:
+Khi chạy `make e2e` hoặc `npm run e2e` ([test/e2e_live_flow.js](test/e2e_live_flow.js)), hệ thống tự khởi động server API trên `http://localhost:3000` và kiểm tra chuỗi 6 bước liên thông thực tế:
 
 1. **System Healthcheck**: Kiểm tra sức khỏe hệ thống và 5 core microservices (`UP`).
 2. **Passenger Booking Journey**: Handshake app version, tìm bến xe fuzzy, tìm chuyến xe, hiển thị sơ đồ ghế VIP 2D, khóa ghế 10 phút, tạo đơn hàng booking (PNR).
@@ -94,8 +94,8 @@ Khởi động máy chủ bằng `make start_server` hoặc `npm start`:
 
 ## 6. Tài Liệu Kỹ Thuật Tham Khảo
 
-- 📖 [Tài Liệu Chi Tiết Trạng Thái Hệ Thống (STATE.md)](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/STATE.md)
-- 📋 [Báo Cáo Kiểm Thử & Walkthrough Thực Nghiệm (walkthrough.md)](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/walkthrough.md)
-- 📱 [Hướng Dẫn Phân Hệ Hành Khách (source/passenger/README.md)](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/source/passenger/README.md)
-- 🚌 [Hướng Dẫn Phân Hệ Tài Xế (source/driver/README.md)](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/source/driver/README.md)
-- 🖥️ [Hướng Dẫn Phân Hệ Quản Lý (source/manager/README.md)](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/source/manager/README.md)
+- 📖 [Tài Liệu Chi Tiết Trạng Thái Hệ Thống (STATE.md)](STATE.md)
+- 📋 [Báo Cáo Kiểm Thử & Walkthrough Thực Nghiệm (walkthrough.md)](walkthrough.md)
+- 📱 [Hướng Dẫn Phân Hệ Hành Khách (source/passenger/README.md)](source/passenger/README.md)
+- 🚌 [Hướng Dẫn Phân Hệ Tài Xế (source/driver/README.md)](source/driver/README.md)
+- 🖥️ [Hướng Dẫn Phân Hệ Quản Lý (source/manager/README.md)](source/manager/README.md)

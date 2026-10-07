@@ -1,141 +1,101 @@
-# BusGo Platform — Tài Liệu Toàn Diện Về Sơ Đồ Luồng & Giao Tiếp Đa Ứng Dụng (Cross-App Interaction Flows)
+# BusGo Platform: luồng giao tiếp đa ứng dụng (tài liệu tổng)
 
-**Tài liệu tham chiếu:** `SPEC-FLOWS-MASTER`  
-**Phiên bản:** 1.0  
-**Tình trạng:** Authoritative / Đã chuẩn hóa mã nguồn  
-**Phạm vi:** Mô tả kiến trúc tích hợp và toàn bộ các luồng giao tiếp thời gian thực giữa 3 ứng dụng khách:
-1. **Passenger Mobile & Web App (PAX)**
-2. **Driver Tactical Cockpit Android Tablet (DRI)**
-3. **Manager Operations & Fleet Dispatch Portal (MGR)**
-4. **Lớp Trung Gian: API Gateway, Redis Distributed Lock, MQTT Telemetry Broker & PostgreSQL Database**
+**Mã tài liệu:** `SPEC-FLOWS-MASTER`
+**Phiên bản:** 2.0 (viết lại ở Giai đoạn C, khớp server thật)
+**Phạm vi:** ba ứng dụng (Passenger `PAX`, Driver `DRI`, Manager `MGR`) và server dùng chung. Mỗi luồng có file riêng và một test chạy qua HTTP trong `test/flows/flow_conformance.test.js` (`docs/review/phase-C-findings.md`).
 
 ---
 
-## 1. Bản Đồ Tổng Quan Các Luồng Nghiệp Vụ (Master Flow Directory)
+## 1. Danh mục luồng
 
-| Mã Luồng | Tiêu Đề Luồng | Giao Thức Chính | Màn Hình Liên Quan | Tài Liệu Chi Tiết |
-| :--- | :--- | :--- | :--- | :--- |
-| **FLOW-01** | Đặt vé, Giữ chỗ & Thanh toán VietQR tức thì | REST + Redis Lock + Webhook IPN + WebSocket | PAX-009, PAX-010, PAX-012, PAX-013, PAX-014, MGR-013, MGR-017 | [FLOW-01.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/flows/FLOW-01-booking-vietqr-settlement.md) |
-| **FLOW-02** | Xuất vé QR & Soát vé đa phương thức (Dynamic, Group, PIN, Offline) | TOTP HMAC + SQLite Cache + WebSocket + Outbox Sync | PAX-015, PAX-016, DRI-008, DRI-009, DRI-010, DRI-011, MGR-004 | [FLOW-02.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/flows/FLOW-02-boarding-qr-multimodal-checkin.md) |
-| **FLOW-03** | Thu tiền COD & Biên lai nợ tiền thừa tại trạm dừng | REST + SQLite Sync + QR Voucher + Cash Reconciliation | DRI-012, DRI-017, PAX-012, PAX-015, MGR-017, MGR-028 | [FLOW-03.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/flows/FLOW-03-cod-cash-debt-settlement.md) |
-| **FLOW-04** | Đón khách vẫy dọc đường & Khóa ghế thời gian thực | REST + Redis Mutex + WebSocket Broadcast | DRI-006, DRI-007, PAX-009, MGR-013, MGR-017 | [FLOW-04.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/flows/FLOW-04-onboard-hail-passengers.md) |
-| **FLOW-05** | Giữ chỗ qua Hotline & Tự động thu hồi ghế | REST + Background Cron Scheduler + SMS/ZNS + WebSocket | MGR-020, MGR-013, MGR-017, PAX-009, DRI-007 | [FLOW-05.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/flows/FLOW-05-hotline-seat-hold-auto-release.md) |
-| **FLOW-06** | Radar GPS Telemetry 60Hz, Cảnh báo mất sóng & Trạm dừng | MQTT Telemetry + Dead Reckoning + Stale Watchdog | DRI-006, DRI-014, PAX-018, PAX-019, MGR-003, MGR-005 | [FLOW-06.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/flows/FLOW-06-radar-gps-telemetry-rest-stop.md) |
-| **FLOW-07** | Sự cố kỹ thuật, Đổi xe khẩn cấp & Tái phân bổ ghế | REST + Seat Re-mapping Engine + High-priority Push | DRI-019, MGR-005, MGR-023, PAX-024, PAX-025 | [FLOW-07.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/flows/FLOW-07-incident-emergency-vehicle-swap.md) |
+| Mã | Luồng | Màn hình | Test |
+| :--- | :--- | :--- | :--- |
+| `FLOW-01` | [Đặt vé, giữ chỗ, thanh toán VietQR](FLOW-01-booking-vietqr-settlement.md) | PAX-009, 010, 012, 013, 014, 016; MGR-013, 017; DRI-007 | `TC-FLOW-C01`, `C02` |
+| `FLOW-02` | [Xuất vé QR, soát vé, vắng mặt](FLOW-02-boarding-qr-multimodal-checkin.md) | PAX-016, 017; DRI-007, 009, 010, 011, 015; MGR-012 | `TC-FLOW-C04`, `C05` |
+| `FLOW-03` | [Thu COD, biên lai nợ tiền thừa, chốt chuyến](FLOW-03-cod-cash-debt-settlement.md) | DRI-012, 017; MGR-018, 022, 028 | `TC-FLOW-C06`, `C07` |
+| `FLOW-04` | [Đón khách vẫy dọc đường](FLOW-04-onboard-hail-passengers.md) | DRI-007; PAX-009; MGR-013, 017 | `TC-FLOW-C08` |
+| `FLOW-05` | [Giữ chỗ hotline, khóa ghế, tự nhả ghế](FLOW-05-hotline-seat-hold-auto-release.md) | MGR-013, 020; PAX-009; DRI-007 | `TC-FLOW-C03`, `C09` |
+| `FLOW-06` | [GPS, mất tín hiệu, trạm dừng](FLOW-06-radar-gps-telemetry-rest-stop.md) | DRI-006, 014, 015; PAX-018, 019; MGR-003 | `TC-FLOW-C10`, `C11` |
+| `FLOW-07` | [Sự cố, đổi xe, chuyến chậm](FLOW-07-incident-emergency-vehicle-swap.md) | DRI-019, 002; MGR-023, 024, 025; PAX-021, 024, 025 | `TC-FLOW-C12` đến `C16` |
 
----
+## 2. Kiến trúc: hiện trạng và đích
 
-## 2. Kiến Trúc Tương Tác Giữa Các Hệ Thống (Cross-System Interaction Architecture)
-
-> [!TIP]
-> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/cross-app-interaction-flows.svg) | [Xem ảnh PNG HD](./images/cross-app-interaction-flows.png)
-
-![Kiến Trúc Tương Tác Đa Hệ Thống](./images/cross-app-interaction-flows.svg)
+| | Hiện trạng (có thật, có test) | Đích (chưa có, `OQ-002`) |
+| :--- | :--- | :--- |
+| Giao thức | REST JSON, Bearer token, `Idempotency-Key` ở các thao tác ghi | thêm WebSocket (`trip:{id}`, `ops:fleet`) và MQTT cho GPS |
+| Đẩy sự kiện | Event Bridge trong bộ nhớ nối ba dịch vụ; app **hỏi lại** (PAX-013 mỗi 3 giây, PAX-018 mỗi 10 giây) | đẩy tức thì qua WebSocket |
+| Khóa ghế | bảng giữ chỗ có hạn trong bộ nhớ, tự rã khi đọc | Redis `SETNX` với TTL |
+| Dữ liệu | bộ nhớ, một tiến trình, dữ liệu mẫu | PostgreSQL |
+| Tác vụ nền | không cần: hạn giữ chỗ được xét ở mỗi lần đọc | bộ lập lịch (BullMQ) |
 
 ```mermaid
-graph TD
-    subgraph Passenger_Domain["📱 Khách Hàng (Passenger Domain)"]
-        PAX_APP["Passenger App\n(Flutter / Web)"]
-        PAX_BOOK["Sơ đồ ghế & Giữ chỗ 10m\nPAX-009 / PAX-010"]
-        PAX_PAY["VietQR Thanh Toán Tức Thì\nPAX-013 / PAX-014"]
-        PAX_TICKET["Vé Động TOTP & Theo dõi HUD\nPAX-015 / PAX-018 / PAX-019"]
-    end
-
-    subgraph Driver_Domain["🚍 Tổ Lái Xe (Driver Tactical Domain)"]
-        DRI_APP["Driver Tablet App\n(Android Tactical Cockpit)"]
-        DRI_RADAR["HUD Dẫn Đường & MQTT GPS\nDRI-006 / DRI-014"]
-        DRI_SCAN["Soát vé QR & PIN Ngoại tuyến\nDRI-009 / DRI-010"]
-        DRI_CASH["Thu COD & Biên lai nợ tiền\nDRI-012 / DRI-017"]
-        DRI_HAIL["Đón khách vẫy & Báo sự cố\nDRI-007 / DRI-019"]
-        SQLITE[("SQLite Outbox Cache\nOffline-First Storage")]
-    end
-
-    subgraph Manager_Domain["🖥️ Trung Tâm Điều Hành (Manager Operations)"]
-        MGR_PORTAL["Operations Portal Web App\n(React / Tailwind)"]
-        MGR_MAP["Radar Đội Xe 60Hz\nMGR-003 / MGR-004"]
-        MGR_INC["Chỉ Huy Sự Cố & Đổi Xe\nMGR-005 / MGR-023"]
-        MGR_MATRIX["Ma Trận Ghế & Đặt Chỗ Hotline\nMGR-013 / MGR-020"]
-    end
-
-    subgraph Backend_Domain["⚙️ Lớp Hạ Tầng & Dịch Vụ (Backend Core)"]
-        GATEWAY["API Gateway / Node.js Express"]
-        REDIS["Redis In-Memory Engine\n(Distributed Lock & Seat Cache)"]
-        EVENT_BUS["WebSocket Server (Socket.io)\nRooms: trip:{id}, booking:{id}"]
-        MQTT_BROKER["MQTT Telemetry Broker\nTopic: fleet/trips/{id}/telemetry"]
-        DATABASE[("PostgreSQL Database\nACID Core")]
-        CRON["Scheduler Engine (BullMQ)\nHotline TTL & Stale Watchdog"]
-    end
-
-    %% Giao tiếp Passenger
-    PAX_BOOK -->|POST /hold| GATEWAY
-    PAX_PAY -->|Quét QR| GATEWAY
-    EVENT_BUS -.->|Emit payment_confirmed| PAX_PAY
-    EVENT_BUS -.->|Emit trip_vehicle_swapped| PAX_TICKET
-
-    %% Giao tiếp Driver
-    DRI_RADAR -->|MQTT 3s| MQTT_BROKER
-    DRI_SCAN <-->|Đối soát cục bộ| SQLITE
-    SQLITE -.->|Đồng bộ khi có 4G| GATEWAY
-    DRI_HAIL -->|POST /hail-passengers| GATEWAY
-    DRI_CASH -->|POST /collect-cod| GATEWAY
-
-    %% Giao tiếp Manager
-    EVENT_BUS -.->|Broadcast 60Hz stream| MGR_MAP
-    MGR_INC -->|POST /swap-vehicle| GATEWAY
-    MGR_MATRIX -->|POST /hotline-hold| GATEWAY
-
-    %% Hạ tầng Backend
-    GATEWAY <--> REDIS
-    GATEWAY <--> DATABASE
-    MQTT_BROKER --> GATEWAY
-    CRON --> DATABASE
-    CRON --> EVENT_BUS
-    GATEWAY --> EVENT_BUS
+flowchart TB
+    PAX["Passenger app (PAX)"] -->|REST| GW["API server"]
+    DRI["Driver app (DRI)"] -->|REST| GW
+    MGR["Manager portal (MGR)"] -->|REST| GW
+    BANK["Ngân hàng VietQR"] -->|webhook IPN| GW
+    GW --> BR["Event Bridge"]
+    BR --> INV["Kho ghế dùng chung"]
+    BR --> PAY["Vé và thanh toán"]
+    BR --> TRK["Theo dõi và thông báo"]
+    BR --> OPS["Điều hành"]
+    BR --> CAB["Tài xế"]
 ```
 
----
+## 3. Máy trạng thái của một ghế
 
-## 3. Ma Trận Ma-sát & Nguyên Tắc Khóa Trạng Thái Ghế (Seat State Interlocking)
-
-> [!TIP]
-> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/cross-app-interaction-flows-2.svg) | [Xem ảnh PNG HD](./images/cross-app-interaction-flows-2.png)
-
-![Sơ đồ máy trạng thái ghế](./images/cross-app-interaction-flows-2.svg)
-
-Trạng thái của mỗi ghế trên một chuyến xe tuân thủ máy trạng thái nghiêm ngặt (Strict State Machine):
+Một kho ghế dùng chung cho app, quầy, hotline và tài xế, tính **theo chặng** giữa hai điểm dừng liên tiếp (`BR-SEAT-001`): một ghế có thể đã bán cho chặng đầu và còn trống cho chặng sau. Sơ đồ dưới là trạng thái tổng của cả ghế trong ma trận của điều hành (`BR-INVENTORY-002`); mỗi chặng có trạng thái riêng `AVAILABLE`, `HELD`, `HOTLINE_HOLD`, `BOOKED`, `BLOCKED`:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> AVAILABLE : Khởi tạo chuyến xe
+    [*] --> AVAILABLE : chuyến được tạo
 
-    AVAILABLE --> HOLDING_ONLINE : Khách online chọn ghế (PAX-009) [TTL: 10 phút]
-    AVAILABLE --> HOLDING_HOTLINE : Tổng đài giữ chỗ (MGR-020) [TTL: Do ĐTV đặt]
-    AVAILABLE --> SOLD_HAIL : Tài xế đón khách vẫy (DRI-007) [Ngay lập tức]
+    AVAILABLE --> HELD : khách online giữ ghế (PAX-010), 10 phút
+    AVAILABLE --> HOTLINE_HOLD : tổng đài giữ chỗ (MGR-020), theo hạn đã đặt
+    AVAILABLE --> BOOKED : quầy bán vé (MGR-020) hoặc tài xế đón khách vẫy (DRI-007)
+    AVAILABLE --> BLOCKED : điều phối khóa ghế kỹ thuật (MGR-013)
+    AVAILABLE --> PARTIALLY_BOOKED : bán cho một đoạn của tuyến
+    PARTIALLY_BOOKED --> BOOKED : các đoạn còn lại cũng được bán
+    PARTIALLY_BOOKED --> AVAILABLE : các đoạn đã bán được nhả
 
-    HOLDING_ONLINE --> CONFIRMED_PAID : Webhook Napas/VietQR báo đã thanh toán
-    HOLDING_ONLINE --> AVAILABLE : Hết hạn 10 phút / Khách hủy chọn
+    HELD --> BOOKED : ngân hàng báo đủ tiền (webhook IPN)
+    HELD --> AVAILABLE : hết hạn hoặc khách bỏ chọn
 
-    HOLDING_HOTLINE --> CONFIRMED_PAID : Khách thanh toán qua link SMS/VietQR
-    HOLDING_HOTLINE --> AVAILABLE : Quá hạn giữ chỗ / Scheduler tự thu hồi
+    HOTLINE_HOLD --> BOOKED : khách lấy vé ở quầy trước hạn
+    HOTLINE_HOLD --> AVAILABLE : hết hạn hoặc hủy giữ chỗ
 
-    CONFIRMED_PAID --> BOARDED : Quét Dynamic QR / Nhập PIN thành công (DRI-009)
-    CONFIRMED_PAID --> NO_SHOW : Quá giờ xuất bến, tài xế xác nhận vắng mặt (DRI-011)
+    BLOCKED --> AVAILABLE : điều phối mở khóa
 
-    SOLD_HAIL --> BOARDED : Khách đã ngồi lên xe và thu tiền mặt COD
-    
-    BOARDED --> COMPLETED : Chuyến xe về bến cuối an toàn
-    NO_SHOW --> [*]
-    COMPLETED --> [*]
+    BOOKED --> AVAILABLE : khách hủy vé (PAX-021)
+    BOOKED --> PARTIALLY_BOOKED : vắng mặt, ghế nhả từ điểm xe đã tới (DRI-011)
 ```
 
----
+Trạng thái của **vé** (ví vé `PAX-016`) đi riêng: `ACTIVE` đến `BOARDED` (quét QR, PIN hoặc tay), `NO_SHOW` (tài xế đánh dấu), `CANCELLED` (khách hủy). Ghế của vé `BOARDED` vẫn tính là đã bán đến hết đoạn của khách; ghế của vé `NO_SHOW` được nhả từ điểm xe đã tới (`OQ-028`). Tab của ví: vé `BOARDED` ở **Sắp đi** đến hết chuyến (`BR-MYTICKETS-004`).
 
-## 4. Tổng Hợp Các Điểm Kết Nối Kỹ Thuật (Integration Technical Matrix)
+## 4. Điểm nối kỹ thuật
 
-| Kịch Bản | Trigger Điểm Đầu | Giao Thức / Endpoint | Dữ Liệu Trao Đổi | Điểm Đến Nhận Sự Kiện |
+| Kịch bản | Khởi phát | Endpoint thật | Sự kiện nội bộ | Bên nhận |
 | :--- | :--- | :--- | :--- | :--- |
-| **Giữ ghế tức thì** | Khách chọn ghế trên PAX-009 | `POST /passenger/bookings/hold` | `{tripId, seatNumbers, passengerId}` | Redis Lock `SETNX` + WS broadcast `seat_status_changed` |
-| **Xác nhận tiền về** | Ngân hàng bắn IPN | `POST /webhooks/vietqr-ipn` | `{reference, amount, transId}` | WS emit `payment_confirmed` -> PAX-014 bật màn hình vé |
-| **Soát vé ngoại tuyến** | Phụ xe quét QR trong hầm | Local SQLite lookup | `HMAC_SHA256(ticketId, secret, timeWindow)` | Âm thanh Ting! trên DRI-009 + Ghi vào Outbox Sync |
-| **Đón khách vẫy** | Phụ xe bấm trên DRI-007 | `POST /driver/trips/:id/hail-passengers` | `{seatNumber, dropoffStop, fare}` | Ghế đổi đỏ trên PAX-009 + Tăng doanh thu chuyến trên MGR-013 |
-| **Đổi xe khẩn cấp** | Điều hành chọn trên MGR-023 | `POST /ops/trips/:id/swap-vehicle` | `{replacementBusId, replacementDriverId}` | Vé mới gửi về PAX-025 + Lệnh điều động gửi về DRI-NEW |
+| Giữ ghế | Khách chọn ghế | `POST /trips/{id}/seats/hold` | | Ma trận ghế điều hành, sơ đồ ghế app |
+| Tiền về | Ngân hàng | `POST /webhooks/vietqr/ipn` | `TICKET_SETTLED` | Manifest tài xế, đơn và doanh thu điều hành, thông báo khách |
+| Lên xe | Tài xế quét | `POST /driver/trips/{id}/boarding` | `PASSENGER_BOARDED` | Vé của khách, số khách lên xe |
+| Vắng mặt | Tài xế | `POST /driver/trips/{id}/tickets/{id}/no-show` | `PASSENGER_NO_SHOW` | Vé của khách, số vắng mặt, thông báo |
+| Thu COD | Tài xế | `POST /driver/trips/{id}/payments/cod-collect` | `COD_COLLECTED` | Đơn `PAID` ở điều hành, ví khách khi `WALLET_CREDIT` |
+| Trả nợ tiền thừa | Thu ngân | `POST /ops/debt-receipts/{code}/redeem` | | Nhật ký kiểm toán |
+| Khách vẫy | Tài xế | `POST /driver/trips/{id}/onboard-hail` | `HAIL_BOARDED` | Kho ghế, doanh thu điều hành |
+| Hotline | Tổng đài | `POST /ops/pos/hotline-hold` | | Ma trận ghế, sơ đồ ghế app |
+| Khóa ghế | Điều phối | `POST /ops/trips/{id}/seats/override-lock` | | Sơ đồ ghế app, quầy, hotline |
+| Bắt đầu chuyến | Tài xế | `POST /driver/trips/{id}/start` | `TRIP_STARTED` | Chuyến và xe ở điều hành thành `IN_TRANSIT` |
+| GPS | Tài xế | `POST /driver/trips/{id}/telemetry` | `DRIVER_TELEMETRY` | Theo dõi của khách, radar điều hành |
+| Sự cố | Tài xế | `POST /driver/trips/{id}/incidents` | `INCIDENT_ALERT` | Cảnh báo điều hành, thông báo khách |
+| Đổi xe | Điều hành | `POST /ops/trips/{id}/replace-vehicle` | `VEHICLE_SWAPPED` | Tài xế mới và cũ, thông báo khách |
+| Hoãn chuyến | Điều hành | `POST /ops/trips/{id}/delay` | `TRIP_DELAYED` | Thông báo khách; hủy vé miễn phí khi chậm quá 30 phút |
+| Hủy vé | Khách | `POST /passenger/tickets/{id}/cancel` | `TICKET_CANCELLED` | Ghế nhả, manifest, yêu cầu hoàn tiền ở `MGR-022` |
+| Kết thúc chuyến | Tài xế | `POST /driver/trips/{id}/end` | `TRIP_COMPLETED` | Chuyến `COMPLETED`, vé sang tab Lịch sử |
+
+## 5. Quy ước cho mọi luồng
+
+1. Server là nguồn sự thật: app không coi một thao tác là xong trước khi nhận `2xx`.
+2. Danh tính lấy từ token, giá do server tính, giờ chạy lấy từ vé (`api-screen-map` mục 6).
+3. Mọi thao tác ghi có `Idempotency-Key`; gửi lại cùng khóa trả cùng kết quả.
+4. Hình ảnh sơ đồ (`images/`) không còn lưu trong repo vì bản cũ vẽ sai hành vi; các khối Mermaid trong tài liệu hiển thị trực tiếp. Dựng lại ảnh bằng `npm run render:diagrams` khi có `@mermaid-js/mermaid-cli`.

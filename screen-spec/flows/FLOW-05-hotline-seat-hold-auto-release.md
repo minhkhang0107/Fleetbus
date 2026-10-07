@@ -1,87 +1,62 @@
-# FLOW-05: Giữ Chỗ Qua Hotline & Tự Động Thu Hồi Ghế (Hotline Seat Hold & Auto-Release)
+# FLOW-05: Giữ chỗ hotline, khóa ghế kỹ thuật và tự nhả ghế
 
-**Mã tài liệu:** `FLOW-05`  
-**Phiên bản:** 1.0  
-**Liên kết màn hình:** [MGR-020](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/manager/MGR-020-hotline-booking-modal.md), [MGR-013](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/manager/MGR-013-seat-inventory-matrix.md), [MGR-017](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/manager/MGR-017-booking-management.md), [PAX-009](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/passenger/PAX-009-seat-selection.md), [DRI-007](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/driver/DRI-007-passenger-manifest-route.md)
-
----
-
-## 1. Mục Tiêu & Mô Tả Nghiệp Vụ
-
-Một lượng lớn khách hàng quen hoặc người lớn tuổi đặt vé thông qua Tổng đài Hotline của nhà xe (Call Center).
-Đặc thù của đặt vé qua điện thoại:
-1. **Khách xin giữ chỗ nhưng chưa thanh toán ngay**: Nhà xe cam kết giữ ghế đến trước giờ xe xuất bến 2 tiếng (hoặc theo hạn nộp tiền do tổng đài viên thiết lập: 30 phút, 2 tiếng, 24 tiếng).
-2. **Nguy cơ bỏ bom vé (Ghost Booking)**: Nếu khách đổi ý không đi mà không gọi báo hủy, ghế đó sẽ bị khóa lãng phí, khiến khách trên mạng hoặc khách tại quầy không mua được.
-
-Hệ thống cung cấp giải pháp **Giữ Chỗ Hotline Có Thời Gian Sống (Hotline Hold TTL) & Tự Động Thu Hồi**:
-- Tổng đài viên thao tác giữ ghế trên modal `MGR-020`, thiết lập thời gian hết hạn (`expireAt`).
-- Hệ thống gửi tin nhắn SMS / Zalo ZNS kèm đường link thanh toán trực tuyến VietQR cho hành khách.
-- Một Background Scheduler (Cron Worker) chạy định kỳ mỗi 60 giây kiểm tra các đơn hàng hotline quá hạn.
-- Nếu quá hạn mà khách chưa thanh toán: Đơn tự động hủy, ghế tự động mở lại trạng thái "Trống" trên toàn hệ thống thời gian thực.
+**Mã tài liệu:** `FLOW-05`
+**Phiên bản:** 2.0 (Giai đoạn C)
+**Màn hình:** [MGR-020](../manager/MGR-020-pos-seat-map-checkout.md), [MGR-013](../manager/MGR-013-trip-seat-inventory.md), [PAX-009](../passenger/PAX-009-seat-map.md), [DRI-007](../driver/DRI-007-manifest.md)
 
 ---
 
-## 2. Sơ Đồ Trình Tự Tương Tác (Mermaid Sequence Diagram)
+## 1. Mục tiêu
 
-> [!TIP]
-> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/FLOW-05-hotline-seat-hold-auto-release.svg) | [Xem ảnh PNG HD](./images/FLOW-05-hotline-seat-hold-auto-release.png)
+Tổng đài viên giữ ghế cho khách gọi điện đến một hạn nhất định; trong thời gian đó ghế không bán được ở kênh nào khác, và hết hạn thì tự nhả. Điều phối viên cũng có thể khóa ghế hỏng và mở lại. Cả hai đều hiện ở ma trận ghế của điều hành và ở sơ đồ ghế của app.
 
-![UML Sequence Diagram FLOW-05](./images/FLOW-05-hotline-seat-hold-auto-release.svg)
+## 2. Các bước và API thật
+
+| # | Bước | Màn hình | API | Bên khác thấy gì | Test |
+| :-- | :--- | :--- | :--- | :--- | :--- |
+| 1 | Giữ ghế cho khách gọi: hạn theo `UNTIL_DEPARTURE_OFFSET` (trước giờ chạy n phút) hoặc `CUSTOM_EXPIRY_MINUTES` | MGR-020 | `POST /api/v1/ops/pos/hotline-hold` `{tripId, passengerName, phone, seatCodes, holdPolicy, ...}` | Ma trận ghế hiện `HOTLINE_HOLD` kèm hạn; app hiện `LOCKED_BY_OTHER` | `TC-FLOW-C09`, `TC-SPEC-A46` |
+| 2 | Một số điện thoại giữ tối đa 4 ghế cùng lúc, mọi chuyến | MGR-020 | cùng API | Vượt: `400 HOTLINE_LIMIT_EXCEEDED`, không khóa ghế nào (`BR-POS-006`) | `TC-FLOW-C09` |
+| 3 | Khách đến quầy lấy vé trước hạn | MGR-020 | `POST /api/v1/ops/pos/orders` `{reservationId, ...}` | Ghế `BOOKED` | `TC-SPEC-A46` |
+| 4 | Hết hạn mà khách không đến: ghế tự nhả ở lần đọc hoặc bán kế tiếp | MGR-013, PAX-009 | (không cần worker) | Ghế `AVAILABLE`; số điện thoại đó giữ lại được; khách khác mua được | `TC-FLOW-C09` |
+| 5 | Điều phối viên khóa ghế hỏng (bắt buộc ghi lý do) | MGR-013 | `POST /api/v1/ops/trips/{tripId}/seats/override-lock` `{seatCodes, locked: true, reason}` | App hiện `BLOCKED`; giữ, mua ở app, quầy, hotline đều bị `409`; ghế đã bán hoặc đang giữ không khóa được | `TC-FLOW-C03` |
+| 6 | Mở khóa | MGR-013 | cùng API, `locked: false` | Ghế `AVAILABLE`; mở ghế không bị khóa: `409 SEAT_NOT_BLOCKED` | `TC-FLOW-C03` |
+
+## 3. Sơ đồ
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor CALLER as 📞 Khách Gọi Hotline
-    actor OPR as 🎧 Tổng Đài Viên (MGR-020)
-    participant GW as ⚙️ API Gateway
-    participant DB as 🗄️ PostgreSQL Database
-    participant CRON as ⏰ Scheduler Worker (Cron/BullMQ)
-    participant WS as ⚡ WebSocket Event Bus
-    actor ONLINE as 📱 Khách Đặt Online (PAX-009)
-    actor DRI as 🚍 Tài Xế (DRI-007)
+    actor CALLER as Khách gọi hotline
+    actor OPR as Tổng đài (MGR-020)
+    participant GW as API server
+    participant INV as Kho ghế dùng chung
+    actor ONL as Khách online (PAX-009)
+    actor DSP as Điều phối (MGR-013)
 
-    %% 1. Tiếp nhận cuộc gọi & Giữ chỗ
-    Note over CALLER,OPR: 1. Khách gọi Hotline đặt vé xe về quê
-    CALLER->>OPR: "Giúp tôi giữ 2 ghế A08, A09 chuyến 19:00 tối nay"
-    OPR->>OPR: Mở MGR-020: Nhập SĐT, Họ tên khách, chọn 2 ghế A08, A09
-    OPR->>OPR: Đặt thời hạn giữ chỗ: "Đến 17:00 (Trước 2 tiếng)"
-    OPR->>GW: POST /api/v1/ops/bookings/hotline-hold<br/>{tripId: "TRIP101", seats: ["A08", "A09"], phone: "0912345678", holdUntil: "2026-09-15T17:00:00Z"}
-    activate GW
-    GW->>DB: INSERT INTO bookings (type='HOTLINE_HOLD', status='HELD', expire_at='2026-09-15T17:00:00Z')
-    GW->>WS: Broadcast event: "seat_status_changed"<br/>{seats: ["A08", "A09"], status: "HOTLINE_HOLD", expireAt: "17:00"}
-    GW-->>OPR: 200 OK {bookingId: "HOT-55", paymentUrl: "https://busgo.vn/pay/HOT-55"}
-    deactivate GW
-    
-    %% Thông báo SMS & Hiển thị trạng thái
-    WS-->>ONLINE: Ghế A08, A09 chuyển sang màu Cam (Giữ chỗ Tổng đài - Không thể chọn)
-    WS-->>DRI: Sơ đồ xe DRI-007 ghi chú "Ghế A08, A09: Giữ chỗ Hotline đến 17h"
-    GW->>CALLER: Bắn tin nhắn SMS Brandname: "BusGo: Quý khách đã giữ ghế A08, A09. Vui lòng thanh toán trước 17:00 tại: busgo.vn/pay/HOT-55"
-
-    %% 2. Quá hạn thanh toán & Tự động thu hồi ghế
-    Note over CRON,WS: 2. Đến 17:01 - Khách không thanh toán -> Tự động thu hồi ghế
-    CRON->>DB: SELECT * FROM bookings WHERE type='HOTLINE_HOLD' AND status='HELD' AND expire_at <= NOW()
-    activate CRON
-    DB-->>CRON: Trả về booking HOT-55 (Quá hạn 1 phút)
-    CRON->>DB: UPDATE bookings SET status='AUTO_EXPIRED_CANCELLED' WHERE id='HOT-55'
-    CRON->>WS: Broadcast event: "seat_status_changed"<br/>{seats: ["A08", "A09"], status: "AVAILABLE", reason: "HOTLINE_EXPIRED"}
-    deactivate CRON
-
-    %% 3. Tức thì mở bán lại cho cộng đồng
-    Note over WS,DRI: 3. Giải phóng ghế tức thì cho hành khách khác
-    par Cập nhật Khách Online
-        WS-->>ONLINE: Ghế A08, A09 lập tức đổi từ Cam sang Xanh Lá Cây (Trống)
-        ONLINE->>ONLINE: Khách khác có thể nhấn chọn mua ngay lập tức!
-    and Cập nhật Bảng Điều Hành
-        WS-->>OPR: MGR-013 chuyển ghế về Xanh, xóa tag giữ chỗ
-    and Cập nhật Tài Xế
-        WS-->>DRI: DRI-007 xóa tên khách khỏi danh sách chờ đón
-    end
+    CALLER->>OPR: xin giữ ghế đến một giờ nhất định
+    OPR->>GW: POST /ops/pos/hotline-hold {tripId, phone, seatCodes, holdPolicy}
+    GW->>GW: nhả các hold đã hết hạn, kiểm tối đa 4 ghế mỗi số điện thoại
+    GW->>INV: khóa ghế cho đến hold_until
+    GW-->>OPR: 201 {reservation_id, hold_until}
+    ONL->>GW: POST /trips/{id}/seats/hold {seatCodes: [ghế giữ]}
+    GW-->>ONL: 409 SEAT_LOCKED_BY_OTHER
+    Note over INV: hết hạn, khóa tự rã ở lần đọc kế tiếp
+    ONL->>GW: POST /trips/{id}/seats/hold
+    GW-->>ONL: 200 (ghế đã trống)
+    DSP->>GW: POST /ops/trips/{id}/seats/override-lock {seatCodes, locked: true, reason}
+    GW->>INV: ghế BLOCKED
+    ONL->>GW: POST /trips/{id}/seats/hold {seatCodes: [ghế khóa]}
+    GW-->>ONL: 409 SEAT_BLOCKED
 ```
 
----
+## 4. Quy tắc
 
-## 3. Chính Sách Nghiệp Vụ Chống Lạm Dụng Giữ Chỗ
+0. Giữ chỗ hotline và bán vé ở quầy cũng theo đoạn đi (`pickupStopId`, `dropoffStopId`, mặc định cả tuyến): một ghế giữ cho đoạn sau vẫn bán được cho đoạn trước (`BR-POS-007`, `TC-SEG-05`).
+1. Hotline, quầy, app và tài xế dùng chung kho ghế (`BR-POS-004`, `BR-POS-005`).
+2. Hạn giữ chỗ tự rã, không cần bộ lập lịch: mọi lần đọc ma trận, bán vé hay giữ chỗ đều nhả trước (`releaseExpiredHotlineHolds`).
+3. Giới hạn 4 ghế mỗi số điện thoại không tính hold đã hết hạn hoặc đã hủy.
+4. Mọi lần khóa và mở khóa ghế ghi vào nhật ký kiểm toán (`SEAT_BLOCKED`, `SEAT_UNBLOCKED`).
 
-1. **Giới hạn số ghế / SĐT**: Mỗi số điện thoại gọi hotline chỉ được giữ tối đa 4 ghế cùng lúc nếu chưa có tiền cọc.
-2. **Danh sách đen (Blacklist Ghost Callers)**: Nếu một số điện thoại có 3 lần giữ chỗ hotline để tự động hết hạn mà không đi trong vòng 30 ngày, hệ thống sẽ tự động hạ mức ưu tiên và yêu cầu chuyển khoản 100% trước khi cho phép giữ chỗ tiếp theo.
-3. **Cảnh báo trước khi hết hạn (Pre-expiry Reminder)**: Trước thời điểm hủy ghế 15 phút, hệ thống tự động bắn 1 thông báo Zalo ZNS / SMS nhắc nhở hành khách thanh toán.
+## 5. Khác với bản cũ
+
+Đã bỏ vì không màn hình nào có và không có kênh gửi tin: danh sách đen khách giữ chỗ rồi bỏ, nhắc 15 phút trước khi hết hạn qua Zalo hoặc SMS, đường dẫn thanh toán `busgo.vn/pay/HOT-55` (`OQ-031`). Đường dẫn cũ `POST /ops/bookings/hotline-hold` đổi thành `POST /ops/pos/hotline-hold`.

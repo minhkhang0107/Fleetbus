@@ -42,6 +42,18 @@ export class FleetBusEventBridge extends EventEmitter {
     if (trackingService) trackingService.eventBridge = this;
     if (seatMapService) seatMapService.eventBridge = this;
     if (paymentService && seatMapService) paymentService.seatMapService = seatMapService;
+    // The stops of a trip, in order: the passenger trip (PAX-008) is the authority, a driver-only trip uses its own
+    if (seatMapService) {
+      seatMapService.stopsProvider = (tripId) => {
+        const passengerTrip = services.searchService?.getTripDetail?.(tripId);
+        if (passengerTrip?.success) return passengerTrip.data.stops;
+        return driverService?.activeTrips?.get(tripId)?.stops || null;
+      };
+    }
+    // PAX-025: the official delay of a trip is the one the manager declared (MGR-024)
+    if (paymentService && managerService) {
+      paymentService.getTripDelayMinutes = (tripId) => managerService.findTrip(tripId)?.delay_minutes || 0;
+    }
 
     // -------------------------------------------------------------------------
     // 1. TICKET_SETTLED: Passenger Booking & VietQR Payment -> Driver & Manager
@@ -51,7 +63,7 @@ export class FleetBusEventBridge extends EventEmitter {
 
       // A. Seat Map: Permanently lock seats as BOOKED
       if (seatMapService && typeof seatMapService.confirmBooking === 'function') {
-        seatMapService.confirmBooking(tripId, order.seat_codes);
+        seatMapService.confirmBooking(tripId, order.seat_codes, order.pnr, { pickupStopId: order.pickup_stop_id, dropoffStopId: order.dropoff_stop_id });
       }
 
       // B. Driver Cockpit: Append newly issued tickets to Driver Manifest
@@ -70,6 +82,8 @@ export class FleetBusEventBridge extends EventEmitter {
                 seat_code: tkt.seat_code,
                 pickup_stop: tkt.pickup_stop,
                 dropoff_stop: tkt.dropoff_stop,
+                pickup_stop_id: tkt.pickup_stop_id,
+                dropoff_stop_id: tkt.dropoff_stop_id,
                 boarding_status: 'NOT_BOARDED',
                 payment_method: 'PREPAID',
                 cod_amount_vnd: 0,
@@ -158,31 +172,77 @@ export class FleetBusEventBridge extends EventEmitter {
     });
 
     // -------------------------------------------------------------------------
+    // 2b. PASSENGER_NO_SHOW: Driver marks absence -> Passenger ticket, Passenger push & Manager count (DRI-011)
+    // -------------------------------------------------------------------------
+    this.on('PASSENGER_NO_SHOW', ({ tripId, ticketId, pnr, seatCode, phone, currentStopId = null }) => {
+      // OQ-028: the seat is free again from the stop the bus has reached; the part already driven stays sold
+      if (seatMapService && seatCode && typeof seatMapService.releaseBooking === 'function') {
+        seatMapService.releaseBooking(tripId, [seatCode], { pnr, fromStopId: currentStopId });
+      }
+      if (paymentService && paymentService.tickets) {
+        const ticket = paymentService.tickets.get(ticketId)
+          || Array.from(paymentService.tickets.values()).find(t => t.pnr === pnr && t.seat_code === seatCode);
+        if (ticket && ticket.status === 'ACTIVE') {
+          ticket.status = 'NO_SHOW';
+          ticket.no_show_at = new Date().toISOString();
+        }
+      }
+      const mgrTrip = managerService?.findTrip?.(tripId);
+      if (mgrTrip) {
+        mgrTrip.no_show_passengers = (mgrTrip.no_show_passengers || 0) + 1;
+      }
+      if (phone && trackingService && typeof trackingService.sendNotification === 'function') {
+        trackingService.sendNotification(phone, {
+          title: 'Vé được ghi nhận vắng mặt',
+          body: `Tài xế đã ghi nhận bạn vắng mặt tại chuyến ${tripId} (Ghế ${seatCode}). Vui lòng liên hệ tổng đài nếu có nhầm lẫn.`,
+          type: 'NO_SHOW',
+          payload: { trip_id: tripId, ticket_id: ticketId, seat_code: seatCode }
+        });
+      }
+    });
+
+    // -------------------------------------------------------------------------
+    // 2c. TRIP_STARTED: Driver starts the trip -> Manager trip & vehicle go in transit (DRI-005)
+    // -------------------------------------------------------------------------
+    this.on('TRIP_STARTED', ({ tripId, vehiclePlate }) => {
+      const mgrTrip = managerService?.findTrip?.(tripId);
+      if (mgrTrip) mgrTrip.status = 'IN_TRANSIT';
+      const vehicle = managerService?.vehicles?.find(v => v.vehicle_id === mgrTrip?.vehicle_id)
+        || managerService?.vehicles?.find(v => v.plate_number === vehiclePlate);
+      if (vehicle) vehicle.status = 'IN_TRANSIT';
+    });
+
+    // -------------------------------------------------------------------------
     // 3. DRIVER_TELEMETRY: Driver GPS Stream -> Passenger Live Radar & Manager 60Hz Radar
     // -------------------------------------------------------------------------
     this.on('DRIVER_TELEMETRY', ({ tripId, telemetry }) => {
-      // A. Passenger Live Radar HUD
+      const pingAt = Date.parse(telemetry.timestamp) || Date.now();
+
+      // A. Passenger Live Radar HUD (the age of the position is the age of the ping, not of its arrival)
       if (trackingService && typeof trackingService.updateBusPosition === 'function') {
         trackingService.updateBusPosition(tripId, {
           lat: telemetry.lat,
           lng: telemetry.lng,
           speed_kmh: telemetry.speed_kmh,
           bearing_deg: telemetry.bearing_deg,
-          plate_number: telemetry.vehicle_plate
+          plate_number: telemetry.vehicle_plate,
+          mockNow: pingAt
         });
       }
 
-      // B. Manager 60Hz Fleet Radar Map
+      // B. Manager Fleet Radar: the vehicle of the trip, found through the manager trip first and the plate second
       if (managerService && managerService.vehicles) {
-        const vehicle = managerService.vehicles.find(v => v.plate_number === telemetry.vehicle_plate || v.vehicle_id === telemetry.vehicle_id);
-        if (vehicle) {
+        const mgrTrip = managerService.findTrip?.(tripId);
+        const vehicle = managerService.vehicles.find(v => v.vehicle_id === mgrTrip?.vehicle_id)
+          || managerService.vehicles.find(v => v.plate_number === telemetry.vehicle_plate);
+        if (vehicle && pingAt >= (vehicle.last_ping_at || 0)) {
           vehicle.lat = telemetry.lat;
           vehicle.lng = telemetry.lng;
           vehicle.speed_kmh = telemetry.speed_kmh;
           vehicle.heading = telemetry.bearing_deg !== undefined ? telemetry.bearing_deg : vehicle.heading;
-          vehicle.status = telemetry.speed_kmh > 0 ? 'IN_TRANSIT' : 'STANDBY';
-          vehicle.gps_status = 'LIVE';
-          vehicle.gps_health = 'LIVE';
+          vehicle.last_ping_at = pingAt;
+          // The vehicle status follows the trip (TRIP_STARTED, TRIP_COMPLETED), not the speed: a bus stopped at a
+          // rest stop is still in transit and must not look like a standby vehicle free for a replacement.
         }
       }
     });
@@ -241,7 +301,7 @@ export class FleetBusEventBridge extends EventEmitter {
 
       // A. Seat Map: Mark seats as BOOKED
       if (seatMapService && typeof seatMapService.confirmBooking === 'function') {
-        seatMapService.confirmBooking(tripId, seatCodes);
+        seatMapService.confirmBooking(tripId, seatCodes, booking.pnr, { pickupStopId: booking.pickup_stop_id, dropoffStopId: booking.dropoff_stop_id });
       }
 
       // B. Driver Cockpit Manifest
@@ -258,6 +318,8 @@ export class FleetBusEventBridge extends EventEmitter {
               seat_code: seatCode,
               pickup_stop: 'Bến xe trung tâm (POS)',
               dropoff_stop: 'Bến xe đích (POS)',
+              pickup_stop_id: booking.pickup_stop_id,
+              dropoff_stop_id: booking.dropoff_stop_id,
               boarding_status: 'NOT_BOARDED',
               payment_method: booking.payment_method || 'CASH_POS',
               cod_amount_vnd: 0,
@@ -290,6 +352,8 @@ export class FleetBusEventBridge extends EventEmitter {
             passenger_phone: booking.phone,
             pickup_stop: 'Bến xe trung tâm',
             dropoff_stop: 'Bến xe đích',
+            pickup_stop_id: booking.pickup_stop_id,
+            dropoff_stop_id: booking.dropoff_stop_id,
             status: 'ACTIVE',
             created_at: new Date().toISOString(),
             boarded_at: null
@@ -301,13 +365,10 @@ export class FleetBusEventBridge extends EventEmitter {
     // -------------------------------------------------------------------------
     // 6. VEHICLE_SWAPPED: Manager Emergency Swap -> Driver Vehicle Plate & Passenger Disruption
     // -------------------------------------------------------------------------
-    this.on('VEHICLE_SWAPPED', ({ tripId, oldPlate, newPlate, reason }) => {
-      // A. Driver Cockpit: Update assigned vehicle plate
-      if (driverService && driverService.activeTrips) {
-        const trip = driverService.activeTrips.get(tripId);
-        if (trip) {
-          trip.vehicle_plate = newPlate;
-        }
+    this.on('VEHICLE_SWAPPED', ({ tripId, oldPlate, newPlate, newDriverId = null, reason }) => {
+      // A. Driver Cockpit: the trip moves to the new vehicle and, when named, to the new driver
+      if (driverService && typeof driverService.reassignTrip === 'function') {
+        driverService.reassignTrip(tripId, { vehiclePlate: newPlate, driverId: newDriverId });
       }
 
       // B. Passenger Radar: Register vehicle replacement disruption & notify passengers
@@ -399,7 +460,7 @@ export class FleetBusEventBridge extends EventEmitter {
 
       // B. Seat Map: Release seat back to AVAILABLE
       if (seatMapService && resolvedTripId && resolvedSeatCode && typeof seatMapService.releaseBooking === 'function') {
-        seatMapService.releaseBooking(resolvedTripId, [resolvedSeatCode]);
+        seatMapService.releaseBooking(resolvedTripId, [resolvedSeatCode], { pnr: resolvedPnr });
       }
 
       // B2. Manager: one seat less sold on the trip
@@ -474,7 +535,7 @@ export class FleetBusEventBridge extends EventEmitter {
     this.on('HAIL_BOARDED', ({ tripId, passenger, fareVnd }) => {
       // The seat is sold for good in the shared inventory (OQ-014)
       if (seatMapService && typeof seatMapService.confirmBooking === 'function') {
-        seatMapService.confirmBooking(tripId, [passenger.seat_code]);
+        seatMapService.confirmBooking(tripId, [passenger.seat_code], passenger.pnr, { pickupStopId: passenger.pickup_stop_id, dropoffStopId: passenger.dropoff_stop_id });
       }
       if (!managerService) return;
       const mgrTrip = managerService.trips?.find(t => t.trip_id === tripId);
@@ -506,6 +567,12 @@ export class FleetBusEventBridge extends EventEmitter {
     // 9. TRIP_COMPLETED: Driver End Trip -> Manager Status
     // -------------------------------------------------------------------------
     this.on('TRIP_COMPLETED', ({ tripId, summary }) => {
+      // PAX-016: tickets of a finished trip belong to the history tab
+      if (paymentService && paymentService.tickets) {
+        for (const ticket of paymentService.tickets.values()) {
+          if (ticket.trip_id === tripId) ticket.trip_completed = true;
+        }
+      }
       if (managerService) {
         if (managerService.trips) {
           const trip = managerService.findTrip(tripId);

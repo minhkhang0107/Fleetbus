@@ -1,54 +1,26 @@
 sequenceDiagram
     autonumber
-    actor PAX as 📱 Khách Hàng (Passenger App)
-    participant GW as ⚙️ API Gateway / Redis Lock
-    participant DB as 🗄️ PostgreSQL Database
-    participant WS as ⚡ WebSocket Event Bus
-    actor BANK as 🏦 Ngân Hàng / App Banking
-    actor MGR as 🖥️ Điều Hành (Manager Portal)
-    actor DRI as 🚍 Tài Xế (Driver Cockpit)
+    actor PAX as Hành khách (PAX)
+    participant GW as API server
+    participant INV as Kho ghế dùng chung
+    actor BANK as Ngân hàng
+    actor MGR as Điều hành (MGR-013)
+    actor DRI as Tài xế (DRI-007)
 
-    %% 1. Chọn ghế và Giữ chỗ
-    Note over PAX,GW: 1. Giai đoạn chọn ghế & Giữ chỗ 10 phút (Locking)
-    PAX->>GW: POST /api/v1/passenger/bookings/hold<br/>{tripId, seatNumbers: ["A01", "A02"], passengerId}
-    activate GW
-    GW->>GW: Redis SETNX lock:seat:TRIP101:A01 EX 600
-    alt Ghế đã bị người khác chọn
-        GW-->>PAX: 409 Conflict {error: "SEAT_ALREADY_HELD"}
-    else Khóa thành công
-        GW->>DB: INSERT INTO bookings (status: 'HELD', expire_at: NOW() + 10m)
-        GW->>WS: Broadcast room "trip:TRIP101" event: "seat_status_changed"<br/>{seats: ["A01", "A02"], status: "HOLDING"}
-        WS-->>MGR: Cập nhật ma trận ghế MGR-013 (Màu vàng đếm ngược)
-        WS-->>DRI: Cập nhật danh sách ghế chặng DRI-007
-        GW-->>PAX: 200 OK {bookingId: "BKG-789", expireAt: 1726416000, ttlSeconds: 600}
-    end
-    deactivate GW
-
-    %% 2. Tạo mã VietQR
-    Note over PAX,GW: 2. Phát sinh mã thanh toán VietQR EMVCo
-    PAX->>GW: POST /api/v1/passenger/bookings/BKG-789/vietqr
-    activate GW
-    GW-->>PAX: 200 OK {qrData: "00020101021238580010A000000727...", amount: 480000, transferContent: "BUSGO BKG789"}
-    deactivate GW
-
-    %% 3. Thanh toán qua Ngân hàng
-    Note over PAX,BANK: 3. Khách quét QR trên App Ngân Hàng (Napas247)
-    PAX->>BANK: Quét mã QR & Xác thực sinh trắc học FaceID / OTP
-    BANK->>BANK: Xử lý trừ tiền tài khoản & chuyển Napas247
-
-    %% 4. Webhook IPN & Tức Thì Đồng Bộ
-    Note over BANK,GW: 4. Ngân hàng gửi Webhook IPN về Gateway
-    BANK->>GW: POST /api/v1/webhooks/vietqr-ipn<br/>{reference: "BKG789", amount: 480000, transId: "NAPAS998822"}
-    activate GW
-    GW->>GW: Kiểm tra Idempotency & Đối soát số tiền
-    GW->>DB: UPDATE bookings SET status='CONFIRMED', payment_status='PAID'
-    GW->>DB: INSERT INTO tickets (ticketId, qr_payload, status='ISSUED')
-    GW->>WS: Emit to user "booking:BKG-789" event: "payment_confirmed"<br/>{bookingId: "BKG-789", tickets: [...]}
-    GW->>WS: Broadcast room "trip:TRIP101" event: "seat_status_changed"<br/>{seats: ["A01", "A02"], status: "CONFIRMED"}
-    GW-->>BANK: 200 OK {status: "SUCCESS"}
-    deactivate GW
-
-    %% 5. Giao diện người dùng cập nhật
-    WS-->>PAX: Màn hình PAX-013 tự chuyển sang PAX-014 (Vé Điện Tử Kèm QR)
-    WS-->>MGR: Màn hình MGR-013 chuyển ghế A01, A02 sang Đỏ (Đã bán)
-    WS-->>DRI: Màn hình DRI-007 thêm 2 hành khách vào danh sách đón
+    PAX->>GW: POST /trips/{id}/seats/hold {seatCodes}
+    GW->>INV: giữ ghế 10 phút cho người này
+    GW-->>PAX: 200 {hold_id, expires_at}
+    MGR->>GW: GET /ops/trips/{id}/seat-matrix
+    GW-->>MGR: ghế HELD kèm held_until
+    PAX->>GW: POST /bookings/create {tripId, holdId, seatCodes, payer, passengers}
+    GW->>GW: kiểm hold, tự tính giá, tạo đơn và PNR
+    GW-->>PAX: 201 {order, payment: transfer_memo, qr}
+    PAX->>BANK: quét VietQR, chuyển đúng số tiền
+    BANK->>GW: POST /webhooks/vietqr/ipn {transferMemo, amountVnd, bankRef}
+    GW->>GW: kiểm chữ ký, PNR, số tiền; phát hành vé
+    GW->>INV: ghế thành BOOKED kèm PNR
+    GW-->>DRI: hành khách vào manifest
+    GW-->>MGR: đơn mới, số ghế, doanh thu
+    GW-->>PAX: thông báo PAYMENT_SUCCESS; PAX-013 thấy trạng thái PAID khi hỏi lại
+    BANK->>GW: gửi lại cùng thông báo
+    GW-->>BANK: 200, không thay đổi gì

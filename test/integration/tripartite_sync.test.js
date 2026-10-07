@@ -169,10 +169,10 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
     assert.strictEqual(pCheck.boarding_status, 'BOARDED');
     assert.ok(manifestCheck.body.data.boarded_count >= 1, 'Boarded count must be at least 1');
 
-    // Verification B: Passenger Ticket Wallet now reflects COMPLETED/BOARDED status
-    const walletCompleted = await api('/api/v1/passenger/tickets?phone=0988223344&tab=COMPLETED');
+    // Verification B: Passenger Ticket Wallet shows BOARDED; it stays under "Sắp đi" until the trip ends (BR-MYTICKETS-001)
+    const walletCompleted = await api('/api/v1/passenger/tickets?phone=0988223344&tab=UPCOMING');
     const ticketCompleted = walletCompleted.body.data.find(t => t.ticket_id === bookedTicketId);
-    assert.ok(ticketCompleted, 'Ticket must now appear in COMPLETED wallet tab');
+    assert.ok(ticketCompleted, 'A boarded ticket stays in the UPCOMING wallet tab while the trip runs');
     assert.strictEqual(ticketCompleted.status, 'BOARDED');
 
     // Verification C: Passenger receives boarding push notification

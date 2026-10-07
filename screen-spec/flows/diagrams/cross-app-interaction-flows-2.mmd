@@ -1,21 +1,21 @@
 stateDiagram-v2
-    [*] --> AVAILABLE : Khởi tạo chuyến xe
+    [*] --> AVAILABLE : chuyến được tạo
 
-    AVAILABLE --> HOLDING_ONLINE : Khách online chọn ghế (PAX-009) [TTL: 10 phút]
-    AVAILABLE --> HOLDING_HOTLINE : Tổng đài giữ chỗ (MGR-020) [TTL: Do ĐTV đặt]
-    AVAILABLE --> SOLD_HAIL : Tài xế đón khách vẫy (DRI-007) [Ngay lập tức]
+    AVAILABLE --> HELD : khách online giữ ghế (PAX-010), 10 phút
+    AVAILABLE --> HOTLINE_HOLD : tổng đài giữ chỗ (MGR-020), theo hạn đã đặt
+    AVAILABLE --> BOOKED : quầy bán vé (MGR-020) hoặc tài xế đón khách vẫy (DRI-007)
+    AVAILABLE --> BLOCKED : điều phối khóa ghế kỹ thuật (MGR-013)
+    AVAILABLE --> PARTIALLY_BOOKED : bán cho một đoạn của tuyến
+    PARTIALLY_BOOKED --> BOOKED : các đoạn còn lại cũng được bán
+    PARTIALLY_BOOKED --> AVAILABLE : các đoạn đã bán được nhả
 
-    HOLDING_ONLINE --> CONFIRMED_PAID : Webhook Napas/VietQR báo đã thanh toán
-    HOLDING_ONLINE --> AVAILABLE : Hết hạn 10 phút / Khách hủy chọn
+    HELD --> BOOKED : ngân hàng báo đủ tiền (webhook IPN)
+    HELD --> AVAILABLE : hết hạn hoặc khách bỏ chọn
 
-    HOLDING_HOTLINE --> CONFIRMED_PAID : Khách thanh toán qua link SMS/VietQR
-    HOLDING_HOTLINE --> AVAILABLE : Quá hạn giữ chỗ / Scheduler tự thu hồi
+    HOTLINE_HOLD --> BOOKED : khách lấy vé ở quầy trước hạn
+    HOTLINE_HOLD --> AVAILABLE : hết hạn hoặc hủy giữ chỗ
 
-    CONFIRMED_PAID --> BOARDED : Quét Dynamic QR / Nhập PIN thành công (DRI-009)
-    CONFIRMED_PAID --> NO_SHOW : Quá giờ xuất bến, tài xế xác nhận vắng mặt (DRI-011)
+    BLOCKED --> AVAILABLE : điều phối mở khóa
 
-    SOLD_HAIL --> BOARDED : Khách đã ngồi lên xe và thu tiền mặt COD
-    
-    BOARDED --> COMPLETED : Chuyến xe về bến cuối an toàn
-    NO_SHOW --> [*]
-    COMPLETED --> [*]
+    BOOKED --> AVAILABLE : khách hủy vé (PAX-021)
+    BOOKED --> PARTIALLY_BOOKED : vắng mặt, ghế nhả từ điểm xe đã tới (DRI-011)

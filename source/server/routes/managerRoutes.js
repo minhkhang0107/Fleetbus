@@ -9,7 +9,8 @@ import { ADMIN_ROLE } from '../core/gateway.js';
 
 // Seat conflicts and reservation mismatches are conflicts (409); a missing trip or reservation is 404.
 function inventoryErrorStatus(code) {
-  if (['SEAT_ALREADY_BOOKED', 'SEAT_LOCKED_BY_OTHER', 'RESERVATION_MISMATCH', 'TRIP_FULL'].includes(code)) return 409;
+  if (['STOP_NOT_FOUND', 'INVALID_SEGMENT', 'STOP_NOT_ALLOWED'].includes(code)) return 400;
+  if (['SEAT_ALREADY_BOOKED', 'SEAT_LOCKED_BY_OTHER', 'SEAT_BLOCKED', 'SEAT_ALREADY_BLOCKED', 'SEAT_NOT_BLOCKED', 'RESERVATION_MISMATCH', 'TRIP_FULL'].includes(code)) return 409;
   if (['TRIP_NOT_FOUND', 'RESERVATION_NOT_FOUND'].includes(code)) return 404;
   return 400;
 }
@@ -41,7 +42,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   if ((pathname === '/api/v1/ops/auth/login' || pathname === '/api/v1/auth/staff/login') && req.method === 'POST') {
     parseJsonBody(req).then(body => {
       const username = String(body.username || body.email || '').trim().toLowerCase();
-      const result = managerService.authenticateStaff(username, body.password);
+      const result = managerService.authenticateStaff(username, body.password, body.totp ?? body.totpCode ?? null);
       if (result.success) {
         managerService.recordAudit({ actor: result.data.user.user_id, role: result.data.user.role, action: 'LOGIN', resource: username, ip: req.socket?.remoteAddress || null });
         sendSuccess(res, result.data || result);
@@ -107,6 +108,8 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         paymentMethod: body.paymentMethod || body.payment_method || 'CASH_POS',
         agentStaffId: body.agentStaffId || 'stf_pos_01',
         reservationId: body.reservationId || body.reservation_id || null,
+        pickupStopId: body.pickupStopId || body.pickup_stop_id || null,
+        dropoffStopId: body.dropoffStopId || body.dropoff_stop_id || null,
         mockNow: body.now || Date.now()
       });
 
@@ -133,6 +136,8 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         customExpiryMinutes: body.customExpiryMinutes || body.custom_expiry_minutes || 60,
         notes: body.notes || '',
         agentStaffId: body.agentStaffId || 'stf_hotline_01',
+        pickupStopId: body.pickupStopId || body.pickup_stop_id || null,
+        dropoffStopId: body.dropoffStopId || body.dropoff_stop_id || null,
         mockNow: body.now || Date.now()
       });
 
@@ -163,7 +168,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         audit(req, managerService, { action: 'VEHICLE_SWAP', resource: tripId, before, after: { vehicle_plate: result.data.new_vehicle_plate } });
         sendSuccess(res, result.data || result);
       } else {
-        const status = /_NOT_FOUND$/.test(result.code) ? 404 : (['VEHICLE_UNAVAILABLE', 'CAPACITY_INSUFFICIENT'].includes(result.code) ? 409 : 400);
+        const status = /_NOT_FOUND$/.test(result.code) ? 404 : (['VEHICLE_UNAVAILABLE', 'DRIVER_UNAVAILABLE', 'CAPACITY_INSUFFICIENT'].includes(result.code) ? 409 : 400);
         sendError(res, result.error, result.code, status);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
@@ -239,21 +244,57 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
-  // GET /api/v1/ops/trips/:tripId/seat-inventory (MGR-013)
+  // GET /api/v1/ops/trips/:tripId/seat-matrix or /seat-inventory (MGR-013)
   if (SEAT_INVENTORY_RE.test(pathname) && req.method === 'GET') {
     const tripId = pathname.match(SEAT_INVENTORY_RE)[1];
-    const trip = managerService.findTrip(tripId);
-    if (trip) {
-      sendSuccess(res, {
-        trip_id: tripId,
-        total_seats: trip.total_seats,
-        booked_seats: trip.booked_seats,
-        vacant_seats: trip.total_seats - trip.booked_seats,
-        hotline_holds: managerService.hotlineReservations.filter(r => r.trip_id === tripId && r.status === 'HELD_HOTLINE')
-      });
+    const result = managerService.getSeatMatrix(tripId);
+    if (result.success) {
+      sendSuccess(res, result.data);
     } else {
-      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+      sendError(res, result.error, result.code, 404);
     }
+    return true;
+  }
+
+  // POST /api/v1/ops/trips/:tripId/seats/override-lock (MGR-013, BR-INVENTORY-001)
+  const overrideMatch = pathname.match(/^\/api\/v1\/ops\/trips\/([^/]+)\/seats\/override-lock$/);
+  if (overrideMatch && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const tripId = overrideMatch[1];
+      const locked = body.locked;
+      if (typeof locked !== 'boolean') {
+        sendError(res, 'Cần chỉ rõ locked: true để khóa hoặc false để mở khóa', 'LOCKED_REQUIRED', 400);
+        return;
+      }
+      const result = managerService.setSeatLock(tripId, {
+        seatCodes: body.seatCodes || body.seat_codes || [],
+        locked,
+        reason: body.reason,
+        staffId: req.identity?.sub || null
+      });
+      if (result.success) {
+        audit(req, managerService, { action: locked ? 'SEAT_BLOCKED' : 'SEAT_UNBLOCKED', resource: tripId, after: { seats: result.data.seat_codes, reason: result.data.reason } });
+        sendSuccess(res, result.data);
+      } else {
+        sendError(res, result.error, result.code, inventoryErrorStatus(result.code));
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/ops/debt-receipts/:code/redeem (MGR-022, FLOW-03)
+  const debtMatch = pathname.match(/^\/api\/v1\/ops\/debt-receipts\/([^/]+)\/redeem$/);
+  if (debtMatch && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const code = decodeURIComponent(debtMatch[1]);
+      const result = services.driverService.redeemDebtReceipt(code, { cashierId: req.identity?.sub || null, stationId: body.station_id || body.stationId || null });
+      if (result.success) {
+        audit(req, managerService, { action: 'DEBT_REDEEMED', resource: result.data.receipt_code, before: { status: 'OUTSTANDING' }, after: { status: 'REDEEMED', amount_vnd: result.data.amount_vnd, station: result.data.redeemed_station } });
+        sendSuccess(res, result.data);
+      } else {
+        sendError(res, result.error, result.code, result.code === 'DEBT_RECEIPT_NOT_FOUND' ? 404 : 409);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 

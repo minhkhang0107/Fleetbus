@@ -47,3 +47,17 @@ export function getAuthMode() {
   if (fromEnv === 'off' && !isProduction()) return 'off';
   return 'enforce';
 }
+
+/**
+ * TOTP secret of a staff member (MGR-001, OQ-027). Production reads FLEETBUS_TOTP_SECRET_<USER_ID> (base32, for
+ * example FLEETBUS_TOTP_SECRET_MGR_01); with none set, 2FA roles cannot sign in. Outside production a fixed dev
+ * secret is used so the demo accounts work.
+ */
+export const DEV_TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
+
+export function getStaffTotpSecret(userId) {
+  const fromEnv = process.env[`FLEETBUS_TOTP_SECRET_${String(userId).toUpperCase().replace(/[^A-Z0-9]/g, '_')}`];
+  if (fromEnv) return fromEnv;
+  return isProduction() ? null : DEV_TOTP_SECRET;
+}
+

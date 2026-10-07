@@ -49,7 +49,7 @@ describe('Spec conformance: seat inventory integrity', () => {
     body: { tripId: TRIP, passengerName: 'Khach Quay', phone: '0911000111', seatCodes, ...extra }
   });
   const hold = (seatCodes, userId, trip = TRIP) => api(`/api/v1/trips/${trip}/seats/hold`, { method: 'POST', body: { seatCodes, userId } });
-  const seatState = (seat, trip = TRIP) => services.seatMapService.getSeatMap(trip, 'a', 'b').data.seats.find((s) => s.seat_code === seat).segment_state;
+  const seatState = (seat, trip = TRIP) => services.seatMapService.getSeatMap(trip, null, null).data.seats.find((s) => s.seat_code === seat).segment_state;
 
   it('TC-SPEC-A45: POS validates seats, payment method and never sells a seat twice (MGR-020)', async () => {
     const noSeats = await pos([]);
@@ -108,7 +108,7 @@ describe('Spec conformance: seat inventory integrity', () => {
     const released = services.managerService.releaseExpiredHotlineHolds(t0 + 31 * MINUTE);
     assert.strictEqual(released.released_count, 1);
     assert.strictEqual(services.managerService.findTrip(TRIP).booked_seats, booked);
-    assert.strictEqual(services.seatMapService.getSeatMap(TRIP, 'a', 'b', t0 + 31 * MINUTE).data.seats.find((s) => s.seat_code === 'A06').segment_state, 'AVAILABLE');
+    assert.strictEqual(services.seatMapService.getSeatMap(TRIP, null, null, t0 + 31 * MINUTE).data.seats.find((s) => s.seat_code === 'A06').segment_state, 'AVAILABLE');
   });
 
   it('TC-SPEC-A46b: the hotline caller collects the ticket at the counter without a second sale (MGR-020)', async () => {
@@ -185,7 +185,7 @@ describe('Spec conformance: seat inventory integrity', () => {
     assert.strictEqual(seatState('B01'), 'AVAILABLE', 'the earlier hold is replaced, so a user never holds more than one set');
     assert.strictEqual(seatState('B03'), 'LOCKED_BY_OTHER');
 
-    const mapSeat = services.seatMapService.getSeatMap(TRIP, 'a', 'b').data.seats.find((s) => s.seat_code === 'B03');
+    const mapSeat = services.seatMapService.getSeatMap(TRIP, null, null).data.seats.find((s) => s.seat_code === 'B03');
     assert.ok(!('locked_by_user' in mapSeat), 'the seat map must not reveal who holds a seat');
   });
 

@@ -1,88 +1,73 @@
-# FLOW-01: Đặt Vé, Giữ Chỗ & Thanh Toán VietQR Tức Thì (Instant Booking & Settlement)
+# FLOW-01: Đặt vé, giữ chỗ và thanh toán VietQR
 
-**Mã tài liệu:** `FLOW-01`  
-**Phiên bản:** 1.0  
-**Liên kết màn hình:** [PAX-009](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/passenger/PAX-009-seat-selection.md), [PAX-010](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/passenger/PAX-010-seat-hold-timer.md), [PAX-012](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/passenger/PAX-012-payment-methods.md), [PAX-013](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/passenger/PAX-013-vietqr-transfer.md), [PAX-014](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/passenger/PAX-014-payment-success.md), [MGR-013](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/manager/MGR-013-seat-inventory-matrix.md), [MGR-017](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/manager/MGR-017-booking-management.md)
-
----
-
-## 1. Mục Tiêu & Mô Tả Nghiệp Vụ
-
-Luồng cho phép hành khách chọn ghế trên sơ đồ xe 2 tầng, hệ thống khóa giữ chỗ bằng Redis Distributed Lock trong thời gian đếm ngược 10 phút, tạo mã VietQR động chuẩn EMVCo kèm mã tham chiếu độc nhất (`REF-{bookingId}`). Khi người dùng chuyển khoản qua ứng dụng Mobile Banking, cổng thanh toán bắn Webhook IPN về Backend, hệ thống kích hoạt xác nhận thanh toán tức thì (< 1.5s), tự động xuất vé điện tử và đồng bộ sơ đồ ghế thời gian thực sang Manager Operations Portal và Driver Tactical Cockpit.
+**Mã tài liệu:** `FLOW-01`
+**Phiên bản:** 2.0 (viết lại ở Giai đoạn C theo server thật, xem `docs/review/phase-C-findings.md`)
+**Màn hình:** [PAX-009](../passenger/PAX-009-seat-map.md), [PAX-010](../passenger/PAX-010-seat-hold.md), [PAX-012](../passenger/PAX-012-checkout.md), [PAX-013](../passenger/PAX-013-payment-processing.md), [PAX-014](../passenger/PAX-014-payment-result.md), [PAX-016](../passenger/PAX-016-my-tickets.md), [MGR-013](../manager/MGR-013-trip-seat-inventory.md), [MGR-017](../manager/MGR-017-booking-search.md), [DRI-007](../driver/DRI-007-manifest.md)
 
 ---
 
-## 2. Sơ Đồ Trình Tự Tương Tác (Mermaid Sequence Diagram)
+## 1. Mục tiêu
 
-> [!TIP]
-> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/FLOW-01-booking-vietqr-settlement.svg) | [Xem ảnh PNG HD](./images/FLOW-01-booking-vietqr-settlement.png)
+Hành khách chọn ghế, giữ chỗ 10 phút, tạo đơn, chuyển khoản VietQR. Khi ngân hàng báo tiền về, hệ thống phát hành vé và cả ba bên cùng thấy: ghế đã bán ở sơ đồ ghế của app và của điều hành, hành khách mới trên danh sách của tài xế, đơn mới và doanh thu trên bảng điều hành.
 
-![UML Sequence Diagram FLOW-01](./images/FLOW-01-booking-vietqr-settlement.svg)
+Server hiện chạy một tiến trình với dữ liệu trong bộ nhớ. Không có Redis, PostgreSQL, WebSocket hay MQTT: khóa ghế là bảng giữ chỗ có hạn trong bộ nhớ, các app đọc lại bằng REST (PAX-013 hỏi trạng thái mỗi 3 giây, PAX-018 mỗi 10 giây). Phần dùng hạ tầng thật là kiến trúc đích, không phải hiện trạng (`OQ-002`).
+
+## 2. Các bước và API thật
+
+| # | Bước | Màn hình | API | Bên khác thấy gì | Test |
+| :-- | :--- | :--- | :--- | :--- | :--- |
+| 1 | Chọn ghế, giữ 10 phút (mỗi người một phiên giữ trên một chuyến, tối đa 5 ghế). Có thể chọn đoạn đi bằng `pickupStopId`, `dropoffStopId`; bỏ trống là cả tuyến, và ghế đã bán cho đoạn khác vẫn giữ được cho đoạn còn trống (`BR-SEAT-001`, `TC-SEG-01`) | PAX-009, PAX-010 | `POST /api/v1/trips/{tripId}/seats/hold` `{seatCodes, pickupStopId?, dropoffStopId?}` | Điều hành thấy ghế `HELD` kèm `held_until`; app khác thấy `LOCKED_BY_OTHER` | `TC-FLOW-C01`, `TC-SPEC-A31` |
+| 2 | Tạo đơn: server tự tính giá, bắt buộc `holdId` còn sống của chính người đó | PAX-012 | `POST /api/v1/bookings/create` | Phiên giữ được kéo dài đến hết hạn thanh toán | `TC-SPEC-A13`, `A16` |
+| 3 | Chuyển khoản với nội dung chứa PNR (`BG-xxxxxx`) | PAX-013 | (ngân hàng) | | |
+| 4 | Ngân hàng báo tiền về | PAX-014 | `POST /api/v1/webhooks/vietqr/ipn` `{transferMemo, amountVnd, bankRef}` (chữ ký `X-Signature` khi có secret) | Vé phát hành; ghế `BOOKED` kèm PNR; tài xế có thêm hành khách; điều hành có đơn mới, số ghế tăng, thông báo `PAYMENT_SUCCESS` cho khách | `TC-FLOW-C01`, `TC-SYNC-01`, `TC-SPEC-A14` |
+| 5 | Ngân hàng gửi lại cùng thông báo | | cùng API | Không đổi gì: không thêm vé, không đếm ghế hai lần, không thêm đơn | `TC-FLOW-C01` |
+| 6 | Khách xem vé | PAX-016 | `GET /api/v1/passenger/tickets?tab=UPCOMING` | | `TC-FLOW-C04` |
+
+Nút "Tôi đã chuyển tiền" (`POST /api/v1/passenger/payments/{orderId}/verify-status`) chỉ yêu cầu đối soát, không bao giờ tự phát hành vé (`BR-PAY-004`).
+
+## 3. Sơ đồ
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor PAX as 📱 Khách Hàng (Passenger App)
-    participant GW as ⚙️ API Gateway / Redis Lock
-    participant DB as 🗄️ PostgreSQL Database
-    participant WS as ⚡ WebSocket Event Bus
-    actor BANK as 🏦 Ngân Hàng / App Banking
-    actor MGR as 🖥️ Điều Hành (Manager Portal)
-    actor DRI as 🚍 Tài Xế (Driver Cockpit)
+    actor PAX as Hành khách (PAX)
+    participant GW as API server
+    participant INV as Kho ghế dùng chung
+    actor BANK as Ngân hàng
+    actor MGR as Điều hành (MGR-013)
+    actor DRI as Tài xế (DRI-007)
 
-    %% 1. Chọn ghế và Giữ chỗ
-    Note over PAX,GW: 1. Giai đoạn chọn ghế & Giữ chỗ 10 phút (Locking)
-    PAX->>GW: POST /api/v1/passenger/bookings/hold<br/>{tripId, seatNumbers: ["A01", "A02"], passengerId}
-    activate GW
-    GW->>GW: Redis SETNX lock:seat:TRIP101:A01 EX 600
-    alt Ghế đã bị người khác chọn
-        GW-->>PAX: 409 Conflict {error: "SEAT_ALREADY_HELD"}
-    else Khóa thành công
-        GW->>DB: INSERT INTO bookings (status: 'HELD', expire_at: NOW() + 10m)
-        GW->>WS: Broadcast room "trip:TRIP101" event: "seat_status_changed"<br/>{seats: ["A01", "A02"], status: "HOLDING"}
-        WS-->>MGR: Cập nhật ma trận ghế MGR-013 (Màu vàng đếm ngược)
-        WS-->>DRI: Cập nhật danh sách ghế chặng DRI-007
-        GW-->>PAX: 200 OK {bookingId: "BKG-789", expireAt: 1726416000, ttlSeconds: 600}
-    end
-    deactivate GW
-
-    %% 2. Tạo mã VietQR
-    Note over PAX,GW: 2. Phát sinh mã thanh toán VietQR EMVCo
-    PAX->>GW: POST /api/v1/passenger/bookings/BKG-789/vietqr
-    activate GW
-    GW-->>PAX: 200 OK {qrData: "00020101021238580010A000000727...", amount: 480000, transferContent: "BUSGO BKG789"}
-    deactivate GW
-
-    %% 3. Thanh toán qua Ngân hàng
-    Note over PAX,BANK: 3. Khách quét QR trên App Ngân Hàng (Napas247)
-    PAX->>BANK: Quét mã QR & Xác thực sinh trắc học FaceID / OTP
-    BANK->>BANK: Xử lý trừ tiền tài khoản & chuyển Napas247
-
-    %% 4. Webhook IPN & Tức Thì Đồng Bộ
-    Note over BANK,GW: 4. Ngân hàng gửi Webhook IPN về Gateway
-    BANK->>GW: POST /api/v1/webhooks/vietqr-ipn<br/>{reference: "BKG789", amount: 480000, transId: "NAPAS998822"}
-    activate GW
-    GW->>GW: Kiểm tra Idempotency & Đối soát số tiền
-    GW->>DB: UPDATE bookings SET status='CONFIRMED', payment_status='PAID'
-    GW->>DB: INSERT INTO tickets (ticketId, qr_payload, status='ISSUED')
-    GW->>WS: Emit to user "booking:BKG-789" event: "payment_confirmed"<br/>{bookingId: "BKG-789", tickets: [...]}
-    GW->>WS: Broadcast room "trip:TRIP101" event: "seat_status_changed"<br/>{seats: ["A01", "A02"], status: "CONFIRMED"}
-    GW-->>BANK: 200 OK {status: "SUCCESS"}
-    deactivate GW
-
-    %% 5. Giao diện người dùng cập nhật
-    WS-->>PAX: Màn hình PAX-013 tự chuyển sang PAX-014 (Vé Điện Tử Kèm QR)
-    WS-->>MGR: Màn hình MGR-013 chuyển ghế A01, A02 sang Đỏ (Đã bán)
-    WS-->>DRI: Màn hình DRI-007 thêm 2 hành khách vào danh sách đón
+    PAX->>GW: POST /trips/{id}/seats/hold {seatCodes}
+    GW->>INV: giữ ghế 10 phút cho người này
+    GW-->>PAX: 200 {hold_id, expires_at}
+    MGR->>GW: GET /ops/trips/{id}/seat-matrix
+    GW-->>MGR: ghế HELD kèm held_until
+    PAX->>GW: POST /bookings/create {tripId, holdId, seatCodes, payer, passengers}
+    GW->>GW: kiểm hold, tự tính giá, tạo đơn và PNR
+    GW-->>PAX: 201 {order, payment: transfer_memo, qr}
+    PAX->>BANK: quét VietQR, chuyển đúng số tiền
+    BANK->>GW: POST /webhooks/vietqr/ipn {transferMemo, amountVnd, bankRef}
+    GW->>GW: kiểm chữ ký, PNR, số tiền; phát hành vé
+    GW->>INV: ghế thành BOOKED kèm PNR
+    GW-->>DRI: hành khách vào manifest
+    GW-->>MGR: đơn mới, số ghế, doanh thu
+    GW-->>PAX: thông báo PAYMENT_SUCCESS; PAX-013 thấy trạng thái PAID khi hỏi lại
+    BANK->>GW: gửi lại cùng thông báo
+    GW-->>BANK: 200, không thay đổi gì
 ```
 
----
+## 4. Ngoại lệ
 
-## 3. Các Điểm Kiểm Soát & Xử Lý Ngoại Lệ (Exception & Failure Handling)
-
-| Tình huống ngoại lệ | Cơ chế xử lý kỹ thuật | Trạng thái hiển thị giao diện |
+| Tình huống | Hành vi thật | Hiển thị |
 | :--- | :--- | :--- |
-| **Hết hạn 10 phút chưa thanh toán** | Redis TTL Key Expired → Scheduler bắn worker xóa booking `HELD` → Giải phóng ghế. | PAX-010 hiển thị popup hết giờ, MGR-013 trả ghế về màu Xanh (Trống). |
-| **Khách chuyển thiếu tiền** | Webhook ghi nhận `PARTIALLY_PAID`, gửi tin nhắn SMS cảnh báo bổ sung kèm link thanh toán. | PAX-013 hiển thị cảnh báo: "Đã nhận 400.000đ / 480.000đ. Vui lòng chuyển thêm 80.000đ". |
-| **Khách chuyển thừa tiền** | Webhook ghi nhận `OVERPAID`, hệ thống xác nhận vé và ghi có số tiền thừa vào số dư ví hoàn tự động. | MGR-017 cảnh báo gắn tag `CẦN_HOÀN_TIỀN_THỪA`. |
-| **Webhook trễ / Mất mạng ngân hàng** | Khách nhấn "Tôi đã chuyển tiền" trên PAX-013 → Gọi `GET /api/v1/passenger/bookings/:id/verify-payment` để cưỡng bức truy vấn API ngân hàng. | Spinner quay kiểm tra trực tiếp trạng thái lệnh Napas. |
+| Hết 10 phút chưa thanh toán | Phiên giữ tự hết hạn khi đọc hoặc khi có người mua; ghế trở lại `AVAILABLE` | PAX-010 báo hết giờ; MGR-013 không còn hiện ghế `HELD` (`TC-FLOW-C02`) |
+| Chuyển sai số tiền (thiếu hoặc thừa) | `400 AMOUNT_MISMATCH`, không phát hành vé, cảnh báo `PAYMENT_AMOUNT_MISMATCH` cho quản lý (`OQ-018`). Bản cũ của flow ghi "thanh toán một phần" và "ghi có tiền thừa vào ví": **bỏ**, vì không có sổ thanh toán từng phần | Quản lý xử lý ở MGR-021/022 |
+| Tiền đến sau khi đơn hết hạn | Đơn `UNMATCHED_OVERDUE`, mở yêu cầu hoàn tiền `UNMATCHED_OVERDUE` và cảnh báo cho quản lý (`OQ-008`) | MGR-022 |
+| Webhook trễ hoặc mất | Khách bấm "Tôi đã chuyển tiền"; server chỉ ghi nhận yêu cầu đối soát, không tự xác nhận | PAX-013 tiếp tục hỏi trạng thái |
+| Hai người giữ cùng ghế | Người sau nhận `409 SEAT_LOCKED_BY_OTHER` | Toast ở PAX-009 |
+| Ghế bị điều hành khóa kỹ thuật | `409 SEAT_BLOCKED` (xem FLOW-05, `MGR-013`) | PAX-009 hiện `BLOCKED` |
+
+## 5. Chưa làm
+
+- Đẩy sự kiện thời gian thực (WebSocket): app phải hỏi lại (`OQ-002`).
+- Giá theo chặng: mọi vé đồng giá của chuyến dù đi đoạn nào (`OQ-032`).

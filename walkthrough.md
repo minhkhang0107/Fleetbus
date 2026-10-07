@@ -12,7 +12,7 @@
 
 ## 1. Hệ Thống Build Hợp Nhất (Universal Build Engine)
 
-Đã thiết lập công cụ build tự động [tools/build_system.js](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/tools/build_system.js) được tích hợp trực tiếp vào `npm run build` và `make build`:
+Đã thiết lập công cụ build tự động [tools/build_system.js](tools/build_system.js) được tích hợp trực tiếp vào `npm run build` và `make build`:
 
 1. **Phân phối Web độc lập (Standalone Web Distributions)**:
    - `source/passenger/web_dist/index.html` (54.5 KB): Giao diện đặt vé hành khách cao cấp.

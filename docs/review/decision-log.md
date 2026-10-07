@@ -142,3 +142,73 @@ Không có assertion nào bị nới lỏng. Những test dưới đây từng k
 
 - **Giai đoạn B (Flutter):** `passenger_api_service.dart` phải gửi `userId` và `holdId` khi tạo đơn, dùng `GET /passenger/tickets?phone=` với số đầy đủ, hiểu `status: REFUND_REQUESTED`, và gửi token Bearer cùng `Idempotency-Key` khi D15 bật bắt buộc.
 - **Còn mở trong giai đoạn A:** FND-A01/A02 (xác thực, idempotency), A03, A04, A05, A06, A38 đến A47, A49 đến A52, và 26 endpoint spec chưa có (FND-A07).
+
+## Giai đoạn C: quyết định (bảy luồng xuyên app)
+
+| # | Quyết định | Phát hiện | Đã cân nhắc | Lý do | Duyệt |
+|---|---|---|---|---|---|
+| D67 | Bỏ khỏi các flow những thứ không có màn hình, kênh gửi tin hay ví voucher: danh sách đen khách hotline, nhắc trước khi hết hạn, voucher 20% khi chậm quá 45 phút, thuật toán dồn ghế, endpoint `cash-summary` và `cash-reconciliation`. Ghi vào `OQ-031` | C12 | Làm hết cho khớp flow cũ | Flow viết trước màn hình; màn hình mới là chuẩn (D4). Không có SMS, Zalo hay ví voucher để kiểm | Trung bình |
+| D68 | Flow mô tả hiện trạng (REST, hỏi lại, bộ nhớ) và tách kiến trúc đích (WebSocket, MQTT, Redis, PostgreSQL) ra bảng riêng | C12 | Giữ hạ tầng đích như đang là sự thật | Tài liệu nói hệ thống làm được điều nó không làm | Thấp |
+| D69 | Bỏ nút nghỉ trạm dừng và hai endpoint `rest-stop` khỏi `FLOW-06`; trạng thái trạm dừng chờ dữ liệu vị trí trạm (`OQ-030`) | C12 | Thêm endpoint theo flow | Không màn hình tài xế nào có nút; `PAX-018` đã định nghĩa trạng thái tự động | Thấp |
+| D70 | Ma trận ghế trả từng ghế với 5 trạng thái; cả chuyến là một chặng đến khi có mô hình chặng (`OQ-028`) | C01 | Làm ngay ma trận theo chặng | Chưa có mô hình chặng | Trung bình |
+| D71 | `POST /ops/trips/{id}/seats/override-lock` `{seatCodes, locked, reason}`: lý do bắt buộc khi khóa, nguyên tử, không khóa được ghế đã bán hoặc đang giữ; vai trò `FLEET_DIRECTOR` và `DISPATCHER`; có nhật ký | C02 | Cho cả thu ngân | Khóa ghế là việc điều phối chuyến; thu ngân chỉ bán | Thấp |
+| D72 | Sửa spec `PAX-021 BR-CANCEL-001`: dưới 6 giờ vẫn hủy được và hoàn 0%; điều hành công bố chậm trên 30 phút thì hoàn 100% (`DELAY_WAIVER`). Chỉ chậm do điều hành công bố mới tính, ước tính của tài xế thì không | C03 | Chặn hủy dưới 6 giờ (đúng câu chữ cũ); lấy chậm từ báo cáo sự cố của tài xế | Chặn hủy khiến khách giữ ghế vô ích; tài xế tự báo không nên quyết định tiền hoàn | **Cao** (tiền) |
+| D73 | Hạn mức nợ tiền thừa 1.000.000 đ mỗi chuyến, tính mọi biên lai đã phát kể cả đã trả; vượt thì `400 DEBT_LIMIT_EXCEEDED` và tài xế trả bằng tiền mặt hoặc ví; đúng hạn mức vẫn cho | C04 | Chỉ tính biên lai chưa trả | Hạn mức giới hạn rủi ro gian lận khi phát hành, không phải số dư | **Cao** (tiền) |
+| D74 | `POST /ops/debt-receipts/{code}/redeem` đặt dưới `MGR-022`, vai trò `FLEET_DIRECTOR`, `CASHIER`, `FINANCIAL_CONTROLLER`, trả một lần, có nhật ký, số điện thoại đã che | C04 | Màn hình thu ngân riêng | Chưa có màn hình; không để sổ nợ không có đường trả | Trung bình |
+| D75 | Hotline: tối đa 4 ghế mỗi số điện thoại trên mọi chuyến; hold hết hạn hoặc hủy không tính | C05 | Giới hạn theo chuyến | Chống một số giữ nhiều chuyến | Thấp |
+| D76 | Ví vé: tab `UPCOMING`, `HISTORY`, `CANCELLED` (`COMPLETED` là tên cũ của `HISTORY`, giá trị khác `400 INVALID_TAB`); vé `BOARDED` ở Sắp đi đến hết chuyến; `NO_SHOW` vào Lịch sử ngay | C06 | Giữ tab cũ | Đúng `BR-MYTICKETS-001` | Trung bình |
+| D77 | Vé `BOARDED` hoặc `NO_SHOW` vẫn mở được, không có QR; vé đã hủy vẫn `404` | C06 | Giữ lỗi cho mọi vé không còn `ACTIVE` | `PAX-017` định nghĩa nhãn "ĐÃ LÊN XE"; vé đã dùng không được chia sẻ | Thấp |
+| D78 | Radar tìm xe qua chuyến rồi mới qua biển số; trạng thái xe theo chuyến, không theo tốc độ; `STALE` sau 60 giây, `OFFLINE` sau 180 giây ở cả khách và điều hành; tuổi vị trí tính từ thời điểm của ping | C07 | Giữ đổi trạng thái theo tốc độ | Xe đứng ở trạm bị coi là xe dự phòng rảnh | Trung bình |
+| D79 | Đổi xe chuyển luôn chuyến sang tài xế mới; tài xế thay thế phải `ON_DUTY` và còn giấy phép (`DRIVER_UNAVAILABLE`); danh bạ điều hành dùng cùng mã và tên với app tài xế | C08 | Chỉ đổi biển số | App tài xế là nơi tài xế mới nhận việc | Trung bình |
+| D80 | Vắng mặt đến vé, thông báo khách và số đếm ở điều hành; ghế vẫn bán cả tuyến, không hoàn tiền | C09 | Nhả ghế ngay | Cần mô hình chặng (`OQ-028`) | Thấp |
+| D81 | Sửa dữ liệu mẫu: xe `veh_04` (`29B-882.19`), chuyến `trp_hn_th_01` ở điều hành thành `READY` với 2 ghế đã bán, tên và mã tài xế khớp app tài xế, thêm tài xế hết giấy phép để thử. Năm test cũ đổi kỳ vọng (`phase-C-findings.md` mục 3) | C07, C08, C10, C11 | Sửa ở nơi đọc để seed không cần đổi | Dữ liệu mẫu tự mâu thuẫn che mất lỗi thật | Thấp |
+| D82 | Xóa 20 ảnh `screen-spec/flows/images` và dựng lại `.mmd` từ các khối Mermaid mới. Ảnh dựng lại bằng `npm run render:diagrams` | C12 | Giữ ảnh cũ; vẽ lại bằng tay | Ảnh vẽ hành vi sai; máy không có `mermaid-cli`; vẫn lấy lại được qua git | Thấp |
+
+## Việc để lại cho Giai đoạn D
+
+`DRI-012-cod.md` trùng `DRI-012-cod-collection.md`; liên kết tuyệt đối hỏng ở `README.md` gốc; dữ liệu mẫu của `trp_991823` (FND-C11); ma trận truy vết đầy đủ; các `OQ` còn mở (`OQ-027`, `OQ-028`, `OQ-029`, `OQ-030`).
+
+## Giai đoạn D: quyết định (rà soát tổng thể)
+
+| # | Quyết định | Phát hiện | Đã cân nhắc | Lý do | Duyệt |
+|---|---|---|---|---|---|
+| D83 | Bổ sung hàng cho 31 màn hình vào ma trận truy vết và 22 vào bản đồ điều hướng, sinh từ danh mục và file màn hình; cột bằng chứng ghi "none: spec only" khi không test nào nêu tên màn hình | D01 | Chỉ nêu "đã phủ"; viết tay | Số liệu sinh bằng script không bịa; thiếu bằng chứng phải thấy được | Thấp |
+| D84 | Không điền nội dung cho `cross-screen-state-map`, `analytics-screen-map`, `component-catalog`, `accessibility` | D01 | Viết cho đủ 79 màn hình | Các file này là tài liệu chọn lọc; viết cho đủ là bịa | Thấp |
+| D85 | Năm mã `BR-*` chỉ xuất hiện trong phần nguồn yêu cầu được coi là nhãn nguồn, không phải quy tắc phải làm | D02 | Viết nội dung quy tắc cho từng mã | Nội dung đã nằm ở quy tắc khác (`ALREADY BOARDED`, `BR-REFUND-002`, `BR-TICKET-006`) | Thấp |
+| D86 | Dữ liệu mẫu `trp_991823`: chuyến `DISPATCHED`, xe `veh_01` `ASSIGNED`; số ghế mẫu không đổi | D03 | Đổi cả số ghế | Cần để luồng bắt đầu chuyến có nghĩa; số ghế do sơ đồ ghế quyết định | Thấp |
+
+## Giai đoạn E: quyết định (việc còn lại không cần Flutter)
+
+| # | Quyết định | Phát hiện | Đã cân nhắc | Lý do | Duyệt |
+|---|---|---|---|---|---|
+| D87 | TOTP: RFC 6238 chuẩn, lệch một bước mỗi phía (không phải hai như mã vé), áp cho `FLEET_DIRECTOR` và `FINANCIAL_CONTROLLER`; hỏi mã sau khi mật khẩu đúng; mã sai tính vào khóa 5 lần; mã đã dùng không dùng lại. Khóa lấy từ biến môi trường `FLEETBUS_TOTP_SECRET_<USER_ID>`, production không có thì từ chối; ngoài production dùng khóa dev để chạy demo. Không làm màn hình đăng ký khóa | OQ-027 | Hai bước lệch như vé; lưu khóa trong cơ sở dữ liệu có màn hình đăng ký | Vé có dung sai 90 giây vì đồng hồ điện thoại khách; đăng nhập nhân viên nên chặt hơn. Màn hình đăng ký thuộc app (`OQ-029`) | **Cao** (bảo mật) |
+| D88 | Trạm dừng: bảng trạm có vùng 300 m trong `core/restStops.js`, dữ liệu mẫu trên tuyến Hà Nội đến Thanh Hóa; ngưỡng 5 phút, tốc độ dưới 1 km/h; hết khi chạy lại. Bỏ hẳn nút nghỉ thủ công | OQ-030 | Thêm nút nghỉ thủ công | Spec màn hình khách đã định nghĩa trạng thái tự động | Thấp |
+| D89 | Kho ghế theo chặng: chặng là khoảng giữa hai điểm dừng liên tiếp; không đưa điểm nào thì cả tuyến; chuyến không rõ điểm dừng thì không chia được | OQ-028 | Chia theo giờ; bitmask | Khớp `BR-SEAT-001` ("không tính còn chỗ bằng tổng ghế") | **Cao** (kho ghế) |
+| D90 | Điểm dừng của chuyến lấy từ chuyến phía hành khách (PAX-008), chuyến chỉ có ở app tài xế dùng điểm dừng của tài xế; thêm Ninh Bình (đón và trả) vào chuyến mẫu `trp_hn_th_01`, app tài xế cùng năm điểm | OQ-028 | Giữ dữ liệu cũ | Hà Nội chỉ đón, Thanh Hóa chỉ trả thì không thể bán hai chặng liền nhau | Thấp |
+| D91 | Một người giữ một phiên trên một chuyến, đổi đoạn là thay phiên cũ; ghế đã bán cho đoạn khác vẫn giữ được cho đoạn trống | OQ-028 | Nhiều phiên cùng lúc | Giữ quy tắc `BR-SEAT-003` hiện có | Thấp |
+| D92 | Vắng mặt nhả ghế từ điểm xe đã tới (`current_stop_index`) đến hết đoạn của khách, phần đã đi vẫn đã bán; không hoàn tiền. Khách vẫy đi từ điểm xe đã tới đến điểm trả, ghế phải trống đúng đoạn đó trong kho ghế và trên manifest | OQ-028 | Nhả cả vé; nhả ngay khi đánh dấu | Phần đã đi không còn ai ngồi được; vé của khách đã mua vẫn là tiền thật nên không hoàn | **Cao** (kho ghế, tiền) |
+| D93 | Giá vẫn phẳng theo chuyến; ghi `OQ-032`, không tự quyết giá theo chặng | OQ-028 | Giá theo tỷ lệ số chặng | Đổi giá là quyết định kinh doanh và cần bảng giá từ trình tạo tuyến | **Cao** (tiền) |
+| D94 | Sửa đánh số quy tắc của `PAX-009` cho khớp trace của chính nó (`001` chặng, `003` tối đa 5 ghế, `004` mất mạng) | OQ-028 | Giữ số cũ | Số cũ mâu thuẫn với phần trace trong cùng file | Thấp |
+
+Test đổi kỳ vọng ở Giai đoạn E: `getSeatMap(trip, 'a', 'b')` thành `getSeatMap(trip, null, null)` (điểm giả trước đây bị bỏ qua, nay được kiểm); `TC-FLOW-C08` cho khách vẫy đi hết tuyến; các test đăng nhập giám đốc gửi mã TOTP.
+
+
+## Review design: quyết định (trải nghiệm 3 app, 2026-10-07)
+
+Phát hiện: `docs/review/design-review-findings.md`.
+
+| # | Quyết định | Phát hiện | Đã cân nhắc | Lý do | Duyệt |
+|---|---|---|---|---|---|
+| D95 | Một màu chính `#2563EB` cho cả ba app; một màu amber `#D97706` cho giữ chỗ và chậm; chữ PNR `#C2410C` trên nền `#FFF7ED` | DSG-10, DSG-24 | Giữ `#0F52BA` của design-system | Code Flutter và hai file DESIGN đã dùng `#2563EB`; chỉ một file lệch | Thấp |
+| D96 | Thanh tab chỉ hiện ở 4 màn gốc; ẩn trong luồng đặt vé. Thứ tự: kết quả, chi tiết chuyến, điểm đón/trả, sơ đồ ghế, thông tin khách và checkout. Banner đếm ngược hiện từ lúc giữ ghế đến hết thanh toán | DSG-04, 05, 06 | Giữ thanh tab mọi nơi | Chặng quyết định ghế trống; thanh tab dưới màn thanh toán làm khách bỏ dở phiên giữ | Trung bình |
+| D97 | Checkout chỉ có VietQR ở phiên bản này; mở `OQ-033` cho cổng khác và COD trong app | DSG-25 | Vẽ đủ 4 phương thức | Nút không chạy được là lỗi; server chỉ khớp VietQR | **Cao** (tiền) |
+| D98 | DRI-004: nút xuất bến khóa đến khi tích đủ 6 mục; DRI-005 là sheet xác nhận | DSG-14 | Cho tích sẵn | Server đã đòi checklist (`INVALID_TRIP_STATE`), UI phải khớp | Thấp |
+| D99 | Không dùng hộp thoại trình duyệt; phản hồi theo mức: đổi trạng thái tại chỗ, toast, sheet hoặc panel kết quả, sheet xác nhận trước thao tác không đảo ngược (nêu số tiền hoặc số người bị ảnh hưởng) | DSG-03, 13, 15, 19, 20 | Giữ `alert()` | `alert()` chặn thao tác, không cập nhật trạng thái, không cho xem lại | Trung bình |
+| D100 | Vé COD chưa thu tiền chỉ lên xe qua bước thu COD; tay, PIN, QR trả `409 COD_PAYMENT_REQUIRED` kèm giá; QR đoàn cho lên người đã trả và liệt kê người còn nợ. UI chỉ có một nút "Thu {giá} & cho lên xe". Bỏ cờ `requires_cod` (không ai đọc) | DSG-12 | Cho lên xe rồi nhắc thu; giữ hai nút | Hai nút tách rời là đường thất thoát doanh thu; `collectCod` vốn đã đánh dấu lên xe | **Cao** (tiền) |
+| D101 | Không emoji, không chữ cho dev (giả lập, mã test, Hz, FPS, MQTT, HMAC, dp) trên màn hình; thang bo góc 4, 8, 12, pill | DSG-08, 18, 22 | | Spec đã cấm emoji nhưng prototype vẫn dùng | Thấp |
+| D102 | Design chuẩn mới nằm trên Claude Design; prototype HTML ở `web_dist` không sửa trong đợt này | DSG-01, 07 | Viết lại 3 file HTML | Prototype sẽ được thay bằng app Flutter (`OQ-029`); sửa hai lần là lãng phí | Trung bình |
+
+| D103 | Đổi D102: viết lại cả ba prototype HTML theo design mới. Nút mô phỏng (ngân hàng, camera, GPS, đồng hồ, mất mạng) nằm trong bảng demo ngoài khung máy | DSG-01, 07 | Giữ prototype cũ đến khi có Flutter | Chủ dự án yêu cầu cập nhật code theo design; prototype là thứ duy nhất chạy được để thử luồng | Trung bình |
+
+Test đổi kỳ vọng: `TC-E2E-01` và `TC-SRV-05` tìm dấu hiệu của giao diện mới thay vì chữ của giao diện cũ, và `TC-SRV-05` kiểm thêm không hộp thoại, không emoji, không nút giả lập.
+Test đổi kỳ vọng: `TC-SPEC-A43` cho vé COD lên xe bằng `collectCod` thay vì `boardPassengerManually` (đường cũ nay bị chặn bởi D100).

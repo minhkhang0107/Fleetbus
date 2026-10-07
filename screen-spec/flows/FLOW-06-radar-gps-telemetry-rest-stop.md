@@ -1,85 +1,64 @@
-# FLOW-06: Radar GPS Telemetry 60Hz, Cảnh Báo Mất Sóng & Trạm Dừng (Fleet Telemetry & Rest-Stop HUD)
+# FLOW-06: Định vị GPS, mất tín hiệu và trạm dừng
 
-**Mã tài liệu:** `FLOW-06`  
-**Phiên bản:** 1.0  
-**Liên kết màn hình:** [DRI-006](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/driver/DRI-006-driving-hud-route.md), [DRI-014](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/driver/DRI-014-gps-hardware-health.md), [PAX-018](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/passenger/PAX-018-live-trip-tracking.md), [PAX-019](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/passenger/PAX-019-rest-stop-companion.md), [MGR-003](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/manager/MGR-003-active-fleet-map.md), [MGR-005](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/manager/MGR-005-delay-incident-command.md)
-
----
-
-## 1. Mục Tiêu & Mô Tả Nghiệp Vụ
-
-Việc giám sát phương tiện theo thời gian thực (Realtime Fleet Telemetry) đóng vai trò trung tâm trong an toàn giao thông và trải nghiệm hành khách:
-1. **Radar mượt mà (Smooth 60Hz Rendering)**: Máy tính bảng tài xế bắn tọa độ GPS tần suất $3\text{s}$/lần qua giao thức nhẹ MQTT; tầng Web frontend của Manager và Mobile App của Hành khách sử dụng thuật toán nội suy quán tính (Dead Reckoning Interpolation) để tạo chuyển động xe trôi mượt mà 60 khung hình/giây trên bản đồ.
-2. **Cảnh báo mất sóng viễn thông (> 60 giây)**: Khi xe đi qua đèo núi hiểm trở hoặc hầm đường bộ làm mất tín hiệu GPS quá 60 giây, hệ thống tự động kích hoạt trạng thái "MẤT TÍN HIỆU" (Stale GPS Alert), thông báo cho hành khách và kích hoạt giao thức kiểm tra an toàn tại phòng điều hành trung tâm.
-3. **Quản lý trạm dừng nghỉ thông minh (Rest Stop Companion HUD)**: Khi xe dừng chân tại trạm dịch vụ (20–30 phút), tài xế kích hoạt đồng hồ đếm ngược. Toàn bộ hành khách nhận được thông báo đồng bộ trên màn hình `PAX-019`, có chuông báo động nhắc lên xe khi còn 5 phút tránh việc khách bị bỏ quên.
+**Mã tài liệu:** `FLOW-06`
+**Phiên bản:** 2.0 (Giai đoạn C)
+**Màn hình:** [DRI-006](../driver/DRI-006-active-trip-dashboard.md), [DRI-014](../driver/DRI-014-gps-health-monitor.md), [DRI-015](../driver/DRI-015-offline-sync-center.md), [PAX-018](../passenger/PAX-018-live-tracking.md), [PAX-019](../passenger/PAX-019-eta-detail.md), [MGR-003](../manager/MGR-003-live-radar.md)
 
 ---
 
-## 2. Sơ Đồ Trình Tự Tương Tác (Mermaid Sequence Diagram)
+## 1. Mục tiêu
 
-> [!TIP]
-> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/FLOW-06-radar-gps-telemetry-rest-stop.svg) | [Xem ảnh PNG HD](./images/FLOW-06-radar-gps-telemetry-rest-stop.png)
+Tài xế gửi vị trí xe; hành khách và điều hành cùng thấy xe đó. Khi xe im lặng, cả hai thấy cảnh báo đúng ngưỡng thay vì một vị trí cũ trông như thật.
 
-![UML Sequence Diagram FLOW-06](./images/FLOW-06-radar-gps-telemetry-rest-stop.svg)
+## 2. Các bước và API thật
+
+| # | Bước | Màn hình | API | Bên khác thấy gì | Test |
+| :-- | :--- | :--- | :--- | :--- | :--- |
+| 1 | Chuyến phải `IN_TRANSIT`; gửi ping (khoảng 3 giây một lần) | DRI-006 | `POST /api/v1/driver/trips/{tripId}/telemetry` `{lat, lng, speed_kmh, bearing_deg}` | App khách và radar điều hành cùng đọc vị trí đó | `TC-FLOW-C10`, `TC-SYNC-03` |
+| 2 | Khách xem xe | PAX-018 | `GET /api/v1/trips/{tripId}/tracking` (hỏi lại mỗi 10 giây) | `signal_status: LIVE` | `TC-FLOW-C10` |
+| 3 | Điều hành xem radar | MGR-003 | `GET /api/v1/ops/fleet/live-positions` | Đúng xe đang chạy chuyến đó (tìm qua chuyến, không chỉ biển số), `gps_health: LIVE` | `TC-FLOW-C10` |
+| 4 | Im lặng quá 60 giây | PAX-018, MGR-003 | như trên | `STALE` ở cả hai bên | `TC-FLOW-C11` |
+| 5 | Im lặng quá 180 giây | PAX-018, MGR-003 | như trên | `OFFLINE` ở cả hai bên | `TC-FLOW-C11` |
+| 5b | Xe đứng yên (dưới 1 km/h) quá 5 phút trong bán kính 300 m của một trạm dừng | PAX-018, PAX-019 | như trên | `is_at_rest_stop`, tên trạm và số phút nghỉ dự kiến; chạy lại hoặc ra khỏi vùng thì mất, kẹt xe ngoài trạm không tính | `TC-REST-01`, `TC-REST-02` |
+| 6 | Có sóng lại, gửi dồn các ping đã đệm | DRI-015 | `POST /api/v1/driver/telemetry/batch-replay` | Theo thứ tự thời gian, bỏ trùng, giữ vị trí mới nhất; tuổi vị trí tính theo thời điểm của ping | `TC-SPEC-A44`, `TC-SYNC-04` |
+
+## 3. Sơ đồ
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor DRI as 🚍 Thiết Bị Tablet Lái Xe (Android Service)
-    participant MQTT as 🛰️ MQTT Broker (Mosquitto/EMQX)
-    participant GW as ⚙️ Telemetry Processor & Watchdog
-    participant WS as ⚡ WebSocket Realtime Server
-    actor MGR as 🖥️ Điều Hành Trung Tâm (MGR-003)
-    actor PAX as 📱 Hành Khách Trên Xe (PAX-018/PAX-019)
+    actor DRI as Tài xế (DRI-006)
+    participant GW as API server
+    participant BR as Event Bridge
+    actor PAX as Hành khách (PAX-018)
+    actor MGR as Điều hành (MGR-003)
 
-    %% Giai đoạn 1: Bắn tọa độ liên tục
-    Note over DRI,MQTT: 1. Định vị liên tục qua MQTT (Mỗi 3 giây)
-    loop Mỗi 3 giây trong suốt hành trình
-        DRI->>MQTT: Publish topic: "fleet/trips/TRIP101/telemetry"<br/>{lat: 20.985, lng: 105.842, speed: 78, heading: 145, satCount: 14}
-        MQTT->>GW: Consumer xử lý tọa độ & cập nhật vị trí xe
-        GW->>WS: Broadcast room "trip:TRIP101" event: "telemetry_tick"<br/>{lat: 20.985, lng: 105.842, speed: 78, heading: 145}
-        par Nội suy hiển thị mượt 60Hz
-            WS-->>MGR: Bản đồ ATC MGR-003 cập nhật marker xe chạy mượt (Dead-reckoning)
-            WS-->>PAX: Màn hình PAX-018 hiển thị xe di chuyển trên bản đồ vệ tinh
-        end
-    end
-
-    %% Giai đoạn 2: Cảnh báo mất sóng > 60s
-    Note over DRI,MGR: 2. Xe vào vùng núi mất sóng (Stale GPS Watchdog > 60s)
-    DRI--xMQTT: Mất kết nối 4G/GPS do đi vào hẻm núi
-    GW->>GW: Heartbeat Timer đếm: Đã quá 60 giây không nhận được gói tin nào từ TRIP101
-    GW->>WS: Broadcast event: "stale_gps_warning"<br/>{tripId: "TRIP101", lastSeenSecondsAgo: 65, status: "SIGNAL_LOST"}
-    
-    par Cảnh báo Trung tâm
-        WS-->>MGR: MGR-003 nhấp nháy xe màu Vàng Cam kèm nhãn: [CẢNH BÁO MẤT TÍN HIỆU 65s]
-        MGR->>MGR: Kích hoạt nút gọi khẩn cấp bộ đàm / gọi phụ xe
-    and Cảnh báo Hành khách
-        WS-->>PAX: PAX-018 hiện thông báo: "Xe đang qua khu vực sóng yếu, vị trí hiển thị theo ước lượng"
-    end
-
-    %% Giai đoạn 3: Dừng nghỉ & Đếm ngược lên xe
-    Note over DRI,PAX: 3. Ghé trạm dừng nghỉ & Đồng hồ đếm ngược (PAX-019)
-    DRI->>DRI: Xe tấp vào Trạm Dừng Nghỉ Phủ Lý -> Nhấn nút [NGHỈ 20 PHÚT] (DRI-006)
-    DRI->>GW: POST /api/v1/driver/trips/TRIP101/rest-stop/start<br/>{stopName: "Trạm Dừng Phủ Lý", durationMinutes: 20}
-    activate GW
-    GW->>WS: Broadcast room "trip:TRIP101" event: "rest_stop_started"<br/>{stopName: "Trạm Dừng Phủ Lý", durationMinutes: 20, departAt: "15:45"}
-    deactivate GW
-
-    WS-->>PAX: Màn hình PAX-019 bật chế độ Nghỉ Ngơi: Đồng hồ đếm ngược 20:00
-    WS-->>MGR: MGR-003 đánh dấu xe trạng thái: "ĐANG NGHỈ CHÂN TẠI TRẠM"
-
-    Note over PAX: Khi đồng hồ đếm ngược còn 5 phút (T-5 min)
-    PAX->>PAX: PAX-019 rung mạnh + phát âm thanh chuông báo: "Xe sắp xuất phát trong 5 phút! Quý khách vui lòng trở lại ghế ngồi"
-    DRI->>DRI: Hết 20 phút -> Bấm [KẾT THÚC NGHỈ - TIẾP TỤC HÀNH TRÌNH] -> Xe lăn bánh
+    DRI->>GW: POST /driver/trips/{id}/telemetry {lat, lng, speed_kmh, bearing_deg}
+    GW->>BR: DRIVER_TELEMETRY (kèm thời điểm của ping)
+    BR-->>PAX: vị trí xe của chuyến
+    BR-->>MGR: vị trí xe chạy chuyến (qua chuyến, rồi biển số), last_ping_at
+    PAX->>GW: GET /trips/{id}/tracking (mỗi 10 giây)
+    GW-->>PAX: signal_status LIVE
+    Note over GW: không có ping mới
+    PAX->>GW: GET /trips/{id}/tracking (sau 61 giây)
+    GW-->>PAX: signal_status STALE
+    MGR->>GW: GET /ops/fleet/live-positions (sau 181 giây)
+    GW-->>MGR: gps_health OFFLINE
+    DRI->>GW: POST /driver/telemetry/batch-replay [ping đã đệm]
+    GW->>BR: DRIVER_TELEMETRY (ping mới nhất)
 ```
 
----
+## 4. Quy tắc
 
-## 3. Thông Số Kỹ Thuật Viễn Thông (Telemetry SLA)
-
-| Chỉ số | Giá trị chuẩn | Cơ chế bù đắp khi mất mạng |
+| Chỉ số | Giá trị | Nguồn |
 | :--- | :--- | :--- |
-| **Tần suất gửi MQTT** | $3\text{s}$ / lần (Băng thông ~120 bytes/gói) | Bộ đệm cục bộ Tablet lưu tối đa 500 gói tin và gửi dồn burst khi có sóng. |
-| **Độ trễ truyền dẫn** | $< 350\text{ms}$ (từ lúc GPS bắt tọa độ tới lúc web manager vẽ lên màn hình) | Sử dụng WebSocket binary packing tối ưu. |
-| **Ngưỡng Stale Watchdog** | $60\text{s}$ không nhận gói tin | Cảnh báo mức 1 (Màu Vàng). Sau $15\text{ phút}$ chuyển Cảnh báo mức 2 (Màu Đỏ - Nghi ngờ tai nạn). |
-| **Độ chính xác đếm ngược trạm dừng** | Đồng bộ theo thời gian chuẩn Unix NTP Server | Tránh sai lệch giữa đồng hồ điện thoại khách và đồng hồ tablet tài xế. |
+| Tần suất ping | 3 giây (`DRI-006`); bản cũ của flow ghi MQTT, hiện là REST (`OQ-002`) | `BR-COCKPIT-001` |
+| `STALE` | quá 60 giây kể từ ping cuối | `BR-TRACK-002`, `BR-RADAR-001` |
+| `OFFLINE` | quá 180 giây | `BR-TRACK-002`, `BR-RADAR-001` |
+| Trạng thái xe | theo chuyến (`DRI-005`, `DRI-017`), không theo tốc độ: xe dừng ở trạm vẫn là đang chạy | `BR-RADAR-001` |
+| Ping chỉ nhận khi | chuyến `IN_TRANSIT`, tọa độ và tốc độ hợp lệ | `BR-COCKPIT-003` |
+
+## 5. Khác với bản cũ
+
+- MQTT broker, WebSocket, nội suy 60Hz, "cảnh báo mức 2 sau 15 phút nghi tai nạn": chưa có; thay bằng REST và hai ngưỡng 60 giây, 180 giây của màn hình.
+- Nút "NGHỈ 20 PHÚT" và `POST .../rest-stop/start`: **bỏ**. Không màn hình tài xế nào có nút này. Trạng thái trạm dừng được suy ra tự động từ các ping, đúng `BR-TRACK-004` (`OQ-030`). Danh sách trạm hiện là dữ liệu mẫu trên tuyến Hà Nội đến Thanh Hóa. Đồng hồ đếm ngược và chuông "còn 5 phút" của `PAX-019` là việc của app: server chỉ trả số phút nghỉ dự kiến.

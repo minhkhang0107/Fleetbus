@@ -5,6 +5,16 @@
 
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
 
+
+// An unpaid COD ticket is a 409 that tells the app which fare to collect (DRI-010, DRI-012).
+function sendBoardingError(res, result, status = 400) {
+  if (result.code === 'COD_PAYMENT_REQUIRED') {
+    sendError(res, result.error, result.code, 409, { ticket_id: result.ticket_id, seat_code: result.seat_code, cod_amount_vnd: result.cod_amount_vnd });
+    return;
+  }
+  sendError(res, result.error, result.code, status);
+}
+
 export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   const { driverService } = services;
 
@@ -135,7 +145,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
       if (result.success) {
         sendSuccess(res, result.data || result);
       } else {
-        sendError(res, result.error, result.code, 400);
+        sendBoardingError(res, result);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -155,7 +165,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
         if (result.success) {
           sendSuccess(res, result.data || result);
         } else {
-          sendError(res, result.error, result.code, 400);
+          sendBoardingError(res, result);
         }
       } else {
         const result = driverService.boardPassengerManually(
@@ -166,7 +176,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
         if (result.success) {
           sendSuccess(res, result.data);
         } else {
-          sendError(res, result.error, result.code, result.code === 'NOT_FOUND' || result.code === 'TRIP_NOT_FOUND' ? 404 : 400);
+          sendBoardingError(res, result, result.code === 'NOT_FOUND' || result.code === 'TRIP_NOT_FOUND' ? 404 : 400);
         }
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));

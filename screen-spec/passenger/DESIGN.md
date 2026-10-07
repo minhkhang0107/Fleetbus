@@ -48,10 +48,10 @@ typography:
     fontWeight: '700'
     lineHeight: '1.0'
 rounded:
-  sm: 0.375rem
-  DEFAULT: 0.75rem
-  lg: 1.0rem
-  xl: 1.5rem
+  sm: 0.25rem
+  DEFAULT: 0.5rem
+  lg: 0.75rem
+  xl: 0.75rem
   full: 9999px
 spacing:
   gutter-mobile: 16px
@@ -77,7 +77,7 @@ Motion: 5 (Smooth Transitions & Spring Taps)
 - **Sapphire Accent** (`#2563EB`) — Primary actions, selected seat states, route lines, and active tabs.
 - **Emerald Safe** (`#16A34A`) — Confirmed tickets, verified boarding passes, and on-time badges.
 - **Amber Hold** (`#D97706`) — Real-time seat reservation countdowns and delay alerts.
-- **PNR Orange** (`#FB9821`) — Booking reference codes and promotional discount tags.
+- **PNR Orange** (`#C2410C` text on `#FFF7ED`) — Booking reference codes and promotional discount tags. `#FB9821` stays a fill only; as text it fails 4.5:1.
 - **Alert Crimson** (`#DC2626`) — Booking cancellation notices and error alerts.
 
 ## 3. Typography Rules
@@ -88,7 +88,7 @@ Motion: 5 (Smooth Transitions & Spring Taps)
 
 ## 4. Component Stylings
 - **Buttons:** Flat, solid fill, 48px to 54px height. Primary buttons use Sapphire Accent (`#2563EB`) with tactile `-1px` scale on press. Secondary buttons use ghost styling with whisper borders.
-- **Trip & Ticket Cards:** Generously rounded corners (16px), 1px whisper border (`rgba(226, 232, 240, 0.7)`), subtle elevated surface, zero heavy blur drop shadows.
+- **Trip & Ticket Cards:** Rounded corners (12px, `design-system.md` section 7), 1px whisper border (`rgba(226, 232, 240, 0.7)`), subtle elevated surface, zero heavy blur drop shadows.
 - **Interactive 2D Seat Matrix:** 
   - *Available:* Pure white fill, 1px Slate border, Charcoal text.
   - *Selected:* Sapphire Accent fill (`#2563EB`), White text, subtle spring pop.

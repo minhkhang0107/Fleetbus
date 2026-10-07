@@ -7,6 +7,8 @@
 
 import crypto from 'node:crypto';
 import { server } from '../source/server/apiServer.js';
+import { generateTotp } from '../source/server/core/totp.js';
+import { DEV_TOTP_SECRET } from '../source/server/config.js';
 
 const BASE_URL = 'http://localhost:3000';
 
@@ -192,10 +194,17 @@ async function runLiveE2E() {
   console.log('✅ Passenger tracking shows the live position (signal LIVE)');
 
   console.log('\n--- 6. MANAGER OPERATIONS CONTROL CENTER ---');
-  const mgrLogin = await request('/api/v1/auth/staff/login', {
-    method: 'POST',
-    body: { username: 'admin@busgo.vn', password: 'admin123' }
-  });
+  const noCode = await request('/api/v1/auth/staff/login', { method: 'POST', body: { username: 'admin@busgo.vn', password: 'admin123' } });
+  expect(noCode.status === 401 && noCode.body.code === 'TOTP_REQUIRED', 'the director must give a TOTP code', noCode);
+  // A code works once, so a second run within 30 s takes the next step (the server accepts one step ahead)
+  let mgrLogin;
+  for (const stepOffset of [0, 30000]) {
+    mgrLogin = await request('/api/v1/auth/staff/login', {
+      method: 'POST',
+      body: { username: 'admin@busgo.vn', password: 'admin123', totp: generateTotp(DEV_TOTP_SECRET, Date.now() + stepOffset) }
+    });
+    if (mgrLogin.status === 200) break;
+  }
   expect(mgrLogin.status === 200 && mgrLogin.body.data.token, 'staff login', mgrLogin);
   const staffToken = mgrLogin.body.data.token;
   console.log('✅ Manager Logged In:', mgrLogin.body.data.user.full_name, '| Role:', mgrLogin.body.data.user.role);

@@ -63,6 +63,13 @@
 3. **Notifications (`/notifications`):** Push history, operational alerts (`PAX-020`).
 4. **Profile (`/profile`):** Saved Passengers, Saved Stops, Settings, Logout (`PAX-022`).
 
+### 1.2b. Where the Bottom Navigation Shows (design review 2026-10-07, D96)
+- **Shown** only on the four tab roots: `PAX-004`, `PAX-016`, `PAX-020`, `PAX-022`.
+- **Hidden** on `PAX-001` splash, `PAX-002`/`PAX-003` login, and the whole booking funnel `PAX-005` to `PAX-015`: the funnel has one sticky bottom action (price + next step) and a back arrow. A tab bar under a payment screen lets the passenger leave a running hold by accident and puts two bottom bars on screen.
+- **Hold banner:** from `PAX-010` to `PAX-013` the amber countdown banner sits under the app bar on every step (`PAX-010` 4.1), not only on checkout.
+- **Funnel order:** `PAX-006` results, `PAX-007` trip detail, `PAX-008` pickup and dropoff (the segment decides which seats are free, `BR-SEAT-001`, so it comes before the seat map), `PAX-009` seats, then `PAX-011` passenger info and `PAX-012` checkout. `PAX-011` and `PAX-012` may be one scrolling screen with two sections; the hold starts when the passenger taps "Giữ ghế" on `PAX-009`.
+- **After payment:** `PAX-014` result, then `PAX-015` success, which clears the funnel stack (`BR-SUCCESS-001`) and offers "Xem vé" (`PAX-017`) and "Về trang chủ".
+
 ### 1.3. Deep Linking Schemes (Passenger)
 - `busgo://trip/{tripId}` -> Direct to `PAX-007-trip-detail.md`
 - `busgo://ticket/{ticketId}` -> Direct to `PAX-017-ticket.md`
@@ -82,6 +89,8 @@ PRE-START MODE (Resting / In-Depot)
                                                                                                               │
                                                                                                               ▼
 ACTIVE DRIVING MODE (Cockpit Lockout) ◄───────────────────────────────────────────────────────────────────────┘
+   (design review 2026-10-07, D98: the DRI-004 start button stays disabled until all six
+    checks are ticked; DRI-005 is a confirmation sheet showing passengers and departure time)
    ┌─────────────────────────────────────────────────────────┐
    │ [DRI-006 Active Cockpit]                                │
    │   ├── [DRI-007 Manifest] ──► [DRI-008 Stop Detail]      │
@@ -128,3 +137,34 @@ ACTIVE DRIVING MODE (Cockpit Lockout) ◄─────────────
   - `/ops/audit` -> `MGR-028-audit-logs.md`
   - `/ops/roles-permissions` -> `MGR-029-roles-permissions.md`
   - `/ops/settings` -> `MGR-030-settings.md`
+
+---
+
+## 6. Routes of Screens Not Drawn Above (Phase D review)
+
+The trees above omit these screens. Routes, entry and exit points are those of `screen-catalog.md`, which is the authority.
+
+| Screen | Name | Route | Entry points | Exit points |
+| :--- | :--- | :--- | :--- | :--- |
+| `PAX-023` | Saved Stops & Frequent Travelers | `/profile/saved-contacts` | Profile, Passenger Info Form | `/profile`, `/checkout/passenger-info` |
+| `PAX-025` | Trip Delay & Disruption Alert | `/notice/trip-delay/:tripId` | Push Notification, Tracking Banner | `/tracking/:tripId`, `/booking/:bookingId/cancel` |
+| `DRI-016` | Telemetry & MQTT Diagnostics | `/driver/diagnostics` | Settings, GPS Health Modal | `/driver/sync-center`, `/driver/today-trips` |
+| `DRI-018` | Shift History & Device Profile | `/driver/profile` | Bottom Nav, Drawer | `/driver/login`, `/driver/today-trips` |
+| `MGR-001` | Staff Login & MFA | `/ops/login` | Browser Access | `/ops/dashboard`, `/ops/radar` |
+| `MGR-004` | Vehicle Live Telemetry Inspector | `/ops/vehicle/:id/live` | Live Radar, Vehicle Directory | `/ops/radar`, `/ops/vehicle/:id/edit` |
+| `MGR-006` | Vehicle Create & Edit | `/ops/vehicles/new`, `/:id/edit` | Vehicle Directory | `/ops/vehicles`, `/ops/seat-layouts` |
+| `MGR-009` | Route & Geofence Stop Builder | `/ops/routes/builder` | Route Directory | `/ops/routes`, `/ops/trips/new` |
+| `MGR-011` | Trip Dispatch & Schedule Generator | `/ops/trips/new` | Trip Directory, Dispatch Board | `/ops/trips`, `/ops/trip/:id` |
+| `MGR-012` | Trip Master Operational Detail | `/ops/trip/:id` | Trip List, Radar, Dispatch Board | `/ops/trip/:id/seat-inventory`, `/ops/trip/:id/replace-vehicle` |
+| `MGR-013` | Segment Seat Inventory Matrix | `/ops/trip/:id/seat-inventory` | Trip Detail, POS Screen | `/ops/trip/:id`, `/ops/booking/:id` |
+| `MGR-016` | Driver Performance & Safety Detail | `/ops/driver/:id` | Driver Directory, Trip Detail | `/ops/drivers`, `/ops/audit` |
+| `MGR-018` | Booking Master Detail & Ledger | `/ops/booking/:id` | Booking Search, Trip Manifest | `/ops/refund/new?bookingId=:id`, `/ops/payments` |
+| `MGR-020` | POS Fast Seat Selection & Checkout | `/ops/pos/checkout` | POS Search | `/ops/booking/:id`, `/ops/pos` |
+| `MGR-023` | Vehicle Replacement Wizard | `/ops/trip/:id/replace-vehicle` | Trip Detail Actions, Incident Alert | `/ops/trip/:id`, `/ops/radar` |
+| `MGR-024` | Trip Delay & Operational Broadcast | `/ops/trip/:id/delay-management` | Trip Detail Actions, Incident Alert | `/ops/trip/:id`, `/ops/notifications` |
+| `MGR-026` | Notification Campaign Engine | `/ops/notifications` | Sidebar Nav | `/ops/dashboard` |
+| `SH-001` | Session Expired & Re-authentication | `/shared/session-expired` | HTTP 401 Interceptor | App Login, Previous Screen on Refresh |
+| `SH-002` | Permission Denied (403 Forbidden) | `/shared/permission-denied` | HTTP 403 Interceptor, Route Guard | Previous Screen, App Home |
+| `SH-003` | Network Offline & Server Error | `/shared/network-error` | Connectivity Loss, HTTP 5xx | Auto-retry, Manual Refresh |
+| `SH-004` | System Maintenance Notice | `/shared/maintenance` | HTTP 503 / Feature Flag Barrier | App Exit, Polling for Service Resumption |
+| `SH-005` | Force App Version Upgrade | `/shared/version-upgrade` | App Config Handshake Barrier | App Store / Play Store URL |

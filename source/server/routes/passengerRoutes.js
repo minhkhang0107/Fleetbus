@@ -114,13 +114,14 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   if ((pathname.startsWith('/api/v1/passenger/trips/') || pathname.startsWith('/api/v1/trips/')) && pathname.endsWith('/seat-map') && req.method === 'GET') {
     const parts = pathname.split('/');
     const tripId = parts[pathname.startsWith('/api/v1/passenger/') ? 5 : 4];
-    const pickupId = parsedUrl.searchParams.get('pickup_stop_id') || 'stp_hn_gb';
-    const dropoffId = parsedUrl.searchParams.get('dropoff_stop_id') || 'stp_th_pb';
+    // No stops asked means the whole route; stops given are checked against the trip (PAX-008, BR-SEAT-001)
+    const pickupId = parsedUrl.searchParams.get('pickup_stop_id');
+    const dropoffId = parsedUrl.searchParams.get('dropoff_stop_id');
     const seatMap = seatMapService.getSeatMap(tripId, pickupId, dropoffId);
     if (seatMap.success) {
       sendSuccess(res, seatMap.data);
     } else {
-      sendError(res, seatMap.error, seatMap.code, 404);
+      sendError(res, seatMap.error, seatMap.code, seatMap.code === 'TRIP_NOT_FOUND' ? 404 : 400);
     }
     return true;
   }
@@ -135,11 +136,14 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         sendError(res, 'Thiếu thông tin người dùng', 'USER_REQUIRED', 400);
         return;
       }
-      const result = seatMapService.holdSeats(tripId, body.seatCodes || [], userId, body.now);
+      const result = seatMapService.holdSeats(tripId, body.seatCodes || [], userId, body.now, {
+        pickupStopId: body.pickupStopId || body.pickup_stop_id || null,
+        dropoffStopId: body.dropoffStopId || body.dropoff_stop_id || null
+      });
       if (result.success) {
         sendSuccess(res, result.data || result);
       } else {
-        sendError(res, result.error, result.code, 409, result);
+        sendError(res, result.error, result.code, ['STOP_NOT_FOUND', 'INVALID_SEGMENT', 'STOP_NOT_ALLOWED'].includes(result.code) ? 400 : 409, result);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -199,8 +203,11 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         payer: checkoutValidation.data.payer,
         passengers: checkoutValidation.data.passengers,
         amountVnd: orderReview.total_payment_vnd,
-        pickupStop: body.pickupStop || 'Bến xe Giáp Bát',
-        dropoffStop: body.dropoffStop || 'Bến xe Phía Bắc Thanh Hóa'
+        // The segment is the one of the hold; names come from the trip stops (a client name is only for old callers)
+        pickupStopId: holdCheck.data.pickup_stop_id,
+        dropoffStopId: holdCheck.data.dropoff_stop_id,
+        pickupStop: (tripDetail.stops || []).find(s => s.stop_id === holdCheck.data.pickup_stop_id)?.name || body.pickupStop || 'Bến xe Giáp Bát',
+        dropoffStop: (tripDetail.stops || []).find(s => s.stop_id === holdCheck.data.dropoff_stop_id)?.name || body.dropoffStop || 'Bến xe Phía Bắc Thanh Hóa'
       });
 
       // The hold becomes a payment lock until the payment window closes (no double sale while the customer pays).

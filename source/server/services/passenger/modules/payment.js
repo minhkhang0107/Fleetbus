@@ -15,6 +15,9 @@ import {
 import { validateVietnamPhone, calculateRefundAmount } from '../core/formatters.js';
 import { getTicketSecret } from '../../../config.js';
 
+// PAX-025: a delay longer than this waives the cancellation fee
+const DELAY_WAIVER_AFTER_MINUTES = 30;
+
 export class PassengerPaymentService {
   constructor(options = {}) {
     this.secretKey = options.secretKey || getTicketSecret();
@@ -73,7 +76,7 @@ export class PassengerPaymentService {
   /**
    * PAX-013: Create Payment Order & VietQR Transfer Details
    */
-  createPaymentOrder({ holdId, trip, seatCodes, payer, passengers, amountVnd, pickupStop, dropoffStop, mockNow = Date.now() }) {
+  createPaymentOrder({ holdId, trip, seatCodes, payer, passengers, amountVnd, pickupStop, dropoffStop, pickupStopId = null, dropoffStopId = null, mockNow = Date.now() }) {
     const orderId = `ord_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
     let pnr;
     do {
@@ -102,6 +105,8 @@ export class PassengerPaymentService {
       seat_codes: seatCodes,
       pickup_stop: pickupStop,
       dropoff_stop: dropoffStop,
+      pickup_stop_id: pickupStopId,
+      dropoff_stop_id: dropoffStopId,
       payer,
       passengers,
       amount_vnd: amountVnd,
@@ -175,6 +180,8 @@ export class PassengerPaymentService {
         passenger_phone: passenger.phone,
         pickup_stop: order.pickup_stop,
         dropoff_stop: order.dropoff_stop,
+        pickup_stop_id: order.pickup_stop_id,
+        dropoff_stop_id: order.dropoff_stop_id,
         status: 'ACTIVE', // ACTIVE | BOARDED | CANCELLED
         created_at: new Date(mockNow).toISOString(),
         boarded_at: null
@@ -289,15 +296,19 @@ export class PassengerPaymentService {
       }
     }
 
-    // Tab filter
-    let filtered = userTickets;
-    if (filter === 'UPCOMING') {
-      filtered = userTickets.filter(t => t.status === 'ACTIVE');
-    } else if (filter === 'COMPLETED') {
-      filtered = userTickets.filter(t => t.status === 'BOARDED');
-    } else if (filter === 'CANCELLED') {
-      filtered = userTickets.filter(t => t.status === 'CANCELLED');
+    // Tab filter (PAX-016, BR-MYTICKETS-001): "Sắp đi" keeps a ticket, boarded or not, until its trip is over;
+    // "Lịch sử" holds finished trips and no-shows; "Đã hủy" holds cancelled tickets.
+    const tab = filter === 'COMPLETED' ? 'HISTORY' : filter;
+    if (!['UPCOMING', 'HISTORY', 'CANCELLED'].includes(tab)) {
+      return { success: false, error: 'Tab vé không hợp lệ (UPCOMING, HISTORY hoặc CANCELLED)', code: 'INVALID_TAB' };
     }
+    const isCancelled = (t) => t.status === 'CANCELLED';
+    const isHistory = (t) => !isCancelled(t) && (t.status === 'NO_SHOW' || Boolean(t.trip_completed));
+    const filtered = userTickets.filter(t => {
+      if (tab === 'CANCELLED') return isCancelled(t);
+      if (tab === 'HISTORY') return isHistory(t);
+      return !isCancelled(t) && !isHistory(t);
+    });
 
     return {
       success: true,
@@ -315,6 +326,10 @@ export class PassengerPaymentService {
       return { success: false, error: 'Không tìm thấy vé', code: 'TICKET_NOT_FOUND' };
     }
 
+    // PAX-017: a boarded or absent ticket still opens, with its status and no QR to show or share
+    if (['BOARDED', 'NO_SHOW'].includes(ticket.status)) {
+      return { success: true, data: { ticket, dynamic_qr: null } };
+    }
     if (ticket.status !== 'ACTIVE') {
       return {
         success: false,
@@ -491,7 +506,18 @@ export class PassengerPaymentService {
       return { success: false, error: `Không thể hủy vé đang ở trạng thái ${ticket.status}`, code: 'TICKET_NOT_ACTIVE' };
     }
 
-    const refundCalc = calculateRefundAmount(ticket.fare_vnd, ticket.departure_time, now);
+    // PAX-025 (BR-DELAY-001): when the manager declared a delay over 30 minutes the cancellation fee is waived
+    const delayMinutes = typeof this.getTripDelayMinutes === 'function' ? this.getTripDelayMinutes(ticket.trip_id) : 0;
+    const refundCalc = delayMinutes > DELAY_WAIVER_AFTER_MINUTES
+      ? {
+        percentage: 100,
+        feePercentage: 0,
+        refundAmount: ticket.fare_vnd,
+        feeAmount: 0,
+        tier: 'DELAY_WAIVER',
+        message: `Chuyến chậm ${delayMinutes} phút (trên ${DELAY_WAIVER_AFTER_MINUTES} phút): Hoàn tiền 100%, không thu phí hủy`
+      }
+      : calculateRefundAmount(ticket.fare_vnd, ticket.departure_time, now);
     const cancelledAt = new Date(now).toISOString();
 
     ticket.status = 'CANCELLED';

@@ -1,87 +1,60 @@
-# FLOW-03: Thu Tiền COD & Biên Lai Nợ Tiền Thừa Tại Trạm Dừng (COD Collection & Debt Settlement)
+# FLOW-03: Thu tiền COD, biên lai nợ tiền thừa và chốt chuyến
 
-**Mã tài liệu:** `FLOW-03`  
-**Phiên bản:** 1.0  
-**Liên kết màn hình:** [DRI-012](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/driver/DRI-012-fare-collection-cod.md), [DRI-017](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/driver/DRI-017-cash-reconciliation-shift-end.md), [PAX-012](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/passenger/PAX-012-payment-methods.md), [PAX-015](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/passenger/PAX-015-ticket-detail-qr.md), [MGR-017](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/manager/MGR-017-booking-management.md), [MGR-028](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/manager/MGR-028-audit-logs.md)
-
----
-
-## 1. Mục Tiêu & Mô Tả Nghiệp Vụ
-
-Trong vận tải liên tỉnh tại Việt Nam, một tỷ lệ lớn hành khách vẫn chọn hình thức thanh toán tiền mặt khi lên xe (COD - Cash on Delivery) hoặc đón xe dọc đường. 
-Thực tế nảy sinh hai vấn đề nan giải:
-1. **Tài xế / phụ xe không có đủ tiền lẻ trả lại**: Ví dụ vé 220.000đ, khách đưa tờ 500.000đ nhưng đầu ca tài xế chưa có đủ 280.000đ tiền lẻ.
-2. **Nguy cơ thất thoát tiền mặt**: Thu tiền mặt dễ dẫn đến gian lận nếu không có sự đối soát khép kín giữa số tiền thực thu, tiền nợ và tiền nộp về thủ quỹ.
-
-Hệ thống giải quyết triệt để vấn đề này qua tính năng **Biên Lai Nợ Tiền Thừa (Debt Receipt / Change Voucher)**:
-- Tài xế ghi nhận số tiền khách đưa và số tiền còn nợ trên màn hình `DRI-012`.
-- Hệ thống phát sinh một mã QR Biên lai nợ tiền thừa đẩy thẳng vào ứng dụng của hành khách (hoặc in/gửi SMS).
-- Khi xe ghé trạm dừng chân hoặc bến cuối, khách mang mã này đến quầy thủ quỹ trạm dừng để nhận lại tiền mặt, hoặc chọn nhận chuyển khoản qua VietQR.
-- Cuối ca chạy, tài xế thực hiện chốt sổ tiền mặt trên `DRI-017`, đối chiếu số tiền thực tế với số tiền hệ thống tính toán trước khi bàn giao cho quản lý.
+**Mã tài liệu:** `FLOW-03`
+**Phiên bản:** 2.0 (Giai đoạn C)
+**Màn hình:** [DRI-012](../driver/DRI-012-cod-collection.md), [DRI-017](../driver/DRI-017-end-trip.md), [MGR-018](../manager/MGR-018-booking-detail.md), [MGR-022](../manager/MGR-022-refund-center.md), [MGR-028](../manager/MGR-028-audit-logs.md)
 
 ---
 
-## 2. Sơ Đồ Trình Tự Tương Tác (Mermaid Sequence Diagram)
+## 1. Mục tiêu
 
-> [!TIP]
-> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/FLOW-03-cod-cash-debt-settlement.svg) | [Xem ảnh PNG HD](./images/FLOW-03-cod-cash-debt-settlement.png)
+Tài xế thu tiền mặt của vé COD. Khi khách đưa tiền lớn và tài xế thiếu tiền lẻ, tài xế có thể phát biên lai nợ tiền thừa để khách nhận lại ở trạm dừng hoặc bến. Cuối chuyến, báo cáo kết thúc liệt kê số tiền phải nộp và các biên lai nợ.
 
-![UML Sequence Diagram FLOW-03](./images/FLOW-03-cod-cash-debt-settlement.svg)
+## 2. Các bước và API thật
+
+| # | Bước | Màn hình | API | Kết quả | Test |
+| :-- | :--- | :--- | :--- | :--- | :--- |
+| 1 | Thu COD: giá lấy từ vé trong manifest, khách phải đưa đủ giá | DRI-012 | `POST /api/v1/driver/trips/{tripId}/payments/cod-collect` `{ticket_id, amount_collected_vnd, change_settlement_method}` | Vé `BOARDED`, thanh toán `SUCCESS`; điều hành thấy đơn `PAID` và tiền COD đã thu | `TC-SPEC-A39` |
+| 2 | Tiền thừa: `CASH_RETURNED` (trả ngay), `WALLET_CREDIT` (cộng ví khách) hoặc `REST_STOP_DEBT_RECEIPT` (biên lai nợ `DR-<vé>-<nghìn>K`) | DRI-012 | cùng API | Biên lai ở trạng thái `OUTSTANDING`, khách nhận mã | `TC-SPEC-A39`, `TC-FLOW-C06` |
+| 3 | Tổng biên lai nợ của một chuyến không quá 1.000.000 đ | DRI-012 | cùng API | Vượt: `400 DEBT_LIMIT_EXCEEDED`, vé chưa thu, tài xế trả tiền thừa bằng tiền mặt hoặc ví (`BR-COD-005`) | `TC-FLOW-C06` |
+| 4 | Khách xuất trình mã biên lai ở quầy trạm dừng, thu ngân trả tiền | MGR-022 | `POST /api/v1/ops/debt-receipts/{receiptCode}/redeem` `{station_id}` | Biên lai `REDEEMED`, ghi nhật ký `DEBT_REDEEMED`; trả lại lần hai: `409 DEBT_ALREADY_REDEEMED` | `TC-FLOW-C07` |
+| 5 | Xe về bến cuối, tài xế kết thúc chuyến | DRI-017 | `POST /api/v1/driver/trips/{tripId}/end` | Server tự tính tiền mặt phải nộp từ manifest, liệt kê mã biên lai; chuyến `COMPLETED` một lần | `TC-SPEC-A41c` |
+
+## 3. Sơ đồ
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor PAX as 📱 Hành Khách
-    actor DRI as 🚍 Phụ Xe / Tài Xế (Tablet)
-    participant GW as ⚙️ API Gateway
-    participant DB as 🗄️ PostgreSQL Database
-    actor POS as 🏪 Quầy Thu Ngân Trạm Nghỉ
-    actor MGR as 🖥️ Điều Hành / Thủ Quỹ (Manager Portal)
+    actor PAX as Hành khách
+    actor DRI as Tài xế (DRI-012)
+    participant GW as API server
+    actor CSH as Thu ngân (MGR-022)
+    actor MGR as Điều hành
 
-    %% Giai đoạn 1: Thu tiền & Phát sinh biên lai nợ
-    Note over PAX,DRI: 1. Thu tiền COD & Khách đưa tiền mệnh giá lớn (DRI-012)
-    PAX->>DRI: Lên xe, đưa 500.000đ tiền mặt (Giá vé: 220.000đ)
-    DRI->>DRI: Tài xế kiểm tra túi tiền: Thiếu 280.000đ tiền thối
-    DRI->>DRI: Trên DRI-012 nhập: Số tiền nhận: 500.000đ -> Chọn [Ghi Nợ Tiền Thừa: 280.000đ]
-    DRI->>GW: POST /api/v1/driver/trips/TRIP101/tickets/TK101/collect-cod<br/>{receivedAmount: 500000, fare: 220000, debtAmount: 280000}
-    activate GW
-    GW->>DB: UPDATE bookings SET payment_status='COLLECTED_CASH_WITH_DEBT'
-    GW->>DB: INSERT INTO debt_receipts (receiptId: "DEBT-88", amount: 280000, status: 'PENDING')
-    GW-->>DRI: 200 OK {receiptId: "DEBT-88", qrPayload: "BUSGO_DEBT:88:280K"}
-    deactivate GW
-    DRI->>PAX: Xác nhận trên App hành khách hoặc gửi tin nhắn biên lai nợ kèm QR DEBT-88
-
-    %% Giai đoạn 2: Khách lấy lại tiền thừa tại Trạm dừng chân
-    Note over PAX,POS: 2. Xe dừng nghỉ 30 phút - Khách đến Quầy nhận tiền thừa
-    PAX->>POS: Xuất trình mã QR DEBT-88 tại Quầy Thu Ngân Trạm Dừng
-    POS->>GW: POST /api/v1/ops/debt-receipts/DEBT-88/redeem<br/>{cashierId: "CSH-HN01", stationId: "REST-STATION-PHUTHO"}
-    activate GW
-    GW->>DB: UPDATE debt_receipts SET status='REDEEMED', redeemed_at=NOW()
-    GW-->>POS: 200 OK {valid: true, amount: 280000, passengerName: "Nguyễn Văn A"}
-    deactivate GW
-    POS->>PAX: Xuất quỹ trả 280.000đ tiền mặt cho hành khách (hoặc bấm bắn VietQR vào STK khách)
-    POS-->>PAX: Trả tiền thành công, trạng thái biên lai nợ chuyển thành ĐÃ HOÀN TẤT
-
-    %% Giai đoạn 3: Chốt sổ cuối ca chạy
-    Note over DRI,MGR: 3. Chốt sổ bàn giao tiền mặt cuối chuyến (DRI-017)
-    DRI->>DRI: Xe về bến cuối, mở màn hình DRI-017 (Quyết toán tiền mặt)
-    DRI->>GW: GET /api/v1/driver/trips/TRIP101/cash-summary
-    activate GW
-    GW-->>DRI: 200 OK {expectedCash: 3500000, codTicketsCount: 7, totalDebtIssued: 280000}
-    deactivate GW
-    DRI->>DRI: Đếm tiền mặt thực tế trong ví: 3.500.000đ (Khớp 100%)
-    DRI->>GW: POST /api/v1/driver/trips/TRIP101/cash-reconciliation<br/>{actualAmount: 3500000, variance: 0, notes: "Khớp đủ tiền, 0 lệch"}
-    activate GW
-    GW->>DB: INSERT INTO cash_settlements (...)
-    GW-->>DRI: 200 OK {status: "SETTLED"}
-    deactivate GW
-    GW-->>MGR: Cập nhật MGR-017 & Báo cáo thủ quỹ: Chuyến xe đã chốt sổ thành công
+    PAX->>DRI: đưa 500.000 đ cho vé COD 220.000 đ
+    DRI->>GW: POST /driver/trips/{id}/payments/cod-collect {ticket_id, amount_collected_vnd: 500000, change_settlement_method: REST_STOP_DEBT_RECEIPT}
+    GW->>GW: giá lấy từ vé, tiền thừa 280.000 đ, tổng nợ chuyến trong hạn mức
+    GW-->>DRI: 200 {change_settlement: {debt_receipt_code: DR-...-280K}}
+    GW-->>MGR: đơn PAID, tiền COD đã thu
+    DRI-->>PAX: đưa mã biên lai
+    PAX->>CSH: xuất trình mã biên lai ở trạm dừng
+    CSH->>GW: POST /ops/debt-receipts/{code}/redeem {station_id}
+    GW->>GW: OUTSTANDING thành REDEEMED, ghi nhật ký kiểm toán
+    GW-->>CSH: 200 {amount_vnd: 280000, phone_masked}
+    CSH->>PAX: trả 280.000 đ
+    DRI->>GW: POST /driver/trips/{id}/end
+    GW-->>DRI: 200 {total_cash_to_handover_vnd, debt_receipts_summary}
 ```
 
----
+## 4. Quy tắc
 
-## 3. Quy Định Kiểm Soát & Đối Soát Tài Chính
+1. Giá COD là giá trên vé, client không đổi được; vé COD chỉ thu một lần; thiếu tiền là `400 INSUFFICIENT_AMOUNT` (`BR-COD-003`, `OQ-024`).
+2. Hạn mức nợ tiền thừa 1.000.000 đ mỗi chuyến tính trên mọi biên lai đã phát, kể cả đã trả (`BR-COD-005`).
+3. Thu ngân phải là `CASHIER`, `FLEET_DIRECTOR` hoặc `FINANCIAL_CONTROLLER`; tài xế và điều phối viên không có quyền (`BR-REFUND-003`).
+4. Mọi thao tác trả nợ vào nhật ký kiểm toán (`MGR-028`) kèm người thực hiện.
 
-1. **Khóa liên động trạng thái (State Interlocking)**: Một chuyến xe chỉ có thể đóng trạng thái `COMPLETED` khi toàn bộ các khoản COD đều đã được chốt (hoặc thu đủ tiền, hoặc ghi nhận biên lai nợ đã nạp vào hệ thống).
-2. **Giới hạn nợ tiền thừa tối đa**: Mỗi tài xế không được phát hành tổng biên lai nợ vượt quá $1.000.000\text{đ}$ trên một chuyến đi để giảm thiểu rủi ro gian lận.
-3. **Audit Log Bất biến**: Bất kỳ hành động phát hành biên lai nợ hay hoàn trả tiền thừa tại trạm dừng đều được ghi vào bảng `audit_logs` có đính kèm tọa độ GPS và định danh nhân viên thực hiện.
+## 5. Khác với bản cũ
+
+- Bản cũ có `GET .../cash-summary` và `POST .../cash-reconciliation`; không màn hình nào dùng. Server tính tiền phải nộp ngay trong `POST .../end` (`BR-END-004`): **bỏ** hai endpoint này.
+- Bản cũ ghi "chuyến chỉ đóng khi mọi COD đã chốt" và "ghi tọa độ GPS trong nhật ký": chưa làm. Báo cáo kết thúc chỉ đếm `unresolved_passenger_count`.
+- Chưa có màn hình thu ngân riêng: thao tác `redeem` gắn vào Trung tâm hoàn tiền `MGR-022` cho đến khi có màn hình.

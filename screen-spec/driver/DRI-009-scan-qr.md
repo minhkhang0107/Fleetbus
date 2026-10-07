@@ -167,3 +167,10 @@ ScanResult verifyScannedPayload(String payload, String tripSecret, int currentTi
 - **AC-002:** Scanning a valid Group QR marks all tickets within the PNR as `BOARDED` simultaneously.
 - **TC-DRI-009-01:** Scanning a QR with an invalid HMAC signature produces red error card with low buzz.
 - **TC-DRI-009-02:** Scanning a valid Group QR successfully batch-boards all tickets and updates trip manifest counter.
+
+
+## Design review 2026-10-07: COD ticket boarding (D100)
+
+- `BR-COD-006`: an unpaid COD ticket boards **only** through the COD collection (`DRI-012`, `POST .../payments/cod-collect`), which marks it `BOARDED` in the same step. Manual boarding, PIN and QR scan of that ticket answer `409 COD_PAYMENT_REQUIRED` with `{ticket_id, seat_code, cod_amount_vnd}`; a group QR boards the paid members and lists the others in `cod_pending_passengers`.
+- UI: the manifest row of an unpaid COD ticket has one primary action **"Thu {giá} & cho lên xe"** (opens the `DRI-012` sheet), never a separate "Cho lên xe" button. A scan that returns `COD_PAYMENT_REQUIRED` opens the same sheet with the fare filled in.
+- Test: `test/server/cod_boarding_gate.test.js` (`TC-DSG-01` to `04`).

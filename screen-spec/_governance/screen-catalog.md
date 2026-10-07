@@ -33,7 +33,7 @@
 | **PAX-021** | Passenger | Booking Detail & Cancel / Refund | `/booking/:bookingId/cancel` | Ticket Detail, Booking History | `/tickets`, `/refund/:refundId/status` | P1 | Draft | Source-backed |
 | **PAX-022** | Passenger | User Profile & Settings | `/profile` | Bottom Nav | `/profile/saved-places`, `/login`, `/home` | P2 | Draft | Source-backed |
 | **PAX-023** | Passenger | Saved Stops & Frequent Travelers | `/profile/saved-contacts` | Profile, Passenger Info Form | `/profile`, `/checkout/passenger-info` | P2 | Draft | Source-backed |
-| **PAX-024** | Passenger | Vehicle Replacement Notice | `/notice/vehicle-replacement/:id` | Push Notification, In-App Banner | `/ticket/:ticketId`, `/seat-reselection` | P1 | Draft | Derived |
+| **PAX-024** | Passenger | Vehicle Replacement Notice | `/notice/vehicle-replacement/:incidentId` | Push Notification, In-App Banner | `/ticket/:ticketId`, `/seat-reselection` | P1 | Draft | Derived |
 | **PAX-025** | Passenger | Trip Delay & Disruption Alert | `/notice/trip-delay/:tripId` | Push Notification, Tracking Banner | `/tracking/:tripId`, `/booking/:bookingId/cancel` | P1 | Draft | Derived |
 
 ---

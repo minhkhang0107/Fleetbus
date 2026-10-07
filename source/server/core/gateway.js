@@ -27,7 +27,7 @@ const PASSENGER_RULES = [
 const IDEMPOTENT_RULES = {
   passenger: /\/(seats\/hold|hold-seats|bookings\/create|checkout\/create-order|delegate|cancel)$/,
   driver: /\/(readiness|start|arrive|boarding|boarding\/manual|board-qr|payments\/cod-collect|collect-cod|onboard-hail|incidents?|end|no-show|batch-replay)$/,
-  staff: /\/(pos\/(orders|bookings|hotline-hold)|refunds\/[^/]+\/process|replace-vehicle|swap-vehicle|delay)$/
+  staff: /\/(pos\/(orders|bookings|hotline-hold)|refunds\/[^/]+\/process|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem)$/
 };
 
 // Staff permissions by role (MGR-029). The first matching rule decides; no rule means any staff role.
@@ -35,7 +35,8 @@ const STAFF_RULES = [
   [/^\/api\/v1\/ops\/pos\//, ['FLEET_DIRECTOR', 'CASHIER']],
   [/^\/api\/v1\/ops\/(refunds|reports|payments|audit-logs)/, ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER']],
   [/^\/api\/v1\/ops\/bookings/, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']],
-  [/^\/api\/v1\/ops\/trips\/[^/]+\/(delay|replace-vehicle|swap-vehicle)$/, ['FLEET_DIRECTOR', 'DISPATCHER']]
+  [/^\/api\/v1\/ops\/trips\/[^/]+\/(delay|replace-vehicle|swap-vehicle|seats\/override-lock)$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
+  [/^\/api\/v1\/ops\/debt-receipts\//, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']]
 ];
 
 export const ADMIN_ROLE = 'FLEET_DIRECTOR';

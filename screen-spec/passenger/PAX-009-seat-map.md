@@ -198,9 +198,10 @@ Exit Points:
 ---
 
 ## 9. Business Rules
-- `BR-SEAT-001`: Maximum 5 seats can be selected per transaction. Selecting a 6th seat displays a toast: *"Bạn chỉ được chọn tối đa 5 ghế trong một lần đặt."*
+- `BR-SEAT-001` (Segment occupancy - Phase E review, `OQ-028`): The map answers for one segment. `GET /trips/{id}/seat-map?pickup_stop_id=&dropoff_stop_id=` (none means the whole route) returns each seat's `segment_state` for that segment: `BOOKED` if any booking overlaps it, `BLOCKED`, `LOCKED_BY_OTHER` if another passenger holds an overlapping segment, otherwise `AVAILABLE`. `state` is the whole-route view (`BOOKED` only when every segment is sold). A seat sold from stop 1 to stop 2 is `AVAILABLE` for stop 2 to stop 3. Unknown stops give `400 STOP_NOT_FOUND`, a backwards pair `400 INVALID_SEGMENT`.
+- `BR-SEAT-003`: Maximum 5 seats can be selected per transaction. Selecting a 6th seat displays a toast: *"Bạn chỉ được chọn tối đa 5 ghế trong một lần đặt."*
 - `BR-SEAT-002`: Seat selections are local until the user taps "Tiếp tục", which commits the Redis lock hold in `PAX-010`.
-- `BR-SEAT-003`: If the network disconnects, the WebSocket connection pill shows `RECONNECTING`. Selections are frozen until reconnection succeeds and snapshot re-validation is executed.
+- `BR-SEAT-004`: If the network disconnects, the WebSocket connection pill shows `RECONNECTING`. Selections are frozen until reconnection succeeds and snapshot re-validation is executed.
 
 ---
 

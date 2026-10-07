@@ -6,9 +6,18 @@
 import { validateVietnamPhone } from '../../passenger/core/formatters.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
+import { verifyTotp } from '../../../core/totp.js';
+import { getStaffTotpSecret } from '../../../config.js';
 
 const POS_PAYMENT_METHODS = ['CASH_POS', 'CARD_POS', 'BANK_TRANSFER'];
+// BR-MGR-AUTH-001: these roles need a TOTP code on every login (ROLE_OPS_ADMIN and ROLE_FINANCE of the spec)
+const TOTP_ROLES = ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER'];
 const HOLD_POLICIES = ['UNTIL_DEPARTURE_OFFSET', 'CUSTOM_EXPIRY_MINUTES'];
+// BR-POS-006: one phone number holds at most this many seats at once across all trips
+const HOTLINE_MAX_SEATS_PER_PHONE = 4;
+// BR-TRACK-002: a vehicle that has been silent for longer than this is STALE, then OFFLINE
+const GPS_STALE_AFTER_MS = 60 * 1000;
+const GPS_OFFLINE_AFTER_MS = 180 * 1000;
 
 export const MOCK_MANAGERS_DB = [
   {
@@ -41,14 +50,17 @@ export class ManagerOperationsService {
   constructor() {
     this.loginGuard = new LoginGuard();
     this.vehicles = [
-      { vehicle_id: 'veh_01', plate_number: '29B-123.45', model: 'Limousine 34 Phòng VIP', total_seats: 34, status: 'IN_TRANSIT', driver_name: 'Trần Văn Bình', lat: 20.9812, lng: 105.8430, speed_kmh: 62, heading: 180, gps_status: 'LIVE', gps_health: 'LIVE' },
+      { vehicle_id: 'veh_01', plate_number: '29B-123.45', model: 'Limousine 34 Phòng VIP', total_seats: 34, status: 'ASSIGNED', driver_name: 'Trần Văn Bình', lat: 20.9812, lng: 105.8430, speed_kmh: 62, heading: 180, gps_status: 'LIVE', gps_health: 'LIVE' },
       { vehicle_id: 'veh_02', plate_number: '29B-444.11', model: 'Cabin Cung Điện VIP 22', total_seats: 22, status: 'IN_TRANSIT', driver_name: 'Lê Văn Toàn', lat: 20.4500, lng: 105.9200, speed_kmh: 55, heading: 175, gps_status: 'STALE', gps_health: 'STALE' },
+      { vehicle_id: 'veh_04', plate_number: '29B-882.19', model: 'Cabin Cung Điện VIP 22', total_seats: 22, status: 'ASSIGNED', driver_name: 'Trần Văn Bình', lat: 20.9806, lng: 105.8413, speed_kmh: 0, heading: 0, gps_status: 'LIVE', gps_health: 'LIVE' },
       { vehicle_id: 'veh_03', plate_number: '29B-888.22', model: 'Sleeper 34 Giường Nằm', total_seats: 34, status: 'STANDBY', driver_name: 'Hoàng Anh Tuấn', lat: 20.9800, lng: 105.8400, speed_kmh: 0, heading: 0, gps_status: 'LIVE', gps_health: 'LIVE' }
     ];
 
     this.drivers = [
-      { driver_id: 'drv_8821a', staff_id: 'TX8821', full_name: 'Nguyễn Thành Long', phone: '0912348821', license_class: 'FC', license_expiry: '2028-12-31', safety_score: 98.5, status: 'ON_DUTY' },
-      { driver_id: 'drv_9912b', staff_id: 'TX9912', full_name: 'Trần Văn Bình', phone: '0988776655', license_class: 'FC', license_expiry: '2027-06-30', safety_score: 96.0, status: 'ON_DUTY' }
+      // Same people, ids and licences as the driver app (DRI-001), so a driver named here can sign in and see the trip
+      { driver_id: 'drv_8821a', staff_id: 'TX8821', full_name: 'Trần Văn Bình', phone: '0912348821', license_class: 'FC', license_expiry: '2028-12-31', safety_score: 98.5, status: 'ON_DUTY' },
+      { driver_id: 'drv_9912b', staff_id: 'TX9912', full_name: 'Phạm Quốc Huy', phone: '0988776655', license_class: 'FC', license_expiry: '2028-06-30', safety_score: 96.0, status: 'ON_DUTY' },
+      { driver_id: 'drv_9902b', staff_id: 'TX9902', full_name: 'Lê Hoàng Nam', phone: '0987654321', license_class: 'FC', license_expiry: '2025-01-01', safety_score: 91.0, status: 'LICENSE_EXPIRED' }
     ];
 
     this.routes = [
@@ -58,9 +70,9 @@ export class ManagerOperationsService {
     ];
 
     this.trips = [
-      { trip_id: 'trp_991823', driver_id: 'drv_8821a', route_id: 'rt_hn_th', vehicle_id: 'veh_01', vehicle_plate: '29B-123.45', departure_time: '2026-08-28T14:00:00+07:00', status: 'IN_TRANSIT', booked_seats: 28, total_seats: 34, delay_minutes: 0 },
+      { trip_id: 'trp_991823', driver_id: 'drv_8821a', route_id: 'rt_hn_th', vehicle_id: 'veh_01', vehicle_plate: '29B-123.45', departure_time: '2026-08-28T14:00:00+07:00', status: 'DISPATCHED', booked_seats: 28, total_seats: 34, delay_minutes: 0 },
       { trip_id: 'trp_991824', driver_id: 'drv_8821a', route_id: 'rt_hn_hp', vehicle_id: 'veh_02', vehicle_plate: '29B-444.11', departure_time: '2026-08-28T15:30:00+07:00', status: 'SCHEDULED', booked_seats: 20, total_seats: 22, delay_minutes: 35 },
-      { trip_id: 'trp_hn_th_01', driver_id: 'drv_8821a', route_id: 'rt_hn_th', vehicle_id: 'veh_01', vehicle_plate: '29B-882.19', departure_time: '2026-08-28T07:00:00+07:00', status: 'IN_TRANSIT', booked_seats: 14, total_seats: 22, delay_minutes: 0 }
+      { trip_id: 'trp_hn_th_01', driver_id: 'drv_8821a', route_id: 'rt_hn_th', vehicle_id: 'veh_04', vehicle_plate: '29B-882.19', departure_time: '2026-08-28T07:00:00+07:00', status: 'READY', booked_seats: 2, total_seats: 22, delay_minutes: 0 }
     ];
 
     this.bookings = [
@@ -101,7 +113,7 @@ export class ManagerOperationsService {
   /**
    * MGR-001: Manager Authentication & RBAC Session
    */
-  authenticateManager(username, password, mockNow = Date.now()) {
+  authenticateManager(username, password, totp = null, mockNow = Date.now()) {
     const key = (username || '').trim().toLowerCase();
 
     const lockedFor = this.loginGuard.isLocked(key, mockNow);
@@ -118,6 +130,27 @@ export class ManagerOperationsService {
     if (!user || !verifySecret(String(password ?? ''), user.password_hash)) {
       this.loginGuard.fail(key, mockNow);
       return { success: false, error: 'Tên đăng nhập hoặc mật khẩu không chính xác', code: 'INVALID_CREDENTIALS' };
+    }
+
+    // Second factor: asked only after the password is right, so it never tells whether a password is valid.
+    if (TOTP_ROLES.includes(user.role)) {
+      if (totp === null || totp === undefined || totp === '') {
+        return { success: false, error: 'Cần mã xác thực 2 bước (6 số) từ ứng dụng Authenticator', code: 'TOTP_REQUIRED' };
+      }
+      const secret = getStaffTotpSecret(user.user_id);
+      if (!secret) {
+        return { success: false, error: 'Tài khoản chưa được cấp khóa xác thực 2 bước. Liên hệ quản trị hệ thống', code: 'TOTP_NOT_CONFIGURED' };
+      }
+      const check = verifyTotp(secret, totp, { now: mockNow, window: 1, lastUsedStep: user.totp_last_step ?? -1 });
+      if (!check.valid) {
+        this.loginGuard.fail(key, mockNow);
+        return {
+          success: false,
+          error: check.reason === 'REPLAYED' ? 'Mã xác thực này đã được dùng. Đợi mã mới' : 'Mã xác thực 2 bước không đúng',
+          code: 'INVALID_TOTP'
+        };
+      }
+      user.totp_last_step = check.step;
     }
     this.loginGuard.succeed(key);
 
@@ -141,8 +174,8 @@ export class ManagerOperationsService {
     };
   }
 
-  authenticateStaff(username, password) {
-    return this.authenticateManager(username, password);
+  authenticateStaff(username, password, totp = null) {
+    return this.authenticateManager(username, password, totp);
   }
 
   /**
@@ -210,27 +243,43 @@ export class ManagerOperationsService {
   /**
    * MGR-003: Live Fleet Radar Map Telemetry
    */
-  getLiveFleetRadar() {
+  getLiveFleetRadar(mockNow = Date.now()) {
     return {
       success: true,
       data: {
-        tracked_at: new Date().toISOString(),
+        tracked_at: new Date(mockNow).toISOString(),
         total_tracked_vehicles: this.vehicles.length,
-        vehicles: this.vehicles.map(v => ({
-          vehicle_id: v.vehicle_id,
-          plate_number: v.plate_number,
-          model: v.model,
-          status: v.status,
-          driver_name: v.driver_name,
-          lat: v.lat,
-          lng: v.lng,
-          speed_kmh: v.speed_kmh,
-          heading: v.heading,
-          gps_status: v.gps_status,
-          gps_health: v.gps_health || v.gps_status || 'LIVE'
-        }))
+        vehicles: this.vehicles.map(v => {
+          const health = this._gpsHealth(v, mockNow);
+          return {
+            vehicle_id: v.vehicle_id,
+            plate_number: v.plate_number,
+            model: v.model,
+            status: v.status,
+            driver_name: v.driver_name,
+            lat: v.lat,
+            lng: v.lng,
+            speed_kmh: v.speed_kmh,
+            heading: v.heading,
+            gps_status: health,
+            gps_health: health,
+            last_ping_at: v.last_ping_at ? new Date(v.last_ping_at).toISOString() : null
+          };
+        })
       }
     };
+  }
+
+  /**
+   * GPS health of a vehicle (BR-TRACK-002). A vehicle that pinged is judged by the age of its last ping;
+   * a vehicle that never pinged keeps the health it was registered with.
+   */
+  _gpsHealth(vehicle, mockNow = Date.now()) {
+    if (!vehicle.last_ping_at) return vehicle.gps_health || vehicle.gps_status || 'LIVE';
+    const age = mockNow - vehicle.last_ping_at;
+    if (age > GPS_OFFLINE_AFTER_MS) return 'OFFLINE';
+    if (age > GPS_STALE_AFTER_MS) return 'STALE';
+    return 'LIVE';
   }
 
   /**
@@ -357,6 +406,42 @@ export class ManagerOperationsService {
   }
 
   /**
+   * MGR-013: seat inventory of a trip, seat by seat. The legacy counters stay for the dashboard.
+   */
+  getSeatMatrix(tripId, mockNow = Date.now()) {
+    this.releaseExpiredHotlineHolds(mockNow);
+    const trip = this.findTrip(tripId);
+    if (!trip) return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
+
+    const matrix = this._inventory()?.getSeatMatrix(tripId, mockNow);
+    const seats = matrix?.success ? matrix.data.seats : [];
+    return {
+      success: true,
+      data: {
+        trip_id: tripId,
+        total_seats: trip.total_seats,
+        booked_seats: trip.booked_seats,
+        vacant_seats: trip.total_seats - trip.booked_seats,
+        hotline_holds: this.hotlineReservations.filter(r => r.trip_id === tripId && r.hold_status === 'HELD_HOTLINE'),
+        summary: matrix?.success ? matrix.data.summary : null,
+        seats
+      }
+    };
+  }
+
+  /**
+   * MGR-013 / BR-INVENTORY-001: block seats for a technical reason or open them again.
+   */
+  setSeatLock(tripId, { seatCodes, locked, reason, staffId }, mockNow = Date.now()) {
+    this.releaseExpiredHotlineHolds(mockNow);
+    const trip = this.findTrip(tripId);
+    if (!trip) return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
+    const inventory = this._inventory();
+    if (!inventory) return { success: false, error: 'Kho ghế chưa sẵn sàng', code: 'INVENTORY_UNAVAILABLE' };
+    return inventory.setSeatBlock(tripId, seatCodes, locked, { reason, staffId, mockNow });
+  }
+
+  /**
    * MGR-019 / MGR-020: Counter POS ticket issuance.
    * Seats are checked against the same inventory as online sales; a hotline caller collects the seats
    * that were locked for them by passing the reservation id.
@@ -369,6 +454,8 @@ export class ManagerOperationsService {
     paymentMethod = 'CASH_POS',
     agentStaffId = 'stf_pos_01',
     reservationId = null,
+    pickupStopId = null,
+    dropoffStopId = null,
     mockNow = Date.now()
   }) {
     this.releaseExpiredHotlineHolds(mockNow);
@@ -402,9 +489,14 @@ export class ManagerOperationsService {
 
     const inventory = this._inventory();
     const owner = reservation ? `hotline:${reservation.reservation_id}` : null;
+    // A sale from a reservation covers the segment that was held (BR-SEAT-001)
+    let segment = { pickupStopId, dropoffStopId };
+    if (reservation) segment = { pickupStopId: reservation.pickup_stop_id, dropoffStopId: reservation.dropoff_stop_id };
+    let resolvedSegment = { pickup_stop_id: null, dropoff_stop_id: null };
     if (inventory) {
-      const check = inventory.checkSellable(tripId, seatCodes, mockNow, owner);
+      const check = inventory.checkSellable(tripId, seatCodes, mockNow, owner, segment);
       if (!check.success) return check;
+      resolvedSegment = check.data;
     } else if (!reservation && trip.booked_seats + seatCodes.length > trip.total_seats) {
       return { success: false, error: 'Chuyến xe đã hết chỗ', code: 'TRIP_FULL' };
     }
@@ -425,6 +517,8 @@ export class ManagerOperationsService {
       payment_method: paymentMethod,
       payment_status: 'PAID',
       agent_staff_id: agentStaffId,
+      pickup_stop_id: resolvedSegment.pickup_stop_id,
+      dropoff_stop_id: resolvedSegment.dropoff_stop_id,
       issued_at: new Date(mockNow).toISOString(),
       channel: 'POS_HOTLINE'
     };
@@ -466,6 +560,8 @@ export class ManagerOperationsService {
     customExpiryMinutes = 60,
     notes = '',
     agentStaffId = 'stf_hotline_01',
+    pickupStopId = null,
+    dropoffStopId = null,
     mockNow = Date.now()
   }) {
     this.releaseExpiredHotlineHolds(mockNow);
@@ -491,11 +587,27 @@ export class ManagerOperationsService {
     }
 
     const inventory = this._inventory();
+    let resolvedSegment = { pickup_stop_id: null, dropoff_stop_id: null };
     if (inventory) {
-      const check = inventory.checkSellable(tripId, seatCodes, mockNow);
+      const check = inventory.checkSellable(tripId, seatCodes, mockNow, null, { pickupStopId, dropoffStopId });
       if (!check.success) return check;
+      resolvedSegment = check.data;
     } else if (trip.booked_seats + seatCodes.length > trip.total_seats) {
       return { success: false, error: 'Chuyến xe đã hết chỗ', code: 'TRIP_FULL' };
+    }
+
+    // BR-POS-006: a caller without a deposit cannot tie up more than 4 seats (expired holds were released above)
+    const callerPhone = validateVietnamPhone(phone).normalized;
+    const alreadyHeld = this.hotlineReservations
+      .filter(r => r.hold_status === 'HELD_HOTLINE' && validateVietnamPhone(r.phone).normalized === callerPhone)
+      .reduce((sum, r) => sum + r.seat_codes.length, 0);
+    if (alreadyHeld + seatCodes.length > HOTLINE_MAX_SEATS_PER_PHONE) {
+      return {
+        success: false,
+        error: `Mỗi số điện thoại chỉ được giữ tối đa ${HOTLINE_MAX_SEATS_PER_PHONE} ghế cùng lúc (đang giữ ${alreadyHeld})`,
+        code: 'HOTLINE_LIMIT_EXCEEDED',
+        held_seats: alreadyHeld
+      };
     }
 
     let holdUntilMs;
@@ -521,6 +633,8 @@ export class ManagerOperationsService {
       phone,
       seat_codes: seatCodes,
       hold_policy: holdPolicy,
+      pickup_stop_id: resolvedSegment.pickup_stop_id,
+      dropoff_stop_id: resolvedSegment.dropoff_stop_id,
       departure_offset_minutes: Number(departureOffsetMinutes),
       hold_status: 'HELD_HOTLINE',
       hold_until: holdUntil,
@@ -529,7 +643,7 @@ export class ManagerOperationsService {
       notes
     };
 
-    inventory?.lockSeats(tripId, seatCodes, `hotline:${reservationId}`, holdUntilMs);
+    inventory?.lockSeats(tripId, seatCodes, `hotline:${reservationId}`, holdUntilMs, { pickupStopId, dropoffStopId });
     this.hotlineReservations.push(reservation);
     trip.booked_seats += seatCodes.length;
 
@@ -616,6 +730,10 @@ export class ManagerOperationsService {
     if (newDriverId && !newDriver) {
       return { success: false, error: 'Không tìm thấy tài xế thay thế', code: 'DRIVER_NOT_FOUND' };
     }
+    // DRI-001 refuses a driver whose licence has expired; a replacement must be someone who can sign in
+    if (newDriver && (newDriver.status !== 'ON_DUTY' || new Date(`${newDriver.license_expiry}T23:59:59+07:00`).getTime() < Date.now())) {
+      return { success: false, error: `Tài xế ${newDriver.full_name} không đủ điều kiện nhận chuyến (giấy phép lái xe hoặc trạng thái ca)`, code: 'DRIVER_UNAVAILABLE' };
+    }
 
     const oldPlate = trip.vehicle_plate;
     const oldVehicle = this.vehicles.find(v => v.vehicle_id === trip.vehicle_id);
@@ -650,6 +768,7 @@ export class ManagerOperationsService {
         tripId,
         oldPlate,
         newPlate: targetVehicle.plate_number,
+        newDriverId: newDriver ? newDriver.driver_id : null,
         reason
       });
     }

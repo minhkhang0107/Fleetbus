@@ -30,7 +30,7 @@ describe('Spec conformance: no-show, replay and manager figures', () => {
     assert.strictEqual(again.success, false);
     assert.strictEqual(again.code, 'INVALID_PASSENGER_STATE');
 
-    driver.boardPassengerManually(trip, { ticketId: 'tkt_88219_A02' });
+    driver.collectCod(trip, 'tkt_88219_A02', 220000);
     const boarded = driver.markNoShow(trip, 'tkt_88219_A02', 'sai', { mockNow: departure + 30 * MINUTE });
     assert.strictEqual(boarded.success, false);
     assert.strictEqual(boarded.code, 'INVALID_PASSENGER_STATE');

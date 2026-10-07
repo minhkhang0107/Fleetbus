@@ -173,3 +173,10 @@ Scenario: Delegated ticket check-in via 6-digit PIN
 | `TC-DRI-010-01` | Functional | Search by seat "A02" | Retrieves passenger and confirms boarding |
 | `TC-DRI-010-02` | Crypto Flow | Enter valid 6-digit PIN | Verifies offline and marks ticket BOARDED |
 | `TC-DRI-010-03` | Security | Enter wrong PIN 5 times | Temporarily locks PIN entry and displays warning |
+
+
+## Design review 2026-10-07: COD ticket boarding (D100)
+
+- `BR-COD-006`: an unpaid COD ticket boards **only** through the COD collection (`DRI-012`, `POST .../payments/cod-collect`), which marks it `BOARDED` in the same step. Manual boarding, PIN and QR scan of that ticket answer `409 COD_PAYMENT_REQUIRED` with `{ticket_id, seat_code, cod_amount_vnd}`; a group QR boards the paid members and lists the others in `cod_pending_passengers`.
+- UI: the manifest row of an unpaid COD ticket has one primary action **"Thu {giá} & cho lên xe"** (opens the `DRI-012` sheet), never a separate "Cho lên xe" button. A scan that returns `COD_PAYMENT_REQUIRED` opens the same sheet with the fare filled in.
+- Test: `test/server/cod_boarding_gate.test.js` (`TC-DSG-01` to `04`).

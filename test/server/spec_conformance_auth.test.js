@@ -2,6 +2,8 @@
  * Spec conformance: authentication, authorization, ownership and idempotency
  * (Phase A review, FND-A01, FND-A02, FND-A30, FND-A51). Runs the gateway with authMode "enforce".
  */
+import { generateTotp } from '../../source/server/core/totp.js';
+import { DEV_TOTP_SECRET } from '../../source/server/config.js';
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import crypto from 'node:crypto';
@@ -56,8 +58,12 @@ describe('Spec conformance: authentication, authorization and idempotency', () =
     return ver.body.data.token;
   }
 
+  let totpOffset = 0;
   async function staffToken(username, password) {
-    const res = await api('/api/v1/auth/staff/login', { method: 'POST', body: { username, password } });
+    // The director signs in with a code; each login takes the next 30 s step because a code works once
+    const body = { username, password };
+    if (username === 'admin@busgo.vn') body.totp = generateTotp(DEV_TOTP_SECRET, Date.now() + 30000 * totpOffset++);
+    const res = await api('/api/v1/auth/staff/login', { method: 'POST', body });
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
     return res.body.data.token;
   }

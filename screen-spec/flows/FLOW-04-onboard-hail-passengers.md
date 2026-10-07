@@ -1,78 +1,56 @@
-# FLOW-04: Đón Khách Vẫy Dọc Đường & Khóa Ghế Thời Gian Thực (Onboard Hail Passengers)
+# FLOW-04: Đón khách vẫy dọc đường
 
-**Mã tài liệu:** `FLOW-04`  
-**Phiên bản:** 1.0  
-**Liên kết màn hình:** [DRI-006](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/driver/DRI-006-driving-hud-route.md), [DRI-007](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/driver/DRI-007-passenger-manifest-route.md), [PAX-009](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/passenger/PAX-009-seat-selection.md), [MGR-013](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/manager/MGR-013-seat-inventory-matrix.md), [MGR-017](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/screen-spec/manager/MGR-017-booking-management.md)
-
----
-
-## 1. Mục Tiêu & Mô Tả Nghiệp Vụ
-
-Trong hành trình xe khách chạy liên tỉnh, tài xế thường xuyên bắt gặp khách vẫy dọc quốc lộ hoặc các nút giao đường gom cao tốc. 
-Thách thức lớn nhất là:
-1. **Xung đột ghế (Seat Collision)**: Nếu khách vẫy bước lên xe ngồi vào ghế B05, nhưng cùng lúc đó một hành khách ở chặng kế tiếp đang mở ứng dụng Passenger App để đặt online ghế B05. Nếu không khóa tức thì, sẽ xảy ra tình huống "1 ghế bán 2 người".
-2. **Thao tác lái xe nhanh (< 5 giây)**: Tài xế hoặc phụ xe chỉ có vài giây để chọn ghế trống, xác nhận chặng xuống và thu tiền mà không làm gián đoạn hành trình.
-
-Giải pháp:
-- Phụ xe mở sơ đồ ghế trực quan trên `DRI-007`. Các ghế trống được tô màu xanh lá cây kèm số tiền chặng tương ứng.
-- Chạm vào ghế trống -> Nhấn "Đón khách vẫy" -> Hệ thống lập tức bắn Distributed Lock lên Redis và phát sóng WebSocket tới toàn bộ máy khách đang xem sơ đồ ghế chuyến đó.
-- Ghế lập tức đổi sang màu Đỏ (Đã bán) trên App của hành khách trực tuyến và bảng điều hành Manager.
+**Mã tài liệu:** `FLOW-04`
+**Phiên bản:** 2.0 (Giai đoạn C)
+**Màn hình:** [DRI-007](../driver/DRI-007-manifest.md), [PAX-009](../passenger/PAX-009-seat-map.md), [MGR-013](../manager/MGR-013-trip-seat-inventory.md), [MGR-017](../manager/MGR-017-booking-search.md)
 
 ---
 
-## 2. Sơ Đồ Trình Tự Tương Tác (Mermaid Sequence Diagram)
+## 1. Mục tiêu
 
-> [!TIP]
-> **Tùy chọn tải & xem bản vẽ UML:** [Xem ảnh Vector SVG](./images/FLOW-04-onboard-hail-passengers.svg) | [Xem ảnh PNG HD](./images/FLOW-04-onboard-hail-passengers.png)
+Khách vẫy xe giữa đường. Tài xế chọn một ghế trống, điểm xuống, nhận tiền mặt; ghế bán ngay cho mọi kênh và doanh thu vào báo cáo của quản lý.
 
-![UML Sequence Diagram FLOW-04](./images/FLOW-04-onboard-hail-passengers.svg)
+## 2. Các bước và API thật
+
+| # | Bước | Màn hình | API | Bên khác thấy gì | Test |
+| :-- | :--- | :--- | :--- | :--- | :--- |
+| 1 | Chuyến phải đang chạy (`IN_TRANSIT`), ghế phải trống ở kho ghế chung | DRI-007 | `POST /api/v1/driver/trips/{tripId}/onboard-hail` `{seat_code, dropoff_stop_id, passenger_name?, amount_collected_vnd?}` | Giá chặng do server đặt, giá client gửi bị bỏ (`OQ-024`) | `TC-SPEC-A40` |
+| 2 | Vé phát hành, trạng thái `BOARDED`, mã `BG-HAIL-xxx` | DRI-007 | cùng API, `201` | Ghế `BOOKED` kèm PNR ở ma trận ghế của điều hành | `TC-FLOW-C08` |
+| 3 | Khách online đang chọn đúng ghế đó | PAX-009 | `POST /trips/{id}/seats/hold` | `409 SEAT_ALREADY_BOOKED`; quầy bán vé cũng bị `409` | `TC-FLOW-C08` |
+| 4 | Điều hành xem đơn | MGR-017 | `GET /api/v1/ops/bookings` | Đơn có `channel: DRIVER_HAIL` và doanh thu của ghế | `TC-FLOW-C08` |
+| 5 | Ghế đã có người | DRI-007 | cùng API | `409 SEAT_OCCUPIED` | `TC-SPEC-A40` |
+
+## 3. Sơ đồ
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor HAIL as 🚶 Khách Vẫy Dọc Đường
-    actor DRI as 🚍 Phụ Xe / Tài Xế (DRI-007)
-    participant GW as ⚙️ API Gateway & Redis Lock
-    participant DB as 🗄️ Database
-    participant WS as ⚡ WebSocket Event Bus
-    actor ONLINE as 📱 Khách Đang Đặt Online (PAX-009)
-    actor MGR as 🖥️ Điều Hành Viên (MGR-013)
+    actor HAIL as Khách vẫy
+    actor DRI as Tài xế (DRI-007)
+    participant GW as API server
+    participant INV as Kho ghế dùng chung
+    actor ONL as Khách online (PAX-009)
+    actor MGR as Điều hành (MGR-013, MGR-017)
 
-    %% Khách vẫy lên xe
-    Note over HAIL,DRI: 1. Khách vẫy xe tại Nút giao QL1A
-    HAIL->>DRI: Bước lên xe, xin đi về "Thị trấn Phủ Lý"
-    DRI->>DRI: Mở màn hình DRI-007 -> Chạm vào ghế B05 (Màu xanh - Ghế trống)
-    DRI->>DRI: Chọn điểm xuống: "Phủ Lý" -> Giá chặng: 120.000đ -> Bấm "Xác Nhận Đón Nhanh"
-
-    %% Gửi request lên Gateway
-    Note over DRI,GW: 2. Kích hoạt khóa ghế & Tạo vé nhanh (< 300ms)
-    DRI->>GW: POST /api/v1/driver/trips/TRIP101/hail-passengers<br/>{seatNumber: "B05", dropoffStop: "PHU_LY", fare: 120000, passengerName: "Khách Vẫy QL1A"}
-    activate GW
-    GW->>GW: Redis SETNX lock:seat:TRIP101:B05 (Tránh xung đột online)
-    GW->>DB: INSERT INTO bookings (trip_id, seat_number, type='HAIL_PASSENGER', status='CONFIRMED')
-    GW->>DB: INSERT INTO tickets (ticket_id: "TK-HAIL-99", status='BOARDED')
-    GW->>WS: Broadcast room "trip:TRIP101" event: "seat_status_changed"<br/>{seat: "B05", status: "SOLD", by: "DRIVER_HAIL"}
-    GW-->>DRI: 200 OK {ticketId: "TK-HAIL-99", seatNumber: "B05", fare: 120000}
-    deactivate GW
-
-    %% Đồng bộ tức thì tới các bên
-    Note over WS,MGR: 3. Phát sóng thời gian thực chống xung đột ghế
-    par Đến Khách Đang Chọn Ghế Online
-        WS-->>ONLINE: Sự kiện "seat_status_changed": Ghế B05 lập tức hóa Đỏ (Đã bán)
-        ONLINE->>ONLINE: Nếu khách đang bấm chọn B05 -> Bật popup: "Ghế vừa được mua bởi hành khách khác"
-    and Đến Màn Hình Điều Hành Trạm
-        WS-->>MGR: Cập nhật sơ đồ ghế MGR-013: Ghế B05 chuyển sang màu Tím (Khách vẫy dọc đường)
-        MGR->>MGR: Doanh thu chuyến xe tự động nhảy thêm +120.000đ
-    end
-
-    %% Thu tiền và in vé nếu cần
-    DRI->>HAIL: Thu 120.000đ tiền mặt, hướng dẫn khách vào ngồi ghế B05
+    HAIL->>DRI: lên xe, xin đi đến điểm xuống
+    DRI->>GW: POST /driver/trips/{id}/onboard-hail {seat_code, dropoff_stop_id}
+    GW->>INV: kiểm ghế trống, bán ghế
+    GW->>GW: giá do server đặt, tạo vé BOARDED
+    GW-->>DRI: 201 {ticket_id, pnr, fare}
+    GW-->>MGR: ghế BOOKED, đơn channel DRIVER_HAIL
+    ONL->>GW: POST /trips/{id}/seats/hold {seatCodes: [ghế vừa bán]}
+    GW-->>ONL: 409 SEAT_ALREADY_BOOKED
+    DRI->>HAIL: thu tiền mặt, đưa tiền thối nếu có
 ```
 
----
+## 4. Quy tắc
 
-## 3. Các Ràng Buộc & Tiêu Chí An Toàn
+0. **Khách vẫy đi một đoạn:** từ điểm xe đã tới (`DRI-008`) đến `dropoff_stop_id` (mặc định điểm cuối). Ghế phải trống đúng đoạn đó: ghế đã bán ở đoạn trước, hoặc khách cũ đã xuống, vẫn đón được; ghế đã bán cho một điểm nằm trong đoạn thì `409` (`BR-HAIL-003`, `TC-SEG-07`).
+1. Một kho ghế cho mọi kênh (app, quầy, hotline, vẫy): không bao giờ bán hai lần cùng ghế (`OQ-014`, `OQ-026`).
+2. Khách vẫy không cần số điện thoại; mã tham chiếu là PNR `BG-HAIL-xxx`. Bản cũ ghi `HAIL-{HHmm}-{Seat}`: **bỏ**, dùng PNR chung của hệ thống.
+3. Nguồn doanh thu ghi ở trường `channel` của đơn (`DRIVER_HAIL`); bản cũ gọi là `SOURCE: ONBOARD_HAIL`.
+4. Tiền thối của khách vẫy xử lý như `DRI-012` (`change_settlement_method`).
 
-1. **Khóa phân tán nguyên tử (Atomic Redis Lock)**: Thao tác giữ ghế của tài xế sử dụng chung cơ chế Redis Lock với hành khách đặt online, bảo đảm không bao giờ xảy ra Race Condition.
-2. **Khách vẫy không có số điện thoại**: Hệ thống tự sinh mã tham chiếu đại diện `HAIL-{HHmm}-{Seat}` để phụ xe không phải mất thời gian nhập liệu khi xe đang di chuyển.
-3. **Phân biệt nguồn vé trên Báo cáo**: Doanh thu từ khách vẫy được gắn nhãn riêng `SOURCE: ONBOARD_HAIL` để quản lý kiểm tra đối chiếu tỷ lệ lấp đầy ghế và tính minh bạch của tổ lái xe.
+## 5. Khác với bản cũ
+
+Đường dẫn cũ `POST .../hail-passengers` đổi thành `POST .../onboard-hail`; tài xế chọn điểm xuống bằng `dropoff_stop_id`, không gửi giá.

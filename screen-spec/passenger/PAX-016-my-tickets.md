@@ -146,6 +146,7 @@ Next Screen:
 - `BR-MYTICKETS-001`: Tickets with `trip_status IN ('SCHEDULED', 'DISPATCHED', 'IN_TRANSIT')` and `ticket_status IN ('ISSUED', 'BOARDED')` appear under the **Sắp đi** tab.
 - `BR-MYTICKETS-003` (Exact owner lookup - review FND-A29): Tickets are returned only for one complete, valid phone number matched exactly (the ticket holder or the delegate). A missing, empty or partial phone returns `400 INVALID_PHONE`, never other passengers' tickets. Once authentication is enforced, the phone comes from the session token and not from the query string.
 - `BR-MYTICKETS-002`: Pull-to-refresh queries latest status and checks if vehicle replacement or delay announcements have occurred.
+- `BR-MYTICKETS-004` (Tabs follow the trip - Phase C review FND-C06): `GET /passenger/tickets?tab=UPCOMING|HISTORY|CANCELLED` (`COMPLETED` is accepted as an old name of `HISTORY`; any other value gives `400 INVALID_TAB`). A `BOARDED` ticket stays under **Sắp đi** with its status until its trip is `COMPLETED`, then moves to **Lịch sử**. A `NO_SHOW` ticket goes to **Lịch sử** at once. A cancelled ticket is only under **Đã hủy**.
 - `BR-GRP-001` (Group Ticket Presentation - REV-01): Bookings containing $\ge 2$ seats under the same PNR are bundled into a `GroupTicketCard`. The card displays all booked seat codes, a direct CTA "Xem QR Đoàn" (allowing one-scan boarding for all travelers), and a "Chia sẻ vé" button to delegate individual e-tickets via SMS and 6-digit offline PINs.
 
 ---

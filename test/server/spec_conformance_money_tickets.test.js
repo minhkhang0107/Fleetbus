@@ -226,8 +226,8 @@ describe('Spec conformance: money, tickets and boarding', () => {
       method: 'POST', body: { ticket_id: ticket.ticket_id, pin }
     });
     assert.strictEqual(board.status, 200, JSON.stringify(board.body));
-    const wallet = await api(`/api/v1/passenger/tickets?phone=${phone}&tab=COMPLETED`);
-    assert.ok(wallet.body.data.some((t) => t.ticket_id === ticket.ticket_id), 'ticket must move to COMPLETED');
+    const wallet = await api(`/api/v1/passenger/tickets?phone=${phone}&tab=UPCOMING`);
+    assert.ok(wallet.body.data.some((t) => t.ticket_id === ticket.ticket_id && t.status === 'BOARDED'), 'a boarded ticket stays under UPCOMING with status BOARDED until the trip ends');
   });
 
   it('TC-SPEC-A29: ticket wallet requires an exact phone, never a substring (PAX-016)', async () => {

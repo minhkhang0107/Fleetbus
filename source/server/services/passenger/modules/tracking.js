@@ -4,19 +4,30 @@
  */
 
 import { calculateHaversineDistance, calculateETA } from '../core/cryptoEngine.js';
+import { REST_STOPS, REST_STOP_AFTER_MS, STILL_SPEED_KMH } from '../../../core/restStops.js';
 
 export class PassengerTrackingService {
   constructor() {
     this.busPositions = new Map(); // tripId -> Telemetry
     this.notifications = new Map(); // userId/phone -> [Notification]
     this.disruptions = new Map(); // tripId -> DisruptionRecord
+    this.stillSince = new Map(); // tripId -> { stopId, since }: the bus has been still inside a rest-stop geofence since then
   }
 
   /**
    * PAX-018: Ingest Driver GPS telemetry ping & get Live Bus Radar Snapshot
    */
-  updateBusPosition(tripId, { lat, lng, speed_kmh, bearing_deg, plate_number, is_at_rest_stop = false, rest_stop_name = null, estimated_rest_minutes = null, mockNow = Date.now() }) {
-    const isRestStop = Boolean(is_at_rest_stop);
+  updateBusPosition(tripId, { lat, lng, speed_kmh, bearing_deg, plate_number, is_at_rest_stop, rest_stop_name = null, estimated_rest_minutes = null, mockNow = Date.now() }) {
+    // BR-TRACK-004: the rest stop is detected from the pings (still for over 5 minutes inside a geofence) unless told
+    let isRestStop = Boolean(is_at_rest_stop);
+    if (is_at_rest_stop === undefined) {
+      const detected = this._detectRestStop(tripId, parseFloat(lat), parseFloat(lng), parseFloat(speed_kmh) || 0, mockNow);
+      if (detected) {
+        isRestStop = true;
+        rest_stop_name = rest_stop_name || detected.name;
+        estimated_rest_minutes = estimated_rest_minutes || detected.planned_rest_minutes;
+      }
+    }
     const record = {
       trip_id: tripId,
       plate_number: plate_number || '29B-882.19',
@@ -33,6 +44,22 @@ export class PassengerTrackingService {
 
     this.busPositions.set(tripId, record);
     return { success: true, data: record };
+  }
+
+  _detectRestStop(tripId, lat, lng, speedKmh, now) {
+    const stop = Number.isFinite(lat) && Number.isFinite(lng)
+      ? REST_STOPS.find(s => calculateHaversineDistance(lat, lng, s.lat, s.lng) <= s.radius_m)
+      : null;
+    if (!stop || speedKmh >= STILL_SPEED_KMH) {
+      this.stillSince.delete(tripId);
+      return null;
+    }
+    const current = this.stillSince.get(tripId);
+    if (!current || current.stopId !== stop.stop_id) {
+      this.stillSince.set(tripId, { stopId: stop.stop_id, since: now });
+      return null;
+    }
+    return now - current.since > REST_STOP_AFTER_MS ? stop : null;
   }
 
   /**
@@ -61,13 +88,16 @@ export class PassengerTrackingService {
     const isArrivingSoon = distanceMeters <= 1000; // < 1 km
     const isAtStation = distanceMeters <= 100; // < 100 m
 
-    // Detect telemetry staleness (>60s lag indicates tunnel/offline - REV-07)
+    // Detect telemetry staleness (PAX-018 BR-TRACK-002): over 60 s the position is STALE, over 180 s the signal is OFFLINE
     const posTimestampMs = new Date(busPos.timestamp).getTime();
     const ageSeconds = Math.max(0, Math.round((mockNow - posTimestampMs) / 1000));
+    const isOffline = ageSeconds > 180;
     const isStale = ageSeconds > 60;
-    const staleWarning = isStale
-      ? `Tín hiệu GPS cập nhật ${ageSeconds} giây trước. Xe có thể đang di chuyển qua hầm hoặc khu vực sóng di động yếu.`
-      : null;
+    const staleWarning = isOffline
+      ? `Mất tín hiệu GPS xe (${ageSeconds} giây). Đang kết nối lại, vị trí hiển thị là vị trí cuối cùng nhận được.`
+      : (isStale
+        ? `Tín hiệu GPS cập nhật ${ageSeconds} giây trước. Xe có thể đang di chuyển qua hầm hoặc khu vực sóng di động yếu.`
+        : null);
 
     let hudStatusText = `Xe đang di chuyển (Cách ${Math.round(distanceMeters / 1000)} km, ~${etaMinutes} phút)`;
     if (busPos.is_at_rest_stop || busPos.status === 'REST_STOP') {
@@ -83,7 +113,7 @@ export class PassengerTrackingService {
       data: {
         trip_id: tripId,
         has_position: true,
-        signal_status: isStale ? 'STALE' : 'LIVE',
+        signal_status: isOffline ? 'OFFLINE' : (isStale ? 'STALE' : 'LIVE'),
         bus_position: busPos,
         pickup_location: { lat: pickupLat, lng: pickupLng },
         distance_meters: distanceMeters,

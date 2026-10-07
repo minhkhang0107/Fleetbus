@@ -51,4 +51,5 @@
 ## 3. Business Rules & API Contract
 - **API Endpoint:** `GET /api/v1/trips/{tripId}/disruptions` & `POST /api/v1/trips/{tripId}/reschedule-free`
 - `BR-DELAY-001`: If official delay exceeds 30 minutes, cancellation penalty is waived ($100\%$ refund guaranteed regardless of time before departure).
+- `BR-DELAY-002` (Official delay - Phase C review FND-C03): The delay that counts is the one declared with `POST /ops/trips/{id}/delay` (`MGR-024`). `PAX-021` reads it when the passenger cancels (`tier: DELAY_WAIVER`). No automatic discount voucher is issued for a delay (`OQ-031`).
 - **TC-PAX-025-01:** Verifies canceling a delayed trip bypasses the $<6\text{h}$ fee policy and grants 100% refund.

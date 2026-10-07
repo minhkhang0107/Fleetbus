@@ -1,6 +1,8 @@
 /**
  * Spec conformance: shape of the API (Phase A review, FND-A04, A05, A07, A10, A11, A32).
  */
+import { generateTotp } from '../../source/server/core/totp.js';
+import { DEV_TOTP_SECRET } from '../../source/server/config.js';
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import crypto from 'node:crypto';
@@ -199,7 +201,7 @@ describe('Spec conformance: API shape (authentication enforced)', () => {
     const delay = await api('/api/v1/ops/trips/trp_991824/delay', { method: 'POST', token, body: { delayMinutes: 20, reason: 'Ket xe' } });
     assert.strictEqual(delay.status, 200);
 
-    const admin = await api('/api/v1/auth/staff/login', { method: 'POST', body: { username: 'admin@busgo.vn', password: 'admin123' } });
+    const admin = await api('/api/v1/auth/staff/login', { method: 'POST', body: { username: 'admin@busgo.vn', password: 'admin123', totp: generateTotp(DEV_TOTP_SECRET, Date.now() + 30000) } });
     const logs = await api('/api/v1/ops/audit-logs', { token: admin.body.data.token });
     assert.strictEqual(logs.status, 200);
     const entry = logs.body.data.audit_logs.find((l) => l.action === 'TRIP_DELAY');

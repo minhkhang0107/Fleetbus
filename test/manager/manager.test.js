@@ -1,3 +1,5 @@
+import { generateTotp } from '../../source/server/core/totp.js';
+import { DEV_TOTP_SECRET } from '../../source/server/config.js';
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { ManagerOperationsService } from '../../source/server/services/manager/modules/managerService.js';
@@ -6,7 +8,9 @@ describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-03
   const managerService = new ManagerOperationsService();
 
   it('TC-MGR-01: Should authenticate manager with role and permissions (MGR-001 / MGR-029)', () => {
-    const authRes = managerService.authenticateManager('admin@busgo.vn', 'admin123');
+    const noCode = managerService.authenticateManager('admin@busgo.vn', 'admin123');
+    assert.strictEqual(noCode.code, 'TOTP_REQUIRED', 'the director needs the second factor (BR-MGR-AUTH-001)');
+    const authRes = managerService.authenticateManager('admin@busgo.vn', 'admin123', generateTotp(DEV_TOTP_SECRET, Date.now() + 90000), Date.now() + 90000);
     assert.strictEqual(authRes.success, true);
     assert.strictEqual(authRes.data.user.full_name, 'Nguyễn Tiến Dũng');
     assert.strictEqual(authRes.data.user.role, 'FLEET_DIRECTOR');
@@ -21,8 +25,8 @@ describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-03
   it('TC-MGR-02: Should compute executive operations dashboard KPIs in real-time (MGR-002)', () => {
     const kpiRes = managerService.getDashboardKPIs();
     assert.strictEqual(kpiRes.success, true);
-    assert.strictEqual(kpiRes.data.kpi_metrics.active_vehicles_count, 2);
-    assert.strictEqual(kpiRes.data.kpi_metrics.total_fleet_count, 3);
+    assert.strictEqual(kpiRes.data.kpi_metrics.active_vehicles_count, 1);
+    assert.strictEqual(kpiRes.data.kpi_metrics.total_fleet_count, 4);
     const totalBooked = managerService.trips.reduce((sum, t) => sum + t.booked_seats, 0);
     const totalSeats = managerService.trips.reduce((sum, t) => sum + t.total_seats, 0);
     assert.strictEqual(kpiRes.data.kpi_metrics.overall_load_factor_pct, parseFloat(((totalBooked / totalSeats) * 100).toFixed(1)));
@@ -33,7 +37,7 @@ describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-03
   it('TC-MGR-03: Should track live fleet telemetry radar map with GPS signal health (MGR-003, MGR-004)', () => {
     const radarRes = managerService.getLiveFleetRadar();
     assert.strictEqual(radarRes.success, true);
-    assert.strictEqual(radarRes.data.total_tracked_vehicles, 3);
+    assert.strictEqual(radarRes.data.total_tracked_vehicles, 4);
 
     const v1 = radarRes.data.vehicles.find(v => v.plate_number === '29B-123.45');
     assert.ok(v1);
@@ -48,7 +52,7 @@ describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-03
     assert.ok(dispatchRes.data.trips.length >= 2);
 
     const trip1 = dispatchRes.data.trips.find(t => t.trip_id === 'trp_991823');
-    assert.strictEqual(trip1.status, 'IN_TRANSIT');
+    assert.strictEqual(trip1.status, 'DISPATCHED');
     assert.strictEqual(trip1.vehicle_plate, '29B-123.45');
   });
 
