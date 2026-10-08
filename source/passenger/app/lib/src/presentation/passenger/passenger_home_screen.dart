@@ -1,292 +1,173 @@
 import 'package:flutter/material.dart';
-import 'package:resources/resources.dart';
+
 import 'passenger_location_picker_screen.dart';
 import 'passenger_search_results_screen.dart';
-import 'passenger_trip_detail_screen.dart';
+import 'passenger_store.dart';
+import 'passenger_ticket_qr_screen.dart';
+import 'passenger_widgets.dart';
 
-class PassengerHomeScreen extends StatefulWidget {
+/// PAX-004: search by route and date only; the seats picked later are the passenger count (D109).
+class PassengerHomeScreen extends StatelessWidget {
   const PassengerHomeScreen({super.key});
 
   @override
-  State<PassengerHomeScreen> createState() => _PassengerHomeScreenState();
+  Widget build(BuildContext context) {
+    final store = PassengerScope.of(context);
+    final upcoming = store.tickets.where((t) => t.status == TicketStatus.active).toList();
+    final name = store.userName;
+    return SafeArea(
+      child: ListView(padding: const EdgeInsets.fromLTRB(16, 24, 16, 24), children: [
+        Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(name == null ? 'Xin chào' : 'Xin chào, ${name.split(' ').last}', style: sans(size: 13, color: PTokens.muted)),
+              Text('Bạn muốn đi đâu?', style: sans(size: 22, weight: FontWeight.w700)),
+            ]),
+          ),
+          CircleAvatar(
+            radius: 20,
+            backgroundColor: PTokens.primarySoft,
+            child: Text(name == null ? '?' : 'NA', style: sans(size: 14, weight: FontWeight.w600, color: PTokens.primaryDark)),
+          ),
+        ]),
+        gap(20),
+        AppCard(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Container(
+              decoration: BoxDecoration(border: Border.all(color: PTokens.line), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+              child: Stack(children: [
+                Column(children: [
+                  _PlaceField(label: 'Điểm đi', place: store.originPlace, isOrigin: true),
+                  const Divider(height: 1, color: PTokens.line),
+                  _PlaceField(label: 'Điểm đến', place: store.destPlace, isOrigin: false),
+                ]),
+                Positioned(
+                  right: 10,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: Material(
+                      color: PTokens.surface,
+                      shape: const CircleBorder(side: BorderSide(color: PTokens.line)),
+                      child: IconButton(tooltip: 'Đổi chiều điểm đi và điểm đến', onPressed: store.swapPlaces, icon: const Icon(Icons.swap_vert, color: PTokens.primary)),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            gap(12),
+            Text('Ngày đi', style: sans(size: 12, color: PTokens.muted)),
+            gap(4),
+            DropdownButtonFormField<String>(
+              initialValue: store.date,
+              items: [for (final d in PassengerStore.dates) DropdownMenuItem(value: d.id, child: Text(d.long, style: sans(size: 15, weight: FontWeight.w600)))],
+              onChanged: (v) => store.setDate(v!),
+            ),
+            gap(12),
+            PrimaryButton(
+              label: 'Tìm chuyến',
+              icon: Icons.search,
+              onPressed: () {
+                if (store.origin == store.dest) {
+                  showToast(context, 'Điểm đi và điểm đến phải khác nhau.');
+                  return;
+                }
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerSearchResultsScreen()));
+              },
+            ),
+          ]),
+        ),
+        if (upcoming.isNotEmpty) ...[
+          gap(20),
+          Text('Chuyến sắp đi', style: sans(size: 15, weight: FontWeight.w600)),
+          gap(10),
+          _UpcomingCard(ticket: upcoming.last),
+        ],
+        gap(20),
+        Text('Tìm lại gần đây', style: sans(size: 15, weight: FontWeight.w600)),
+        gap(10),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          _RecentChip(label: 'Hà Nội → Thanh Hóa', origin: 'hn', dest: 'th'),
+          _RecentChip(label: 'Hà Nội → Ninh Bình', origin: 'hn', dest: 'nb'),
+        ]),
+      ]),
+    );
+  }
 }
 
-class _PassengerHomeScreenState extends State<PassengerHomeScreen> {
-  String _origin = 'Hà Nội (Bến xe Giáp Bát)';
-  String _destination = 'Thanh Hóa (Bến xe Phía Bắc)';
-
-  Future<void> _pickOrigin() async {
-    final result = await Navigator.of(context).push<String>(
-      MaterialPageRoute(
-        builder: (_) => PassengerLocationPickerScreen(
-          title: 'Chọn điểm đi (PAX-005)',
-          initialValue: _origin,
-        ),
-      ),
-    );
-    if (result != null && mounted) {
-      setState(() => _origin = result);
-    }
-  }
-
-  Future<void> _pickDestination() async {
-    final result = await Navigator.of(context).push<String>(
-      MaterialPageRoute(
-        builder: (_) => PassengerLocationPickerScreen(
-          title: 'Chọn điểm đến (PAX-005)',
-          initialValue: _destination,
-        ),
-      ),
-    );
-    if (result != null && mounted) {
-      setState(() => _destination = result);
-    }
-  }
+class _PlaceField extends StatelessWidget {
+  const _PlaceField({required this.label, required this.place, required this.isOrigin});
+  final String label;
+  final Place place;
+  final bool isOrigin;
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.canvasPassenger,
-      body: CustomScrollView(
-        slivers: [
-          // Sapphire App Bar
-          SliverAppBar(
-            expandedHeight: 140,
-            pinned: true,
-            backgroundColor: AppColors.primarySapphire,
-            flexibleSpace: const FlexibleSpaceBar(
-              titlePadding: EdgeInsets.only(left: 16, bottom: 16),
-              title: Text(
-                'BusGo Passenger',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                ),
-              ),
-            ),
+    return InkWell(
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerLocationPickerScreen(isOrigin: isOrigin))),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 64, 10),
+        child: Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(label, style: sans(size: 12, color: PTokens.muted)),
+              const SizedBox(height: 2),
+              Text('${place.city} · ${place.station}', style: sans(size: 15, weight: FontWeight.w600)),
+            ]),
           ),
-
-          // Search Form Card (PAX-004 / PAX-005)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppColors.whisperBorder),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
-                    )
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'TÌM CHUYẾN XE LIÊN TỈNH',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.5,
-                        color: AppColors.mutedSteel,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    _buildLocationField(
-                      icon: Icons.trip_origin_rounded,
-                      iconColor: AppColors.primarySapphire,
-                      label: 'Điểm đi (Chạm để đổi)',
-                      value: _origin,
-                      onTap: _pickOrigin,
-                    ),
-                    const SizedBox(height: 12),
-                    _buildLocationField(
-                      icon: Icons.location_on_rounded,
-                      iconColor: AppColors.alertCrimson,
-                      label: 'Điểm đến (Chạm để đổi)',
-                      value: _destination,
-                      onTap: _pickDestination,
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const PassengerSearchResultsScreen(),
-                          ),
-                        );
-                      },
-                      child: const Text('TÌM KIẾM CHUYẾN XE (PAX-006) ➔'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // Popular Routes Header
-          const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text(
-                'Tuyến đường phổ biến',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.charcoalInk,
-                ),
-              ),
-            ),
-          ),
-
-          // Route Cards
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                children: [
-                  _buildPopularRouteCard(
-                    context,
-                    origin: 'Hà Nội',
-                    destination: 'Thanh Hóa',
-                    price: '220.000 đ',
-                    time: '07:00 (Hôm nay)',
-                    vehicle: 'Cabin Cung Điện VIP',
-                  ),
-                  const SizedBox(height: 12),
-                  _buildPopularRouteCard(
-                    context,
-                    origin: 'Hà Nội',
-                    destination: 'Sầm Sơn (Biển)',
-                    price: '250.000 đ',
-                    time: '14:00 (Hôm nay)',
-                    vehicle: 'Cabin Cung Điện VIP',
-                  ),
-                  const SizedBox(height: 24),
-                ],
-              ),
-            ),
-          ),
-        ],
+        ]),
       ),
     );
   }
+}
 
-  Widget _buildLocationField({
-    required IconData icon,
-    required Color iconColor,
-    required String label,
-    required String value,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppColors.canvasPassenger,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.whisperBorder),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, color: iconColor, size: 20),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: const TextStyle(fontSize: 10, color: AppColors.mutedSteel),
-                  ),
-                  Text(
-                    value,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.charcoalInk,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.swap_vert_rounded, color: AppColors.mutedSteel, size: 18),
-          ],
-        ),
-      ),
+class _UpcomingCard extends StatelessWidget {
+  const _UpcomingCard({required this.ticket});
+  final Ticket ticket;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerTicketQrScreen(ticket: ticket))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [PnrTag(ticket.pnr), const Spacer(), const Pill('Đã thanh toán', PillKind.ok)]),
+        gap(10),
+        Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+          Text(ticket.departure, style: mono(size: 20, weight: FontWeight.w700)),
+          const SizedBox(width: 8),
+          Expanded(child: Text(ticket.route, style: sans(size: 15, weight: FontWeight.w600))),
+        ]),
+        gap(10),
+        Row(children: [
+          Expanded(child: Text('${ticket.date} · Ghế ${ticket.seat}', style: sans(size: 13, color: PTokens.muted))),
+          Text('Mở vé', style: sans(size: 13, weight: FontWeight.w600, color: PTokens.primaryDark)),
+        ]),
+      ]),
     );
   }
+}
 
-  Widget _buildPopularRouteCard(
-    BuildContext context, {
-    required String origin,
-    required String destination,
-    required String price,
-    required String time,
-    required String vehicle,
-  }) {
-    return InkWell(
-      onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => PassengerTripDetailScreen(
-              origin: origin,
-              destination: destination,
-              price: price,
-              departureTime: time.split(' ')[0],
-              vehicleType: vehicle,
-            ),
-          ),
-        );
+class _RecentChip extends StatelessWidget {
+  const _RecentChip({required this.label, required this.origin, required this.dest});
+  final String label;
+  final String origin;
+  final String dest;
+
+  @override
+  Widget build(BuildContext context) {
+    return ActionChip(
+      label: Text(label, style: sans(size: 14)),
+      backgroundColor: PTokens.surface,
+      side: const BorderSide(color: PTokens.line),
+      shape: const StadiumBorder(),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+      onPressed: () {
+        final store = PassengerScope.read(context);
+        store.setPlace(isOrigin: true, code: origin);
+        store.setPlace(isOrigin: false, code: dest);
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerSearchResultsScreen()));
       },
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.whisperBorder),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(origin, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 6),
-                      child: Icon(Icons.arrow_forward_rounded, size: 14, color: AppColors.mutedSteel),
-                    ),
-                    Text(destination, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text('$vehicle · $time', style: const TextStyle(fontSize: 12, color: AppColors.mutedSteel)),
-              ],
-            ),
-            Text(
-              price,
-              style: const TextStyle(
-                fontFamily: 'JetBrains Mono',
-                fontWeight: FontWeight.bold,
-                fontSize: 15,
-                color: AppColors.primarySapphire,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

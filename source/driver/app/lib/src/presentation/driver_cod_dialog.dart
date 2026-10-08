@@ -1,190 +1,123 @@
 import 'package:flutter/material.dart';
-import 'package:resources/resources.dart';
 
-class DriverCodDialog extends StatefulWidget {
-  final String seatCode;
-  final String passengerName;
-  final String pnr;
-  final int amountVnd;
+import 'driver_store.dart';
+import 'driver_widgets.dart';
 
-  const DriverCodDialog({
-    super.key,
-    this.seatCode = 'A02 (T1)',
-    this.passengerName = 'Nguyễn Văn Nam',
-    this.pnr = 'BG-882201',
-    this.amountVnd = 220000,
-  });
-
-  @override
-  State<DriverCodDialog> createState() => _DriverCodDialogState();
+/// DRI-012: collect the COD fare and board in one step. Change goes back in cash, to the wallet,
+/// or as a debt receipt within the trip limit of 1.000.000 đ (BR-COD-005).
+Future<void> showCodSheet(BuildContext context, Passenger p) async {
+  final store = DriverScope.read(context);
+  var given = 500000;
+  var method = 'DEBT';
+  final done = await showDriverSheet<bool>(context, builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) {
+        final change = given - p.cod;
+        final left = DriverStore.debtLimit - store.debtIssued;
+        final debtOk = change <= left;
+        if (method == 'DEBT' && !debtOk) method = 'CASH';
+        final hint = change <= 0
+            ? 'Đủ tiền, không có tiền thừa'
+            : switch (method) { 'CASH' => 'Trả lại khách ${vnd(change)}', 'WALLET' => 'Cộng ${vnd(change)} vào ví', _ => 'In biên lai nợ ${vnd(change)}' };
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Thu tiền vé COD', style: dsans(size: 18, weight: FontWeight.w700)),
+                Text('Ghế ${p.seat} · ${p.name}', style: dsans(size: 14, color: DTokens.sub)),
+              ]),
+            ),
+            IconButton(tooltip: 'Đóng', onPressed: () => Navigator.of(ctx).pop(false), icon: const Icon(Icons.close)),
+          ]),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(color: DTokens.bg, borderRadius: BorderRadius.circular(10)),
+            child: Row(children: [Text('Giá vé', style: dsans(size: 14, color: DTokens.muted)), const Spacer(), Text(vnd(p.cod), style: dmono(size: 26))]),
+          ),
+          const SizedBox(height: 14),
+          Text('Khách đưa', style: dsans(size: 14, weight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Row(children: [
+            for (final v in [220000, 300000, 500000]) ...[
+              if (v != 220000) const SizedBox(width: 8),
+              Expanded(child: ChoiceTile(label: '${v ~/ 1000}k', center: true, selected: given == v, onTap: () => setSheet(() => given = v))),
+            ],
+          ]),
+          if (change > 0) ...[
+            const SizedBox(height: 14),
+            Text.rich(TextSpan(children: [
+              TextSpan(text: 'Tiền thừa ', style: dsans(size: 14, weight: FontWeight.w600)),
+              TextSpan(text: vnd(change), style: dmono(size: 14, color: DTokens.warnInk)),
+              TextSpan(text: ' trả bằng', style: dsans(size: 14, weight: FontWeight.w600)),
+            ])),
+            const SizedBox(height: 8),
+            ChoiceTile(label: 'Trả tiền mặt ngay', hint: 'Đưa lại khách bây giờ', selected: method == 'CASH', onTap: () => setSheet(() => method = 'CASH')),
+            const SizedBox(height: 8),
+            ChoiceTile(label: 'Cộng vào ví của khách', hint: 'Theo số điện thoại trên vé', selected: method == 'WALLET', onTap: () => setSheet(() => method = 'WALLET')),
+            const SizedBox(height: 8),
+            ChoiceTile(
+              label: 'Biên lai nhận tại trạm dừng',
+              hint: debtOk ? 'Hạn mức chuyến còn ${vnd(left)}' : 'Vượt hạn mức chuyến (còn ${vnd(left)})',
+              selected: method == 'DEBT',
+              enabled: debtOk,
+              onTap: () => setSheet(() => method = 'DEBT'),
+            ),
+          ],
+          const SizedBox(height: 16),
+          BigButton(label: 'Đã nhận ${vnd(given)} · Cho lên xe', subtitle: hint, color: DTokens.ok, height: 72, onPressed: () => Navigator.of(ctx).pop(true)),
+        ]);
+      }));
+  if (done != true || !context.mounted) return;
+  final error = await store.collectCod(p, given: given, method: method);
+  if (!context.mounted) return;
+  dToast(context, error ?? 'Đã thu ${vnd(p.cod)}, ghế ${p.seat} đã lên xe');
 }
 
-class _DriverCodDialogState extends State<DriverCodDialog> {
-  bool _isConfirming = false;
-
-  void _handleConfirm() {
-    setState(() => _isConfirming = true);
-    Future.delayed(const Duration(milliseconds: 800), () {
-      if (mounted) {
-        setState(() => _isConfirming = false);
-        Navigator.of(context).pop(true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppColors.emeraldSafe,
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle_rounded, color: Colors.white),
-                const SizedBox(width: 8),
-                Text('ĐÃ THU ${widget.amountVnd} đ TỪ KHÁCH ${widget.seatCode}'),
-              ],
-            ),
-          ),
-        );
-      }
-    });
+/// DRI-007 hail sale: a free seat, the stop where the passenger gets off, the trip fare in cash.
+Future<void> showHailSheet(BuildContext context) async {
+  final store = DriverScope.read(context);
+  await store.loadFreeSeats();
+  if (!context.mounted) return;
+  if (store.freeSeats.isEmpty) {
+    dToast(context, 'Xe đã hết ghế trống');
+    return;
   }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.canvasOps,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      padding: const EdgeInsets.all(24),
-      child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.payments_rounded, color: AppColors.amberWarning, size: 24),
-                    SizedBox(width: 8),
-                    Text(
-                      'THU TIỀN MẶT COD (DRI-012)',
-                      style: TextStyle(
-                        fontFamily: 'JetBrains Mono',
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(false),
-                  icon: const Icon(Icons.close_rounded, color: AppColors.textMuted),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // Passenger Info Box
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.surfacePanel,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppColors.borderTactical),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Ghế đặt:', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-                      Text(
-                        widget.seatCode,
-                        style: const TextStyle(
-                          fontFamily: 'JetBrains Mono',
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.pnrOrange,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Hành khách:', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-                      Text(
-                        widget.passengerName,
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Mã vé PNR:', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-                      Text(
-                        widget.pnr,
-                        style: const TextStyle(
-                          fontFamily: 'JetBrains Mono',
-                          fontSize: 12,
-                          color: Color(0xFF60A5FA),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Divider(color: AppColors.borderTactical, height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Số tiền phải thu:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
-                      Text(
-                        '${widget.amountVnd} đ',
-                        style: const TextStyle(
-                          fontFamily: 'JetBrains Mono',
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.amberWarning,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // Confirm Button (64dp)
-            SizedBox(
-              width: double.infinity,
-              height: 64,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.amberWarning,
-                  foregroundColor: Colors.black,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                ),
-                onPressed: _isConfirming ? null : _handleConfirm,
-                child: _isConfirming
-                    ? const CircularProgressIndicator(color: Colors.black)
-                    : const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.check_circle_rounded, size: 22),
-                          SizedBox(width: 8),
-                          Text(
-                            'XÁC NHẬN ĐÃ THU TIỀN MẶT',
-                            style: TextStyle(fontFamily: 'JetBrains Mono', fontSize: 14, fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
+  var seat = store.freeSeats.first;
+  final after = store.stops.skip(store.stopIndex + 1).toList();
+  if (after.isEmpty) {
+    dToast(context, 'Xe đã ở bến cuối');
+    return;
+  }
+  var to = after.last.id;
+  final ok = await showDriverSheet<bool>(context, builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('Khách vẫy dọc đường', style: dsans(size: 18, weight: FontWeight.w700)),
+        const SizedBox(height: 12),
+        Text('Ghế trống', style: dsans(size: 14, weight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: 2.2,
+          children: [for (final c in store.freeSeats.take(6)) ChoiceTile(label: c, center: true, selected: seat == c, onTap: () => setSheet(() => seat = c))],
         ),
-      ),
-    );
-  }
+        const SizedBox(height: 12),
+        Text('Xuống tại', style: dsans(size: 14, weight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        for (final s in after) ...[ChoiceTile(label: s.name, selected: to == s.id, onTap: () => setSheet(() => to = s.id)), const SizedBox(height: 8)],
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(color: DTokens.bg, borderRadius: BorderRadius.circular(10)),
+          child: Row(children: [Expanded(child: Text('Giá vé (giá chung của chuyến)', style: dsans(size: 14, color: DTokens.muted))), Text(vnd(store.fare), style: dmono(size: 22))]),
+        ),
+        const SizedBox(height: 14),
+        BigButton(label: 'Đã thu ${vnd(store.fare)} · Cho lên xe', color: DTokens.ok, height: 72, onPressed: () => Navigator.of(ctx).pop(true)),
+        const SizedBox(height: 8),
+        BigButton(label: 'Hủy', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop(false)),
+      ])));
+  if (ok != true || !context.mounted) return;
+  final error = await store.sellHail(seat, to);
+  if (!context.mounted) return;
+  dToast(context, error ?? 'Đã bán ghế $seat cho khách vẫy');
 }

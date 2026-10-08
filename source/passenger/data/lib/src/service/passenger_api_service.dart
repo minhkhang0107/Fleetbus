@@ -168,10 +168,15 @@ class PassengerApiClientService {
   /**
    * PAX-010: Hold Seats (10 minutes, at most 5). The response carries the hold_id that the booking needs.
    */
-  Future<Map<String, dynamic>> holdSeats(String tripId, List<String> seatCodes, {String? idempotencyKey}) {
+  Future<Map<String, dynamic>> holdSeats(String tripId, List<String> seatCodes, {String? pickupStopId, String? dropoffStopId, String? idempotencyKey}) {
     return _post(
       '/api/v1/trips/$tripId/seats/hold',
-      body: {'seatCodes': seatCodes},
+      body: {
+        'seatCodes': seatCodes,
+        // The segment decides which seats are free (BR-SEAT-001), none means the whole route.
+        if (pickupStopId != null) 'pickupStopId': pickupStopId,
+        if (dropoffStopId != null) 'dropoffStopId': dropoffStopId,
+      },
       idempotent: true,
       idempotencyKey: idempotencyKey,
     );

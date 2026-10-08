@@ -206,3 +206,25 @@ Record: `docs/review/design-review-2-findings.md` (DR2-01 to DR2-13), `decision-
 - [x] **Boarding QR (D104)**: static, versioned QR per ticket; `POST /api/v1/passenger/tickets/{ticketId}/qr/reissue` revokes the old QR and PIN until departure; the manifest carries `boarding_check` so a tablet checks scans offline without any secret; opaque share link; the rotating QR, the drift window, the offline JSON and the duplicate boarding path in the payment module are removed.
 - [x] **No-show at the passenger's own stop (D105)**, **trip ends at the last stop or with a reason (D108)**.
 - [x] **Design and prototypes**: login at "Giữ ghế" (D106), cockpit locked while moving (D107), no passenger count in search (D109), static QR with "Đổi mã QR".
+
+## 15. Flutter Apps on the New Design (2026-10-08)
+
+Record: `decision-log.md` (D110, D111). Flutter 3.47.6 (Dart 3.13.5) installed in `~/development/flutter`, Android cmdline-tools added; `flutter doctor` reports no issue.
+
+- [x] **Build fixed**: `shared` pinned `freezed_annotation 2.4.1` and `build_runner 2.4.8` against the other modules; both mobile apps moved to Gradle 9.3.1, AGP 9.1.0, Kotlin 2.4.0 (Flutter 3.47 needs Gradle 8.14+; Gradle 9 drops `buildDir`). Debug APKs build with `flutter build apk --debug --flavor develop`.
+- [x] **Passenger app** (`source/passenger/app/lib/src/presentation/passenger/`): 16 screens of the Claude Design canvas on one `PassengerStore` (splash, OTP login, home, location picker, results, pickup and dropoff, seat map with login sheet at the hold, checkout, VietQR, success, my tickets, static ticket QR with reissue, tracking with lost signal, delay notice and cancellation, notifications, profile). Geist and JetBrains Mono through `google_fonts`. Walked on the Pixel_5 emulator: 21 steps pass. 8 unit tests (`flutter test`).
+- [x] **Driver app** (`source/driver/app/lib/src/presentation/`): login, today's trips, six-point check gating the start, start sheet, cockpit locked while moving, boarding per stop with in-place updates, COD sheet with change and debt cap, PIN boarding, hail sale, incident, early end with reason, end report, sync, profile. Walked on the emulator: 29 steps pass. 5 unit tests.
+- [x] Template leftovers removed (chat, knowledge, channels screens of the "mestudy" template).
+- [x] Superseded by section 16: the screens now call the API.
+- [ ] **Open**: Camera QR decoding needs a scanner plugin; the PIN path works. The unused DI layer (`lib/di`, `lib/config`) still references a missing generated file. The manager web app was not rebuilt in Flutter.
+
+## 16. Apps Connected to the Local Server (2026-10-08)
+
+Record: `decision-log.md` (D112 to D114). Server: `npm start` on port 3000; the Android emulator reaches it at `http://10.0.2.2:3000` (chosen by the API services).
+
+- [x] **Passenger app** calls the API for OTP, search, seat map by segment, hold, order, VietQR (real EMVCo QR with `qr_flutter`), payment status (poll every 3 s), wallet, ticket QR and PIN, QR reissue, sharing, cancellation, tracking (every 10 s) and notifications. 8 unit tests against a fake server (`MockClient`).
+- [x] **Driver app** calls the API for login, today's trips, readiness, start, stop arrival, manual and PIN boarding, COD, no-show, hail, incident, telemetry (every 5 s while running) and end; the trip is read again after each action. 6 unit tests against a fake server.
+- [x] **Server**: ticket detail returns the backup PIN (`TC-QR-08`); the stray seeded ticket on `trp_hn_th_01` removed (`TC-SPEC-A60`). Node tests 230/230, lint clean.
+- [x] **End-to-end on the emulator**: book A02, bank webhook from the host, success by polling, ticket with QR and PIN, driver sees the passenger, wrong PIN refused, right PIN boards, passenger wallet shows "Đã lên xe", tracking live, boarding notice.
+- [ ] **Open**: per-stop times are estimates (the API has no time per stop); the driver clock between stops is still simulated while boarding times come from the server; the boarding notice shows the raw trip id; `usesCleartextTraffic` is set in the main manifest and must move to the debug manifest before a release; camera QR plugin; manager app.
+

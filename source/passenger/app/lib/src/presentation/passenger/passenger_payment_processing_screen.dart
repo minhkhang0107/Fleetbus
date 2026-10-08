@@ -1,326 +1,238 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
+import 'dart:async';
+
 import 'package:flutter/services.dart';
-import 'package:resources/resources.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+
+import 'passenger_main_shell.dart';
+import 'passenger_store.dart';
 import 'passenger_ticket_qr_screen.dart';
+import 'passenger_widgets.dart';
 
+/// PAX-013: VietQR transfer. "Tôi đã chuyển tiền" asks for a check; the ticket is issued when the
+/// bank confirms (BR-PAY-004). There is no simulation button on this screen (D101).
 class PassengerPaymentProcessingScreen extends StatefulWidget {
-  final int totalAmount;
-  final String pnr;
-  final List<String> selectedSeats;
-
-  const PassengerPaymentProcessingScreen({
-    super.key,
-    this.totalAmount = 170000,
-    this.pnr = 'BG88219',
-    this.selectedSeats = const ['A01'],
-  });
+  const PassengerPaymentProcessingScreen({super.key, required this.name, required this.phone});
+  final String name;
+  final String phone;
 
   @override
   State<PassengerPaymentProcessingScreen> createState() => _PassengerPaymentProcessingScreenState();
 }
 
 class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProcessingScreen> {
-  int _secondsLeft = 600; // 10 minutes hold
-  Timer? _timer;
-  bool _isVerifying = false;
+  bool _checking = false;
+  String? _notYet;
+  Timer? _poll;
 
   @override
   void initState() {
     super.initState();
-    _startCountdown();
-  }
-
-  void _startCountdown() {
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (mounted) {
-        setState(() {
-          if (_secondsLeft <= 1) {
-            _timer?.cancel();
-            _secondsLeft = 0;
-          } else {
-            _secondsLeft--;
-          }
-        });
-      }
-    });
+    // BR-PAY-003: ask the server every 3 seconds; the bank webhook is what settles the order.
+    _poll = Timer.periodic(const Duration(seconds: 3), (_) => _check(manual: false));
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _poll?.cancel();
     super.dispose();
   }
 
-  String get _formattedTime {
-    final m = (_secondsLeft ~/ 60).toString().padLeft(2, '0');
-    final s = (_secondsLeft % 60).toString().padLeft(2, '0');
-    return '$m:$s';
+  Future<void> _check({required bool manual}) async {
+    if (_checking) return;
+    final store = PassengerScope.read(context);
+    setState(() => _checking = manual);
+    final paid = await store.checkPayment(manual: manual);
+    if (!mounted) return;
+    setState(() {
+      _checking = false;
+      if (manual && !paid) _notYet = 'Chưa nhận được tiền. Hệ thống vẫn kiểm tra mỗi 3 giây; kiểm tra lại nội dung chuyển khoản.';
+    });
+    if (!paid || store.lastTicket == null) return;
+    _poll?.cancel();
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => PassengerBookingSuccessScreen(ticket: store.lastTicket!, phone: widget.phone)),
+      (_) => false,
+    );
   }
 
-  void _handleConfirmPayment() {
-    setState(() => _isVerifying = true);
-    Future.delayed(const Duration(milliseconds: 1500), () {
-      if (mounted) {
-        setState(() => _isVerifying = false);
-        // Show success modal then navigate to e-ticket
-        showModalBottomSheet(
-          context: context,
-          isDismissible: false,
-          enableDrag: false,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          builder: (ctx) => Container(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(
-                    color: AppColors.emeraldSoft,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.check_circle_rounded, color: AppColors.emeraldSafe, size: 48),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Thanh toán thành công!',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.charcoalInk),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Đã nhận thanh toán ${widget.totalAmount} đ qua VietQR Napas247.',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 13, color: AppColors.mutedSteel),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                    Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(builder: (_) => const PassengerTicketQrScreen()),
-                    );
-                  },
-                  child: const Text('XEM VÉ ĐIỆN TỬ (QR) ➔'),
-                ),
-              ],
-            ),
-          ),
-        );
-      }
-    });
+  void _copy(String value) {
+    Clipboard.setData(ClipboardData(text: value));
+    showToast(context, 'Đã sao chép $value');
+  }
+
+  Future<void> _cancel(PassengerStore store) async {
+    final yes = await showAppSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('Hủy đơn ${store.orderPnr}?', style: sans(size: 18, weight: FontWeight.w700)),
+          gap(8),
+          Text('Ghế ${store.seats.join(', ')} sẽ được nhả ngay. Nếu bạn đã chuyển tiền, đừng hủy: vé sẽ được xuất khi ngân hàng báo tiền về.', style: sans(size: 14, color: PTokens.muted, height: 1.5)),
+          gap(14),
+          PrimaryButton(label: 'Hủy đơn và nhả ghế', color: PTokens.danger, onPressed: () => Navigator.of(ctx).pop(true)),
+          gap(8),
+          GhostButton(label: 'Tiếp tục thanh toán', onPressed: () => Navigator.of(ctx).pop(false)),
+        ]));
+    if (yes != true || !mounted) return;
+    _poll?.cancel();
+    await store.cancelOrder();
+    if (!mounted) return;
+    Navigator.of(context).popUntil((r) => r.settings.name == 'seats' || r.isFirst);
+    showToast(context, 'Đã hủy đơn và nhả ghế');
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.canvasPassenger,
-      appBar: AppBar(
-        title: const Text('Thanh toán VietQR Napas247'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Hold Timer Banner (PAX-010 / PAX-013)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: AppColors.amberSoft,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.amberHold.withOpacity(0.3)),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.timer_outlined, color: AppColors.amberHold, size: 20),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'Thời gian giữ chỗ:',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.charcoalInk),
-                    ),
-                  ],
-                ),
-                Text(
-                  _formattedTime,
-                  style: const TextStyle(
-                    fontFamily: 'JetBrains Mono',
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.amberHold,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // VietQR Code Box Card
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.whisperBorder),
-            ),
-            child: Column(
-              children: [
-                // Napas & VietQR Header
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppColors.primarySapphireSoft,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Text(
-                        'VIETQR · NAPAS 247',
-                        style: TextStyle(
-                          fontFamily: 'JetBrains Mono',
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.primarySapphire,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      'PNR: ${widget.pnr}',
-                      style: const TextStyle(
-                        fontFamily: 'JetBrains Mono',
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.pnrOrange,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // Simulated Dynamic VietQR Image Box
-                Container(
-                  width: 200,
-                  height: 200,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppColors.whisperBorder, width: 2),
-                  ),
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.qr_code_2_rounded, size: 130, color: AppColors.charcoalInk),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.emeraldSoft,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: const Text(
-                            'CHUẨN EMVCO NAPAS',
-                            style: TextStyle(
-                              fontFamily: 'JetBrains Mono',
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.emeraldSafe,
-                            ),
-                          ),
-                        ),
-                      ],
+    final store = PassengerScope.of(context);
+    final pnr = store.orderPnr ?? '';
+    final memo = store.transferMemo;
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        appBar: TopBar(title: 'Chuyển khoản', showBack: false, trailing: pnr.isEmpty ? null : PnrTag(pnr)),
+        body: Column(children: [
+          const HoldBanner(),
+          Expanded(
+            child: ListView(padding: const EdgeInsets.all(16), children: [
+              AppCard(
+                padding: const EdgeInsets.all(16),
+                child: Column(children: [
+                  Semantics(
+                    label: 'Mã VietQR cho đơn $pnr, số tiền ${vnd(store.orderAmount)}',
+                    image: true,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(border: Border.all(color: PTokens.line), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+                      child: QrImageView(data: store.vietQrPayload, size: 188, backgroundColor: Colors.white),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-
-                const Text(
-                  'Mở ứng dụng ngân hàng bất kỳ để quét mã',
-                  style: TextStyle(fontSize: 12, color: AppColors.mutedSteel),
-                ),
-                const Divider(height: 24),
-
-                // Transfer Details Table
-                _buildTransferDetailRow('Ngân hàng thụ hưởng:', 'Techcombank (TCB)', canCopy: false),
-                const SizedBox(height: 8),
-                _buildTransferDetailRow('Số tài khoản:', '9821999901', canCopy: true),
-                const SizedBox(height: 8),
-                _buildTransferDetailRow('Tên người thụ hưởng:', 'CONG TY CP BUSGO VIET NAM', canCopy: false),
-                const SizedBox(height: 8),
-                _buildTransferDetailRow('Số tiền:', '${widget.totalAmount} đ', canCopy: true, isAmount: true),
-                const SizedBox(height: 8),
-                _buildTransferDetailRow('Nội dung chuyển khoản:', widget.pnr, canCopy: true, isHighlight: true),
-              ],
-            ),
+                  gap(10),
+                  Text('Quét bằng app ngân hàng bất kỳ', style: sans(size: 13, color: PTokens.muted)),
+                  gap(10),
+                  SizedBox(width: 180, child: GhostButton(label: 'Lưu ảnh mã QR', onPressed: () => showToast(context, 'Đã lưu ảnh mã QR vào thư viện'))),
+                ]),
+              ),
+              gap(14),
+              AppCard(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Column(children: [
+                  _row('Ngân hàng', store.bankName),
+                  _row('Số tài khoản', store.accountNumber, copy: store.accountNumber, isMono: true),
+                  _row('Số tiền', vnd(store.orderAmount), copy: '${store.orderAmount}', isMono: true),
+                  _row('Nội dung', memo, copy: memo, isMono: true, color: PTokens.pnr, last: true),
+                ]),
+              ),
+              gap(14),
+              Text('Chuyển đúng số tiền và nội dung. Vé được xuất tự động khi ngân hàng báo tiền về, thường dưới 1 phút.', style: sans(size: 13, color: const Color(0xFF334155), height: 1.5)),
+              gap(10),
+              Row(children: [
+                Container(width: 8, height: 8, decoration: const BoxDecoration(color: PTokens.primary, shape: BoxShape.circle)),
+                const SizedBox(width: 8),
+                Expanded(child: Text(_checking ? 'Đang kiểm tra với ngân hàng…' : (_notYet ?? 'Đang chờ ngân hàng xác nhận'), style: sans(size: 13, color: _notYet != null && !_checking ? PTokens.warnInk : PTokens.muted))),
+              ]),
+            ]),
           ),
-          const SizedBox(height: 20),
-
-          ElevatedButton(
-            onPressed: _isVerifying ? null : _handleConfirmPayment,
-            child: _isVerifying
-                ? const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
-                      SizedBox(width: 12),
-                      Text('ĐANG KIỂM TRA GIAO DỊCH...'),
-                    ],
-                  )
-                : const Text('TÔI ĐÃ CHUYỂN KHOẢN XONG ➔'),
-          ),
-          const SizedBox(height: 12),
-
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Thay đổi phương thức thanh toán', style: TextStyle(color: AppColors.mutedSteel, fontSize: 13)),
-          ),
-        ],
+        ]),
+        bottomNavigationBar: BottomAction(column: true, children: [
+          PrimaryButton(label: _checking ? 'Đang kiểm tra…' : 'Tôi đã chuyển tiền, kiểm tra ngay', onPressed: _checking ? null : () => _check(manual: true)),
+          LinkButton(label: 'Hủy đơn và nhả ghế', color: PTokens.danger, onPressed: () => _cancel(store)),
+        ]),
       ),
     );
   }
 
-  Widget _buildTransferDetailRow(
-    String label,
-    String value, {
-    bool canCopy = false,
-    bool isAmount = false,
-    bool isHighlight = false,
-  }) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: const TextStyle(fontSize: 12, color: AppColors.mutedSteel)),
-        Row(
-          children: [
-            Text(
-              value,
-              style: TextStyle(
-                fontFamily: isAmount || isHighlight ? 'JetBrains Mono' : 'Geist',
-                fontSize: isAmount ? 14 : 12,
-                fontWeight: isAmount || isHighlight ? FontWeight.bold : FontWeight.w600,
-                color: isHighlight
-                    ? AppColors.pnrOrange
-                    : (isAmount ? AppColors.primarySapphire : AppColors.charcoalInk),
-              ),
+  Widget _row(String label, String value, {String? copy, bool isMono = false, Color color = PTokens.ink, bool last = false}) => Container(
+        constraints: const BoxConstraints(minHeight: 48),
+        decoration: BoxDecoration(border: last ? null : const Border(bottom: BorderSide(color: Color(0xFFF1F5F9)))),
+        child: Row(children: [
+          SizedBox(width: 96, child: Text(label, style: sans(size: 13, color: PTokens.muted))),
+          Expanded(child: Text(value, style: isMono ? mono(size: 15, weight: FontWeight.w700, color: color) : sans(size: 14, weight: FontWeight.w600))),
+          if (copy != null)
+            TextButton(
+              onPressed: () => _copy(copy),
+              style: TextButton.styleFrom(backgroundColor: PTokens.primarySoft, foregroundColor: PTokens.primaryDark, minimumSize: const Size(44, 36), textStyle: sans(size: 13, weight: FontWeight.w600)),
+              child: const Text('Sao chép'),
             ),
-            if (canCopy) ...[
-              const SizedBox(width: 6),
-              InkWell(
-                onTap: () {
-                  Clipboard.setData(ClipboardData(text: value.replaceAll(' đ', '').trim()));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Đã sao chép: $value')),
-                  );
-                },
-                child: const Icon(Icons.copy_rounded, size: 14, color: AppColors.primarySapphire),
+        ]),
+      );
+}
+
+/// PAX-015: success; going back from here never returns to checkout (BR-SUCCESS-001).
+class PassengerBookingSuccessScreen extends StatelessWidget {
+  const PassengerBookingSuccessScreen({super.key, required this.ticket, required this.phone});
+  final Ticket ticket;
+  final String phone;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Column(children: [
+          Align(
+            alignment: Alignment.centerRight,
+            child: IconButton(tooltip: 'Đóng và về trang chủ', onPressed: () => PassengerMainShell.openTab(context, 0), icon: const Icon(Icons.close)),
+          ),
+          Expanded(
+            child: ListView(padding: const EdgeInsets.symmetric(horizontal: 24), children: [
+              Center(
+                child: Container(
+                  width: 72,
+                  height: 72,
+                  decoration: const BoxDecoration(color: Color(0xFFDCFCE7), shape: BoxShape.circle),
+                  child: const Icon(Icons.check, size: 36, color: PTokens.success),
+                ),
               ),
-            ],
-          ],
-        ),
-      ],
+              gap(20),
+              Text('Đặt vé thành công', textAlign: TextAlign.center, style: sans(size: 24, weight: FontWeight.w700)),
+              gap(6),
+              Text('Đã nhận ${vnd(ticket.paid)}. Vé và mã đặt chỗ đã gửi qua SMS tới ${maskPhone(phone)}.', textAlign: TextAlign.center, style: sans(size: 14, color: PTokens.muted, height: 1.5)),
+              gap(20),
+              AppCard(
+                padding: EdgeInsets.zero,
+                child: Column(children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(children: [Text('Mã đặt chỗ', style: sans(size: 13, color: PTokens.muted)), const Spacer(), Text(ticket.pnr, style: mono(size: 18, weight: FontWeight.w700, color: PTokens.pnr))]),
+                  ),
+                  const Divider(height: 1, color: PTokens.lineStrong),
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: GridView.count(
+                      crossAxisCount: 2,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      childAspectRatio: 3.2,
+                      mainAxisSpacing: 8,
+                      children: [
+                        KeyValue('Chuyến', ticket.route),
+                        KeyValue('Khởi hành', '${ticket.dep} · ${ticket.date.split(' ').last}', isMono: true),
+                        KeyValue('Điểm đón', ticket.pickup),
+                        KeyValue('Ghế', ticket.seat, isMono: true),
+                        KeyValue('Xe', ticket.plate, isMono: true),
+                        KeyValue('Hành khách', ticket.name),
+                      ],
+                    ),
+                  ),
+                ]),
+              ),
+              gap(20),
+              Text('Có mặt ở điểm đón trước 15 phút. Vé dùng được cả khi mất mạng; bạn có thể lưu ảnh hoặc in vé. Mỗi vé chỉ lên xe một lần.', textAlign: TextAlign.center, style: sans(size: 13, color: PTokens.muted, height: 1.5)),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              PrimaryButton(
+                label: 'Xem vé lên xe',
+                onPressed: () {
+                  PassengerMainShell.openTab(context, 1);
+                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerTicketQrScreen(ticket: ticket)));
+                },
+              ),
+              gap(8),
+              GhostButton(label: 'Về trang chủ', onPressed: () => PassengerMainShell.openTab(context, 0)),
+            ]),
+          ),
+        ]),
+      ),
     );
   }
 }

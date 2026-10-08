@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:resources/resources.dart';
-import 'passenger_seat_map_screen.dart';
-import 'passenger_trip_detail_screen.dart';
 
+import 'passenger_store.dart';
+import 'passenger_trip_detail_screen.dart';
+import 'passenger_widgets.dart';
+
+/// PAX-006: trips with seats first, sold-out trips last and not tappable.
 class PassengerSearchResultsScreen extends StatefulWidget {
   const PassengerSearchResultsScreen({super.key});
 
@@ -11,218 +13,174 @@ class PassengerSearchResultsScreen extends StatefulWidget {
 }
 
 class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScreen> {
-  String _selectedVehicleFilter = 'ALL'; // ALL | VIP_CABIN | SLEEPER_34
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => PassengerScope.read(context).loadTrips());
+  }
 
   @override
   Widget build(BuildContext context) {
+    final store = PassengerScope.of(context);
+    final all = store.trips;
+    final open = all.where((t) => t.seatsLeft > 0).toList()
+      ..sort((a, b) => switch (store.sort) {
+            'price' => a.price.compareTo(b.price),
+            'seats' => b.seatsLeft.compareTo(a.seatsLeft),
+            _ => a.dep.compareTo(b.dep),
+          });
+    final full = all.where((t) => t.seatsLeft == 0).toList();
     return Scaffold(
-      backgroundColor: AppColors.canvasPassenger,
-      appBar: AppBar(
-        title: const Column(
-          children: [
-            Text('Hà Nội ➔ Thanh Hóa', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-            Text('Hôm nay · 3 chuyến khả dụng', style: TextStyle(fontSize: 11, color: AppColors.mutedSteel)),
-          ],
-        ),
+      appBar: TopBar(
+        title: '${store.originPlace.city} → ${store.destPlace.city}',
+        subtitle: store.loadingTrips ? 'Đang tìm chuyến…' : (open.isEmpty ? 'Không có chuyến còn chỗ' : '${open.length} chuyến còn chỗ'),
       ),
-      body: Column(
-        children: [
-          // Filter Chips Strip
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            color: Colors.white,
-            child: Row(
-              children: [
-                _buildFilterChip('Tất cả', 'ALL'),
-                const SizedBox(width: 8),
-                _buildFilterChip('Cabin VIP', 'VIP_CABIN'),
-                const SizedBox(width: 8),
-                _buildFilterChip('Giường nằm', 'SLEEPER_34'),
+      body: Column(children: [
+        Container(
+          color: PTokens.surface,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Column(children: [
+            Row(children: [
+              for (final d in PassengerStore.dates) ...[
+                if (d != PassengerStore.dates.first) const SizedBox(width: 8),
+                Expanded(child: _Choice(label: d.short, selected: store.date == d.id, onTap: () {
+                  store.setDate(d.id);
+                  store.loadTrips();
+                }, height: 48)),
               ],
-            ),
-          ),
-
-          // Trip Cards List
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _buildTripCard(
-                  tripId: 'trp_hn_th_01',
-                  time: '07:00',
-                  duration: '2h 30m',
-                  vehicleType: 'Cabin Cung Điện VIP 22 Phòng',
-                  plate: '29B-882.19',
-                  price: '220.000 đ',
-                  availableSeats: 8,
-                  pickup: 'Bến xe Giáp Bát',
-                  dropoff: 'Bến xe Phía Bắc Thanh Hóa',
-                ),
-                const SizedBox(height: 12),
-                _buildTripCard(
-                  tripId: 'trp_hn_th_02',
-                  time: '14:00',
-                  duration: '2h 30m',
-                  vehicleType: 'Giường Nằm 34 Chỗ',
-                  plate: '29B-991.02',
-                  price: '180.000 đ',
-                  availableSeats: 12,
-                  pickup: 'Bến xe Mỹ Đình',
-                  dropoff: 'Bến xe Phía Bắc Thanh Hóa',
-                ),
-                const SizedBox(height: 12),
-                _buildTripCard(
-                  tripId: 'trp_hn_th_03',
-                  time: '19:30',
-                  duration: '2h 30m',
-                  vehicleType: 'Cabin VIP Sầm Sơn',
-                  plate: '29B-678.90',
-                  price: '250.000 đ',
-                  availableSeats: 5,
-                  pickup: 'Bến xe Giáp Bát',
-                  dropoff: 'Bến xe Sầm Sơn (Biển)',
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFilterChip(String label, String value) {
-    final isSelected = _selectedVehicleFilter == value;
-    return InkWell(
-      onTap: () => setState(() => _selectedVehicleFilter = value),
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.primarySapphire : Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(20),
+            ]),
+            gap(10),
+            Row(children: [
+              _Choice(label: 'Sớm nhất', selected: store.sort == 'time', onTap: () => store.setSort('time'), pill: true),
+              const SizedBox(width: 8),
+              _Choice(label: 'Giá thấp', selected: store.sort == 'price', onTap: () => store.setSort('price'), pill: true),
+              const SizedBox(width: 8),
+              _Choice(label: 'Nhiều chỗ', selected: store.sort == 'seats', onTap: () => store.setSort('seats'), pill: true),
+            ]),
+          ]),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected ? Colors.white : AppColors.charcoalInk,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTripCard({
-    required String tripId,
-    required String time,
-    required String duration,
-    required String vehicleType,
-    required String plate,
-    required String price,
-    required int availableSeats,
-    required String pickup,
-    required String dropoff,
-  }) {
-    return InkWell(
-      onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => PassengerTripDetailScreen(
-              tripId: tripId,
-              departureTime: time,
-              price: price,
-              vehicleType: vehicleType,
-              vehiclePlate: plate,
-            ),
-          ),
-        );
-      },
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.whisperBorder),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      time,
-                      style: const TextStyle(
-                        fontFamily: 'JetBrains Mono',
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.charcoalInk,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
+        const Divider(height: 1, color: PTokens.line),
+        Expanded(
+          child: store.loadingTrips
+              ? const Center(child: CircularProgressIndicator())
+              : store.tripsError != null
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: AppCard(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                      Text(store.tripsError!, style: sans(size: 15, weight: FontWeight.w600)),
+                      gap(10),
+                      PrimaryButton(label: 'Thử lại', onPressed: store.loadTrips),
+                    ]),
+                  ),
+                )
+              : all.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: AppCard(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Chưa có chuyến cho tuyến này', style: sans(size: 15, weight: FontWeight.w600)),
+                      gap(6),
+                      Text('Thử Hà Nội → Thanh Hóa hoặc Hà Nội → Ninh Bình, hoặc gọi 1900 6868.', style: sans(size: 14, color: PTokens.muted)),
+                    ]),
+                  ),
+                )
+              : ListView(padding: const EdgeInsets.all(16), children: [
+                  for (final t in open) ...[_TripCard(trip: t), gap(12)],
+                  for (final t in full)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        duration,
-                        style: const TextStyle(fontSize: 11, color: AppColors.mutedSteel, fontFamily: 'JetBrains Mono'),
-                      ),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(borderRadius: BorderRadius.circular(PTokens.radius), border: Border.all(color: PTokens.lineStrong)),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('${t.dep} · ${t.type} · Hết chỗ', style: sans(size: 14, weight: FontWeight.w600, color: PTokens.muted)),
+                        gap(4),
+                        Text('Bến xe ${t.from} → ${t.to}', style: sans(size: 13, color: PTokens.muted)),
+                      ]),
                     ),
-                  ],
-                ),
-                Text(
-                  price,
-                  style: const TextStyle(
-                    fontFamily: 'JetBrains Mono',
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primarySapphire,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '$vehicleType · $plate',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.charcoalInk),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Đón: $pickup ➔ Trả: $dropoff',
-              style: const TextStyle(fontSize: 12, color: AppColors.mutedSteel),
-            ),
-            const Divider(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Còn $availableSeats chỗ trống',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.emeraldSafe,
-                  ),
-                ),
-                const Text(
-                  'CHỌN CHỖ ➔',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primarySapphire,
-                  ),
-                ),
-              ],
-            ),
-          ],
+                ]),
+        ),
+      ]),
+    );
+  }
+}
+
+class _Choice extends StatelessWidget {
+  const _Choice({required this.label, required this.selected, required this.onTap, this.pill = false, this.height = 36});
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final bool pill;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      selected: selected,
+      button: true,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(pill ? 999 : PTokens.radiusControl),
+        child: Container(
+          height: height,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? PTokens.primarySoft : PTokens.surface,
+            borderRadius: BorderRadius.circular(pill ? 999 : PTokens.radiusControl),
+            border: Border.all(color: selected ? PTokens.primary : PTokens.line),
+          ),
+          child: Text(label, style: sans(size: 13, weight: selected ? FontWeight.w600 : FontWeight.w500, color: selected ? PTokens.primaryDark : PTokens.ink)),
         ),
       ),
+    );
+  }
+}
+
+class _TripCard extends StatelessWidget {
+  const _TripCard({required this.trip});
+  final Trip trip;
+
+  @override
+  Widget build(BuildContext context) {
+    final few = trip.seatsLeft <= 3;
+    return AppCard(
+      padding: const EdgeInsets.all(16),
+      onTap: () {
+        PassengerScope.read(context).chooseTrip(trip);
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerTripDetailScreen()));
+      },
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(color: trip.vip ? PTokens.primarySoft : const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(4)),
+            child: Text(trip.type, style: sans(size: 12, weight: FontWeight.w600, color: trip.vip ? PTokens.primaryDark : const Color(0xFF334155))),
+          ),
+          const Spacer(),
+          Text(vnd(trip.price), style: mono(size: 17, weight: FontWeight.w700)),
+        ]),
+        gap(12),
+        Row(children: [
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(trip.dep, style: mono(size: 20, weight: FontWeight.w700)), Text(trip.from, style: sans(size: 12, color: PTokens.muted))]),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Column(children: [
+                Text(trip.duration, style: sans(size: 12, color: PTokens.muted)),
+                const Divider(color: PTokens.lineStrong, height: 6),
+                Text(trip.via, style: sans(size: 12, color: PTokens.muted)),
+              ]),
+            ),
+          ),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [Text(trip.arr, style: mono(size: 20, weight: FontWeight.w700)), Text(trip.to, style: sans(size: 12, color: PTokens.muted))]),
+        ]),
+        const Divider(height: 20, color: Color(0xFFF1F5F9)),
+        Row(children: [
+          Text(few ? 'Sắp hết: còn ${trip.seatsLeft} chỗ' : 'Còn ${trip.seatsLeft} chỗ', style: sans(size: 13, weight: FontWeight.w600, color: few ? const Color(0xFFB45309) : PTokens.success)),
+          const Spacer(),
+          Text('Xe ${trip.plate}', style: sans(size: 13, color: PTokens.muted)),
+        ]),
+      ]),
     );
   }
 }

@@ -45,12 +45,12 @@ describe('Phase Driver Mobile: Android & iOS Platform Integrity Test Suite', () 
     assert.ok(content.includes('<string>location</string>'), 'UIBackgroundModes location must be set');
   });
 
-  it('TC-DRV-MOB-03: Driver Flutter entry point must instantiate BusGoDriverApp with Dark Cockpit theme', () => {
+  it('TC-DRV-MOB-03: Driver Flutter entry point starts BusGoDriverApp at the staff login (DRI-001, navigation-map 2.1)', () => {
     assert.ok(fs.existsSync(driverMainDartPath), 'Driver main.dart must exist');
     const content = fs.readFileSync(driverMainDartPath, 'utf8');
 
     assert.ok(content.includes('BusGoDriverApp'), 'Must instantiate BusGoDriverApp');
-    assert.ok(content.includes('DriverCockpitDashboard'), 'Must launch DriverCockpitDashboard');
+    assert.ok(content.includes('DriverLoginScreen'), 'The app opens on the login; the cockpit comes only after the vehicle check and the start');
   });
 
   it('TC-DRV-MOB-04: Driver AppColors must declare tactical dark palette matching DESIGN.md', () => {

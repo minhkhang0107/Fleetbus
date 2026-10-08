@@ -35,6 +35,7 @@ dependencies:
   encrypt_shared_preferences: ^0.8.4
   encrypted_shared_preferences: ^3.0.1
   shared_preferences: ^2.3.5
+  http: ^1.6.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -287,12 +287,21 @@ class DriverApiClientService {
   /**
    * DRI-017: End Trip. The server reconciles the cash from the manifest; no totals are sent.
    */
-  Future<Map<String, dynamic>> endTrip(String tripId, {String? idempotencyKey}) {
+  Future<Map<String, dynamic>> endTrip(String tripId, {String? earlyEndReason, String? idempotencyKey}) {
     return _post(
       '/api/v1/driver/trips/$tripId/end',
+      // Before the last stop the server needs a reason (BR-END-005, D108)
+      body: {if (earlyEndReason != null) 'early_end_reason': earlyEndReason},
       idempotent: true,
       idempotencyKey: idempotencyKey,
     );
+  }
+
+  /**
+   * PAX-009 seat map of a trip, read by the driver to offer free seats to a hailing passenger (DRI-006)
+   */
+  Future<Map<String, dynamic>> getSeatMap(String tripId) {
+    return _get('/api/v1/trips/$tripId/seat-map');
   }
 
   /**
@@ -318,7 +327,7 @@ class DriverApiClientService {
       body: {
         'incident_type': incidentType,
         'description': description,
-        'estimated_delay_minutes': estimatedDelayMinutes,
+        'estimatedDelayMinutes': estimatedDelayMinutes,
         'lat': lat,
         'lng': lng,
       },

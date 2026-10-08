@@ -1,226 +1,85 @@
 import 'package:flutter/material.dart';
-import 'package:resources/resources.dart';
 
-class DriverIncidentDialog extends StatefulWidget {
-  final String tripId;
+import 'driver_store.dart';
+import 'driver_widgets.dart';
 
-  const DriverIncidentDialog({
-    super.key,
-    this.tripId = 'trp_991823',
-  });
+/// DRI-019: incident type and estimated delay; the operator decides the official delay (BR-DELAY-002).
+class DriverIncidentScreen extends StatefulWidget {
+  const DriverIncidentScreen({super.key});
 
   @override
-  State<DriverIncidentDialog> createState() => _DriverIncidentDialogState();
+  State<DriverIncidentScreen> createState() => _DriverIncidentScreenState();
 }
 
-class _DriverIncidentDialogState extends State<DriverIncidentDialog> {
-  String _selectedType = 'TRAFFIC_JAM';
-  int _delayMinutes = 30;
-  bool _isSending = false;
+class _DriverIncidentScreenState extends State<DriverIncidentScreen> {
+  String _type = 'Kẹt xe';
+  int _delay = 30;
+  final _note = TextEditingController();
 
-  final List<Map<String, dynamic>> _incidentTypes = const [
-    {
-      'type': 'TRAFFIC_JAM',
-      'label': 'Ùn tắc giao thông / Kẹt xe cao tốc',
-      'icon': Icons.traffic_rounded,
-      'color': AppColors.amberWarning,
-    },
-    {
-      'type': 'TIRE_PUNCTURE',
-      'label': 'Thay lốp / Sự cố kỹ thuật nhỏ',
-      'icon': Icons.build_circle_rounded,
-      'color': AppColors.amberWarning,
-    },
-    {
-      'type': 'VEHICLE_BREAKDOWN',
-      'label': 'Hỏng máy nặng / Cần xe cứu hộ thay thế',
-      'icon': Icons.car_crash_rounded,
-      'color': AppColors.alertCritical,
-    },
-    {
-      'type': 'WEATHER_DELAY',
-      'label': 'Thời tiết xấu / Mưa bão giảm tốc độ',
-      'icon': Icons.thunderstorm_rounded,
-      'color': AppColors.primaryAction,
-    },
-    {
-      'type': 'MEDICAL_EMERGENCY',
-      'label': 'Cấp cứu y tế / Báo động khẩn cấp SOS',
-      'icon': Icons.emergency_rounded,
-      'color': AppColors.alertCritical,
-    },
-  ];
-
-  void _handleSubmit() {
-    setState(() => _isSending = true);
-    Future.delayed(const Duration(milliseconds: 1000), () {
-      if (mounted) {
-        setState(() => _isSending = false);
-        Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            backgroundColor: AppColors.alertCritical,
-            content: Row(
-              children: [
-                Icon(Icons.check_circle_rounded, color: Colors.white),
-                SizedBox(width: 8),
-                Text('ĐÃ GỬI BÁO CÁO SỰ CỐ VỀ TRUNG TÂM ĐIỀU ĐỘ (MGR-025)'),
-              ],
-            ),
-          ),
-        );
-      }
-    });
+  @override
+  void dispose() {
+    _note.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.canvasOps,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    return Scaffold(
+      appBar: DHeader(
+        title: 'Báo sự cố',
+        close: true,
+        trailing: FilledButton(
+          onPressed: () => dToast(context, 'Đang gọi 112'),
+          style: FilledButton.styleFrom(backgroundColor: DTokens.danger, minimumSize: const Size(64, 44), shape: const StadiumBorder()),
+          child: Text('Gọi 112', style: dsans(size: 14, weight: FontWeight.w700, color: Colors.white)),
+        ),
       ),
-      padding: const EdgeInsets.all(20),
-      child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+      body: ListView(padding: const EdgeInsets.all(16), children: [
+        Text('Chuyện gì xảy ra?', style: dsans(size: 15, weight: FontWeight.w600)),
+        const SizedBox(height: 10),
+        GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: 2.4,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.warning_amber_rounded, color: AppColors.alertCritical, size: 24),
-                    SizedBox(width: 8),
-                    Text(
-                      'BÁO CÁO SỰ CỐ & TRỄ CHUYẾN (DRI-019)',
-                      style: TextStyle(
-                        fontFamily: 'JetBrains Mono',
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close_rounded, color: AppColors.textMuted),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-
-            // Incident Types List
-            const Text(
-              'CHỌN LOẠI SỰ CỐ (CHẠM 1 CHẠM):',
-              style: TextStyle(fontFamily: 'JetBrains Mono', fontSize: 10, color: AppColors.textMuted),
-            ),
-            const SizedBox(height: 8),
-            ..._incidentTypes.map((item) {
-              final isSelected = _selectedType == item['type'];
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: InkWell(
-                  onTap: () => setState(() => _selectedType = item['type']),
-                  borderRadius: BorderRadius.circular(14),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: isSelected ? AppColors.surfaceActive : AppColors.surfacePanel,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: isSelected ? item['color'] as Color : AppColors.borderTactical,
-                        width: isSelected ? 2 : 1,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(item['icon'] as IconData, color: item['color'] as Color, size: 20),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            item['label'] as String,
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                        if (isSelected)
-                          Icon(Icons.check_rounded, color: item['color'] as Color, size: 18),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            }),
-            const SizedBox(height: 12),
-
-            // Delay Minutes Selector Strip
-            const Text(
-              'DỰ KIẾN THỜI GIAN TRỄ:',
-              style: TextStyle(fontFamily: 'JetBrains Mono', fontSize: 10, color: AppColors.textMuted),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [15, 30, 45, 60].map((mins) {
-                final isSelected = _delayMinutes == mins;
-                return Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: isSelected ? AppColors.amberWarning : AppColors.surfacePanel,
-                        foregroundColor: isSelected ? Colors.black : Colors.white,
-                        minimumSize: const Size(0, 44),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(
-                            color: isSelected ? AppColors.amberWarning : AppColors.borderTactical,
-                          ),
-                        ),
-                      ),
-                      onPressed: () => setState(() => _delayMinutes = mins),
-                      child: Text(
-                        '+${mins}p',
-                        style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 20),
-
-            // Submit Incident CTA (72dp)
-            SizedBox(
-              width: double.infinity,
-              height: 72,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.alertCritical,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                ),
-                onPressed: _isSending ? null : _handleSubmit,
-                child: _isSending
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.send_rounded, size: 24),
-                          SizedBox(width: 10),
-                          Text(
-                            'GỬI BÁO CÁO VỀ ĐIỀU ĐỘ (72dp)',
-                            style: TextStyle(fontFamily: 'JetBrains Mono', fontSize: 15, fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
-              ),
-            ),
+            for (final t in ['Kẹt xe', 'Xe hỏng', 'Tai nạn', 'Khác']) ChoiceTile(label: t, danger: true, center: true, height: 72, selected: _type == t, onTap: () => setState(() => _type = t)),
           ],
+        ),
+        const SizedBox(height: 20),
+        Text('Ước tính chậm bao lâu?', style: dsans(size: 15, weight: FontWeight.w600)),
+        const SizedBox(height: 10),
+        Row(children: [
+          for (final d in [15, 30, 45, 60]) ...[
+            if (d != 15) const SizedBox(width: 8),
+            Expanded(child: ChoiceTile(label: d == 60 ? '60+' : '$d', danger: true, center: true, selected: _delay == d, onTap: () => setState(() => _delay = d))),
+          ],
+        ]),
+        const SizedBox(height: 20),
+        TextField(controller: _note, maxLines: 3, style: dsans(size: 15), decoration: const InputDecoration(labelText: 'Ghi chú (không bắt buộc)')),
+        const SizedBox(height: 16),
+        Text('Điều hành nhận ngay cùng vị trí xe. Khách trên chuyến chỉ thấy giờ mới khi điều hành công bố.', style: dsans(size: 13, color: DTokens.muted, height: 1.5)),
+      ]),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: BigButton(
+            label: 'Gửi cho điều hành',
+            color: DTokens.danger,
+            height: 72,
+            onPressed: () async {
+              final error = await DriverScope.read(context).reportIncident(_type, _delay);
+              if (!context.mounted) return;
+              if (error != null) {
+                dToast(context, error);
+                return;
+              }
+              Navigator.of(context).pop();
+              dToast(context, DriverScope.read(context).offline ? 'Mất mạng · sẽ gửi khi có sóng' : 'Đã gửi cho điều hành');
+            },
+          ),
         ),
       ),
     );

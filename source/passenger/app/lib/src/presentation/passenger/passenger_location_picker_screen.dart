@@ -1,244 +1,82 @@
 import 'package:flutter/material.dart';
-import 'package:resources/resources.dart';
 
+import 'passenger_store.dart';
+import 'passenger_widgets.dart';
+
+/// PAX-005: pick a city or station; the search ignores Vietnamese accents ("thanh hoa" finds Thanh Hóa).
 class PassengerLocationPickerScreen extends StatefulWidget {
-  final String title;
-  final String initialValue;
-
-  const PassengerLocationPickerScreen({
-    super.key,
-    required this.title,
-    this.initialValue = '',
-  });
+  const PassengerLocationPickerScreen({super.key, required this.isOrigin});
+  final bool isOrigin;
 
   @override
   State<PassengerLocationPickerScreen> createState() => _PassengerLocationPickerScreenState();
 }
 
-class _PassengerLocationPickerScreenState extends State<PassengerLocationPickerScreen> {
-  final TextEditingController _searchController = TextEditingController();
-  late List<Map<String, String>> _filteredLocations;
-
-  final List<Map<String, String>> _allLocations = const [
-    {
-      'name': 'Hà Nội (Bến xe Giáp Bát)',
-      'address': 'Km6 Giải Phóng, Giáp Bát, Hoàng Mai, Hà Nội',
-      'city': 'Hà Nội',
-    },
-    {
-      'name': 'Hà Nội (Bến xe Mỹ Đình)',
-      'address': 'Số 20 Phạm Hùng, Mỹ Đình 2, Nam Từ Liêm, Hà Nội',
-      'city': 'Hà Nội',
-    },
-    {
-      'name': 'Hà Nội (Bến xe Nước Ngầm)',
-      'address': 'Số 1 Ngọc Hồi, Hoàng Liệt, Hoàng Mai, Hà Nội',
-      'city': 'Hà Nội',
-    },
-    {
-      'name': 'Thanh Hóa (Bến xe Phía Bắc)',
-      'address': 'Khu quy hoạch phía Bắc, TP. Thanh Hóa',
-      'city': 'Thanh Hóa',
-    },
-    {
-      'name': 'Thanh Hóa (Bến xe Sầm Sơn)',
-      'address': 'Đường Lê Lợi, TP. Sầm Sơn, Thanh Hóa',
-      'city': 'Thanh Hóa',
-    },
-    {
-      'name': 'Ninh Bình (Bến xe Ninh Bình)',
-      'address': 'Số 207 Lê Đại Hành, Thanh Bình, TP. Ninh Bình',
-      'city': 'Ninh Bình',
-    },
-    {
-      'name': 'Hải Phòng (Bến xe Vĩnh Niệm)',
-      'address': 'Bùi Viện, Vĩnh Niệm, Lê Chân, Hải Phòng',
-      'city': 'Hải Phòng',
-    },
-    {
-      'name': 'Nam Định (Bến xe Nam Định)',
-      'address': 'Đường Điện Biên, Lộc Hòa, TP. Nam Định',
-      'city': 'Nam Định',
-    },
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _filteredLocations = _allLocations;
-    _searchController.addListener(_onSearchChanged);
-  }
-
-  void _onSearchChanged() {
-    final q = _searchController.text.toLowerCase().trim();
-    setState(() {
-      if (q.isEmpty) {
-        _filteredLocations = _allLocations;
-      } else {
-        _filteredLocations = _allLocations.where((loc) {
-          final name = loc['name']!.toLowerCase();
-          final addr = loc['address']!.toLowerCase();
-          final city = loc['city']!.toLowerCase();
-          return name.contains(q) || addr.contains(q) || city.contains(q);
-        }).toList();
-      }
+String foldVietnamese(String input) {
+  const groups = {
+    'a': 'àáạảãâầấậẩẫăằắặẳẵ',
+    'e': 'èéẹẻẽêềếệểễ',
+    'i': 'ìíịỉĩ',
+    'o': 'òóọỏõôồốộổỗơờớợởỡ',
+    'u': 'ùúụủũưừứựửữ',
+    'y': 'ỳýỵỷỹ',
+    'd': 'đ',
+  };
+  final lower = input.toLowerCase();
+  final out = StringBuffer();
+  for (final ch in lower.split('')) {
+    var mapped = ch;
+    groups.forEach((base, chars) {
+      if (chars.contains(ch)) mapped = base;
     });
+    out.write(mapped);
   }
+  return out.toString();
+}
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
+class _PassengerLocationPickerScreenState extends State<PassengerLocationPickerScreen> {
+  String _query = '';
 
   @override
   Widget build(BuildContext context) {
+    final q = foldVietnamese(_query.trim());
+    final items = PassengerStore.places.values.where((p) => q.isEmpty || foldVietnamese('${p.city} ${p.station} ${p.altStations.join(' ')}').contains(q)).toList();
     return Scaffold(
-      backgroundColor: AppColors.canvasPassenger,
-      appBar: AppBar(
-        title: Text(widget.title),
-      ),
-      body: Column(
-        children: [
-          // Search Input Bar
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: Colors.white,
-            child: TextField(
-              controller: _searchController,
-              autofocus: true,
-              decoration: InputDecoration(
-                hintText: 'Tìm bến xe, tỉnh thành, địa điểm...',
-                prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primarySapphire),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear_rounded),
-                        onPressed: () => _searchController.clear(),
-                      )
-                    : null,
-                filled: true,
-                fillColor: AppColors.canvasPassenger,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: AppColors.whisperBorder),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: AppColors.whisperBorder),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: AppColors.primarySapphire, width: 2),
-                ),
-              ),
-            ),
+      appBar: TopBar(title: widget.isOrigin ? 'Chọn điểm đi' : 'Chọn điểm đến'),
+      body: Column(children: [
+        Container(
+          color: PTokens.surface,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: TextField(
+            autofocus: true,
+            onChanged: (v) => setState(() => _query = v),
+            style: sans(size: 15),
+            decoration: const InputDecoration(hintText: 'Tỉnh, thành phố hoặc bến xe', prefixIcon: Icon(Icons.search)),
           ),
-
-          // Quick City Filters
-          Container(
-            height: 48,
-            color: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                _buildQuickCityChip('Tất cả', ''),
-                _buildQuickCityChip('Hà Nội', 'Hà Nội'),
-                _buildQuickCityChip('Thanh Hóa', 'Thanh Hóa'),
-                _buildQuickCityChip('Ninh Bình', 'Ninh Bình'),
-                _buildQuickCityChip('Hải Phòng', 'Hải Phòng'),
-                _buildQuickCityChip('Nam Định', 'Nam Định'),
-              ],
-            ),
-          ),
-          const Divider(height: 1, color: AppColors.whisperBorder),
-
-          // Location Items List
-          Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: _filteredLocations.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (context, index) {
-                final item = _filteredLocations[index];
-                return InkWell(
-                  onTap: () => Navigator.of(context).pop(item['name']),
-                  borderRadius: BorderRadius.circular(14),
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppColors.whisperBorder),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: AppColors.primarySapphireSoft,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(
-                            Icons.location_on_rounded,
-                            color: AppColors.primarySapphire,
-                            size: 20,
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                item['name']!,
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.charcoalInk,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                item['address']!,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: AppColors.mutedSteel,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildQuickCityChip(String label, String query) {
-    final isSelected = _searchController.text == query;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: ActionChip(
-        label: Text(label),
-        labelStyle: TextStyle(
-          fontSize: 12,
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          color: isSelected ? Colors.white : AppColors.charcoalInk,
         ),
-        backgroundColor: isSelected ? AppColors.primarySapphire : AppColors.canvasPassenger,
-        side: const BorderSide(color: AppColors.whisperBorder),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        onPressed: () {
-          _searchController.text = query;
-        },
-      ),
+        Expanded(
+          child: items.isEmpty
+              ? Padding(padding: const EdgeInsets.all(16), child: Text('Không tìm thấy địa điểm. Thử gõ tên tỉnh, ví dụ "Thanh Hoa".', style: sans(size: 14, color: PTokens.muted)))
+              : ListView.separated(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: items.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1, color: PTokens.line),
+                  itemBuilder: (_, i) {
+                    final p = items[i];
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      minVerticalPadding: 12,
+                      title: Text(p.city, style: sans(size: 15, weight: FontWeight.w600)),
+                      subtitle: Text([p.station, ...p.altStations].join(' · '), style: sans(size: 13, color: PTokens.muted)),
+                      onTap: () {
+                        PassengerScope.read(context).setPlace(isOrigin: widget.isOrigin, code: p.code);
+                        Navigator.of(context).pop();
+                      },
+                    );
+                  },
+                ),
+        ),
+      ]),
     );
   }
 }

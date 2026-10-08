@@ -40,7 +40,7 @@ class DriverNavigationScreen extends StatelessWidget {
                     ),
                   ],
                 ),
-                child: const Row(
+                child: Row(
                   children: [
                     Container(
                       padding: EdgeInsets.all(12),

@@ -23,6 +23,8 @@ dependencies:
   resources:
     path: ../resources
   objectbox: ^4.0.3
+  google_fonts: ^9.0.0
+  http: ^1.6.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -36,6 +38,7 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  uses-material-design: true
 
   # To add assets to your package, add an assets section, like this:
   # assets:

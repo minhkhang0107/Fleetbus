@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:resources/resources.dart';
-import 'passenger_checkout_screen.dart';
 
+import 'passenger_checkout_screen.dart';
+import 'passenger_login_screen.dart';
+import 'passenger_store.dart';
+import 'passenger_widgets.dart';
+
+/// PAX-009: two decks, every seat state has a text label (never colour alone), at most 5 seats.
+/// "Giữ ghế" asks for an account first when there is none, keeping the selection (D106).
 class PassengerSeatMapScreen extends StatefulWidget {
   const PassengerSeatMapScreen({super.key});
 
@@ -10,240 +15,186 @@ class PassengerSeatMapScreen extends StatefulWidget {
 }
 
 class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
-  int _selectedDeck = 1;
-  final Set<String> _selectedSeats = {'A01'};
+  bool _limitHit = false;
+  bool _holding = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final error = await PassengerScope.read(context).loadSeatMap();
+      if (mounted) setState(() => _error = error);
+    });
+  }
+
+  Future<void> _hold() async {
+    final store = PassengerScope.read(context);
+    if (!store.loggedIn) {
+      final ok = await showLoginSheet(context, seats: store.seats.join(', '));
+      if (!ok || !mounted) return;
+    }
+    setState(() => _holding = true);
+    final error = await store.holdSeats();
+    if (!mounted) return;
+    setState(() => _holding = false);
+    if (error != null) {
+      showToast(context, error);
+      return;
+    }
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerCheckoutScreen()));
+  }
 
   @override
   Widget build(BuildContext context) {
+    final store = PassengerScope.of(context);
+    final seats = store.deckSeats(store.deck);
+    final left = seats.keys.where((c) => c.startsWith('A')).toList();
+    final right = seats.keys.where((c) => c.startsWith('B')).toList();
+    final rows = left.length > right.length ? left.length : right.length;
+    final p = store.stop(store.pickup);
+    final d = store.stop(store.dropoff);
     return Scaffold(
-      backgroundColor: AppColors.canvasPassenger,
-      appBar: AppBar(
-        title: const Text('Chọn chỗ ngồi (Cabin VIP)'),
-      ),
-      body: Column(
-        children: [
-          // Deck Switcher
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: Colors.white,
-            child: Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _selectedDeck == 1 ? AppColors.primarySapphire : Colors.grey.shade100,
-                      foregroundColor: _selectedDeck == 1 ? Colors.white : AppColors.charcoalInk,
-                      minimumSize: const Size(double.infinity, 44),
-                    ),
-                    onPressed: () => setState(() => _selectedDeck = 1),
-                    child: const Text('TẦNG DƯỚI (Deck 1)', style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _selectedDeck == 2 ? AppColors.primarySapphire : Colors.grey.shade100,
-                      foregroundColor: _selectedDeck == 2 ? Colors.white : AppColors.charcoalInk,
-                      minimumSize: const Size(double.infinity, 44),
-                    ),
-                    onPressed: () => setState(() => _selectedDeck = 2),
-                    child: const Text('TẦNG TRÊN (Deck 2)', style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-              ],
+      appBar: TopBar(title: 'Chọn ghế', subtitle: '${p.short} → ${d.short} · tối đa ${PassengerStore.maxSeats} ghế'),
+      body: Column(children: [
+        Container(
+          color: PTokens.surface,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Column(children: [
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+              child: Row(children: [
+                for (final d in store.decks.isEmpty ? [1] : store.decks)
+                  _DeckTab(label: '${d == 1 ? 'Tầng dưới' : 'Tầng trên'} · ${store.freeOnDeck(d)} trống', selected: store.deck == d, onTap: () => store.setDeck(d)),
+              ]),
             ),
-          ),
-
-          // Seat Grid (PAX-009)
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade200,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.directions_bus_rounded, size: 16, color: AppColors.mutedSteel),
-                      SizedBox(width: 8),
-                      Text(
-                        'ĐẦU XE / BÁC TÀI',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.mutedSteel),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                ..._buildDeckRows(_selectedDeck),
-              ],
-            ),
-          ),
-
-          // Bottom Bar
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: const Border(top: BorderSide(color: AppColors.whisperBorder)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, -4),
-                )
-              ],
-            ),
-            child: SafeArea(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Ghế đã chọn: ${_selectedSeats.isEmpty ? "Chưa chọn" : _selectedSeats.join(", ")}',
-                        style: const TextStyle(fontSize: 12, color: AppColors.mutedSteel),
-                      ),
-                      Text(
-                        '${_selectedSeats.length * 220}.000 đ',
-                        style: const TextStyle(
-                          fontFamily: 'JetBrains Mono',
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.primarySapphire,
-                        ),
-                      ),
-                    ],
-                  ),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(160, 50),
-                    ),
-                    onPressed: _selectedSeats.isEmpty
-                        ? null
-                        : () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => PassengerCheckoutScreen(
-                                  selectedSeats: _selectedSeats.toList(),
-                                ),
-                              ),
-                            );
-                          },
-                    child: Text('TIẾP TỤC (${_selectedSeats.length})'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
+            gap(10),
+            Wrap(spacing: 12, runSpacing: 6, children: const [
+              _Legend(fill: PTokens.surface, border: Color(0xFF94A3B8), label: 'Trống'),
+              _Legend(fill: PTokens.primary, border: PTokens.primary, label: 'Bạn chọn'),
+              _Legend(fill: PTokens.warnSoft, border: PTokens.warn, label: 'Người khác giữ'),
+              _Legend(fill: PTokens.line, border: PTokens.line, label: 'Đã bán'),
+            ]),
+          ]),
+        ),
+        const Divider(height: 1, color: PTokens.line),
+        Expanded(
+          child: store.loadingSeats
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+              ? Padding(padding: const EdgeInsets.all(16), child: Text(_error!, style: sans(size: 15, color: PTokens.danger)))
+              : ListView(padding: const EdgeInsets.fromLTRB(32, 16, 32, 16), children: [
+            Row(children: [const Icon(Icons.adjust, size: 18, color: PTokens.muted), const SizedBox(width: 8), Text('Đầu xe', style: sans(size: 12, color: PTokens.muted))]),
+            gap(10),
+            for (var i = 0; i < rows; i++) ...[
+              Row(children: [
+                Expanded(child: i < left.length ? _SeatButton(code: left[i], state: seats[left[i]]!, onLimit: () => setState(() => _limitHit = true)) : const SizedBox()),
+                const SizedBox(width: 68),
+                Expanded(child: i < right.length ? _SeatButton(code: right[i], state: seats[right[i]]!, onLimit: () => setState(() => _limitHit = true)) : const SizedBox()),
+              ]),
+              gap(10),
+            ],
+            if (_limitHit) Text('Mỗi lần đặt tối đa ${PassengerStore.maxSeats} ghế.', style: sans(size: 13, color: PTokens.danger)),
+          ]),
+        ),
+      ]),
+      bottomNavigationBar: BottomAction(children: [
+        Expanded(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(store.seats.isEmpty ? 'Chưa chọn ghế' : 'Ghế ${store.seats.join(', ')}', style: sans(size: 12, color: PTokens.muted), overflow: TextOverflow.ellipsis),
+            Text(vnd(store.baseFare), style: mono(size: 17, weight: FontWeight.w700)),
+          ]),
+        ),
+        PrimaryButton(label: _holding ? 'Đang giữ ghế…' : (store.seats.isEmpty ? 'Chọn ít nhất 1 ghế' : 'Giữ ghế 10 phút'), onPressed: store.seats.isEmpty || _holding ? null : _hold),
+      ]),
     );
   }
+}
 
-  List<Widget> _buildDeckRows(int deck) {
-    final rows = deck == 1
-        ? [
-            {'a': 'A01', 'b': 'B01'},
-            {'a': 'A02', 'b': 'B02'},
-            {'a': 'A03', 'b': 'B03'},
-            {'a': 'A04', 'b': 'B04'},
-            {'a': 'A05', 'b': 'B05'},
-          ]
-        : [
-            {'a': 'A07', 'b': 'B06'},
-            {'a': 'A08', 'b': 'B07'},
-            {'a': 'A09', 'b': 'B08'},
-            {'a': 'A10', 'b': 'B09'},
-            {'a': 'A11', 'b': 'B10'},
-          ];
+class _DeckTab extends StatelessWidget {
+  const _DeckTab({required this.label, required this.selected, required this.onTap});
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
 
-    return rows.map((r) {
-      final codeA = r['a']!;
-      final codeB = r['b']!;
-      final isSelA = _selectedSeats.contains(codeA);
-      final isSelB = _selectedSeats.contains(codeB);
-
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: Row(
-          children: [
-            Expanded(
-              child: _buildSeatItem(codeA, isSelA, () => _toggleSeat(codeA)),
-            ),
-            const SizedBox(
-              width: 50,
-              child: Center(
-                child: Text('LỐI ĐI', style: TextStyle(fontSize: 10, color: AppColors.mutedSteel, fontFamily: 'JetBrains Mono')),
+  @override
+  Widget build(BuildContext context) => Expanded(
+        child: Semantics(
+          selected: selected,
+          button: true,
+          child: GestureDetector(
+            onTap: onTap,
+            child: Container(
+              height: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected ? PTokens.surface : Colors.transparent,
+                borderRadius: BorderRadius.circular(6),
+                boxShadow: selected ? const [BoxShadow(color: Color(0x140F172A), blurRadius: 2, offset: Offset(0, 1))] : null,
               ),
+              child: Text(label, style: sans(size: 14, weight: FontWeight.w600, color: selected ? PTokens.primaryDark : PTokens.muted)),
             ),
-            Expanded(
-              child: _buildSeatItem(codeB, isSelB, () => _toggleSeat(codeB)),
-            ),
-          ],
+          ),
         ),
       );
-    }).toList();
-  }
+}
 
-  Widget _buildSeatItem(String code, bool isSelected, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        height: 60,
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.primarySapphire : Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isSelected ? AppColors.primarySapphire : AppColors.whisperBorder,
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              code,
-              style: TextStyle(
-                fontFamily: 'JetBrains Mono',
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-                color: isSelected ? Colors.white : AppColors.charcoalInk,
-              ),
-            ),
-            Text(
-              '220k',
-              style: TextStyle(
-                fontFamily: 'JetBrains Mono',
-                fontSize: 11,
-                color: isSelected ? Colors.white70 : AppColors.mutedSteel,
-              ),
-            ),
-          ],
+class _Legend extends StatelessWidget {
+  const _Legend({required this.fill, required this.border, required this.label});
+  final Color fill;
+  final Color border;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 14, height: 14, decoration: BoxDecoration(color: fill, border: Border.all(color: border, width: 1.5), borderRadius: BorderRadius.circular(4))),
+        const SizedBox(width: 6),
+        Text(label, style: sans(size: 12, color: const Color(0xFF334155))),
+      ]);
+}
+
+class _SeatButton extends StatelessWidget {
+  const _SeatButton({required this.code, required this.state, required this.onLimit});
+  final String code;
+  final SeatState state;
+  final VoidCallback onLimit;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = PassengerScope.of(context);
+    final selected = store.seats.contains(code);
+    final (bg, border, fg, sub, enabled) = selected
+        ? (PTokens.primary, PTokens.primaryDark, Colors.white, 'Bạn chọn', true)
+        : switch (state) {
+            SeatState.held => (PTokens.warnSoft, PTokens.warn, const Color(0xFF92400E), 'Đang giữ', false),
+            SeatState.booked => (PTokens.line, PTokens.line, const Color(0xFF64748B), 'Đã bán', false),
+            SeatState.blocked => (PTokens.dangerSoft, const Color(0xFFFCA5A5), const Color(0xFF991B1B), 'Khóa', false),
+            SeatState.free => (PTokens.surface, const Color(0xFF94A3B8), PTokens.ink, '${(store.trip?.price ?? 0) ~/ 1000}k', true),
+          };
+    final semantic = selected ? 'bạn đang chọn' : switch (state) { SeatState.held => 'người khác đang giữ', SeatState.booked => 'đã bán', SeatState.blocked => 'khóa kỹ thuật', SeatState.free => 'trống' };
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      selected: selected,
+      label: 'Ghế $code, $semantic',
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: enabled
+            ? () {
+                if (!store.toggleSeat(code)) onLimit();
+              }
+            : null,
+        borderRadius: BorderRadius.circular(PTokens.radiusControl),
+        child: Container(
+          height: 60,
+          decoration: BoxDecoration(color: bg, border: Border.all(color: border, width: 1.5), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Text(code, style: mono(size: 15, color: fg)),
+            Text(sub, style: sans(size: 11, weight: FontWeight.w500, color: fg)),
+          ]),
         ),
       ),
     );
-  }
-
-  void _toggleSeat(String code) {
-    setState(() {
-      if (_selectedSeats.contains(code)) {
-        _selectedSeats.remove(code);
-      } else {
-        if (_selectedSeats.length >= 5) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Bạn chỉ được chọn tối đa 5 ghế!')),
-          );
-          return;
-        }
-        _selectedSeats.add(code);
-      }
-    });
   }
 }

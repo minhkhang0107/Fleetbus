@@ -1,125 +1,90 @@
 import 'package:flutter/material.dart';
-import 'driver_cockpit_dashboard.dart';
 
-class DriverReadinessScreen extends StatefulWidget {
+import 'driver_cockpit_dashboard.dart';
+import 'driver_incident_dialog.dart';
+import 'driver_manifest_screen.dart';
+import 'driver_store.dart';
+import 'driver_widgets.dart';
+
+/// DRI-004: the start button stays disabled until the six checks are ticked (D98);
+/// DRI-005 is the confirmation sheet.
+class DriverReadinessScreen extends StatelessWidget {
   const DriverReadinessScreen({super.key});
 
-  @override
-  State<DriverReadinessScreen> createState() => _DriverReadinessScreenState();
-}
-
-class _DriverReadinessScreenState extends State<DriverReadinessScreen> {
-  final Map<String, bool> _checklist = {
-    'TIRES': true,
-    'BRAKES': true,
-    'LIGHTS': true,
-    'WIPERS': true,
-    'FUEL': true,
-    'EMERGENCY_KIT': true,
-  };
-
-  bool get _allPassed => _checklist.values.every((v) => v);
+  Future<void> _confirmStart(BuildContext context, DriverStore store) async {
+    final yes = await showDriverSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('Xuất bến chuyến ${store.depTime}?', style: dsans(size: 18, weight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: Stat('Khách đã đặt', '${store.manifest.length}')),
+            const SizedBox(width: 10),
+            Expanded(child: Stat('Giờ chạy', store.depTime)),
+          ]),
+          const SizedBox(height: 12),
+          Text('App sẽ gửi vị trí xe liên tục cho điều hành và khách đến khi kết thúc chuyến.', style: dsans(size: 15, color: DTokens.sub, height: 1.5)),
+          const SizedBox(height: 14),
+          BigButton(label: 'Xuất bến', color: DTokens.ok, height: 72, onPressed: () => Navigator.of(ctx).pop(true)),
+          const SizedBox(height: 8),
+          BigButton(label: 'Chưa', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop(false)),
+        ]));
+    if (yes != true || !context.mounted) return;
+    final error = await store.startTrip();
+    if (!context.mounted) return;
+    if (error != null) {
+      dToast(context, error);
+      return;
+    }
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const DriverCockpitDashboard()));
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverManifestScreen()));
+  }
 
   @override
   Widget build(BuildContext context) {
+    final store = DriverScope.of(context);
+    final done = store.checked.where((c) => c).length;
+    final color = done == 6 ? const Color(0xFF22C55E) : const Color(0xFFFBBF24);
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF1E293B),
-        title: const Text(
-          'KIỂM TRA AN TOÀN 6 ĐIỂM (DRI-004)',
-          style: TextStyle(fontFamily: 'JetBrains Mono', fontSize: 14, fontWeight: FontWeight.bold),
-        ),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Expanded(
-              child: ListView(
-                children: [
-                  _buildChecklistItem('TIRES', '1. Áp suất và độ mòn lốp xe', 'Kiểm tra 6 bánh xe và lốp dự phòng'),
-                  _buildChecklistItem('BRAKES', '2. Hệ thống phanh khí nén & ABS', 'Bình khí nén đạt áp suất chuẩn 8.0 bar'),
-                  _buildChecklistItem('LIGHTS', '3. Đèn pha, cos, xi-nhan và đèn phanh', 'Toàn bộ đèn cảnh báo hoạt động tốt'),
-                  _buildChecklistItem('WIPERS', '4. Cần gạt mưa và nước rửa kính', 'Gạt sạch, đủ nước rửa kính chuyên dụng'),
-                  _buildChecklistItem('FUEL', '5. Mức nhiên liệu dầu Diesel', 'Đạt trên 85% dung tích bình chứa'),
-                  _buildChecklistItem('EMERGENCY_KIT', '6. Búa phá kính & Bình cứu hỏa', 'Đủ 4 búa thoát hiểm và 2 bình bột chữa cháy'),
-                ],
+      appBar: DHeader(title: 'Kiểm tra xe', subtitle: '${store.plate} · chuyến ${store.depTime}', trailing: Text('$done/6', style: dmono(size: 16, color: color))),
+      body: Column(children: [
+        LinearProgressIndicator(value: done / 6, minHeight: 4, color: color, backgroundColor: DTokens.panel),
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.all(16),
+            itemCount: DriverStore.checks.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 10),
+            itemBuilder: (_, i) => Container(
+              decoration: BoxDecoration(color: DTokens.panel, borderRadius: BorderRadius.circular(10), border: Border.all(color: store.checked[i] ? const Color(0xFF166534) : DTokens.line)),
+              child: CheckboxListTile(
+                value: store.checked[i],
+                onChanged: (v) => store.toggleCheck(i, v ?? false),
+                controlAffinity: ListTileControlAffinity.leading,
+                activeColor: const Color(0xFF22C55E),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                title: Text(DriverStore.checks[i], style: dsans(size: 16, weight: FontWeight.w500)),
               ),
             ),
-
-            // Start Trip CTA
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: ElevatedButton(
-                onPressed: _allPassed
-                    ? () {
-                        Navigator.of(context).pushReplacement(
-                          MaterialPageRoute(builder: (_) => const DriverCockpitDashboard()),
-                        );
-                      }
-                    : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF10B981),
-                  shape: BorderRadius.circular(16),
-                ),
-                child: const Text(
-                  'XÁC NHẬN AN TOÀN & XUẤT BẾN ➔',
-                  style: TextStyle(
-                    fontFamily: 'JetBrains Mono',
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
+          ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildChecklistItem(String key, String title, String subtitle) {
-    final isChecked = _checklist[key] ?? false;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isChecked ? const Color(0xFF10B981).withOpacity(0.4) : const Color(0xFF334155)),
-      ),
-      child: Row(
-        children: [
-          IconButton(
-            onPressed: () => setState(() => _checklist[key] = !isChecked),
-            icon: Icon(
-              isChecked ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-              color: isChecked ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
-              size: 26,
+      ]),
+      bottomNavigationBar: SafeArea(
+        child: Container(
+          decoration: const BoxDecoration(border: Border(top: BorderSide(color: DTokens.lineSoft))),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            BigButton(
+              label: done < 6 ? 'Còn ${6 - done} mục chưa kiểm tra' : 'Xuất bến',
+              subtitle: done < 6 ? null : '${store.manifest.length} khách · ${store.stops.isEmpty ? '' : store.stops.first.short} ${store.depTime}',
+              color: DTokens.ok,
+              height: 72,
+              onPressed: done < 6 ? null : () => _confirmStart(context, store),
             ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
-                ),
-              ],
+            TextButton(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverIncidentScreen())),
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+              child: Text('Xe có vấn đề, báo điều hành', style: dsans(size: 15, weight: FontWeight.w600, color: DTokens.dangerInk)),
             ),
-          ),
-        ],
+          ]),
+        ),
       ),
     );
   }

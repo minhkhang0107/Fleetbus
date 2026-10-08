@@ -1,301 +1,98 @@
 import 'package:flutter/material.dart';
-import 'package:resources/resources.dart';
 
-class PassengerCancelRefundScreen extends StatefulWidget {
-  final String pnr;
-  final int ticketPrice;
-  final String departureTime;
+import 'passenger_main_shell.dart';
+import 'passenger_store.dart';
+import 'passenger_ticket_qr_screen.dart';
+import 'passenger_widgets.dart';
 
-  const PassengerCancelRefundScreen({
-    super.key,
-    this.pnr = 'BG-882199',
-    this.ticketPrice = 220000,
-    this.departureTime = '07:00 · 28/08/2026',
-  });
-
-  @override
-  State<PassengerCancelRefundScreen> createState() => _PassengerCancelRefundScreenState();
+/// PAX-021: confirm a cancellation with the refund the policy gives (tiers, or 100 % after an
+/// official delay over 30 minutes).
+Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
+  final store = PassengerScope.read(context);
+  final r = store.refundFor(t);
+  final known = r.percent >= 0;
+  final amount = known ? t.paid * r.percent ~/ 100 : 0;
+  final yes = await showAppSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('Hủy vé ${t.pnr}?', style: sans(size: 18, weight: FontWeight.w700)),
+        gap(12),
+        AppCard(
+          child: Column(children: [
+            Row(children: [Text('Đã trả', style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(vnd(t.paid), style: mono(size: 14))]),
+            if (known) ...[
+              gap(4),
+              Row(children: [Text('Được hoàn', style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(vnd(amount), style: mono(size: 14, weight: FontWeight.w700))]),
+            ],
+            gap(6),
+            Align(alignment: Alignment.centerLeft, child: Text(r.tier, style: sans(size: 13, color: PTokens.muted, height: 1.4))),
+          ]),
+        ),
+        gap(10),
+        Text('Ghế ${t.seat} được nhả ngay cho người khác và không lấy lại được.', style: sans(size: 13, color: PTokens.muted, height: 1.5)),
+        gap(14),
+        PrimaryButton(label: known && amount > 0 ? 'Hủy vé, hoàn ${vnd(amount)}' : 'Hủy vé', color: PTokens.danger, onPressed: () => Navigator.of(ctx).pop(true)),
+        gap(8),
+        GhostButton(label: 'Giữ vé', onPressed: () => Navigator.of(ctx).pop(false)),
+      ]));
+  if (yes != true || !context.mounted) return;
+  final result = await store.cancelTicket(t);
+  if (!context.mounted) return;
+  if (!result.ok) {
+    showToast(context, result.error!);
+    return;
+  }
+  PassengerMainShell.openTab(context, 1);
+  showToast(context, (result.value ?? 0) > 0 ? 'Đã gửi yêu cầu hoàn ${vnd(result.value!)}' : 'Đã hủy vé, không hoàn tiền theo chính sách');
 }
 
-class _PassengerCancelRefundScreenState extends State<PassengerCancelRefundScreen> {
-  bool _isProcessing = false;
-  String _selectedReason = 'Thay đổi lịch trình cá nhân';
-
-  final List<String> _reasons = [
-    'Thay đổi lịch trình cá nhân',
-    'Bị ốm / sự cố sức khỏe',
-    'Tìm thấy phương tiện khác thuận tiện hơn',
-    'Lý do thời tiết / công tác',
-  ];
+/// PAX-025: an official delay with the choice to keep the ticket or cancel free of charge.
+class PassengerDelayNoticeScreen extends StatelessWidget {
+  const PassengerDelayNoticeScreen({super.key, required this.ticket});
+  final Ticket ticket;
 
   @override
   Widget build(BuildContext context) {
-    const refundPercent = 90; // > 24h
-    final fee = (widget.ticketPrice * (100 - refundPercent) / 100).round();
-    final refundAmount = widget.ticketPrice - fee;
-
+    final t = ticket;
     return Scaffold(
-      backgroundColor: AppColors.canvasPassenger,
-      appBar: AppBar(
-        title: const Text('Hủy vé & Yêu cầu hoàn tiền'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Warning Banner
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.alertCrimsonSoft,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.alertCrimson.withOpacity(0.3)),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.warning_amber_rounded, color: AppColors.alertCrimson, size: 24),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Lưu ý quan trọng',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.alertCrimson),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'Sau khi xác nhận hủy, ghế đã chọn sẽ được giải phóng ngay lập tức trên sơ đồ chuyến xe.',
-                        style: TextStyle(fontSize: 11, color: AppColors.charcoalInk),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Ticket Info Card
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.whisperBorder),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'MÃ PNR: ${widget.pnr}',
-                      style: const TextStyle(
-                        fontFamily: 'JetBrains Mono',
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: AppColors.pnrOrange,
-                      ),
-                    ),
-                    Text(
-                      widget.departureTime,
-                      style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 11, color: AppColors.mutedSteel),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Hà Nội ➔ Thanh Hóa (Cabin Cung Điện VIP)',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.charcoalInk),
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Ghế: A01 · Khách: Nguyễn Văn An',
-                  style: TextStyle(fontSize: 12, color: AppColors.mutedSteel),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Policy Tiers Explanation Card
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.whisperBorder),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'CHÍNH SÁCH HOÀN TIỀN TỰ ĐỘNG (PAX-021)',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedSteel),
-                ),
-                const SizedBox(height: 12),
-                _buildTierRow('Trước giờ khởi hành > 24h:', 'Hoàn 90%', isActive: true),
-                const SizedBox(height: 8),
-                _buildTierRow('Từ 12h đến 24h trước khởi hành:', 'Hoàn 70%', isActive: false),
-                const SizedBox(height: 8),
-                _buildTierRow('Dưới 12h trước khởi hành:', 'Không hỗ trợ hoàn vé', isActive: false),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Refund Breakdown Card
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.whisperBorder),
-            ),
-            child: Column(
-              children: [
-                _buildBreakdownRow('Giá trị vé ban đầu:', '${widget.ticketPrice} đ'),
-                const SizedBox(height: 8),
-                _buildBreakdownRow('Tỷ lệ hoàn tiền áp dụng:', '$refundPercent%'),
-                const SizedBox(height: 8),
-                _buildBreakdownRow('Phí dịch vụ hủy vé (10%):', '-$fee đ', isNegative: true),
-                const Divider(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Số tiền hoàn lại:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    Text(
-                      '$refundAmount đ',
-                      style: const TextStyle(
-                        fontFamily: 'JetBrains Mono',
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.emeraldSafe,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Reason Selector
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.whisperBorder),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'LÝ DO HỦY VÉ',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedSteel),
-                ),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  value: _selectedReason,
-                  decoration: InputDecoration(
-                    filled: true,
-                    fillColor: AppColors.canvasPassenger,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  items: _reasons
-                      .map((r) => DropdownMenuItem(value: r, child: Text(r, style: const TextStyle(fontSize: 13))))
-                      .toList(),
-                  onChanged: (val) => setState(() => _selectedReason = val ?? _selectedReason),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // Confirm Cancel Button
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.alertCrimson,
-            ),
-            onPressed: _isProcessing
-                ? null
-                : () {
-                    setState(() => _isProcessing = true);
-                    Future.delayed(const Duration(milliseconds: 1200), () {
-                      if (mounted) {
-                        setState(() => _isProcessing = false);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            backgroundColor: AppColors.emeraldSafe,
-                            content: Text('Đã hủy vé ${widget.pnr} và khởi tạo hoàn $refundAmount đ.'),
-                          ),
-                        );
-                        Navigator.of(context).pop();
-                      }
-                    });
-                  },
-            child: _isProcessing
-                ? const CircularProgressIndicator(color: Colors.white)
-                : const Text('XÁC NHẬN HỦY VÉ & HOÀN TIỀN'),
-          ),
-          const SizedBox(height: 16),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTierRow(String label, String value, {required bool isActive}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: isActive ? AppColors.emeraldSoft : AppColors.canvasPassenger,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: isActive ? AppColors.emeraldSafe.withOpacity(0.4) : AppColors.whisperBorder,
+      appBar: const TopBar(title: 'Thông báo chuyến'),
+      body: ListView(padding: const EdgeInsets.fromLTRB(16, 20, 16, 16), children: [
+        const Align(alignment: Alignment.centerLeft, child: Pill('Nhà xe công bố lúc 06:35', PillKind.warn)),
+        gap(8),
+        Text('Chuyến của bạn khởi hành chậm ${t.delay} phút', style: sans(size: 24, weight: FontWeight.w700, height: 1.25)),
+        gap(8),
+        Text('Lý do: ùn tắc kéo dài ở nút giao Pháp Vân. Ghế và mã vé của bạn giữ nguyên.', style: sans(size: 14, color: PTokens.muted, height: 1.5)),
+        gap(18),
+        AppCard(
+          padding: const EdgeInsets.all(16),
+          child: Column(children: [
+            Row(children: [
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Giờ cũ', style: sans(size: 12, color: PTokens.muted)),
+                Text(t.dep, style: mono(size: 22, weight: FontWeight.w700, color: const Color(0xFF64748B), decoration: TextDecoration.lineThrough)),
+              ]),
+              const Expanded(child: Icon(Icons.arrow_forward, color: PTokens.muted)),
+              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                Text('Giờ mới', style: sans(size: 12, color: PTokens.muted)),
+                Text(t.departure, style: mono(size: 22, weight: FontWeight.w700)),
+              ]),
+            ]),
+            const Divider(height: 20, color: Color(0xFFF1F5F9)),
+            Align(alignment: Alignment.centerLeft, child: Text('${t.pnr} · Ghế ${t.seat} · Đón tại ${t.pickup}', style: sans(size: 13, color: PTokens.muted))),
+          ]),
         ),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-              color: isActive ? AppColors.charcoalInk : AppColors.mutedSteel,
-            ),
-          ),
-          Text(
-            value,
-            style: TextStyle(
-              fontFamily: 'JetBrains Mono',
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: isActive ? AppColors.emeraldSafe : AppColors.mutedSteel,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBreakdownRow(String label, String value, {bool isNegative = false}) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: const TextStyle(fontSize: 13, color: AppColors.mutedSteel)),
-        Text(
-          value,
-          style: TextStyle(
-            fontFamily: 'JetBrains Mono',
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: isNegative ? AppColors.alertCrimson : AppColors.charcoalInk,
-          ),
+        gap(18),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: PTokens.primarySoft, border: Border.all(color: const Color(0xFFBFDBFE)), borderRadius: BorderRadius.circular(PTokens.radius)),
+          child: Text.rich(TextSpan(children: [
+            TextSpan(text: 'Bạn được hủy vé miễn phí. ', style: sans(size: 13, weight: FontWeight.w700, color: const Color(0xFF1E3A8A))),
+            TextSpan(text: 'Chuyến chậm hơn 30 phút nên hủy lúc này được hoàn đủ ${vnd(t.paid)} về tài khoản đã chuyển, không mất phí.', style: sans(size: 13, color: const Color(0xFF1E40AF), height: 1.5)),
+          ])),
         ),
-      ],
+      ]),
+      bottomNavigationBar: BottomAction(column: true, children: [
+        PrimaryButton(label: 'Giữ vé, đi lúc ${t.departure}', onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => PassengerTicketQrScreen(ticket: t)))),
+        GhostButton(label: 'Hủy vé, hoàn ${vnd(t.paid)}', color: PTokens.danger, borderColor: const Color(0xFFFCA5A5), onPressed: () => confirmCancelTicket(context, t)),
+      ]),
     );
   }
 }
