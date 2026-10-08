@@ -175,4 +175,16 @@ describe('Spec conformance: no-show, replay and manager figures', () => {
     assert.strictEqual(inside.financial_summary.total_revenue_vnd, gross.gross_revenue_vnd);
     assert.ok(!('zero_incident_days' in all.punctuality_summary), 'a figure with no data behind it is not reported');
   });
+
+  it('TC-SPEC-A60: every seat in a driver manifest at start shows as sold on the passenger seat map', () => {
+    const { services } = createFleetBusServer();
+    for (const [tripId, trip] of services.driverService.activeTrips) {
+      const map = services.seatMapService.getSeatMap(tripId);
+      if (!map.success) continue;
+      for (const passenger of trip.manifest) {
+        const seat = map.data.seats.find(s => s.seat_code === passenger.seat_code);
+        assert.ok(seat && seat.state !== 'AVAILABLE', `${tripId} ${passenger.seat_code} is in the driver manifest but free for sale`);
+      }
+    }
+  });
 });

@@ -124,7 +124,7 @@ export class DriverCockpitService {
       vehicle_plate: '29B-882.19',
       vehicle_model: 'Cabin Cung Điện VIP 22 Phòng',
       total_capacity: 22,
-      booked_passengers_count: 1,
+      booked_passengers_count: 0,
       boarded_count: 0,
       total_cod_collected_vnd: 0,
       current_speed_kmh: 0,
@@ -140,15 +140,15 @@ export class DriverCockpitService {
         gps_telemetry_beacon_active: true
       },
       stops: [
-        { stop_id: 'stp_hn_gb', name: 'Bến xe Giáp Bát', city: 'Hà Nội', order: 1, expected_board: 1, expected_alight: 0, status: 'PENDING' },
+        { stop_id: 'stp_hn_gb', name: 'Bến xe Giáp Bát', city: 'Hà Nội', order: 1, expected_board: 0, expected_alight: 0, status: 'PENDING' },
         { stop_id: 'stp_hn_nuoc_ngam', name: 'Bến xe Nước Ngầm', city: 'Hà Nội', order: 2, expected_board: 0, expected_alight: 0, status: 'PENDING' },
         { stop_id: 'stp_nb', name: 'Bến xe Ninh Bình', city: 'Ninh Bình', order: 3, expected_board: 0, expected_alight: 0, status: 'PENDING' },
-        { stop_id: 'stp_th_pb', name: 'Bến xe Phía Bắc Thanh Hóa', city: 'Thanh Hóa', order: 4, expected_board: 0, expected_alight: 1, status: 'PENDING' },
+        { stop_id: 'stp_th_pb', name: 'Bến xe Phía Bắc Thanh Hóa', city: 'Thanh Hóa', order: 4, expected_board: 0, expected_alight: 0, status: 'PENDING' },
         { stop_id: 'stp_th_sam_son', name: 'Bến xe Sầm Sơn', city: 'Thanh Hóa', order: 5, expected_board: 0, expected_alight: 0, status: 'PENDING' }
       ],
-      manifest: [
-        { ticket_id: 'tkt_88219_A01', pnr: 'BG-88219', seat_code: 'A01', deck: 1, passenger_name: 'Trần Văn Hùng', phone_masked: '098***112', pickup_stop_id: 'stp_hn_gb', dropoff_stop_id: 'stp_th_pb', boarding_status: 'ISSUED', payment_method: 'VNPAY_ONLINE', cod_amount_vnd: 0 }
-      ]
+      // Starts empty: its tickets are sold in the passenger app and arrive through the event bridge,
+      // so the driver manifest and the passenger seat map stay the same seats.
+      manifest: []
     };
 
     this.activeTrips.set(trip1.trip_id, trip1);

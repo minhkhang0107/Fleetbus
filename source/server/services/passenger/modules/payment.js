@@ -336,7 +336,16 @@ export class PassengerPaymentService {
         status: ticket.status
       };
     }
-    return { success: true, data: { ticket, boarding_qr: generateBoardingQR(ticket, this.secretKey) } };
+    return { success: true, data: this._passData(ticket) };
+  }
+
+  /** The pass of an active ticket: its QR and the backup PIN of the same version (PAX-017 section 7.1). */
+  _passData(ticket) {
+    return {
+      ticket,
+      boarding_qr: generateBoardingQR(ticket, this.secretKey),
+      offline_pin: generateTicketPin(ticket.ticket_id, this.secretKey, ticket.qr_version || 1)
+    };
   }
 
   /**
@@ -358,7 +367,7 @@ export class PassengerPaymentService {
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
       this.eventBridge.emit('TICKET_QR_REISSUED', { tripId: ticket.trip_id, ticketId, version: ticket.qr_version });
     }
-    return { success: true, data: { ticket, boarding_qr: generateBoardingQR(ticket, this.secretKey) } };
+    return { success: true, data: this._passData(ticket) };
   }
 
   /**

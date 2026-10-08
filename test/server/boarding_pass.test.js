@@ -164,4 +164,14 @@ describe('Boarding pass: static versioned QR (PAX-017, D104)', () => {
     assert.strictEqual(row.boarding_check.pin_digest, crypto.createHash('sha256').update(`${ticket.ticket_id}|${pin}`).digest('hex'));
     assert.ok(!JSON.stringify(manifest).includes(String(pin)), 'the PIN itself is never sent to the tablet');
   });
+
+  it('TC-QR-08: the ticket detail carries the backup PIN of its current version (PAX-017 section 7.1)', async () => {
+    const ticket = await buyTicket('A06', 'u_qr8');
+    const first = (await api(`/api/v1/tickets/${ticket.ticket_id}`)).body.data;
+    assert.ok(/^\d{6}$/.test(first.offline_pin), 'the owner sees the backup PIN on the ticket');
+    const shared = (await api(`/api/v1/passenger/tickets/${ticket.ticket_id}/delegate`, { method: 'POST', body: { phone: '0987000777', name: 'Ban' } })).body.data;
+    assert.strictEqual(shared.offline_pin, first.offline_pin, 'one PIN per QR version');
+    const re = (await api(`/api/v1/passenger/tickets/${ticket.ticket_id}/qr/reissue`, { method: 'POST', body: {} })).body.data;
+    assert.ok(re.offline_pin && re.offline_pin !== first.offline_pin, 'a reissue gives a new PIN');
+  });
 });
