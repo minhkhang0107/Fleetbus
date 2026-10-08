@@ -137,7 +137,7 @@ async function runLiveE2E() {
 
   const qrPass = await request(`/api/v1/tickets/${ticketId}`, { token: passengerToken });
   expect(qrPass.status === 200, 'ticket QR', qrPass);
-  const qrString = qrPass.body.data.dynamic_qr.qr_code_value;
+  const qrString = qrPass.body.data.boarding_qr.qr_code_value;
   console.log('✅ Dynamic 30s HMAC QR Payload Generated:', qrString, '| Validity: 30s');
 
   console.log('\n--- 5. DRIVER TACTICAL COCKPIT ---');

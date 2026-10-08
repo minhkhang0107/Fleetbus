@@ -18,7 +18,7 @@ Tài xế thu tiền mặt của vé COD. Khi khách đưa tiền lớn và tài
 | 2 | Tiền thừa: `CASH_RETURNED` (trả ngay), `WALLET_CREDIT` (cộng ví khách) hoặc `REST_STOP_DEBT_RECEIPT` (biên lai nợ `DR-<vé>-<nghìn>K`) | DRI-012 | cùng API | Biên lai ở trạng thái `OUTSTANDING`, khách nhận mã | `TC-SPEC-A39`, `TC-FLOW-C06` |
 | 3 | Tổng biên lai nợ của một chuyến không quá 1.000.000 đ | DRI-012 | cùng API | Vượt: `400 DEBT_LIMIT_EXCEEDED`, vé chưa thu, tài xế trả tiền thừa bằng tiền mặt hoặc ví (`BR-COD-005`) | `TC-FLOW-C06` |
 | 4 | Khách xuất trình mã biên lai ở quầy trạm dừng, thu ngân trả tiền | MGR-022 | `POST /api/v1/ops/debt-receipts/{receiptCode}/redeem` `{station_id}` | Biên lai `REDEEMED`, ghi nhật ký `DEBT_REDEEMED`; trả lại lần hai: `409 DEBT_ALREADY_REDEEMED` | `TC-FLOW-C07` |
-| 5 | Xe về bến cuối, tài xế kết thúc chuyến | DRI-017 | `POST /api/v1/driver/trips/{tripId}/end` | Server tự tính tiền mặt phải nộp từ manifest, liệt kê mã biên lai; chuyến `COMPLETED` một lần | `TC-SPEC-A41c` |
+| 5 | Xe về bến cuối (đã báo tới trạm cuối), tài xế kết thúc chuyến; kết thúc giữa đường phải ghi lý do (`BR-END-005`, D108) | DRI-017 | `POST /api/v1/driver/trips/{tripId}/end` | Server tự tính tiền mặt phải nộp từ manifest, liệt kê mã biên lai; chuyến `COMPLETED` một lần | `TC-SPEC-A41c` |
 
 ## 3. Sơ đồ
 

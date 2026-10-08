@@ -12,14 +12,12 @@ import {
   calculateRefundAmount
 } from '../../source/server/services/passenger/core/formatters.js';
 import {
-  generateDynamicTicketQR,
-  verifyDynamicTicketQR,
+  generateBoardingQR,
+  verifyBoardingQR,
   generateGroupBoardingQR,
   verifyGroupBoardingQR,
   generateTicketPin,
   verifyTicketPin,
-  generateOfflineSignedTicket,
-  verifyOfflineSignedTicket,
   crc16Ccitt,
   generateVietQRPayload,
   calculateHaversineDistance,
@@ -62,24 +60,19 @@ describe('Phase 1: Core Design System & Utilities Test Suite', () => {
     assert.strictEqual(invalidCCCD.isValid, false);
   });
 
-  it('TC-CORE-04: Should generate dynamic 30s rotating HMAC ticket QR payload', () => {
-    const ticket = {
-      pnr: 'BG-88219',
-      ticket_id: 'tkt_01',
-      seat_code: 'A02',
-      trip_id: 'trp_991'
-    };
-    const now = 1724800000000;
-    const qrResult = generateDynamicTicketQR(ticket, 'secret_key_123', now);
-    
-    assert.ok(qrResult.qr_code_value.startsWith('BUSGO|BG-88219|tkt_01|'));
-    assert.ok(qrResult.seconds_remaining <= 30 && qrResult.seconds_remaining >= 0);
-    assert.strictEqual(typeof qrResult.hmac_signature, 'string');
+  it('TC-CORE-04: Should generate a signed static boarding QR with a version (PAX-017, D104)', () => {
+    const ticket = { pnr: 'BG-88219', ticket_id: 'tkt_01', seat_code: 'A02', trip_id: 'trp_991' };
+    const qrResult = generateBoardingQR(ticket, 'secret_key_123');
+
+    assert.strictEqual(qrResult.qr_code_value, generateBoardingQR(ticket, 'secret_key_123').qr_code_value, 'the QR does not depend on the clock');
+    assert.ok(qrResult.qr_code_value.startsWith('BUSGO|BG-88219|tkt_01|v1|'));
+    assert.strictEqual(qrResult.version, 1);
     assert.strictEqual(qrResult.hmac_signature.length, 16);
 
-    const verifyResult = verifyDynamicTicketQR(qrResult.qr_code_value, 'secret_key_123', now);
+    const verifyResult = verifyBoardingQR(qrResult.qr_code_value, 'secret_key_123');
     assert.strictEqual(verifyResult.isValid, true);
     assert.strictEqual(verifyResult.pnr, 'BG-88219');
+    assert.strictEqual(verifyResult.version, 1);
   });
 
   it('TC-CORE-05: Should generate valid Napas247 VietQR EMVCo payload with CRC16', () => {
@@ -130,28 +123,16 @@ describe('Phase 1: Core Design System & Utilities Test Suite', () => {
     assert.strictEqual(noRefund.refundAmount, 0);
   });
 
-  it('TC-CORE-04B: Should verify dynamic QR with +-2 window tolerance (60s drift allowance - REV-03)', () => {
+  it('TC-CORE-04B: A reissued QR carries a new version and a forged one is rejected (D104)', () => {
     const ticket = { pnr: 'BG-88219', ticket_id: 'tkt_88219_A01', seat_code: 'A01', trip_id: 'trp_01' };
-    const baseNow = 1756300000000;
-    const qrResult = generateDynamicTicketQR(ticket, 'busgo_ticket_master_secret', baseNow);
+    const v1 = generateBoardingQR(ticket, 'busgo_ticket_master_secret');
+    const v2 = generateBoardingQR({ ...ticket, qr_version: 2 }, 'busgo_ticket_master_secret');
+    assert.notStrictEqual(v1.qr_code_value, v2.qr_code_value);
+    assert.strictEqual(verifyBoardingQR(v2.qr_code_value, 'busgo_ticket_master_secret').version, 2);
 
-    // Same window
-    const checkSame = verifyDynamicTicketQR(qrResult.qr_code_value, 'busgo_ticket_master_secret', baseNow);
-    assert.strictEqual(checkSame.isValid, true);
-    assert.strictEqual(checkSame.isCurrentWindow, true);
-
-    // 1 window ahead (+30s)
-    const check1Ahead = verifyDynamicTicketQR(qrResult.qr_code_value, 'busgo_ticket_master_secret', baseNow + 30000);
-    assert.strictEqual(check1Ahead.isValid, true);
-
-    // 2 windows ahead (+60s) -> Valid under REV-03
-    const check2Ahead = verifyDynamicTicketQR(qrResult.qr_code_value, 'busgo_ticket_master_secret', baseNow + 60000);
-    assert.strictEqual(check2Ahead.isValid, true);
-
-    // 3 windows ahead (+90s) -> Invalid
-    const check3Ahead = verifyDynamicTicketQR(qrResult.qr_code_value, 'busgo_ticket_master_secret', baseNow + 90000);
-    assert.strictEqual(check3Ahead.isValid, false);
-    assert.strictEqual(check3Ahead.reason, 'QR_EXPIRED');
+    const forged = v1.qr_code_value.replace('|v1|', '|v2|');
+    assert.strictEqual(verifyBoardingQR(forged, 'busgo_ticket_master_secret').reason, 'INVALID_SIGNATURE');
+    assert.strictEqual(verifyBoardingQR('BUSGO|BG-88219|tkt_88219_A01|59648457|d6a7c5d8bf86d6c5', 'busgo_ticket_master_secret').reason, 'MALFORMED_PAYLOAD', 'the old rotating format is not accepted');
   });
 
   it('TC-CORE-08: Should generate and verify aggregate group boarding QR (REV-01)', () => {
@@ -160,41 +141,33 @@ describe('Phase 1: Core Design System & Utilities Test Suite', () => {
       { ticket_id: 'tkt_02', pnr: 'BG-GRP-11', order_id: 'ord_11', seat_code: 'A02' },
       { ticket_id: 'tkt_03', pnr: 'BG-GRP-11', order_id: 'ord_11', seat_code: 'A03' }
     ];
-    const baseNow = 1756300000000;
-    const groupQR = generateGroupBoardingQR(tickets, 'busgo_ticket_master_secret', baseNow);
+    const groupQR = generateGroupBoardingQR(tickets, 'busgo_ticket_master_secret');
 
     assert.ok(groupQR.qr_code_value.startsWith('BUSGO_GRP|BG-GRP-11|ord_11|3|'));
     assert.strictEqual(groupQR.ticket_count, 3);
     assert.deepStrictEqual(groupQR.ticket_ids, ['tkt_01', 'tkt_02', 'tkt_03']);
 
-    const verified = verifyGroupBoardingQR(groupQR.qr_code_value, 'busgo_ticket_master_secret', baseNow + 30000);
+    const verified = verifyGroupBoardingQR(groupQR.qr_code_value, 'busgo_ticket_master_secret');
     assert.strictEqual(verified.isValid, true);
     assert.strictEqual(verified.isGroup, true);
     assert.strictEqual(verified.pnr, 'BG-GRP-11');
     assert.strictEqual(verified.ticket_count, 3);
     assert.deepStrictEqual(verified.ticket_ids, ['tkt_01', 'tkt_02', 'tkt_03']);
+    assert.deepStrictEqual(verified.members.map((m) => m.version), [1, 1, 1]);
   });
 
-  it('TC-CORE-09: Should generate and verify offline 6-digit PIN and signed offline ticket (REV-01, REV-03)', () => {
+  it('TC-CORE-09: The 6-digit backup PIN follows the QR version (REV-01, D104)', () => {
     const ticketId = 'tkt_test_998811';
     const pin = generateTicketPin(ticketId, 'busgo_secret_123');
     assert.match(pin, /^\d{6}$/);
+    assert.strictEqual(verifyTicketPin(ticketId, pin, 'busgo_secret_123').isValid, true);
 
-    const checkPinValid = verifyTicketPin(ticketId, pin, 'busgo_secret_123');
-    assert.strictEqual(checkPinValid.isValid, true);
+    const wrong = verifyTicketPin(ticketId, '000000', 'busgo_secret_123');
+    assert.strictEqual(wrong.isValid, false);
+    assert.strictEqual(wrong.reason, 'INVALID_PIN');
 
-    const checkPinWrong = verifyTicketPin(ticketId, '000000', 'busgo_secret_123');
-    assert.strictEqual(checkPinWrong.isValid, false);
-    assert.strictEqual(checkPinWrong.reason, 'INVALID_PIN');
-
-    // Offline signed ticket payload
-    const ticket = { ticket_id: 'tkt_off_01', pnr: 'BG-991', seat_code: 'B02', trip_id: 'trp_100' };
-    const offlineSigned = generateOfflineSignedTicket(ticket, 'busgo_secret_123');
-    assert.ok(offlineSigned.sig);
-    assert.strictEqual(offlineSigned.tkt, 'tkt_off_01');
-
-    const verifiedTicket = verifyOfflineSignedTicket(offlineSigned, 'busgo_secret_123');
-    assert.strictEqual(verifiedTicket.isValid, true);
-    assert.strictEqual(verifiedTicket.ticket_id, 'tkt_off_01');
+    const pinV2 = generateTicketPin(ticketId, 'busgo_secret_123', 2);
+    assert.strictEqual(verifyTicketPin(ticketId, pin, 'busgo_secret_123', 2).isValid, pin === pinV2, 'the old PIN stops working after a reissue');
+    assert.strictEqual(verifyTicketPin(ticketId, pinV2, 'busgo_secret_123', 2).isValid, true);
   });
 });

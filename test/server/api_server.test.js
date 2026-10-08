@@ -327,7 +327,8 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     });
     assert.strictEqual(delegateRes.statusCode, 200);
     assert.match(delegateRes.body.data.offline_pin, /^\d{6}$/);
-    assert.ok(delegateRes.body.data.share_link.includes('ticket/share'));
+    assert.ok(delegateRes.body.data.share_link.startsWith('https://busgo.vn/pass/'));
+    assert.ok(!delegateRes.body.data.share_link.includes(delegateRes.body.data.offline_pin), 'the PIN never goes in a URL');
   });
 
   it('TC-SRV-07: Diagnostic, Manual Boarding, No-show & Manager Ops Queries', async () => {

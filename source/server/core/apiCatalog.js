@@ -22,6 +22,7 @@ export const API_CATALOG = [
   { method: 'GET', path: '/api/v1/passenger/tickets', screen: 'PAX-016', summary: 'Ticket wallet' },
   { method: 'GET', path: '/api/v1/tickets/{ticketId}', screen: 'PAX-017', summary: 'Ticket with its rotating QR' },
   { method: 'GET', path: '/api/v1/passenger/orders/{orderId}/group-qr', screen: 'PAX-017', summary: 'Group boarding QR' },
+  { method: 'POST', path: '/api/v1/passenger/tickets/{ticketId}/qr/reissue', screen: 'PAX-017', summary: 'Reissue the boarding QR, revoking the old QR and PIN' },
   { method: 'POST', path: '/api/v1/passenger/tickets/{ticketId}/delegate', screen: 'PAX-017', summary: 'Share a ticket with a companion' },
   { method: 'GET', path: '/api/v1/trips/{tripId}/tracking', screen: 'PAX-018', summary: 'Live tracking snapshot' },
   { method: 'GET', path: '/api/v1/passenger/notifications', screen: 'PAX-020', summary: 'Notifications' },

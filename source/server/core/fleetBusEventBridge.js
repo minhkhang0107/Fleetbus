@@ -55,6 +55,14 @@ export class FleetBusEventBridge extends EventEmitter {
       paymentService.getTripDelayMinutes = (tripId) => managerService.findTrip(tripId)?.delay_minutes || 0;
     }
 
+    // PAX-017 reissue (D104): the driver manifest follows the QR version the passenger holds,
+    // so a revoked QR or PIN no longer boards.
+    this.on('TICKET_QR_REISSUED', ({ tripId, ticketId, version }) => {
+      if (driverService && typeof driverService.setTicketQrVersion === 'function') {
+        driverService.setTicketQrVersion(tripId, ticketId, version);
+      }
+    });
+
     // -------------------------------------------------------------------------
     // 1. TICKET_SETTLED: Passenger Booking & VietQR Payment -> Driver & Manager
     // -------------------------------------------------------------------------

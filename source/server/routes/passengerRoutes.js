@@ -234,12 +234,12 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
-  // GET /api/v1/passenger/tickets/:ticketId/qr or /api/v1/tickets/:ticketId (PAX-017: Rotating HMAC QR)
+  // GET /api/v1/passenger/tickets/:ticketId/qr or /api/v1/tickets/:ticketId (PAX-017: static versioned boarding QR)
   if ((WALLET_TICKET_QR_RE.test(pathname) || TICKET_RE.test(pathname)) && req.method === 'GET') {
     const parts = pathname.split('/');
     const ticketId = pathname.startsWith('/api/v1/passenger/') ? parts[5] : parts[4];
     if (forbidTicket(req, res, paymentService, ticketId)) return true;
-    const qrResult = paymentService.getDynamicBoardingPass(ticketId);
+    const qrResult = paymentService.getBoardingPass(ticketId);
     if (qrResult.success) {
       sendSuccess(res, qrResult.data || qrResult);
     } else {
@@ -258,6 +258,22 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       sendSuccess(res, groupRes.data);
     } else {
       sendError(res, groupRes.error, groupRes.code, 404);
+    }
+    return true;
+  }
+
+  // POST /api/v1/passenger/tickets/:ticketId/qr/reissue (PAX-017, D104): revoke a leaked QR and PIN
+  if (pathname.startsWith('/api/v1/passenger/tickets/') && pathname.endsWith('/qr/reissue') && req.method === 'POST') {
+    const ticketId = pathname.split('/')[5];
+    if (forbidTicket(req, res, paymentService, ticketId, { ownerOnly: true })) return true;
+    const ticket = paymentService.tickets.get(ticketId);
+    const driverTrip = ticket ? services.driverService?.activeTrips?.get(ticket.trip_id) : null;
+    const boardingStarted = Boolean(driverTrip && ['IN_TRANSIT', 'COMPLETED'].includes(driverTrip.status));
+    const result = paymentService.reissueBoardingQR(ticketId, { boardingStarted });
+    if (result.success) {
+      sendSuccess(res, result.data);
+    } else {
+      sendError(res, result.error, result.code, result.code === 'TICKET_NOT_FOUND' ? 404 : 409);
     }
     return true;
   }

@@ -163,3 +163,8 @@ Scenario: Driver completes trip with COD and Hail cash
 | :--- | :--- | :--- | :--- |
 | `TC-DRI-017-01` | Functional | Submit end trip report | Transitions trip status to `COMPLETED` and routes to `DRI-002` |
 | `TC-DRI-017-02` | Financial | End trip with Hail & COD | Accurately calculates total cash to deposit and logs debt receipts |
+
+## Design review 2 (D108): where a trip ends
+
+- `BR-END-005`: a trip ends at its last stop (the driver has recorded the arrival there). Ending it earlier needs `early_end_reason` (at least 5 characters, for example a breakdown after all passengers moved to the replacement bus), which the end report keeps; without it `400 TRIP_NOT_AT_FINAL_STOP`. The cockpit shows "Kết thúc chuyến" only at the last stop; elsewhere the action sits in the menu behind the reason field.
+- Test: `TC-END-01`, `TC-END-02`.

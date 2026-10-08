@@ -14,6 +14,7 @@ describe('Spec conformance: no-show, replay and manager figures', () => {
     const driver = services.driverService;
     const trip = 'trp_991823';
     const departure = Date.parse(driver.activeTrips.get(trip).planned_departure_time);
+    driver.activeTrips.get(trip).status = 'IN_TRANSIT';
 
     const early = driver.markNoShow(trip, 'tkt_88219_B01', 'chua den', { mockNow: departure + 5 * MINUTE });
     assert.strictEqual(early.success, false);
@@ -37,6 +38,64 @@ describe('Spec conformance: no-show, replay and manager figures', () => {
 
     const unknown = driver.markNoShow(trip, 'tkt_ghost', 'khong co', { mockNow: departure + 30 * MINUTE });
     assert.strictEqual(unknown.code, 'TICKET_NOT_FOUND');
+  });
+
+  it('TC-NOSHOW-01: a passenger waiting at a later stop cannot be marked absent before the bus reaches that stop (DRI-011, design review 2)', () => {
+    const { services } = createFleetBusServer();
+    const driver = services.driverService;
+    const trip = 'trp_991823';
+    const t = driver.activeTrips.get(trip);
+    const departure = Date.parse(t.planned_departure_time);
+    t.status = 'IN_TRANSIT';
+
+    // tkt_88219_A02 boards at Pháp Vân (stp_hn_pv), the second stop
+    const notThere = driver.markNoShow(trip, 'tkt_88219_A02', 'chua thay', { mockNow: departure + 120 * MINUTE });
+    assert.strictEqual(notThere.success, false);
+    assert.strictEqual(notThere.code, 'BUS_NOT_AT_STOP', 'two hours after departure the bus may still be on the way');
+
+    driver.arriveAtStop(trip, 'stp_hn_pv', departure + 30 * MINUTE);
+    const tooSoon = driver.markNoShow(trip, 'tkt_88219_A02', 'chua thay', { mockNow: departure + 35 * MINUTE });
+    assert.strictEqual(tooSoon.code, 'NO_SHOW_TOO_EARLY', 'the passenger gets 10 minutes from the arrival of the bus at their stop');
+
+    const ok = driver.markNoShow(trip, 'tkt_88219_A02', 'qua 10 phut', { mockNow: departure + 40 * MINUTE });
+    assert.strictEqual(ok.success, true, JSON.stringify(ok));
+  });
+
+  it('TC-NOSHOW-02: nobody is marked absent before the trip has left (DRI-011)', () => {
+    const { services } = createFleetBusServer();
+    const driver = services.driverService;
+    const trip = 'trp_991823';
+    const departure = Date.parse(driver.activeTrips.get(trip).planned_departure_time);
+    const res = driver.markNoShow(trip, 'tkt_88219_B01', 'chua den', { mockNow: departure + 30 * MINUTE });
+    assert.strictEqual(res.code, 'BUS_NOT_AT_STOP');
+  });
+
+  it('TC-END-01: a trip ends at its last stop; ending earlier needs a reason (DRI-017, design review 2)', () => {
+    const { services } = createFleetBusServer();
+    const driver = services.driverService;
+    const trip = 'trp_991823';
+    const t = driver.activeTrips.get(trip);
+    t.status = 'IN_TRANSIT';
+
+    const early = driver.endTrip(trip);
+    assert.strictEqual(early.success, false);
+    assert.strictEqual(early.code, 'TRIP_NOT_AT_FINAL_STOP', 'a slip of the finger mid-route must not close the trip');
+
+    const withReason = driver.endTrip(trip, { earlyEndReason: 'Xe hỏng, khách đã chuyển sang xe 29B-888.22' });
+    assert.strictEqual(withReason.success, true, JSON.stringify(withReason));
+    assert.strictEqual(withReason.data.early_end_reason, 'Xe hỏng, khách đã chuyển sang xe 29B-888.22');
+  });
+
+  it('TC-END-02: arriving at the last stop lets the trip end without a reason (DRI-017)', () => {
+    const { services } = createFleetBusServer();
+    const driver = services.driverService;
+    const trip = 'trp_991823';
+    const t = driver.activeTrips.get(trip);
+    t.status = 'IN_TRANSIT';
+    driver.arriveAtStop(trip, t.stops[t.stops.length - 1].stop_id);
+    const res = driver.endTrip(trip);
+    assert.strictEqual(res.success, true, JSON.stringify(res));
+    assert.strictEqual(res.data.early_end_reason, null);
   });
 
   it('TC-SPEC-A44: replaying the offline buffer is ordered, duplicate-safe and keeps the newest position (DRI-015)', () => {

@@ -203,6 +203,8 @@ describe('Spec conformance: driver lifecycle, COD, privacy and fleet', () => {
     assert.strictEqual(notStarted.status, 400);
     assert.strictEqual(notStarted.body.code, 'INVALID_TRIP_STATE');
 
+    const shiftStops = services.driverService.activeTrips.get(SHIFT_TRIP).stops;
+    services.driverService.arriveAtStop(SHIFT_TRIP, shiftStops[shiftStops.length - 1].stop_id);
     const end = await api(`/api/v1/driver/trips/${SHIFT_TRIP}/end`, {
       method: 'POST', body: { total_cod_collected_vnd: 999999999, total_hail_collected_vnd: 1 }
     });

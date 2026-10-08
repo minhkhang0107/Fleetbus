@@ -37,7 +37,8 @@
 | **PAX-014** | Payment Result | `GET /api/v1/payments/{paymentId}/status` | `GET` | Bearer | No | Poll payment authoritative state from PostgreSQL |
 | **PAX-015** | Booking Success| `GET /api/v1/bookings/{bookingId}` | `GET` | Bearer | No | Fetch confirmed PNR details and ticket summaries |
 | **PAX-016** | My Tickets | `GET /api/v1/passenger/tickets` | `GET` | Bearer | No | Query `tab=UPCOMING\|HISTORY\|CANCELLED` (`BR-MYTICKETS-004`) |
-| **PAX-017** | Ticket QR | `GET /api/v1/tickets/{ticketId}` | `GET` | Bearer | No | Fetch individual ticket rotating TOTP QR payload |
+| **PAX-017** | Ticket QR | `GET /api/v1/tickets/{ticketId}` | `GET` | Bearer | No | Ticket with its static versioned `boarding_qr` (`boarding_qr: null` once boarded or absent, D104) |
+| **PAX-017** | Reissue QR | `POST /api/v1/passenger/tickets/{ticketId}/qr/reissue` | `POST` | Bearer (owner) | Yes (`Idempotency-Key`) | New QR version; revokes the old QR and PIN; `409 BOARDING_STARTED` after departure (D104) |
 | **PAX-017** | Group Boarding QR| `GET /api/v1/passenger/orders/{orderId}/group-qr` | `GET` | Bearer | No | Fetch aggregate Group Boarding QR for multi-seat bookings (REV-01) |
 | **PAX-017** | Ticket Delegation | `POST /api/v1/passenger/tickets/{ticketId}/delegate` | `POST` | Bearer | Yes | Delegate ticket to companion with SMS share link & 6-digit offline PIN |
 | **PAX-018** | Live Tracking | `GET /api/v1/trips/{tripId}/tracking` | `GET` | Bearer/Public | No | Fetch tracking snapshot (stale GPS warning & rest-stop status); WS `trip:{tripId}` |
@@ -65,7 +66,7 @@
 | **DRI-007** | Manifest | `GET /api/v1/driver/trips/{tripId}/manifest` | `GET` | Bearer (Driver) | No | Retrieve authoritative passenger list grouped by stops |
 | **DRI-007** | Onboard Hail Passenger | `POST /api/v1/driver/trips/{tripId}/onboard-hail` | `POST` | Bearer (Driver) | Yes (`Idempotency-Key`) | Add on-the-road hail passenger to vacant seat & collect cash |
 | **DRI-008** | Stop Detail | `POST /api/v1/driver/trips/{tripId}/stops/{stopId}/arrive` | `POST` | Bearer (Driver) | Yes | Confirm vehicle arrival at stop geofence |
-| **DRI-009** | QR Scanner | `Offline Cryptographic Signature Verify` | N/A | Local Key | Yes | Verify dynamic TOTP (+-2 window / 60s) or offline JSON signature |
+| **DRI-009** | QR Scanner | Offline check against the manifest | N/A | None (manifest `boarding_check`) | Yes | Version and signature digest per ticket from `GET /driver/trips/{tripId}/manifest`; no secret on the tablet (D104) |
 | **DRI-009** | Boarding Event | `POST /api/v1/driver/trips/{tripId}/boarding` | `POST` | Bearer (Driver) | Yes (`Idempotency-Key`) | Submit boarded ticket status (single or group QR) |
 | **DRI-010** | Manual Boarding | `POST /api/v1/driver/trips/{tripId}/boarding/manual` | `POST` | Bearer (Driver) | Yes | Board passenger by PNR, phone lookup, or 6-digit offline PIN |
 | **DRI-011** | Mark No-Show | `POST /api/v1/driver/trips/{tripId}/tickets/{ticketId}/no-show` | `POST` | Bearer (Driver) | Yes | Mark absent passenger after grace period expiry |

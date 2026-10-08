@@ -198,3 +198,11 @@ Record: `docs/review/design-review-findings.md` (DSG-01 to DSG-25), `decision-lo
 - [x] **Server fixed (D100)**: an unpaid COD ticket boards only through the COD collection; manual, PIN and QR boarding answer `409 COD_PAYMENT_REQUIRED` with the fare (`test/server/cod_boarding_gate.test.js`).
 - [x] **New design** on Claude Design, 23 screens across the three apps: https://claude.ai/artifact/Ai5drXHQWjV2oAvyY41PSY
 - [x] **HTML prototypes rewritten to the new design** (`docs/designs/*.html`, copied to each `web_dist`): passenger 16 screens, driver 11 screens, manager 6 pages with staff login and 2FA; the flows of the design work end to end, results show in the page, and demo controls sit outside the phone frame. Walked with headless Chrome: 59 steps, no script error. `TC-SRV-05` now also checks no browser dialog, no emoji and no simulation control in the served pages.
+
+## 14. Spec and Design Review 2 (2026-10-08)
+
+Record: `docs/review/design-review-2-findings.md` (DR2-01 to DR2-13), `decision-log.md` (D104 to D109). 228 tests, lint passes, `npm run e2e` passes.
+
+- [x] **Boarding QR (D104)**: static, versioned QR per ticket; `POST /api/v1/passenger/tickets/{ticketId}/qr/reissue` revokes the old QR and PIN until departure; the manifest carries `boarding_check` so a tablet checks scans offline without any secret; opaque share link; the rotating QR, the drift window, the offline JSON and the duplicate boarding path in the payment module are removed.
+- [x] **No-show at the passenger's own stop (D105)**, **trip ends at the last stop or with a reason (D108)**.
+- [x] **Design and prototypes**: login at "Giữ ghế" (D106), cockpit locked while moving (D107), no passenger count in search (D109), static QR with "Đổi mã QR".

@@ -212,3 +212,18 @@ Phát hiện: `docs/review/design-review-findings.md`.
 
 Test đổi kỳ vọng: `TC-E2E-01` và `TC-SRV-05` tìm dấu hiệu của giao diện mới thay vì chữ của giao diện cũ, và `TC-SRV-05` kiểm thêm không hộp thoại, không emoji, không nút giả lập.
 Test đổi kỳ vọng: `TC-SPEC-A43` cho vé COD lên xe bằng `collectCod` thay vì `boardPassengerManually` (đường cũ nay bị chặn bởi D100).
+
+## Review spec và design lần 2: quyết định (2026-10-08)
+
+Phát hiện: `docs/review/design-review-2-findings.md`.
+
+| # | Quyết định | Phát hiện | Đã cân nhắc | Lý do | Duyệt |
+|---|---|---|---|---|---|
+| D104 | Mã QR lên xe tĩnh theo vé, có phiên bản: `BUSGO|pnr|ticket|v<n>|hmac16`. Khách đổi mã được trước giờ xuất bến; mã cũ trả `QR_REVOKED`, PIN cũ trả `INVALID_PIN`. Bỏ QR xoay 30 giây, cửa sổ lệch đồng hồ và JSON offline. Máy tài xế kiểm offline bằng `boarding_check` trong manifest, không giữ khóa. Link chia sẻ là token ngẫu nhiên, PIN chỉ trong SMS. Xóa đường cho lên xe trùng ở module thanh toán | DR2-01 đến 08 | Giữ QR xoay nhưng cho app tự sinh mã bằng khóa riêng từng vé; giữ JSON offline | Chống dùng hai lần đã có `ALREADY_BOARDED`; xoay mã chỉ thêm phụ thuộc mạng và đồng hồ, còn bản offline cả ngày đã vô hiệu nó. Khóa riêng từng vé vẫn phải có mặt trên máy tài xế để kiểm | **Cao** (bảo mật, vé) |
+| D105 | Vắng mặt chỉ khi xe đã ở điểm đón của khách 10 phút: trạm đầu tính từ giờ xuất bến (chuyến phải đã chạy), trạm sau tính từ lúc tài xế báo tới trạm. Thiếu điều kiện: `BUS_NOT_AT_STOP` hoặc `NO_SHOW_TOO_EARLY` | DR2-09 | Tính theo giờ dự kiến của từng trạm | Giờ dự kiến lệch khi kẹt xe; lúc xe tới thật mới là lúc khách bắt đầu bị chờ | **Cao** (tiền) |
+| D106 | Không cần đăng nhập để xem chuyến và ghế; bấm "Giữ ghế" khi chưa đăng nhập mở sheet số điện thoại và OTP ngay trên sơ đồ ghế, giữ nguyên ghế đã chọn | DR2-10 | Bắt đăng nhập từ đầu; cho đặt vé khách vãng lai | Khớp server (giữ ghế cần Bearer); không chặn người chỉ xem giá | Trung bình |
+| D107 | Cockpit ẩn quét vé, danh sách khách, bán vé vẫy, kết thúc chuyến khi tốc độ trên 5 km/h; còn trạm kế, tốc độ và nút "Báo sự cố" lớn | DR2-11 | Chỉ cảnh báo | Thao tác màn hình khi lái là rủi ro an toàn; phụ xe dùng máy thứ hai | **Cao** (an toàn) |
+| D108 | Kết thúc chuyến chỉ khi đã báo tới bến cuối; kết thúc sớm cần `early_end_reason` (từ 5 ký tự), ghi vào báo cáo; thiếu: `400 TRIP_NOT_AT_FINAL_STOP` | DR2-12 | Chỉ ẩn nút trên UI | Server là chốt cuối; vẫn cho kết thúc sớm khi có sự cố thật | Trung bình |
+| D109 | Bỏ ô "Số khách" khỏi tìm chuyến; số ghế chọn là số khách | DR2-13 | Ràng buộc số ghế theo số khách | Một ô ít hơn, không có hai nguồn sự thật | Thấp |
+
+Test đổi kỳ vọng: test mã hóa (`TC-CORE-04`, `04B`, `08`, `09`) và thanh toán (`TC-PAY-04`, `06`, `07`) chuyển sang QR tĩnh và không còn cho lên xe trong module thanh toán; `TC-SPEC-A24` dùng định dạng mới; `TC-SPEC-A43` cho chuyến chạy trước khi đánh dấu vắng mặt; `TC-DRV-07`, `TC-SPEC-A41c` báo tới bến cuối trước khi kết thúc; `TC-SYNC-09` kết thúc sớm có lý do; `TC-SRV-06` kiểm link chia sẻ không chứa PIN.

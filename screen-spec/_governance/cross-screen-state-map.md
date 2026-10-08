@@ -78,7 +78,7 @@
          ├─► [Group Boarding QR (REV-01)] ── 1-scan check-in for all N seats in PNR
          ├─► [Delegated SMS + 6-digit PIN (REV-01)] ── Driver checks in via DRI-010 PIN lookup
          │
-         ▼ Driver Scans QR in DRI-009 (Dynamic TOTP +-2 windows or Offline Signed JSON - REV-03)
+         ▼ Driver Scans QR in DRI-009 (static versioned QR checked against the manifest - D104)
 [DRI-009 Scan QR / DRI-010 Manual PIN] ── State: BOARDED (Local SQLite Outbox in DRI-015)
          │
          ├─────────────────────────────────────────┐

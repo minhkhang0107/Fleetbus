@@ -21,8 +21,8 @@
 
 ## 2. Business Context & Invariants
 - **Requirements Trace:** `BR-SCAN-001` (Offline Cryptographic Ticket Validation), `BR-SCAN-002` (Duplicate Scan Prevention), `UC-DRI-SCAN-001`.
-- **OFFLINE VERIFICATION INVARIANT:** The app verifies the ticket payload signature against the secret key pre-cached during `DRI-001` login. No network connection is needed at the moment of scanning.
-- **SIGNATURE INVARIANT (review FND-A24):** Every payload carries an HMAC that is **always recomputed and compared in constant time before any other check**. A payload with a missing or wrong signature is rejected with `INVALID_SIGNATURE`, even when its window and ticket id look valid. The server (`POST /driver/trips/{tripId}/boarding`) applies the same rule, because it is the single source of truth when the device is online.
+- **OFFLINE VERIFICATION INVARIANT (D104):** The tablet never holds the ticket secret. Before the trip (`DRI-004`, `DRI-005`) it downloads the manifest (`GET /api/v1/driver/trips/{tripId}/manifest`), in which every row carries `boarding_check: { qr_version, qr_digest, pin_digest }`. Offline, a scanned QR is valid when its ticket is on the manifest, its version equals `qr_version` and its signature equals `qr_digest`; a PIN is valid when `sha256(ticket_id|pin)` equals `pin_digest`. A lost tablet therefore exposes one trip at most, never the means to forge any ticket. Online, the server checks the same way.
+- **SIGNATURE INVARIANT (review FND-A24):** Every payload carries an HMAC that is **always recomputed and compared in constant time before any other check**. A payload with a missing or wrong signature is rejected with `INVALID_SIGNATURE`, even when its version and ticket id look valid. The server (`POST /driver/trips/{tripId}/boarding`) applies the same rule, because it is the single source of truth when the device is online.
 - **TRIP-SCOPE INVARIANT (review FND-A36):** A ticket is matched on `ticket_id` inside the manifest of the trip being scanned. A valid signature for a ticket that is not on this trip returns `WRONG TRIP`; the PNR alone never selects a passenger.
 - **SINGLE BOARDING PATH (review FND-A37):** QR, group QR, PIN, offline ticket and manual boarding all end in the same step, which marks the passenger `BOARDED` and publishes `PASSENGER_BOARDED`, so the passenger wallet and the manager dashboard stay in sync.
 
@@ -86,70 +86,28 @@
 
 ---
 
-## 6. Offline Validation Algorithm & Multi-Format Support
+## 6. Offline Validation Algorithm (D104)
 
-The scanner auto-detects payload format and executes instant local validation ($<150\text{ms}$):
+The scanner reads the payload and checks it against the downloaded manifest ($<150\text{ms}$), without any secret:
 
 ```dart
-// Dart offline verification engine supporting dynamic TOTP, Group QR, and static offline signatures
-ScanResult verifyScannedPayload(String payload, String tripSecret, int currentTimestampMs) {
-  // Format 1: Dynamic 30s TOTP string (BUSGO|pnr|tid|window|hmac); hmac = HMAC16("QR|pnr|tid|window")
+ScanResult verifyScannedPayload(String payload, Manifest manifest) {
+  // Single ticket: BUSGO|pnr|ticket_id|v<version>|hmac16
   if (payload.startsWith('BUSGO|')) {
-    final parts = payload.split('|');
-    if (parts.length >= 5) {
-      final pnr = parts[1];
-      final tid = parts[2];
-      final scannedWindow = int.parse(parts[3]);
-      final hmac = parts[4];
-      final currentWindow = currentTimestampMs ~/ 30000;
-      
-      // Signature first, constant-time compare; then permit +-2 windows (60s drift tolerance - REV-03)
-      final expectedHmac = computeHmac16("QR|$pnr|$tid|${parts[3]}", tripSecret);
-      if (!constantTimeEquals(hmac, expectedHmac)) {
-        return ScanResult.invalid(reason: 'INVALID_SIGNATURE');
-      }
-      if ((currentWindow - scannedWindow).abs() <= 2) {
-        return ScanResult.valid(ticketId: tid, pnr: pnr, method: 'DYNAMIC_TOTP');
-      }
-      return ScanResult.invalid(reason: 'QR_EXPIRED');
-    }
+    final p = payload.split('|');
+    if (p.length != 5 || !RegExp(r'^v\d+$').hasMatch(p[3])) return ScanResult.invalid('MALFORMED_PAYLOAD');
+    final row = manifest.byTicketId(p[2]);
+    if (row == null) return ScanResult.invalid('TICKET_WRONG_TRIP');
+    if (row.boardingStatus == 'BOARDED') return ScanResult.invalid('ALREADY_BOARDED');
+    if (int.parse(p[3].substring(1)) != row.check.qrVersion) return ScanResult.invalid('QR_REVOKED');
+    if (!constantTimeEquals(p[4], row.check.qrDigest)) return ScanResult.invalid('INVALID_SIGNATURE');
+    if (row.isUnpaidCod) return ScanResult.codRequired(row);            // BR-COD-006
+    return ScanResult.valid(row, method: 'QR');
   }
-
-  // Format 2: Unified Group Boarding QR (BUSGO_GRP|pnr|orderId|seatCount|tids|window|hmac - REV-01)
-  // hmac = HMAC16("GRP|pnr|orderId|seatCount|tids|window")
-  if (payload.startsWith('BUSGO_GRP|')) {
-    final parts = payload.split('|');
-    if (parts.length >= 7) {
-      final pnr = parts[1];
-      final orderId = parts[2];
-      final seatCount = int.parse(parts[3]);
-      final ticketIds = parts[4].split(',');
-      final scannedWindow = int.parse(parts[5]);
-      final hmac = parts[6];
-      final currentWindow = currentTimestampMs ~/ 30000;
-
-      final expectedHmac = computeHmac16("GRP|$pnr|$orderId|${parts[3]}|${parts[4]}|${parts[5]}", tripSecret);
-      if (!constantTimeEquals(hmac, expectedHmac)) {
-        return ScanResult.invalid(reason: 'INVALID_SIGNATURE');
-      }
-      if ((currentWindow - scannedWindow).abs() <= 2) {
-        return ScanResult.validGroup(pnr: pnr, ticketIds: ticketIds, method: 'GROUP_TOTP');
-      }
-      return ScanResult.invalid(reason: 'QR_EXPIRED');
-    }
-  }
-
-  // Format 3: Offline JSON signature (Zero connectivity fallback / Printed Ticket)
-  // {"tkt","pnr","seat","trip","sig"}; sig = HMAC16("tkt|pnr|seat|trip"); valid only for the ticket's own trip
-  try {
-    final Map<String, dynamic> data = jsonDecode(payload);
-    final expectedSig = computeHmac16("${data['tkt']}|${data['pnr']}|${data['seat']}|${data['trip']}", tripSecret);
-    if (constantTimeEquals(data['sig'], expectedSig) && data['trip'] == currentTripId) {
-      return ScanResult.valid(ticketId: data['tkt'], pnr: data['pnr'], method: 'STATIC_OFFLINE');
-    }
-  } catch (_) {}
-
-  return ScanResult.invalid(reason: 'SIGNATURE_MISMATCH_OR_EXPIRED');
+  // Group: BUSGO_GRP|pnr|order|count|tid:v1,tid:v1|hmac16. The tablet checks each member as above
+  // (version and per-ticket digest); the group signature itself is checked by the server when online.
+  if (payload.startsWith('BUSGO_GRP|')) return verifyGroupMembers(payload, manifest);
+  return ScanResult.invalid('INVALID_FORMAT');
 }
 ```
 
@@ -157,7 +115,7 @@ ScanResult verifyScannedPayload(String payload, String tripSecret, int currentTi
   - `ticket_id: TEXT PRIMARY KEY`
   - `trip_id: TEXT`
   - `scanned_at: TEXT (ISO 8601)`
-  - `scan_method: TEXT ('DYNAMIC_TOTP' | 'GROUP_TOTP' | 'STATIC_OFFLINE' | 'MANUAL_PIN')`
+  - `scan_method: TEXT ('QR' | 'GROUP_QR' | 'PIN' | 'MANUAL_OVERRIDE')`
   - `synced: INTEGER (0 = false, 1 = true)`
 
 ---

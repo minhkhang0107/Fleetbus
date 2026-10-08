@@ -265,6 +265,19 @@ class PassengerApiClientService {
   }
 
   /**
+   * PAX-017: Reissue the boarding QR. The old QR and PIN stop working; refused with
+   * 409 BOARDING_STARTED once the trip has left (D104).
+   */
+  Future<Map<String, dynamic>> reissueBoardingQr(String ticketId, {String? idempotencyKey}) {
+    return _post(
+      '/api/v1/passenger/tickets/$ticketId/qr/reissue',
+      body: const {},
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  /**
    * PAX-017: Share a ticket with a companion (SMS link and offline PIN)
    */
   Future<Map<String, dynamic>> delegateTicket(

@@ -7,7 +7,7 @@ import http from 'node:http';
 import assert from 'node:assert';
 import { createFleetBusServer } from '../../source/server/apiServer.js';
 import { getTicketSecret } from '../../source/server/config.js';
-import { generateDynamicTicketQR } from '../../source/server/services/passenger/core/cryptoEngine.js';
+import { generateBoardingQR } from '../../source/server/services/passenger/core/cryptoEngine.js';
 
 const TRIP = 'trp_991823';
 const COD_TICKET = 'tkt_88219_A02';
@@ -28,7 +28,7 @@ describe('COD boarding gate (DRI-010, DRI-012)', () => {
     const { services } = createFleetBusServer();
     const driver = services.driverService;
     const item = driver.activeTrips.get(TRIP).manifest.find((m) => m.ticket_id === COD_TICKET);
-    const qr = generateDynamicTicketQR({ pnr: item.pnr, ticket_id: item.ticket_id, seat_code: item.seat_code, trip_id: TRIP }, getTicketSecret(), Date.now()).qr_code_value;
+    const qr = generateBoardingQR({ pnr: item.pnr, ticket_id: item.ticket_id, seat_code: item.seat_code, trip_id: TRIP }, getTicketSecret(), Date.now()).qr_code_value;
     const res = driver.boardPassengerByQR(TRIP, qr);
     assert.strictEqual(res.success, false);
     assert.strictEqual(res.code, 'COD_PAYMENT_REQUIRED');

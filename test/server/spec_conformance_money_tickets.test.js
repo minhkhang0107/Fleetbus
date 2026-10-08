@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import { createFleetBusServer } from '../../source/server/apiServer.js';
 import { getTicketSecret } from '../../source/server/config.js';
-import { generateDynamicTicketQR } from '../../source/server/services/passenger/core/cryptoEngine.js';
+import { generateBoardingQR } from '../../source/server/services/passenger/core/cryptoEngine.js';
 
 const TRIP = 'trp_hn_th_01';
 const HOUR = 3600 * 1000;
@@ -189,16 +189,15 @@ describe('Spec conformance: money, tickets and boarding', () => {
     }
   });
 
-  it('TC-SPEC-A24: forged QR signature is rejected, genuine QR boards (DRI-009, REV-03)', async () => {
+  it('TC-SPEC-A24: forged QR signature is rejected, genuine QR boards (DRI-009, D104)', async () => {
     const { ticket } = await buyTicket('A07', 'u_qr');
-    const win = Math.floor(Date.now() / 30000);
-    const forged = `BUSGO|${ticket.pnr}|${ticket.ticket_id}|${win}|deadbeefdeadbeef`;
+    const forged = `BUSGO|${ticket.pnr}|${ticket.ticket_id}|v1|deadbeefdeadbeef`;
     const bad = await api(`/api/v1/driver/trips/${TRIP}/boarding`, { method: 'POST', body: { qrString: forged } });
     assert.strictEqual(bad.status, 400);
     assert.strictEqual(bad.body.code, 'INVALID_SIGNATURE');
 
     const pass = await api(`/api/v1/tickets/${ticket.ticket_id}`);
-    const genuine = pass.body.data.dynamic_qr.qr_code_value;
+    const genuine = pass.body.data.boarding_qr.qr_code_value;
     const ok = await api(`/api/v1/driver/trips/${TRIP}/boarding`, { method: 'POST', body: { qrString: genuine } });
     assert.strictEqual(ok.status, 200, JSON.stringify(ok.body));
   });
@@ -208,7 +207,7 @@ describe('Spec conformance: money, tickets and boarding', () => {
     const victim = manifest.find((m) => m.boarding_status !== 'BOARDED');
     assert.ok(victim, 'fixture needs an unboarded passenger');
     const foreign = { pnr: victim.pnr, ticket_id: 'tkt_not_on_this_trip', seat_code: 'Z99', trip_id: 'trp_other' };
-    const qr = generateDynamicTicketQR(foreign, getTicketSecret(), Date.now()).qr_code_value;
+    const qr = generateBoardingQR(foreign, getTicketSecret(), Date.now()).qr_code_value;
     const res = await api(`/api/v1/driver/trips/${TRIP}/boarding`, { method: 'POST', body: { qrString: qr } });
     assert.strictEqual(res.status, 400);
     assert.strictEqual(res.body.code, 'TICKET_WRONG_TRIP');

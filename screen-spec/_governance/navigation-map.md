@@ -68,6 +68,8 @@
 - **Hidden** on `PAX-001` splash, `PAX-002`/`PAX-003` login, and the whole booking funnel `PAX-005` to `PAX-015`: the funnel has one sticky bottom action (price + next step) and a back arrow. A tab bar under a payment screen lets the passenger leave a running hold by accident and puts two bottom bars on screen.
 - **Hold banner:** from `PAX-010` to `PAX-013` the amber countdown banner sits under the app bar on every step (`PAX-010` 4.1), not only on checkout.
 - **Funnel order:** `PAX-006` results, `PAX-007` trip detail, `PAX-008` pickup and dropoff (the segment decides which seats are free, `BR-SEAT-001`, so it comes before the seat map), `PAX-009` seats, then `PAX-011` passenger info and `PAX-012` checkout. `PAX-011` and `PAX-012` may be one scrolling screen with two sections; the hold starts when the passenger taps "Giữ ghế" on `PAX-009`.
+- **Login at the hold (D106):** searching, trip detail, stops and the seat map work without an account. Holding seats needs one (`POST .../seats/hold` is Bearer): tapping "Giữ ghế" without a session opens the phone and OTP sheet over the seat map and keeps the selection; the hold starts after the OTP.
+- **No passenger count in the search (D109):** the number of seats picked on `PAX-009` is the passenger count; the search form asks only route and date.
 - **After payment:** `PAX-014` result, then `PAX-015` success, which clears the funnel stack (`BR-SUCCESS-001`) and offers "Xem vé" (`PAX-017`) and "Về trang chủ".
 
 ### 1.3. Deep Linking Schemes (Passenger)

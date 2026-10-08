@@ -1,8 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { PassengerPaymentService } from '../../source/server/services/passenger/modules/payment.js';
+import { verifyBoardingQR, verifyGroupBoardingQR, verifyTicketPin } from '../../source/server/services/passenger/core/cryptoEngine.js';
 
-describe('Phase 6: Payment, Ticket Wallet & Dynamic HMAC QR Test Suite', () => {
+describe('Phase 6: Payment, Ticket Wallet & Boarding Pass Test Suite', () => {
   const paymentService = new PassengerPaymentService();
   const t0 = 1724800000000;
 
@@ -60,24 +61,23 @@ describe('Phase 6: Payment, Ticket Wallet & Dynamic HMAC QR Test Suite', () => {
     assert.strictEqual(walletRes.data[0].passenger_name, 'Nguyễn Văn An');
   });
 
-  it('TC-PAY-04: Should generate 30s rotating HMAC QR boarding pass and board passenger (PAX-017)', () => {
+  it('TC-PAY-04: Should issue a static boarding QR and reissue it with a new version (PAX-017, D104)', () => {
     const ticketId = `tkt_${createdPnr.replace('-', '')}_A01`;
-    
-    // 1. Passenger opens boarding pass
-    const passRes = paymentService.getDynamicBoardingPass(ticketId, t0 + 120000);
+
+    // Boarding happens in the driver service (DRI-009); this module only issues the pass.
+    const passRes = paymentService.getBoardingPass(ticketId);
     assert.strictEqual(passRes.success, true);
-    assert.ok(passRes.data.dynamic_qr.qr_code_value.startsWith('BUSGO|'));
-    assert.strictEqual(passRes.data.dynamic_qr.hmac_signature.length, 16);
+    const qr = passRes.data.boarding_qr;
+    assert.ok(qr.qr_code_value.startsWith('BUSGO|'));
+    assert.strictEqual(paymentService.getBoardingPass(ticketId).data.boarding_qr.qr_code_value, qr.qr_code_value, 'the QR is the same every time it is opened');
+    assert.strictEqual(verifyBoardingQR(qr.qr_code_value, paymentService.secretKey).isValid, true);
 
-    // 2. Driver scans dynamic QR
-    const scanRes = paymentService.validateAndBoardTicket(passRes.data.dynamic_qr.qr_code_value, t0 + 121000);
-    assert.strictEqual(scanRes.success, true);
-    assert.strictEqual(scanRes.data.status, 'BOARDED');
+    const reissued = paymentService.reissueBoardingQR(ticketId);
+    assert.strictEqual(reissued.success, true);
+    assert.strictEqual(reissued.data.boarding_qr.version, 2);
 
-    // 3. Re-scan of already boarded ticket -> Rejected
-    const duplicateScan = paymentService.validateAndBoardTicket(passRes.data.dynamic_qr.qr_code_value, t0 + 122000);
-    assert.strictEqual(duplicateScan.success, false);
-    assert.strictEqual(duplicateScan.code, 'TICKET_ALREADY_USED');
+    const locked = paymentService.reissueBoardingQR(ticketId, { boardingStarted: true });
+    assert.strictEqual(locked.code, 'BOARDING_STARTED');
   });
 
   it('TC-PAY-05: Should handle active resume polling and manual payment trigger (PAX-013, REV-02)', () => {
@@ -124,7 +124,7 @@ describe('Phase 6: Payment, Ticket Wallet & Dynamic HMAC QR Test Suite', () => {
     assert.strictEqual(pollAfterBank.tickets.length, 1);
   });
 
-  it('TC-PAY-06: Should generate aggregate group boarding pass and board entire group (PAX-017, REV-01)', () => {
+  it('TC-PAY-06: Should generate a static group boarding pass for a multi-seat booking (PAX-017, REV-01)', () => {
     // Order with 2 seats
     const orderRes = paymentService.createPaymentOrder({
       holdId: 'hld_grp_01',
@@ -145,19 +145,17 @@ describe('Phase 6: Payment, Ticket Wallet & Dynamic HMAC QR Test Suite', () => {
     assert.strictEqual(settle.success, true);
 
     // Get Group Boarding Pass
-    const groupPass = paymentService.getGroupBoardingPass(orderRes.data.order_id, t0 + 60000);
+    const groupPass = paymentService.getGroupBoardingPass(orderRes.data.order_id);
     assert.strictEqual(groupPass.success, true);
     assert.strictEqual(groupPass.data.active_tickets_count, 2);
     assert.ok(groupPass.data.group_qr.qr_code_value.startsWith('BUSGO_GRP|'));
 
-    // Driver scans Group QR
-    const groupScan = paymentService.validateAndBoardTicket(groupPass.data.group_qr.qr_code_value, t0 + 61000);
-    assert.strictEqual(groupScan.success, true);
-    assert.strictEqual(groupScan.isGroup, true);
-    assert.strictEqual(groupScan.data.boarded_count, 2);
+    const verified = verifyGroupBoardingQR(groupPass.data.group_qr.qr_code_value, paymentService.secretKey);
+    assert.strictEqual(verified.isValid, true);
+    assert.strictEqual(verified.ticket_count, 2);
   });
 
-  it('TC-PAY-07: Should delegate ticket with offline 6-digit PIN and allow PIN check-in (PAX-017, REV-01)', () => {
+  it('TC-PAY-07: Should share a ticket with a backup PIN and an opaque link (PAX-017, REV-01)', () => {
     // Order for companion
     const orderRes = paymentService.createPaymentOrder({
       holdId: 'hld_del_01',
@@ -182,10 +180,7 @@ describe('Phase 6: Payment, Ticket Wallet & Dynamic HMAC QR Test Suite', () => {
     assert.strictEqual(delegateRes.success, true);
     assert.match(delegateRes.data.offline_pin, /^\d{6}$/);
 
-    // Companion boards using PIN:ticketId:pin
-    const pinString = `PIN:${ticketId}:${delegateRes.data.offline_pin}`;
-    const boardRes = paymentService.validateAndBoardTicket(pinString, t0 + 50000);
-    assert.strictEqual(boardRes.success, true);
-    assert.strictEqual(boardRes.data.status, 'BOARDED');
+    assert.strictEqual(verifyTicketPin(ticketId, delegateRes.data.offline_pin, paymentService.secretKey).isValid, true);
+    assert.ok(!delegateRes.data.share_link.includes(delegateRes.data.offline_pin), 'the PIN is never in the link');
   });
 });

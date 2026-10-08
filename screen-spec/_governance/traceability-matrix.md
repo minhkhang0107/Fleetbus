@@ -57,7 +57,7 @@ Acceptance Criteria & Test Matrix
 | **BR-MAN-001** | `UC-DRI-MAN-001` | `DRI-007` | `ManifestTable` | `GET /driver/trips/{id}/manifest`| `MANIFEST_UPDATED`| `MANIFEST_VIEWED` | `TC-DRI-007-01` |
 | **BR-HAIL-001** | `UC-DRI-HAIL-001` | `DRI-007` | `HailPassengerModal`| `POST /api/v1/driver/trips/{id}/onboard-hail` | `PASSENGER_BOARDED` | `HAIL_PASSENGER_ONBOARDED` | `TC-DRI-007-02` |
 | **BR-SCAN-001** | `UC-DRI-SCAN-001` | `DRI-009` | `QRScannerView` | `Local Cryptographic Verification`| `PASSENGER_BOARDED`| `TICKET_SCANNED_OFFLINE`| `TC-DRI-009-01` |
-| **BR-QR-002** | `UC-DRI-SCAN-002` | `DRI-009` | `DualQREngine` | `Dynamic TOTP +-2 window / Group QR` | `PASSENGER_BOARDED` | `GROUP_QR_SCANNED` | `TC-DRI-009-02` |
+| **BR-QR-002** | `UC-DRI-SCAN-002` | `DRI-009` | `DualQREngine` | `Static versioned QR / Group QR (D104)` | `PASSENGER_BOARDED` | `GROUP_QR_SCANNED` | `TC-DRI-009-02` |
 | **BR-MAN-002** | `UC-DRI-MAN-002` | `DRI-010` | `OfflinePINBoardingForm` | `POST /api/v1/driver/trips/{id}/boarding/manual` | `PASSENGER_BOARDED` | `PIN_BOARDED` | `TC-DRI-010-02` |
 | **BR-COD-001** | `UC-DRI-COD-001` | `DRI-012` | `CODReceiptCard` | `POST /api/v1/driver/trips/{id}/payments/cod`| `COD_COLLECTED`| `COD_COLLECTED` | `TC-DRI-012-01` |
 | **BR-COD-002** | `UC-DRI-COD-002` | `DRI-012` | `ChangeSettlementModal` | `POST /api/v1/driver/trips/{id}/payments/cod-collect` | `COD_DEBT_ISSUED` | `COD_CHANGE_SETTLED` | `TC-DRI-012-02` |
@@ -242,7 +242,12 @@ Every rule of the master matrix exists in a screen file and every spec test id i
 | `BR-TICKET-003` | `PAX-017` | Offline mode guarantees QR is rendered from SQLite cache even without internet connectivity. | by screen tests only |
 | `BR-TICKET-004` | `PAX-017` | For bookings with $\ge 2$ seats under the same PNR, the screen displays a horizontal pill switcher. Swiping to | by screen tests only |
 | `BR-TICKET-005` | `PAX-017` | User can tap "Chia sẻ vé" to enter a recipient's phone number. The system sends an SMS with a secure authentic | by screen tests only |
-| `BR-TICKET-006` | `PAX-017` | Driver verification engine permits $\pm 2$ window steps ($\pm 60$ seconds) to prevent false rejections due to  | by screen tests only |
+| `BR-TICKET-006` | `PAX-017` | Superseded by D104: the QR has no time window | `cryptoEngine.js` `generateBoardingQR`, `verifyBoardingQR` | `TC-CORE-04`, `TC-QR-01`, `TC-QR-02` |
+| `BR-TICKET-008` | `PAX-017` | Reissue revokes the old QR and PIN; frozen after departure | `payment.js` `reissueBoardingQR`, `passengerRoutes.js` | `TC-QR-03`, `TC-QR-04`, `TC-PAY-04` |
+| `BR-TICKET-005` | `PAX-017` | Share link is an opaque token, PIN only in the SMS | `payment.js` `delegateTicket` | `TC-QR-05`, `TC-PAY-07`, `TC-SRV-06` |
+| `DRI-009` offline | `DRI-009` | Manifest `boarding_check` lets the tablet check scans without a secret | `driverService.js` `_boardingCheck` | `TC-QR-07` |
+| `BR-NOSHOW-004` | `DRI-011` | Grace period at the passenger's own stop | `driverService.js` `markNoShow` | `TC-NOSHOW-01`, `TC-NOSHOW-02`, `TC-SPEC-A43` |
+| `BR-END-005` | `DRI-017` | Trip ends at the last stop or with a written reason | `driverService.js` `endTrip` | `TC-END-01`, `TC-END-02` |
 | `BR-TRACK-001` | `PAX-018` | If WebSocket drops, client immediately falls back to REST polling (`GET /trips/{id}/tracking`) every $10\text{ | by screen tests only |
 | `BR-TRACK-002` | `PAX-018` | If no GPS position has been received for $>60\text{s}$, ConnectionBadge changes to `STALE` (Amber: *"Dữ liệu x | yes |
 | `BR-TRACK-003` | `PAX-018` | When vehicle enters within $1.0\text{km}$ ($<5\text{ minutes}$ ETA) of passenger's pickup geofence, trigger lo | by screen tests only |

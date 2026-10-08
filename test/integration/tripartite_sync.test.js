@@ -7,7 +7,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import http from 'http';
 import { createFleetBusServer } from '../../source/server/apiServer.js';
-import { generateDynamicTicketQR } from '../../source/server/services/passenger/core/cryptoEngine.js';
+import { generateBoardingQR } from '../../source/server/services/passenger/core/cryptoEngine.js';
 
 describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () => {
   let server;
@@ -140,14 +140,14 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
     assert.strictEqual(seatA02.state, 'BOOKED', 'Seat A02 must be permanently BOOKED');
   });
 
-  it('TC-SYNC-02: Driver scanning rotating QR marks passenger BOARDED in wallet & updates Manager metrics', async () => {
+  it('TC-SYNC-02: Driver scanning the boarding QR marks passenger BOARDED in wallet & updates Manager metrics', async () => {
     assert.ok(bookedTicketId, 'Ticket ID must exist from previous step');
 
-    // 1. Get dynamic 30s rotating HMAC QR for the passenger's ticket
+    // 1. Get the static boarding QR of the passenger's ticket
     const qrRes = await api(`/api/v1/passenger/tickets/${bookedTicketId}/qr`);
     assert.strictEqual(qrRes.statusCode, 200);
-    const dynamicQr = qrRes.body.data.dynamic_qr;
-    const qrString = dynamicQr.dynamic_qr ? dynamicQr.dynamic_qr.qr_code_value : (dynamicQr.qr_code_value || dynamicQr.qr_payload);
+    const boardingQr = qrRes.body.data.boarding_qr;
+    const qrString = boardingQr.qr_code_value;
     assert.ok(qrString, 'QR code payload string must be present');
 
     // Baseline: Verify ticket status in passenger wallet is ACTIVE
@@ -372,7 +372,7 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
   it('TC-SYNC-09: Driver ending trip updates Manager trip status to COMPLETED', async () => {
     const endRes = await api(`/api/v1/driver/trips/${driverTripId}/end`, {
       method: 'POST',
-      body: { endOdometerKm: 142210 }
+      body: { endOdometerKm: 142210, early_end_reason: 'Kết thúc sớm để kiểm thử đồng bộ ba bên' }
     });
     assert.strictEqual(endRes.statusCode, 200);
     assert.strictEqual(endRes.body.data.status, 'COMPLETED');

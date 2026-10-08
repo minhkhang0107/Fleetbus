@@ -199,7 +199,7 @@ describe('Cross-app flows (FLOW-01 to FLOW-07)', () => {
       const ticketId = tickets[0].ticket_id;
       await startTrip();
 
-      const qr = (await api(`/api/v1/tickets/${ticketId}`, { token: pax.token })).body.data.dynamic_qr.qr_code_value;
+      const qr = (await api(`/api/v1/tickets/${ticketId}`, { token: pax.token })).body.data.boarding_qr.qr_code_value;
       const scan = await api(`/api/v1/driver/trips/${TRIP}/boarding`, { method: 'POST', token: driver, body: { qrPayload: qr } });
       assert.strictEqual(scan.status, 200, JSON.stringify(scan.body));
       const again = await api(`/api/v1/driver/trips/${TRIP}/boarding`, { method: 'POST', token: driver, body: { qrPayload: qr } });
@@ -213,7 +213,7 @@ describe('Cross-app flows (FLOW-01 to FLOW-07)', () => {
       const detail = await api(`/api/v1/tickets/${ticketId}`, { token: pax.token });
       assert.strictEqual(detail.status, 200, 'the boarded passenger still opens the ticket (PAX-017 status pill)');
       assert.strictEqual(detail.body.data.ticket.status, 'BOARDED');
-      assert.strictEqual(detail.body.data.dynamic_qr ?? null, null, 'a used ticket has no QR to share');
+      assert.strictEqual(detail.body.data.boarding_qr ?? null, null, 'a used ticket has no QR to share');
 
       services.eventBridge.emit('TRIP_COMPLETED', { tripId: TRIP, summary: {} });
       services.managerService.findTrip(TRIP).status = 'IN_TRANSIT';

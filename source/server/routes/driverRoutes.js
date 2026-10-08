@@ -274,7 +274,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.endTrip(tripId, body);
+      const result = driverService.endTrip(tripId, { earlyEndReason: body.early_end_reason || body.earlyEndReason });
       if (result.success) {
         sendSuccess(res, result.data || result);
       } else {

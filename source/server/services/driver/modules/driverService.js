@@ -3,10 +3,12 @@
  * Implements DRI-001 through DRI-019 for the commercial driver mobile/tablet platform.
  */
 
+import crypto from 'crypto';
 import {
-  verifyDynamicTicketQR,
+  generateBoardingQR,
+  generateTicketPin,
+  verifyBoardingQR,
   verifyGroupBoardingQR,
-  verifyOfflineSignedTicket,
   verifyTicketPin
 } from '../../passenger/core/cryptoEngine.js';
 import { getTicketSecret } from '../../../config.js';
@@ -239,8 +241,23 @@ export class DriverCockpitService {
         trip_id: tripId,
         vehicle_plate: trip.vehicle_plate,
         boarded_count: trip.boarded_count,
-        manifest: trip.manifest.map(p => this._publicPassenger(p))
+        manifest: trip.manifest.map(p => ({ ...this._publicPassenger(p), boarding_check: this._boardingCheck(p) }))
       }
+    };
+  }
+
+  /**
+   * What an offline tablet needs to check a scan of this ticket (DRI-009, D104): the signature its
+   * current QR must carry and a digest of its PIN. No shared secret ever leaves the server, so a lost
+   * tablet exposes one trip at most, never the means to forge any ticket.
+   */
+  _boardingCheck(passenger) {
+    const version = passenger.qr_version || 1;
+    const pin = generateTicketPin(passenger.ticket_id, this.secretKey, version);
+    return {
+      qr_version: version,
+      qr_digest: generateBoardingQR({ ...passenger, qr_version: version }, this.secretKey).hmac_signature,
+      pin_digest: crypto.createHash('sha256').update(`${passenger.ticket_id}|${pin}`).digest('hex')
     };
   }
 
@@ -497,32 +514,40 @@ export class DriverCockpitService {
   }
 
   /**
-   * DRI-009 / DRI-010: Scan Dynamic QR, Group QR, Offline PIN, or Offline Signed Ticket (REV-01, REV-03)
-   * Tickets are matched on ticket_id within this trip's manifest only.
+   * DRI-009 / DRI-010: board by the static boarding QR, the group QR or the backup PIN (D104).
+   * Tickets are matched on ticket_id within this trip's manifest only, and the QR or PIN must be
+   * of the ticket's current version: a reissued ticket revokes its older copies (QR_REVOKED).
    */
   boardPassengerByQR(tripId, inputString, mockNow = Date.now()) {
     const trip = this.activeTrips.get(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại' };
-    if (!inputString) return { success: false, error: 'Dữ liệu quét không được để trống' };
+    if (!inputString || typeof inputString !== 'string') return { success: false, error: 'Dữ liệu quét không được để trống' };
+    const versionOf = (passenger) => passenger.qr_version || 1;
+    const revoked = (passenger) => ({ success: false, error: `Mã QR của ghế ${passenger.seat_code} đã được khách đổi. Đề nghị khách mở lại vé trong app.`, code: 'QR_REVOKED' });
 
-    // Case 1: Group Boarding QR (BUSGO_GRP|...)
-    if (typeof inputString === 'string' && inputString.startsWith('BUSGO_GRP|')) {
-      const groupCheck = verifyGroupBoardingQR(inputString, this.secretKey, mockNow);
+    // Group boarding QR (BUSGO_GRP|...)
+    if (inputString.startsWith('BUSGO_GRP|')) {
+      const groupCheck = verifyGroupBoardingQR(inputString, this.secretKey);
       if (!groupCheck.isValid) {
         return { success: false, error: `Mã QR nhóm không hợp lệ (${groupCheck.reason})`, code: groupCheck.reason };
       }
 
-      const onTrip = groupCheck.ticket_ids
-        .map(tktId => trip.manifest.find(m => m.ticket_id === tktId))
-        .filter(Boolean);
+      const onTrip = groupCheck.members
+        .map(m => ({ member: m, passenger: trip.manifest.find(p => p.ticket_id === m.ticket_id) }))
+        .filter(x => x.passenger);
       if (onTrip.length === 0) {
         return { success: false, error: 'Vé không thuộc chuyến xe này', code: 'TICKET_WRONG_TRIP' };
       }
 
       const boardedList = [];
       const codPending = [];
-      for (const passenger of onTrip) {
+      const revokedList = [];
+      for (const { member, passenger } of onTrip) {
         if (passenger.boarding_status === 'BOARDED') continue;
+        if (member.version !== versionOf(passenger)) {
+          revokedList.push(passenger);
+          continue;
+        }
         if (this._codPaymentRequired(passenger)) {
           codPending.push(passenger);
           continue;
@@ -538,92 +563,60 @@ export class DriverCockpitService {
         data: {
           pnr: groupCheck.pnr,
           boarded_passengers: boardedList.map(p => this._publicPassenger(p)),
-          cod_pending_passengers: codPending.map(p => this._publicPassenger(p))
+          cod_pending_passengers: codPending.map(p => this._publicPassenger(p)),
+          revoked_passengers: revokedList.map(p => this._publicPassenger(p))
         }
       };
     }
 
-    // Case 2: 6-digit Offline PIN (PIN:ticketId:pin)
-    if (typeof inputString === 'string' && inputString.startsWith('PIN:')) {
+    // Backup PIN (PIN:ticketId:pin), entered by the driver (DRI-010)
+    if (inputString.startsWith('PIN:')) {
       const [, ticketId, pin] = inputString.split(':');
-      const pinCheck = verifyTicketPin(ticketId, pin, this.secretKey);
-      if (!pinCheck.isValid) {
-        return { success: false, error: 'Mã PIN vé không chính xác', code: 'INVALID_PIN' };
-      }
-
       const passenger = trip.manifest.find(m => m.ticket_id === ticketId);
       if (!passenger) {
         return { success: false, error: 'Vé không thuộc chuyến xe này', code: 'TICKET_WRONG_TRIP' };
       }
-      if (passenger.boarding_status === 'BOARDED') {
-        return { success: false, error: `Khách ${passenger.passenger_name} đã lên xe trước đó!`, code: 'ALREADY_BOARDED' };
+      if (!verifyTicketPin(ticketId, pin, this.secretKey, versionOf(passenger)).isValid) {
+        return { success: false, error: 'Mã PIN vé không chính xác', code: 'INVALID_PIN' };
       }
-
-      const codRefusal = this._codPaymentRequired(passenger);
-      if (codRefusal) return codRefusal;
-
-      this._markBoarded(tripId, trip, passenger, mockNow);
-
-      return {
-        success: true,
-        message: `Xác thực PIN thành công: ${passenger.passenger_name} · Ghế ${passenger.seat_code}`,
-        data: this._publicPassenger(passenger)
-      };
+      return this._boardOne(tripId, trip, passenger, mockNow, 'Xác thực PIN thành công');
     }
 
-    // Case 3: Offline Signed JSON Ticket
-    if (typeof inputString === 'string' && inputString.trim().startsWith('{')) {
-      const offlineCheck = verifyOfflineSignedTicket(inputString, this.secretKey);
-      if (!offlineCheck.isValid) {
-        return { success: false, error: `Chữ ký vé offline không hợp lệ (${offlineCheck.reason})`, code: offlineCheck.reason };
-      }
-      const passenger = offlineCheck.trip_id === tripId
-        ? trip.manifest.find(m => m.ticket_id === offlineCheck.ticket_id)
-        : null;
-      if (!passenger) return { success: false, error: 'Vé không thuộc chuyến xe này', code: 'TICKET_WRONG_TRIP' };
-
-      if (passenger.boarding_status === 'BOARDED') {
-        return { success: false, error: `Khách ${passenger.passenger_name} đã lên xe trước đó!`, code: 'ALREADY_BOARDED' };
-      }
-
-      const codRefusal = this._codPaymentRequired(passenger);
-      if (codRefusal) return codRefusal;
-
-      this._markBoarded(tripId, trip, passenger, mockNow);
-
-      return {
-        success: true,
-        isOfflineSigned: true,
-        message: `Soát vé offline thành công: ${passenger.passenger_name} · Ghế ${passenger.seat_code}`,
-        data: this._publicPassenger(passenger)
-      };
-    }
-
-    // Case 4: Standard Dynamic TOTP QR (BUSGO|...) with +-2 window tolerance
-    const qrCheck = verifyDynamicTicketQR(inputString, this.secretKey, mockNow);
+    // Single boarding QR (BUSGO|pnr|ticket|v<n>|hmac)
+    const qrCheck = verifyBoardingQR(inputString, this.secretKey);
     if (!qrCheck.isValid) {
       return { success: false, error: `Mã QR không hợp lệ (${qrCheck.reason})`, code: qrCheck.reason };
     }
-
     const passenger = trip.manifest.find(m => m.ticket_id === qrCheck.ticket_id);
     if (!passenger) {
       return { success: false, error: 'Vé không thuộc chuyến xe này', code: 'TICKET_WRONG_TRIP' };
     }
+    if (passenger.boarding_status !== 'BOARDED' && qrCheck.version !== versionOf(passenger)) return revoked(passenger);
+    return this._boardOne(tripId, trip, passenger, mockNow, 'Soát vé thành công');
+  }
 
+  /** Shared tail of the single-ticket boarding paths: one boarding per ticket, COD first. */
+  _boardOne(tripId, trip, passenger, mockNow, label) {
     if (passenger.boarding_status === 'BOARDED') {
       return { success: false, error: `Khách ${passenger.passenger_name} (Ghế ${passenger.seat_code}) đã lên xe trước đó!`, code: 'ALREADY_BOARDED' };
     }
-
     const codRefusal = this._codPaymentRequired(passenger);
     if (codRefusal) return codRefusal;
 
     this._markBoarded(tripId, trip, passenger, mockNow);
-
     return {
       success: true,
-      message: `Soát vé thành công: ${passenger.passenger_name} · Ghế ${passenger.seat_code}`,
+      message: `${label}: ${passenger.passenger_name} · Ghế ${passenger.seat_code}`,
       data: this._publicPassenger(passenger)
     };
+  }
+
+  /**
+   * Keeps the manifest copy of a ticket on the version the passenger holds (PAX-017 reissue).
+   */
+  setTicketQrVersion(tripId, ticketId, version) {
+    const passenger = this.activeTrips.get(tripId)?.manifest.find(m => m.ticket_id === ticketId);
+    if (passenger) passenger.qr_version = version;
   }
 
   /**
@@ -895,13 +888,27 @@ export class DriverCockpitService {
       return { success: false, error: `Hành khách đang ở trạng thái ${item.boarding_status}, không thể đánh dấu vắng mặt`, code: 'INVALID_PASSENGER_STATE' };
     }
 
-    const graceEnds = Date.parse(trip.planned_departure_time) + NO_SHOW_GRACE_MINUTES * 60 * 1000;
-    if (!passengerRequestedCancel && mockNow < graceEnds) {
-      return {
-        success: false,
-        error: `Chỉ được đánh dấu vắng mặt sau giờ xuất bến ${NO_SHOW_GRACE_MINUTES} phút`,
-        code: 'NO_SHOW_TOO_EARLY'
-      };
+    // The grace period runs at the passenger's own pickup stop (design review 2): from the planned
+    // departure at the first stop, from the arrival of the bus at a later stop.
+    if (!passengerRequestedCancel) {
+      const pickupIndex = Math.max(0, (trip.stops || []).findIndex(s => s.stop_id === item.pickup_stop_id));
+      const pickupStop = trip.stops?.[pickupIndex];
+      const atStop = trip.status === 'IN_TRANSIT' && (pickupIndex === 0 || pickupStop?.status === 'ARRIVED');
+      if (!atStop) {
+        return {
+          success: false,
+          error: `Xe chưa tới điểm đón của khách (${pickupStop?.name || 'điểm đón'}), chưa thể đánh dấu vắng mặt`,
+          code: 'BUS_NOT_AT_STOP'
+        };
+      }
+      const graceFrom = pickupIndex === 0 ? Date.parse(trip.planned_departure_time) : Date.parse(pickupStop.arrived_at);
+      if (mockNow < graceFrom + NO_SHOW_GRACE_MINUTES * 60 * 1000) {
+        return {
+          success: false,
+          error: `Chỉ được đánh dấu vắng mặt sau khi xe chờ tại điểm đón ${NO_SHOW_GRACE_MINUTES} phút`,
+          code: 'NO_SHOW_TOO_EARLY'
+        };
+      }
     }
 
     item.boarding_status = 'NO_SHOW';
@@ -1086,11 +1093,23 @@ export class DriverCockpitService {
    * DRI-017: End Trip at final terminal.
    * Cash is reconciled on the server from the manifest; totals sent by the client are ignored. A trip ends once.
    */
-  endTrip(tripId) {
+  endTrip(tripId, { earlyEndReason = null } = {}) {
     const trip = this.activeTrips.get(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
     if (trip.status !== 'IN_TRANSIT') {
       return { success: false, error: `Chuyến xe ở trạng thái ${trip.status}, không thể kết thúc`, code: 'INVALID_TRIP_STATE' };
+    }
+    // A trip ends at its last stop. Ending it earlier (breakdown, all passengers moved) needs a
+    // written reason, kept in the end report (BR-END-005, design review 2).
+    const lastStop = (trip.stops || [])[(trip.stops || []).length - 1];
+    const atFinalStop = !lastStop || lastStop.status === 'ARRIVED';
+    const reason = typeof earlyEndReason === 'string' ? earlyEndReason.trim() : '';
+    if (!atFinalStop && reason.length < 5) {
+      return {
+        success: false,
+        error: `Xe chưa tới bến cuối (${lastStop.name}). Kết thúc giữa đường cần ghi lý do`,
+        code: 'TRIP_NOT_AT_FINAL_STOP'
+      };
     }
 
     const count = (status) => trip.manifest.filter(m => m.boarding_status === status).length;
@@ -1104,6 +1123,7 @@ export class DriverCockpitService {
       total_boarded: count('BOARDED'),
       total_no_show: count('NO_SHOW'),
       unresolved_passenger_count: trip.manifest.filter(m => !settledStatuses.includes(m.boarding_status)).length,
+      early_end_reason: atFinalStop ? null : reason,
       total_cod_collected_vnd: trip.total_cod_collected_vnd,
       total_hail_collected_vnd: trip.total_hail_collected_vnd,
       total_cash_to_handover_vnd: trip.total_cod_collected_vnd + trip.total_hail_collected_vnd,

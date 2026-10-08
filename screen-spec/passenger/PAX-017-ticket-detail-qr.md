@@ -21,8 +21,10 @@
 
 ## 2. Business Context & Invariants
 - **Requirements Trace:** `BR-TICK-002` (Cryptographic Ticket QR Code), `BR-TICK-003` (Screen brightness auto-boost), `UC-PAS-TICK-002`.
-- **OFFLINE QR INTEGRITY RULE:** The QR payload contains a cryptographic signature `HMAC-SHA256(ticket_id + trip_id + seat_code + issued_at, secret_key)`. The driver app (`DRI-009`) can verify authenticity without internet connectivity.
-- **Offline Caching:** Ticket data and QR image are automatically cached in local encrypted storage upon first load.
+- **STATIC VERSIONED QR (design review 2, D104):** The QR of a ticket is fixed: `BUSGO|{pnr}|{ticket_id}|v{version}|{hmac16}` with `hmac16 = HMAC-SHA256("QR|pnr|ticket_id|v{version}", server secret)` truncated to 16 hex. It does not depend on the clock, so it works offline, as a screenshot, printed, or through the SMS link. It replaces the 30-second rotating QR and the daily offline JSON of the earlier versions: the rotation needed a connection at the door, the offline JSON was valid all day anyway, and checking either offline required the server secret on every driver tablet.
+- **One boarding per ticket:** a copy of the QR is harmless after the first scan (`ALREADY_BOARDED`); the driver sees name and seat on the result card.
+- **Revoke a leaked copy:** "Đổi mã QR" takes a new version (`POST /api/v1/passenger/tickets/{ticketId}/qr/reissue`); older QRs answer `QR_REVOKED` and the old PIN stops working.
+- **Offline Caching:** Ticket data and the QR are cached in local encrypted storage upon first load and refreshed after a reissue.
 
 ---
 
@@ -55,11 +57,11 @@ Next Screen:
 │ │ ┌──────────────────────────────────────────┐ │  │
 │ │ │                                          │ │  │
 │ │ │          [ AUTHORITATIVE QR CODE ]       │ │  │
-│ │ │         (Dynamic 30s HMAC & Offline)     │ │  │
+│ │ │      (Static signed QR, works offline)   │ │  │
 │ │ │                                          │ │  │
 │ │ └──────────────────────────────────────────┘ │  │
 │ │ (i) Đưa mã này cho tài xế khi lên xe         │  │
-│ │ ⏳ Mã tự xoay sau 24s · ☀️ Độ sáng 100%       │  │
+│ │ Độ sáng 100% · [ Đổi mã QR ]                 │  │
 │ │ 🔑 Mã số dự phòng (Offline PIN): [ 682 914 ]  │  │
 │ │                                              │  │
 │ │ ───────────────────────────────────────────  │  │
@@ -110,29 +112,22 @@ Next Screen:
 
 ## 6. QR Code Cryptographic Payload Specification
 
-### 6.1. Primary High-Security Format (Dynamic 30s Rotating TOTP String)
-When app is online or device clock is within $\pm 60$s drift tolerance:
+### 6.1. Ticket QR (static, versioned - D104)
 ```text
-BUSGO|{pnr}|{ticket_id}|{window30s}|{hmac16}
-Ví dụ: BUSGO|BG-88219|tkt_88192a|59648457|d6a7c5d8bf86d6c5
+BUSGO|{pnr}|{ticket_id}|v{version}|{hmac16}
+Ví dụ: BUSGO|BG-88219|tkt_88192a|v1|d6a7c5d8bf86d6c5
+hmac16 = HMAC-SHA256("QR|{pnr}|{ticket_id}|v{version}", server secret), first 16 hex
 ```
 
-### 6.2. Offline JSON Signature Format (Zero-connectivity Fallback & Group QR)
-Cached locally in SQLite upon booking confirmation, valid throughout departure date:
-```json
-{
-  "ver": 1,
-  "tid": "tkt_88192a",
-  "pnr": "BG-88219",
-  "trp": "trp_991823",
-  "seat": "A01",
-  "seats": ["A01", "A02"],
-  "seg": "stp_hn_gb:stp_th_pb",
-  "iat": 1756291200,
-  "pin": "682914",
-  "sig": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-}
+### 6.2. Group QR (static, lists each member with its version)
+```text
+BUSGO_GRP|{pnr}|{order_id}|{count}|{ticket_id}:v{version},...|{hmac16}
+hmac16 = HMAC-SHA256("GRP|{pnr}|{order_id}|{count}|{members}", server secret), first 16 hex
 ```
+A member whose ticket was reissued since the group QR was made is not boarded by it (`revoked_passengers` in the scan result).
+
+### 6.3. Backup PIN
+6 digits from `HMAC-SHA256("PIN|{ticket_id}|v{version}")`; a reissue changes it. It is shown in the app and sent in the share SMS, never put in a URL.
 
 ---
 
@@ -154,7 +149,7 @@ Cached locally in SQLite upon booking confirmation, valid throughout departure d
     "passenger_name": "Nguyễn Văn Nam",
     "passenger_phone": "+84987654321",
     "offline_pin": "682914",
-    "qr_payload": "BUSGO|BG-88219|tkt_88192a|59648457|d6a7c5d8bf86d6c5",
+    "boarding_qr": { "qr_code_value": "BUSGO|BG-88219|tkt_88192a|v1|d6a7c5d8bf86d6c5", "version": 1 },
     "group_tickets": [
       { "ticket_id": "tkt_88192a", "seat_code": "A01", "passenger_name": "Nguyễn Văn Nam" },
       { "ticket_id": "tkt_88192b", "seat_code": "A02", "passenger_name": "Trần Thị Mai" }
@@ -238,11 +233,13 @@ Cached locally in SQLite upon booking confirmation, valid throughout departure d
 ## 8. Business Rules
 - `BR-TICKET-001`: Screen automatically boosts display brightness to 100% when viewed and restores user brightness upon exit.
 - `BR-TICKET-002`: If driver scans the ticket and marks `BOARDED`, the screen status pill instantly changes to `🟢 ĐÃ LÊN XE` via WebSocket event `PASSENGER_BOARDED`.
-- `BR-TICKET-003`: Offline mode guarantees QR is rendered from SQLite cache even without internet connectivity.
+- `BR-TICKET-003`: Offline mode renders the cached QR; because the QR is static, the cached copy is the valid one until the passenger reissues it.
 - `BR-TICKET-004` (Multi-ticket Carousel & Group QR - REV-01): For bookings with $\ge 2$ seats under the same PNR, the screen displays a horizontal pill switcher. Swiping toggles individual seat QR passes; tapping "QR Đoàn" produces a unified group boarding QR allowing the driver to board all passengers in one scan.
-- `BR-TICKET-005` (Ticket Sharing & Delegation - REV-01): User can tap "Chia sẻ vé" to enter a recipient's phone number. The system sends an SMS with a secure authenticated web link (`https://busgo.vn/pass/:shareToken`) and displays a 6-digit offline PIN (`offline_pin`) allowing relatives without the mobile app to board seamlessly.
-- `BR-TICKET-006` (Drift Tolerance - REV-03): Driver verification engine permits $\pm 2$ window steps ($\pm 60$ seconds) to prevent false rejections due to device clock discrepancies.
-- `BR-TICKET-007` (Used tickets still open - Phase C review FND-C06): `GET /tickets/{ticketId}` for a `BOARDED` or `NO_SHOW` ticket returns `200` with the ticket and `dynamic_qr: null`; the screen shows the status pill (`ĐÃ LÊN XE` or `VẮNG MẶT`) and no QR, so a used ticket cannot be shared. A cancelled ticket still gives `404 TICKET_NOT_ACTIVE`.
+- `BR-TICKET-005` (Ticket Sharing & Delegation - REV-01): User can tap "Chia sẻ vé" to enter a recipient's phone number. The system sends an SMS with an opaque web link (`https://busgo.vn/pass/:shareToken`, random 128-bit token; the link carries neither the ticket id nor the PIN) and the 6-digit backup PIN in the SMS text, allowing relatives without the mobile app to board.
+- `BR-TICKET-006` (Superseded by D104): the clock-drift tolerance of the rotating QR no longer applies; the QR has no time window.
+- `BR-TICKET-008` (Reissue - D104): the owner may reissue the QR while the ticket is `ACTIVE` and the trip has not left (`409 BOARDING_STARTED` after the start, because the driver tablet may be offline with the previous version). A reissue bumps the version, revokes the old QR and PIN, cancels an earlier share, and updates the driver manifest.
+- `BR-TICKET-009` (No countdown on screen - D104): the screen shows no expiry timer for the QR; a countdown suggested the ticket was about to lapse and pushed passengers to refresh at the door.
+- `BR-TICKET-007` (Used tickets still open - Phase C review FND-C06): `GET /tickets/{ticketId}` for a `BOARDED` or `NO_SHOW` ticket returns `200` with the ticket and `boarding_qr: null`; the screen shows the status pill (`ĐÃ LÊN XE` or `VẮNG MẶT`) and no QR, so a used ticket cannot be shared. A cancelled ticket still gives `404 TICKET_NOT_ACTIVE`.
 
 ---
 

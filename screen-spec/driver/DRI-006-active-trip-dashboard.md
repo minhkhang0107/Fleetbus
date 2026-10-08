@@ -151,3 +151,8 @@ Child Modals / Sub-screens:
 ## 9. Acceptance Criteria & Test Matrix
 - **AC-001:** Cockpit renders high-contrast metrics; tapping "QUÉT VÉ QR" opens the camera scanner within $<200\text{ms}$.
 - **TC-DRI-006-01:** Verifies background GPS continues publishing even when screen is locked or another app is opened.
+
+## Design review 2 (D107): nothing to tap while the bus moves
+
+- `BR-COCKPIT-005`: while the speed is above 5 km/h, the cockpit hides every action that needs reading or typing (scan, manifest, hail sale, end trip) and shows the next stop, the speed and one large "Báo sự cố" button. The actions come back when the bus stops. A co-driver uses the manifest on a second device under the same trip.
+- "Kết thúc chuyến" appears only at the last stop (`BR-END-005`).

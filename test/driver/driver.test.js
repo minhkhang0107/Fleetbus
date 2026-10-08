@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { DriverCockpitService } from '../../source/server/services/driver/modules/driverService.js';
 import {
-  generateDynamicTicketQR,
+  generateBoardingQR,
   generateGroupBoardingQR,
   generateTicketPin
 } from '../../source/server/services/passenger/core/cryptoEngine.js';
@@ -100,7 +100,7 @@ describe('Phase Driver: Driver Tactical Cockpit Test Suite (DRI-001 to DRI-019)'
       seat_code: 'A01',
       trip_id: tripId
     };
-    const qrData = generateDynamicTicketQR(ticketA01, driverService.secretKey, t0);
+    const qrData = generateBoardingQR(ticketA01, driverService.secretKey, t0);
 
     // Driver scans QR
     const boardRes = driverService.boardPassengerByQR(tripId, qrData.qr_code_value, t0);
@@ -136,6 +136,8 @@ describe('Phase Driver: Driver Tactical Cockpit Test Suite (DRI-001 to DRI-019)'
 
   it('TC-DRV-07: Should complete trip at final terminal (DRI-017)', () => {
     const tripId = 'trp_991823';
+    const stops = driverService.activeTrips.get(tripId).stops;
+    driverService.arriveAtStop(tripId, stops[stops.length - 1].stop_id);
     const endRes = driverService.endTrip(tripId);
 
     assert.strictEqual(endRes.success, true);

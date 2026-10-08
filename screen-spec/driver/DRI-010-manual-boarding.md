@@ -180,3 +180,7 @@ Scenario: Delegated ticket check-in via 6-digit PIN
 - `BR-COD-006`: an unpaid COD ticket boards **only** through the COD collection (`DRI-012`, `POST .../payments/cod-collect`), which marks it `BOARDED` in the same step. Manual boarding, PIN and QR scan of that ticket answer `409 COD_PAYMENT_REQUIRED` with `{ticket_id, seat_code, cod_amount_vnd}`; a group QR boards the paid members and lists the others in `cod_pending_passengers`.
 - UI: the manifest row of an unpaid COD ticket has one primary action **"Thu {giá} & cho lên xe"** (opens the `DRI-012` sheet), never a separate "Cho lên xe" button. A scan that returns `COD_PAYMENT_REQUIRED` opens the same sheet with the fare filled in.
 - Test: `test/server/cod_boarding_gate.test.js` (`TC-DSG-01` to `04`).
+
+## Design review 2 (D104): backup PIN
+
+- The PIN follows the ticket's QR version: after the passenger reissues the QR, the old PIN answers `INVALID_PIN`. Offline, the tablet compares `sha256(ticket_id|pin)` to the manifest's `pin_digest`; the PIN itself is never sent to the tablet.
