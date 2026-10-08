@@ -165,10 +165,11 @@ button:disabled{cursor:not-allowed}
       </div>
       <section id="ck-next" style="background:#172554;border:1px solid #1D4ED8;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px"></section>
       <div class="card" style="border:0;padding:12px 14px;display:flex;flex-direction:column;gap:8px"><div class="between" style="font-size:14px"><span style="color:var(--sub)">Đã lên xe</span><span class="mono" style="font-weight:700" id="ck-boarded"></span></div><div style="height:8px;border-radius:9999px;background:var(--line);overflow:hidden"><div id="ck-bar" style="height:100%;background:#22C55E;width:0"></div></div></div>
+      <div id="ck-lock" role="status" style="background:var(--panel);border:1px dashed #475569;border-radius:12px;padding:14px 16px;display:flex;gap:12px;align-items:center;color:var(--sub);font-size:15px;line-height:1.4"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex:none"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Xe đang chạy. Quét vé, danh sách khách và bán vé vẫy mở lại khi xe dừng.</span></div>
       <button class="btn btn-primary btn-xl" id="ck-arrive"></button>
-      <div class="grid2"><button class="btn btn-outline" data-go="scan"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M7 12h10"/></svg>Quét vé</button><button class="btn btn-outline" id="ck-hail">Khách vẫy</button></div>
+      <div class="grid2" id="ck-tools"><button class="btn btn-outline" data-go="scan"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M7 12h10"/></svg>Quét vé</button><button class="btn btn-outline" id="ck-hail">Khách vẫy</button></div>
     </div>
-    <div class="foot" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px"><button class="btn btn-outline-danger" data-incident>Báo sự cố</button><button class="btn btn-outline" id="ck-end">Kết thúc chuyến</button></div>
+    <div class="foot"><button class="btn btn-outline-danger btn-xl" style="flex-direction:row" data-incident>Báo sự cố</button><button class="btn btn-text" style="color:var(--sub)" id="ck-end">Kết thúc chuyến sớm</button></div>
   </section>
 
   <!-- DRI-007/008 Stop boarding -->
@@ -227,6 +228,7 @@ button:disabled{cursor:not-allowed}
     <button data-demo-scan="other">Vé của chuyến khác</button>
   </fieldset>
   <fieldset><legend>Đồng hồ: <strong id="demo-clock"></strong></legend><button id="demo-tick">Tua thêm 10 phút</button></fieldset>
+  <fieldset><legend>Xe</legend><button id="demo-stop">Xe dừng lại (tốc độ 0)</button></fieldset>
   <fieldset><legend>Mạng</legend><label><input type="checkbox" id="demo-offline"> Mất mạng di động</label></fieldset>
 </aside>
 </div>
@@ -251,7 +253,7 @@ button:disabled{cursor:not-allowed}
   const CHECKS = ['Lốp và áp suất lốp', 'Phanh và dầu phanh', 'Điều hòa, vệ sinh khoang', 'Bình chữa cháy, túi cứu thương', 'Nhiên liệu đủ cho chuyến', 'Định vị GPS đang hoạt động'];
   const S = {
     stack: ['login'], clock: toMin('13:40'), trip: 'READY_CHECK', checks: [false, false, false, false, false, false],
-    stopIdx: 0, atStop: false, offline: false, queue: [], incident: null, ended: null,
+    stopIdx: 0, atStop: false, moving: false, arrivedAt: {}, earlyReason: null, offline: false, queue: [], incident: null, ended: null,
     manifest: [
       { seat: 'A01', name: 'Trần Văn Hùng', phone: '098***112', pay: 'VietQR', from: 'gb', to: 'nb', status: 'WAIT' },
       { seat: 'B01', name: 'Lê Thị Mai', phone: '091***889', pay: 'VietQR', from: 'gb', to: 'pb', status: 'WAIT' },
@@ -327,7 +329,12 @@ button:disabled{cursor:not-allowed}
       const s = STOPS[S.stopIdx], last = S.stopIdx === STOPS.length - 1;
       $('#ck-status').innerHTML = `<span class="row" style="color:${S.offline ? 'var(--warn-ink)' : 'var(--ok-ink)'}"><span class="dot" style="background:${S.offline ? '#F59E0B' : '#22C55E'}"></span>${S.offline ? 'Mất mạng · lưu trên máy' : 'Đang gửi vị trí'}</span><span style="color:#475569">·</span><span style="color:var(--sub)">${S.queue.length ? S.queue.length + ' chờ đồng bộ' : 'Đã đồng bộ'}</span><span style="flex:1"></span><span class="mono sub">${hhmm(S.clock)}</span>`;
       $('#ck-incident').innerHTML = S.incident ? `<div class="banner" style="background:var(--danger-bg);color:var(--danger-ink)"><span style="flex:1">Đã báo <strong>${S.incident.type.toLowerCase()}</strong> lúc ${S.incident.at} · ước tính chậm ${S.incident.delay} phút. Điều hành đã nhận.</span></div>` : '';
-      $('#ck-speed').innerHTML = (S.atStop ? 0 : 62) + '<span style="font-size:15px;color:var(--muted)"> km/h</span>';
+      // BR-COCKPIT-005: nothing to read or type while the bus moves, except the incident button
+      const moving = S.moving;
+      $('#ck-lock').hidden = !moving; $('#ck-arrive').hidden = moving; $('#ck-tools').hidden = moving;
+      $('#ck-end').hidden = moving || last;
+      $('#demo-stop').textContent = moving ? 'Xe dừng lại (tốc độ 0)' : 'Xe chạy tiếp (62 km/h)';
+      $('#ck-speed').innerHTML = (moving ? 62 : 0) + '<span style="font-size:15px;color:var(--muted)"> km/h</span>';
       $('#ck-eta').innerHTML = S.atStop ? 'Tại<span style="font-size:15px;color:var(--muted)"> trạm</span>' : Math.max(1, toMin(s.time) - S.clock) + '<span style="font-size:15px;color:var(--muted)"> phút</span>';
       const board = S.manifest.filter((p) => p.from === s.id && p.status === 'WAIT').length;
       const drop = S.manifest.filter((p) => p.to === s.id && p.status === 'BOARDED').length;
@@ -339,11 +346,11 @@ button:disabled{cursor:not-allowed}
       $('#ck-boarded').textContent = n + '/' + tot; $('#ck-bar').style.width = (n / tot * 100) + '%';
       const arrive = $('#ck-arrive');
       arrive.style.display = '';
-      arrive.innerHTML = last ? 'Đã đến bến cuối' : S.atStop ? 'Mở danh sách đón' : 'Đã đến trạm · Đón khách';
+      arrive.innerHTML = last ? 'Đã đến bến cuối · Kết thúc chuyến' : S.atStop ? 'Mở danh sách đón' : 'Đã đến trạm · Đón khách';
     },
     stop() {
       const s = STOPS[S.stopIdx], list = atStopPax();
-      const late = S.clock >= toMin(s.time) + 10;
+      const late = S.clock >= noShowFrom();
       $('#st-name').textContent = s.name;
       $('#st-sub').textContent = 'Đón ' + list.length + ' khách · rời trạm ' + s.time + ' · bây giờ ' + hhmm(S.clock);
       $('#st-count').textContent = list.filter((p) => p.status === 'BOARDED').length + '/' + list.length;
@@ -351,8 +358,8 @@ button:disabled{cursor:not-allowed}
         let pill, actions = '';
         if (p.status === 'BOARDED') pill = `<span class="pill p-ok">Đã lên ${p.at}</span>`;
         else if (p.status === 'NO_SHOW') pill = '<span class="pill p-mute">Vắng mặt</span>';
-        else if (p.cod && !p.paid) { pill = '<span class="pill p-warn">Chờ thu COD</span>'; actions = `<div style="display:grid;grid-template-columns:2fr 1fr;gap:8px"><button class="btn btn-cod" data-cod="${p.seat}">Thu ${vnd(p.cod)} và cho lên xe</button>${noShowBtn(p, late, s)}</div>`; }
-        else { pill = '<span class="pill p-mute">Chưa lên</span>'; actions = `<div style="display:grid;grid-template-columns:2fr 1fr;gap:8px"><button class="btn btn-ok" data-board="${p.seat}">Cho lên xe</button>${noShowBtn(p, late, s)}</div>`; }
+        else if (p.cod && !p.paid) { pill = '<span class="pill p-warn">Chờ thu COD</span>'; actions = `<div style="display:grid;grid-template-columns:2fr 1fr;gap:8px"><button class="btn btn-cod" data-cod="${p.seat}">Thu ${vnd(p.cod)} và cho lên xe</button>${noShowBtn(p, late)}</div>`; }
+        else { pill = '<span class="pill p-mute">Chưa lên</span>'; actions = `<div style="display:grid;grid-template-columns:2fr 1fr;gap:8px"><button class="btn btn-ok" data-board="${p.seat}">Cho lên xe</button>${noShowBtn(p, late)}</div>`; }
         return `<article class="pax ${p.status === 'BOARDED' ? 'boarded' : p.status === 'NO_SHOW' ? 'noshow' : p.cod && !p.paid ? 'cod' : ''}">
           <div class="row" style="gap:10px"><span class="mono" style="font-weight:700;font-size:16px;width:40px">${p.seat}</span><span style="flex:1;display:flex;flex-direction:column;min-width:0"><span style="font-size:15px;font-weight:600">${esc(p.name)}</span><span class="sub" style="font-size:12px"><span class="mono">${p.phone}</span> · ${p.pay} · xuống ${stopOf(p.to).name.replace('Bến xe ', '')}</span></span>${pill}</div>${actions}</article>`;
       }).join('') || '<p class="sub" style="margin:0">Không có khách đón ở trạm này.</p>';
@@ -369,6 +376,7 @@ button:disabled{cursor:not-allowed}
       const cash = S.codCash + S.hailCash;
       $('#en-sub').textContent = 'Về ' + STOPS[STOPS.length - 1].name.replace('Bến xe ', '') + ' ' + hhmm(S.clock) + ' · 29B-123.45';
       $('#en-body').innerHTML = `
+        ${S.earlyReason ? `<div class="banner" style="border-radius:10px;background:var(--danger-bg);color:var(--danger-ink);font-size:14px"><span><strong>Kết thúc trước bến cuối.</strong> Lý do: ${esc(S.earlyReason)}</span></div>` : ''}
         ${open.length ? `<div class="banner" style="border-radius:10px;background:var(--warn-bg);border:1px solid #A16207;color:#FDE68A;font-size:14px"><span><strong>${open.length} khách chưa xử lý</strong> (ghế ${open.map((p) => p.seat).join(', ')}). Nên đánh dấu lên xe hoặc vắng mặt trước khi kết thúc; nếu không, bến sẽ theo dõi.</span></div>` : ''}
         <section class="card pad" style="border:0;display:flex;flex-direction:column;gap:8px"><span class="sub">Hành khách</span><div class="grid3">
           <div><div style="font:700 22px var(--mono);color:var(--ok-ink)">${boarded}</div><div class="sub">Đã lên xe</div></div>
@@ -386,8 +394,14 @@ button:disabled{cursor:not-allowed}
       $('#en-go').classList.toggle('btn-xl', true);
     }
   };
-  function noShowBtn(p, late, s) {
-    return late ? `<button class="btn btn-outline" style="font-size:14px" data-noshow="${p.seat}">Vắng mặt</button>` : `<button class="btn btn-outline" style="font-size:13px" disabled title="Đánh dấu vắng mặt được từ ${hhmm(toMin(s.time) + 10)}">Vắng · ${hhmm(toMin(s.time) + 10)}</button>`;
+  // BR-NOSHOW-004: 10 minutes at the passenger's own stop: from the planned departure at the first
+  // stop, from the arrival of the bus at a later stop.
+  function noShowFrom() {
+    return (S.stopIdx === 0 ? toMin(STOPS[0].time) : S.arrivedAt[S.stopIdx]) + 10;
+  }
+  function noShowBtn(p, late) {
+    const at = hhmm(noShowFrom());
+    return late ? `<button class="btn btn-outline" style="font-size:14px" data-noshow="${p.seat}">Vắng mặt</button>` : `<button class="btn btn-outline" style="font-size:13px" disabled title="Đánh dấu vắng mặt được từ ${at}">Vắng · ${at}</button>`;
   }
 
   // ---------- Actions ----------
@@ -487,24 +501,32 @@ button:disabled{cursor:not-allowed}
     <span style="color:var(--sub);line-height:1.5">App sẽ gửi vị trí xe liên tục cho điều hành và khách đến khi kết thúc chuyến.</span>
     <button class="btn btn-ok btn-xl" id="st-yes">Xuất bến</button><button class="btn btn-outline" id="st-no">Chưa</button>`, (s) => {
     $('#st-no', s).onclick = closeSheet;
-    $('#st-yes', s).onclick = () => { closeSheet(); S.trip = 'IN_TRANSIT'; S.clock = Math.max(S.clock, toMin('13:58')); S.atStop = true; act('Xuất bến'); S.stack = ['today', 'cockpit']; show('cockpit'); go('stop'); };
+    $('#st-yes', s).onclick = () => { closeSheet(); S.trip = 'IN_TRANSIT'; S.clock = Math.max(S.clock, toMin('13:58')); S.atStop = true; S.moving = false; S.arrivedAt[0] = S.clock; act('Xuất bến'); S.stack = ['today', 'cockpit']; show('cockpit'); go('stop'); };
   });
   $('#ck-arrive').onclick = () => {
     if (S.stopIdx === STOPS.length - 1) { S.atStop = true; return go('end'); }
-    if (!S.atStop) { S.atStop = true; S.clock = Math.max(S.clock, toMin(STOPS[S.stopIdx].time) - 2); act('Đến ' + STOPS[S.stopIdx].name); }
+    if (!S.atStop) { S.atStop = true; S.clock = Math.max(S.clock, toMin(STOPS[S.stopIdx].time) - 2); S.arrivedAt[S.stopIdx] = S.clock; act('Đến ' + STOPS[S.stopIdx].name); }
     go('stop');
   };
   $('#st-leave').onclick = () => {
     const waiting = atStopPax().filter((p) => p.status === 'WAIT');
     const leave = () => {
-      closeSheet(); S.atStop = false; S.stopIdx = Math.min(S.stopIdx + 1, STOPS.length - 1);
+      closeSheet(); S.atStop = false; S.moving = true; S.stopIdx = Math.min(S.stopIdx + 1, STOPS.length - 1);
       S.manifest.filter((p) => p.to === STOPS[S.stopIdx - 1]?.id && p.status === 'BOARDED');
       S.clock = Math.max(S.clock, toMin(STOPS[S.stopIdx - 1].time) + 1); act('Rời ' + STOPS[S.stopIdx - 1].name); back();
     };
     if (!waiting.length) return leave();
     openSheet(`<span style="font-size:18px;font-weight:700">Còn ${waiting.length} khách chưa lên xe</span><span style="color:var(--sub);line-height:1.5">Ghế ${waiting.map((p) => p.seat).join(', ')}. Rời trạm thì các khách này vẫn ở trạng thái chưa xử lý; điều hành sẽ gọi cho họ.</span><button class="btn btn-primary" id="lv-yes">Vẫn rời trạm</button><button class="btn btn-outline" id="lv-no">Chờ thêm</button>`, (s) => { $('#lv-no', s).onclick = closeSheet; $('#lv-yes', s).onclick = leave; });
   };
-  $('#ck-end').onclick = () => go('end');
+  // BR-END-005: before the last stop, ending the trip needs a written reason
+  $('#ck-end').onclick = () => openSheet(`<span style="font-size:18px;font-weight:700">Kết thúc chuyến trước bến cuối?</span>
+    <span style="color:var(--sub);line-height:1.5">Chỉ dùng khi chuyến không thể đi tiếp, ví dụ xe hỏng và khách đã chuyển sang xe khác. Lý do được gửi cho điều hành.</span>
+    <label class="field" style="letter-spacing:0">LÝ DO<textarea id="ee-why" rows="3" style="border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:10px 12px;font:400 15px var(--sans);resize:none"></textarea></label>
+    <span class="err" id="ee-err" hidden>Ghi lý do, ít nhất 5 ký tự.</span>
+    <button class="btn btn-danger" id="ee-yes">Tiếp tục kết thúc chuyến</button><button class="btn btn-outline" id="ee-no">Quay lại</button>`, (sh) => {
+    $('#ee-no', sh).onclick = closeSheet;
+    $('#ee-yes', sh).onclick = () => { const w = $('#ee-why', sh).value.trim(); if (w.length < 5) { $('#ee-err', sh).hidden = false; return; } S.earlyReason = w; closeSheet(); go('end'); };
+  });
   $('#ck-hail').onclick = () => {
     if (!S.free.length) return toast('Xe đã hết ghế trống');
     S.hail = { seat: S.free[0], to: 'pb' };
@@ -549,6 +571,7 @@ button:disabled{cursor:not-allowed}
   };
 
   $('#demo-tick').onclick = () => { S.clock += 10; refresh(); };
+  $('#demo-stop').onclick = () => { if (S.trip !== 'IN_TRANSIT') return toast('Chuyến chưa xuất bến'); S.moving = !S.moving; $('#demo-stop').textContent = S.moving ? 'Xe dừng lại (tốc độ 0)' : 'Xe chạy tiếp (62 km/h)'; refresh(); };
   $('#demo-offline').onchange = (e) => {
     S.offline = e.target.checked;
     if (!S.offline && S.queue.length) { const n = S.queue.length; S.queue = []; toast('Có mạng lại · đã gửi ' + n + ' thao tác'); }

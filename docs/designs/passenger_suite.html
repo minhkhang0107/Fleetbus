@@ -185,10 +185,7 @@ a{color:var(--primary-dark)}
           <button type="button" id="swap" aria-label="Đổi chiều điểm đi và điểm đến" class="icon-btn" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);border:1px solid var(--line);background:#fff;color:var(--primary)">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M7 4 3 8M7 4l4 4M17 20V4m0 16-4-4m4 4 4-4"/></svg></button>
         </div>
-        <div class="grid2">
-          <label class="field">Ngày đi<select class="input" id="date-select"></select></label>
-          <label class="field">Số khách<select class="input" id="pax-select"><option value="1">1 người</option><option value="2">2 người</option><option value="3">3 người</option><option value="4">4 người</option><option value="5">5 người</option></select></label>
-        </div>
+        <label class="field">Ngày đi<select class="input" id="date-select"></select></label>
         <span class="err-text" id="search-err" hidden>Điểm đi và điểm đến phải khác nhau.</span>
         <button type="button" class="btn btn-primary" id="search-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Tìm chuyến</button>
       </form>
@@ -311,7 +308,7 @@ a{color:var(--primary-dark)}
         <div class="between" style="padding:16px;border-bottom:1px dashed var(--line-strong)"><span style="font-size:13px;color:var(--muted)">Mã đặt chỗ</span><span style="font:700 18px var(--mono);color:var(--pnr)" id="ok-pnr"></span></div>
         <div class="grid2" style="padding:16px;gap:14px" id="ok-grid"></div>
       </section>
-      <p style="margin:0;font-size:13px;color:var(--muted);line-height:1.5;text-align:center">Có mặt ở điểm đón trước 15 phút. Mã QR trên vé đổi liên tục, hãy mở vé trong app khi lên xe thay vì chụp màn hình.</p>
+      <p style="margin:0;font-size:13px;color:var(--muted);line-height:1.5;text-align:center">Có mặt ở điểm đón trước 15 phút. Vé dùng được cả khi mất mạng; bạn có thể lưu ảnh hoặc in vé. Mỗi vé chỉ lên xe một lần.</p>
     </div>
     <div class="foot col" style="border:0;background:transparent"><button class="btn btn-primary" id="ok-view">Xem vé lên xe</button><button class="btn btn-ghost" data-tab="home">Về trang chủ</button></div>
   </section>
@@ -332,13 +329,12 @@ a{color:var(--primary-dark)}
       <div id="tk-delay"></div>
       <section class="card" style="padding:20px 16px 16px;display:flex;flex-direction:column;align-items:center;gap:12px" id="tk-qr-card">
         <div class="qr" id="tk-qr" style="width:232px;height:232px;padding:12px"></div>
-        <div style="width:232px;display:flex;flex-direction:column;gap:6px"><div style="height:4px;border-radius:9999px;background:var(--line);overflow:hidden"><div id="tk-bar" style="height:100%;background:var(--primary);width:100%"></div></div>
-          <span style="font-size:12px;color:var(--muted);text-align:center">Mã tự đổi sau <strong class="mono" style="color:var(--ink)" id="tk-sec">30 giây</strong> · màn hình đã tăng độ sáng</span></div>
-        <div id="tk-pin" hidden class="notice" style="background:var(--primary-soft);color:#1E3A8A;text-align:center;width:100%">Mã PIN dự phòng: <strong class="mono" style="font-size:18px;letter-spacing:.1em">482 107</strong><br>Đọc mã này cho tài xế nếu không quét được.</div>
+        <span style="font-size:12px;color:var(--muted);text-align:center;line-height:1.5;max-width:260px">Dùng được khi mất mạng, khi lưu ảnh hoặc in. Mỗi vé chỉ lên xe một lần · màn hình đã tăng độ sáng</span>
+        <div id="tk-pin" hidden class="notice" style="background:var(--primary-soft);color:#1E3A8A;text-align:center;width:100%">Mã PIN dự phòng: <strong class="mono" style="font-size:18px;letter-spacing:.1em" id="tk-pin-code"></strong><br>Đọc mã này cho tài xế nếu không quét được.</div>
       </section>
       <section class="card" style="padding:16px" ><div class="grid2" style="gap:14px" id="tk-grid"></div></section>
       <div class="grid2" style="gap:8px"><button class="btn btn-primary" data-go="tracking">Xe đang ở đâu?</button><button class="btn btn-ghost" id="tk-share">Chia sẻ vé</button></div>
-      <button class="btn" style="background:transparent;color:var(--primary-dark);height:44px" id="tk-pin-btn">Không quét được? Hiện mã PIN dự phòng</button>
+      <div class="grid2" style="gap:8px"><button class="btn" style="background:transparent;color:var(--primary-dark);height:44px;font-size:14px" id="tk-pin-btn">Hiện mã PIN dự phòng</button><button class="btn" style="background:transparent;color:var(--primary-dark);height:44px;font-size:14px" id="tk-reissue">Đổi mã QR</button></div>
       <button class="btn btn-danger-text" id="tk-cancel">Hủy vé</button>
     </div>
   </section>
@@ -425,6 +421,9 @@ a{color:var(--primary-dark)}
     <label><input type="radio" name="gps" value="STALE"> Mất tín hiệu hơn 60 giây</label>
     <label><input type="radio" name="gps" value="OFFLINE"> Ngoại tuyến hơn 3 phút</label>
   </fieldset>
+  <fieldset><legend>Chuyến của vé đang xem</legend>
+    <label><input type="checkbox" id="demo-departed"> Đã xuất bến (khóa đổi mã QR)</label>
+  </fieldset>
   <fieldset><legend>Thời gian giữ ghế</legend>
     <button class="btn btn-ghost btn-sm" id="demo-expire">Tua đến còn 1:30</button>
   </fieldset>
@@ -477,7 +476,7 @@ a{color:var(--primary-dark)}
 
   // ---------- State ----------
   const S = {
-    stack: ['splash'], user: null, origin: 'hn', dest: 'th', date: '28/08', pax: 1, sort: 'time',
+    stack: ['splash'], user: null, origin: 'hn', dest: 'th', date: '28/08', sort: 'time',
     trip: null, pickup: 'gb', dropoff: 'pb', deck: 1, seats: [], voucher: null, insured: false,
     holdLeft: 0, holdTimer: null, holdPhase: null, order: null,
     tickets: [{ pnr: 'BG-771204', route: 'Thanh Hóa → Hà Nội', date: 'T2 31/08', dep: '15:00', seat: 'B04', pickup: 'Phía Bắc TH', plate: '29B-123.45', paid: 220000, name: 'Nguyễn Văn An', status: 'ACTIVE', delay: 0 }],
@@ -584,7 +583,7 @@ a{color:var(--primary-dark)}
       const list = tripsFor(S.origin, S.dest);
       const open = list.filter((t) => t.left > 0);
       $('#res-title').textContent = o + ' → ' + d;
-      $('#res-sub').textContent = S.pax + ' khách · ' + (open.length ? open.length + ' chuyến còn chỗ' : 'không có chuyến còn chỗ');
+      $('#res-sub').textContent = (open.length ? open.length + ' chuyến còn chỗ' : 'không có chuyến còn chỗ');
       $('#res-dates').innerHTML = DATES.map((x) => `<button class="chip-sm" style="height:48px;border-radius:8px" data-date="${x.id}" aria-pressed="${x.id === S.date}">${x.label}</button>`).join('');
       $$('[data-sort]').forEach((x) => x.setAttribute('aria-pressed', x.dataset.sort === S.sort));
       const sorted = open.slice().sort((a, b2) => S.sort === 'price' ? a.price - b2.price : S.sort === 'seats' ? b2.left - a.left : a.dep.localeCompare(b2.dep));
@@ -677,7 +676,7 @@ a{color:var(--primary-dark)}
       $('#tk-qr-card').style.display = t.status === 'ACTIVE' ? 'flex' : 'none';
       $('#tk-cancel').style.display = t.status === 'ACTIVE' ? '' : 'none';
       $('#tk-pin').hidden = true;
-      startQrRotation();
+      drawTicketQr(t);
     },
     tracking() {
       const t = S.currentTicket || S.tickets[S.tickets.length - 1];
@@ -763,15 +762,11 @@ a{color:var(--primary-dark)}
     const m = { wait: ['var(--primary)', 'Đang chờ ngân hàng xác nhận'], check: ['var(--primary)', 'Đang kiểm tra với ngân hàng…'], none: ['var(--warn)', 'Chưa nhận được tiền. Hệ thống vẫn kiểm tra mỗi 3 giây; kiểm tra lại nội dung chuyển khoản.'] }[kind];
     el.innerHTML = `<span style="width:8px;height:8px;border-radius:9999px;background:${m[0]};flex:none"></span>${m[1]}`;
   }
-  function startQrRotation() {
-    clearInterval(S.qrTimer); let sec = 30, seed = 1;
-    const draw = () => { qrCells($('#tk-qr'), 25, seed); };
-    draw();
-    S.qrTimer = setInterval(() => {
-      if (!$('[data-screen=ticket]').classList.contains('active')) { clearInterval(S.qrTimer); return; }
-      sec--; if (sec <= 0) { sec = 30; seed++; draw(); }
-      $('#tk-sec').textContent = sec + ' giây'; $('#tk-bar').style.width = (sec / 30 * 100) + '%';
-    }, 1000);
+  // The boarding QR is static: it changes only when the passenger reissues it (D104).
+  const PINS = ['482 107', '730 519', '196 284', '657 031'];
+  function drawTicketQr(t) {
+    qrCells($('#tk-qr'), 25, 7 * (t.qrVersion || 1));
+    $('#tk-pin-code').textContent = PINS[((t.qrVersion || 1) - 1) % PINS.length];
   }
   function refundFor(t) {
     if (t.delay > 30) return { pct: 100, tier: 'Chuyến chậm hơn 30 phút: hoàn 100%, không phí' };
@@ -835,7 +830,7 @@ a{color:var(--primary-dark)}
 
   $('#swap').onclick = () => { [S.origin, S.dest] = [S.dest, S.origin]; RENDER.home(); };
   $('#search-btn').onclick = () => {
-    S.date = $('#date-select').value; S.pax = Number($('#pax-select').value);
+    S.date = $('#date-select').value;
     const same = S.origin === S.dest; $('#search-err').hidden = !same; if (same) return;
     go('results');
   };
@@ -848,7 +843,28 @@ a{color:var(--primary-dark)}
     if (e.target.name === 'gps') { S.gps = e.target.value; if ($('[data-screen=tracking]').classList.contains('active')) RENDER.tracking(); }
   });
   $('#stops-next').onclick = () => { S.deck = 1; go('seats'); };
-  $('#hold-btn').onclick = () => { startHold(600, 'hold'); go('checkout'); };
+  // Holding seats needs an account (Bearer): ask for the phone and OTP over the seat map, keep the selection (D106).
+  $('#hold-btn').onclick = () => {
+    if (S.user) { startHold(600, 'hold'); return go('checkout'); }
+    openSheet(`<h2 style="margin:0;font-size:18px">Đăng nhập để giữ ghế ${S.seats.join(', ')}</h2>
+      <p style="margin:0;color:var(--muted);font-size:14px;line-height:1.5">Vé sẽ gắn với số điện thoại này. Ghế bạn chọn vẫn được giữ nguyên trong lúc đăng nhập.</p>
+      <label class="field">Số điện thoại<input class="input mono" id="hl-phone" type="tel" inputmode="numeric" placeholder="0912 345 678"></label>
+      <div id="hl-otp-wrap" hidden style="display:flex;flex-direction:column;gap:6px"><span class="field">Mã 6 số đã gửi tới số trên</span><input class="input mono" id="hl-otp" inputmode="numeric" maxlength="6" placeholder="••••••" style="letter-spacing:.3em;text-align:center"></div>
+      <span class="err-text" id="hl-err" hidden></span>
+      <button class="btn btn-primary" id="hl-go">Gửi mã</button><button class="btn btn-ghost" id="hl-no">Để sau</button>`, (sh) => {
+      $('#hl-no', sh).onclick = closeSheet;
+      $('#hl-go', sh).onclick = () => {
+        const err = $('#hl-err', sh), phone = $('#hl-phone', sh).value.replace(/\s/g, '');
+        if ($('#hl-otp-wrap', sh).hidden) {
+          if (!/^0\d{9}$/.test(phone)) { err.hidden = false; err.textContent = 'Số điện thoại cần 10 chữ số, bắt đầu bằng 0.'; return; }
+          err.hidden = true; $('#hl-otp-wrap', sh).hidden = false; $('#hl-go', sh).textContent = 'Xác nhận và giữ ghế 10 phút'; $('#hl-otp', sh).focus(); return;
+        }
+        const code = $('#hl-otp', sh).value;
+        if (!/^\d{6}$/.test(code) || code === '000000') { err.hidden = false; err.textContent = 'Mã chưa đúng. Kiểm tra tin nhắn và nhập lại.'; return; }
+        S.user = { name: 'Nguyễn Văn An', phone }; closeSheet(); startHold(600, 'hold'); go('checkout'); toast('Đã đăng nhập và giữ ghế');
+      };
+    });
+  };
   $('#co-ins').onchange = (e) => { S.insured = e.target.checked; RENDER.checkout(); };
   $('#co-voucher-btn').onclick = () => {
     const code = $('#co-voucher').value.trim().toUpperCase(), msg = $('#co-voucher-msg');
@@ -893,6 +909,18 @@ a{color:var(--primary-dark)}
   }
   $('#ok-view').onclick = () => { S.currentTicket = S.lastTicket; S.stack = ['tickets']; go('ticket'); };
   $('#tk-pin-btn').onclick = () => { $('#tk-pin').hidden = !$('#tk-pin').hidden; };
+  $('#tk-reissue').onclick = () => {
+    const t = S.currentTicket;
+    if ($('#demo-departed').checked) {
+      return openSheet(`<h2 style="margin:0;font-size:18px">Không đổi được mã lúc này</h2><p style="margin:0;color:var(--muted);line-height:1.5">Chuyến đã xuất bến. Nếu có người dùng mã của bạn, báo tài xế kiểm tra bằng tên và số ghế ${t.seat}, hoặc gọi 1900 6868.</p><button class="btn btn-primary" id="ri-ok">Đã hiểu</button>`, (sh) => { $('#ri-ok', sh).onclick = closeSheet; });
+    }
+    openSheet(`<h2 style="margin:0;font-size:18px">Đổi mã QR của vé ${t.pnr}?</h2>
+      <p style="margin:0;color:var(--muted);line-height:1.5">Dùng khi bạn lỡ gửi ảnh vé cho người khác. Mã QR cũ, mã PIN cũ và các link đã chia sẻ sẽ hết hiệu lực. Ghế và giờ đi giữ nguyên.</p>
+      <button class="btn btn-primary" id="ri-yes">Đổi mã QR</button><button class="btn btn-ghost" id="ri-no">Giữ mã hiện tại</button>`, (sh) => {
+      $('#ri-no', sh).onclick = closeSheet;
+      $('#ri-yes', sh).onclick = () => { t.qrVersion = (t.qrVersion || 1) + 1; closeSheet(); drawTicketQr(t); $('#tk-pin').hidden = true; toast('Đã đổi mã QR. Mã cũ không còn dùng được'); };
+    });
+  };
   $('#tk-cancel').onclick = () => cancelTicket(S.currentTicket);
   $('#dl-keep').onclick = () => { S.stack = ['tickets']; go('ticket'); };
   $('#dl-cancel').onclick = () => cancelTicket(S.currentTicket);
