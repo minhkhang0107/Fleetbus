@@ -8,6 +8,7 @@ import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
 import { verifyTotp } from '../../../core/totp.js';
 import { getStaffTotpSecret } from '../../../config.js';
+import { DEFAULT_OPERATOR_ID, findOperatorById, publicOperatorProfile } from '../../../core/operators.js';
 
 const POS_PAYMENT_METHODS = ['CASH_POS', 'CARD_POS', 'BANK_TRANSFER'];
 // BR-MGR-AUTH-001: these roles need a TOTP code on every login (ROLE_OPS_ADMIN and ROLE_FINANCE of the spec)
@@ -26,7 +27,8 @@ export const MOCK_MANAGERS_DB = [
     password_hash: hashSecret('admin123'),
     full_name: 'Nguyễn Tiến Dũng',
     role: 'FLEET_DIRECTOR', // FLEET_DIRECTOR | DISPATCHER | CASHIER | FINANCIAL_CONTROLLER
-    permissions: ['ALL']
+    permissions: ['ALL'],
+    operator_id: 'op_saomai'
   },
   {
     user_id: 'mgr_02',
@@ -34,7 +36,8 @@ export const MOCK_MANAGERS_DB = [
     password_hash: hashSecret('disp123'),
     full_name: 'Phạm Hồng Quân',
     role: 'DISPATCHER',
-    permissions: ['DISPATCH_MANAGE', 'TRIP_EDIT', 'INCIDENT_BROADCAST', 'RADAR_VIEW']
+    permissions: ['DISPATCH_MANAGE', 'TRIP_EDIT', 'INCIDENT_BROADCAST', 'RADAR_VIEW'],
+    operator_id: 'op_saomai'
   },
   {
     user_id: 'mgr_03',
@@ -42,7 +45,26 @@ export const MOCK_MANAGERS_DB = [
     password_hash: hashSecret('cash123'),
     full_name: 'Đỗ Thu Hà',
     role: 'CASHIER',
-    permissions: ['POS_ISSUE', 'BOOKING_SEARCH']
+    permissions: ['POS_ISSUE', 'BOOKING_SEARCH'],
+    operator_id: 'op_saomai'
+  },
+  {
+    user_id: 'mgr_xv_01',
+    username: 'dispatcher@xuyenviet.vn',
+    password_hash: hashSecret('xv123'),
+    full_name: 'Vũ Thị Lan',
+    role: 'DISPATCHER',
+    permissions: ['DISPATCH_MANAGE', 'TRIP_EDIT', 'INCIDENT_BROADCAST', 'RADAR_VIEW'],
+    operator_id: 'op_xuyenviet'
+  },
+  {
+    user_id: 'mgr_xv_02',
+    username: 'cashier@xuyenviet.vn',
+    password_hash: hashSecret('xv123'),
+    full_name: 'Hoàng Văn Tú',
+    role: 'CASHIER',
+    permissions: ['POS_ISSUE', 'BOOKING_SEARCH'],
+    operator_id: 'op_xuyenviet'
   }
 ];
 
@@ -50,39 +72,43 @@ export class ManagerOperationsService {
   constructor() {
     this.loginGuard = new LoginGuard();
     this.vehicles = [
-      { vehicle_id: 'veh_01', plate_number: '29B-123.45', model: 'Limousine 34 Phòng VIP', total_seats: 34, status: 'ASSIGNED', driver_name: 'Trần Văn Bình', lat: 20.9812, lng: 105.8430, speed_kmh: 62, heading: 180, gps_status: 'LIVE', gps_health: 'LIVE' },
-      { vehicle_id: 'veh_02', plate_number: '29B-444.11', model: 'Cabin Cung Điện VIP 22', total_seats: 22, status: 'IN_TRANSIT', driver_name: 'Lê Văn Toàn', lat: 20.4500, lng: 105.9200, speed_kmh: 55, heading: 175, gps_status: 'STALE', gps_health: 'STALE' },
-      { vehicle_id: 'veh_04', plate_number: '29B-882.19', model: 'Cabin Cung Điện VIP 22', total_seats: 22, status: 'ASSIGNED', driver_name: 'Trần Văn Bình', lat: 20.9806, lng: 105.8413, speed_kmh: 0, heading: 0, gps_status: 'LIVE', gps_health: 'LIVE' },
-      { vehicle_id: 'veh_03', plate_number: '29B-888.22', model: 'Sleeper 34 Giường Nằm', total_seats: 34, status: 'STANDBY', driver_name: 'Hoàng Anh Tuấn', lat: 20.9800, lng: 105.8400, speed_kmh: 0, heading: 0, gps_status: 'LIVE', gps_health: 'LIVE' }
+      { vehicle_id: 'veh_01', plate_number: '29B-123.45', model: 'Limousine 34 Phòng VIP', total_seats: 34, status: 'ASSIGNED', driver_name: 'Trần Văn Bình', lat: 20.9812, lng: 105.8430, speed_kmh: 62, heading: 180, gps_status: 'LIVE', gps_health: 'LIVE', operator_id: 'op_saomai' },
+      { vehicle_id: 'veh_02', plate_number: '29B-444.11', model: 'Cabin Cung Điện VIP 22', total_seats: 22, status: 'IN_TRANSIT', driver_name: 'Lê Văn Toàn', lat: 20.4500, lng: 105.9200, speed_kmh: 55, heading: 175, gps_status: 'STALE', gps_health: 'STALE', operator_id: 'op_saomai' },
+      { vehicle_id: 'veh_04', plate_number: '29B-882.19', model: 'Cabin Cung Điện VIP 22', total_seats: 22, status: 'ASSIGNED', driver_name: 'Trần Văn Bình', lat: 20.9806, lng: 105.8413, speed_kmh: 0, heading: 0, gps_status: 'LIVE', gps_health: 'LIVE', operator_id: 'op_saomai' },
+      { vehicle_id: 'veh_03', plate_number: '29B-888.22', model: 'Sleeper 34 Giường Nằm', total_seats: 34, status: 'STANDBY', driver_name: 'Hoàng Anh Tuấn', lat: 20.9800, lng: 105.8400, speed_kmh: 0, heading: 0, gps_status: 'LIVE', gps_health: 'LIVE', operator_id: 'op_saomai' },
+      { vehicle_id: 'veh_xv_01', plate_number: '30H-246.80', model: 'Limousine Xuyên Việt 22 Phòng', total_seats: 22, status: 'ASSIGNED', driver_name: 'Đỗ Minh Khoa', lat: 21.0285, lng: 105.7787, speed_kmh: 0, heading: 0, gps_status: 'LIVE', gps_health: 'LIVE', operator_id: 'op_xuyenviet' }
     ];
 
     this.drivers = [
       // Same people, ids and licences as the driver app (DRI-001), so a driver named here can sign in and see the trip
-      { driver_id: 'drv_8821a', staff_id: 'TX8821', full_name: 'Trần Văn Bình', phone: '0912348821', license_class: 'FC', license_expiry: '2028-12-31', safety_score: 98.5, status: 'ON_DUTY' },
-      { driver_id: 'drv_9912b', staff_id: 'TX9912', full_name: 'Phạm Quốc Huy', phone: '0988776655', license_class: 'FC', license_expiry: '2028-06-30', safety_score: 96.0, status: 'ON_DUTY' },
-      { driver_id: 'drv_9902b', staff_id: 'TX9902', full_name: 'Lê Hoàng Nam', phone: '0987654321', license_class: 'FC', license_expiry: '2025-01-01', safety_score: 91.0, status: 'LICENSE_EXPIRED' }
+      { driver_id: 'drv_8821a', staff_id: 'TX8821', full_name: 'Trần Văn Bình', phone: '0912348821', license_class: 'FC', license_expiry: '2028-12-31', safety_score: 98.5, status: 'ON_DUTY', operator_id: 'op_saomai' },
+      { driver_id: 'drv_9912b', staff_id: 'TX9912', full_name: 'Phạm Quốc Huy', phone: '0988776655', license_class: 'FC', license_expiry: '2028-06-30', safety_score: 96.0, status: 'ON_DUTY', operator_id: 'op_saomai' },
+      { driver_id: 'drv_9902b', staff_id: 'TX9902', full_name: 'Lê Hoàng Nam', phone: '0987654321', license_class: 'FC', license_expiry: '2025-01-01', safety_score: 91.0, status: 'LICENSE_EXPIRED', operator_id: 'op_saomai' },
+      { driver_id: 'drv_xv_7701', staff_id: 'TX7701', full_name: 'Đỗ Minh Khoa', phone: '0901777001', license_class: 'FC', license_expiry: '2029-03-31', safety_score: 100, status: 'ON_DUTY', operator_id: 'op_xuyenviet' }
     ];
 
     this.routes = [
-      { route_id: 'rt_hn_th', name: 'Hà Nội — Thanh Hóa (Cao tốc)', distance_km: 160, base_fare_vnd: 220000, stops_count: 4 },
-      { route_id: 'rt_hn_hp', name: 'Hà Nội — Hải Phòng (5B)', distance_km: 120, base_fare_vnd: 180000, stops_count: 3 },
-      { route_id: 'rt_hn_nb', name: 'Hà Nội — Ninh Bình (Cao tốc)', distance_km: 95, base_fare_vnd: 150000, stops_count: 3 }
+      { route_id: 'rt_hn_th', name: 'Hà Nội — Thanh Hóa (Cao tốc)', distance_km: 160, base_fare_vnd: 220000, stops_count: 4, operator_id: 'op_saomai' },
+      { route_id: 'rt_hn_hp', name: 'Hà Nội — Hải Phòng (5B)', distance_km: 120, base_fare_vnd: 180000, stops_count: 3, operator_id: 'op_saomai' },
+      { route_id: 'rt_hn_nb', name: 'Hà Nội — Ninh Bình (Cao tốc)', distance_km: 95, base_fare_vnd: 150000, stops_count: 3, operator_id: 'op_saomai' },
+      { route_id: 'rt_xv_hn_th', name: 'Hà Nội — Thanh Hóa (Xuyên Việt)', distance_km: 160, base_fare_vnd: 200000, stops_count: 4, operator_id: 'op_xuyenviet' }
     ];
 
     this.trips = [
-      { trip_id: 'trp_991823', driver_id: 'drv_8821a', route_id: 'rt_hn_th', vehicle_id: 'veh_01', vehicle_plate: '29B-123.45', departure_time: '2026-08-28T14:00:00+07:00', status: 'DISPATCHED', booked_seats: 28, total_seats: 34, delay_minutes: 0 },
-      { trip_id: 'trp_991824', driver_id: 'drv_8821a', route_id: 'rt_hn_hp', vehicle_id: 'veh_02', vehicle_plate: '29B-444.11', departure_time: '2026-08-28T15:30:00+07:00', status: 'SCHEDULED', booked_seats: 20, total_seats: 22, delay_minutes: 35 },
-      { trip_id: 'trp_hn_th_01', driver_id: 'drv_8821a', route_id: 'rt_hn_th', vehicle_id: 'veh_04', vehicle_plate: '29B-882.19', departure_time: '2026-08-28T07:00:00+07:00', status: 'READY', booked_seats: 2, total_seats: 22, delay_minutes: 0 }
+      { trip_id: 'trp_991823', driver_id: 'drv_8821a', route_id: 'rt_hn_th', vehicle_id: 'veh_01', vehicle_plate: '29B-123.45', departure_time: '2026-08-28T14:00:00+07:00', status: 'DISPATCHED', booked_seats: 28, total_seats: 34, delay_minutes: 0, operator_id: 'op_saomai' },
+      { trip_id: 'trp_991824', driver_id: 'drv_8821a', route_id: 'rt_hn_hp', vehicle_id: 'veh_02', vehicle_plate: '29B-444.11', departure_time: '2026-08-28T15:30:00+07:00', status: 'SCHEDULED', booked_seats: 20, total_seats: 22, delay_minutes: 35, operator_id: 'op_saomai' },
+      { trip_id: 'trp_hn_th_01', driver_id: 'drv_8821a', route_id: 'rt_hn_th', vehicle_id: 'veh_04', vehicle_plate: '29B-882.19', departure_time: '2026-08-28T07:00:00+07:00', status: 'READY', booked_seats: 2, total_seats: 22, delay_minutes: 0, operator_id: 'op_saomai' },
+      { trip_id: 'trp_xv_hn_th_01', driver_id: 'drv_xv_7701', route_id: 'rt_xv_hn_th', vehicle_id: 'veh_xv_01', vehicle_plate: '30H-246.80', departure_time: '2026-08-28T08:30:00+07:00', status: 'READY', booked_seats: 0, total_seats: 22, delay_minutes: 0, operator_id: 'op_xuyenviet' }
     ];
 
     this.bookings = [
-      { pnr: 'BG-88219', trip_id: 'trp_991823', passenger_name: 'Trần Văn Hùng', phone: '0981112233', seat_codes: ['A01', 'A02'], total_fare_vnd: 440000, payment_status: 'PAID', channel: 'PASSENGER_APP', issued_at: '2026-08-27T09:00:00+07:00' },
-      { pnr: 'BG-99412', trip_id: 'trp_991823', passenger_name: 'Nguyễn Thị Hoa', phone: '0912334455', seat_codes: ['B01'], total_fare_vnd: 220000, payment_status: 'PAID', channel: 'POS_HOTLINE', issued_at: '2026-08-27T10:30:00+07:00' }
+      { pnr: 'BG-88219', trip_id: 'trp_991823', passenger_name: 'Trần Văn Hùng', phone: '0981112233', seat_codes: ['A01', 'A02'], total_fare_vnd: 440000, payment_status: 'PAID', channel: 'PASSENGER_APP', issued_at: '2026-08-27T09:00:00+07:00', operator_id: 'op_saomai' },
+      { pnr: 'BG-99412', trip_id: 'trp_991823', passenger_name: 'Nguyễn Thị Hoa', phone: '0912334455', seat_codes: ['B01'], total_fare_vnd: 220000, payment_status: 'PAID', channel: 'POS_HOTLINE', issued_at: '2026-08-27T10:30:00+07:00', operator_id: 'op_saomai' }
     ];
 
     this.alerts = [
-      { alert_id: 'alt_01', vehicle_plate: '29B-444.11', type: 'DELAY_WARNING', severity: 'AMBER', message: 'Chuyến trp_991824 dự kiến trễ +35 phút do kẹt xe đầu cao tốc 5B', created_at: '2026-08-28T13:00:00Z' },
-      { alert_id: 'alt_02', vehicle_plate: '29B-123.45', type: 'GPS_LIVE', severity: 'GREEN', message: 'Xe đang vận hành ổn định trên cao tốc Pháp Vân - Cầu Giẽ', created_at: '2026-08-28T13:02:00Z' }
+      { alert_id: 'alt_01', vehicle_plate: '29B-444.11', type: 'DELAY_WARNING', severity: 'AMBER', message: 'Chuyến trp_991824 dự kiến trễ +35 phút do kẹt xe đầu cao tốc 5B', created_at: '2026-08-28T13:00:00Z', operator_id: 'op_saomai' },
+      { alert_id: 'alt_02', vehicle_plate: '29B-123.45', type: 'GPS_LIVE', severity: 'GREEN', message: 'Xe đang vận hành ổn định trên cao tốc Pháp Vân - Cầu Giẽ', created_at: '2026-08-28T13:02:00Z', operator_id: 'op_saomai' }
     ];
 
     this.hotlineReservations = [];
@@ -94,7 +120,7 @@ export class ManagerOperationsService {
    * MGR-028: Append-only record of who did what, to what, from where, with the values before and after.
    * Entries are frozen and never edited; secrets are never written to it.
    */
-  recordAudit({ actor = 'anonymous', role = null, action, resource = null, ip = null, before = null, after = null, now = Date.now() }) {
+  recordAudit({ actor = 'anonymous', role = null, action, resource = null, ip = null, before = null, after = null, now = Date.now(), operator_id = DEFAULT_OPERATOR_ID }) {
     const entry = Object.freeze({
       audit_id: `aud_${now}_${this.auditLog.length + 1}`,
       at: new Date(now).toISOString(),
@@ -104,7 +130,8 @@ export class ManagerOperationsService {
       resource,
       ip,
       before,
-      after
+      after,
+      operator_id
     });
     this.auditLog.push(entry);
     return entry;
@@ -155,7 +182,7 @@ export class ManagerOperationsService {
     this.loginGuard.succeed(key);
 
     const token = signToken(
-      { sub: user.user_id, role: user.role, permissions: user.permissions, kind: 'staff' },
+      { sub: user.user_id, role: user.role, permissions: user.permissions, kind: 'staff', operator_id: user.operator_id },
       { prefix: TOKEN_PREFIXES.staff, ttlSeconds: 8 * 3600, now: mockNow }
     );
 
@@ -169,6 +196,7 @@ export class ManagerOperationsService {
           role: user.role,
           permissions: user.permissions
         },
+        operator: publicOperatorProfile(findOperatorById(user.operator_id)),
         token
       }
     };
@@ -190,21 +218,27 @@ export class ManagerOperationsService {
     return { gross_revenue_vnd: gross, refunded_vnd: refunded, net_revenue_vnd: gross - refunded };
   }
 
-  getDashboardKPIs() {
+  getDashboardKPIs(operatorId = DEFAULT_OPERATOR_ID) {
     this.releaseExpiredHotlineHolds();
     const round1 = (n) => parseFloat(n.toFixed(1));
-    const totalVehicles = this.vehicles.length;
-    const activeVehicles = this.vehicles.filter(v => v.status === 'IN_TRANSIT').length;
-    const totalBookedSeats = this.trips.reduce((acc, t) => acc + t.booked_seats, 0);
-    const totalCapacity = this.trips.reduce((acc, t) => acc + t.total_seats, 0);
+    const trips = this.trips.filter(t => t.operator_id === operatorId);
+    const vehicles = this.vehicles.filter(v => v.operator_id === operatorId);
+    const bookings = this.bookings.filter(b => trips.some(t => t.trip_id === b.trip_id));
+    const alerts = this.alerts.filter(a => a.operator_id === operatorId);
+    const routes = this.routes.filter(r => r.operator_id === operatorId);
+
+    const totalVehicles = vehicles.length;
+    const activeVehicles = vehicles.filter(v => v.status === 'IN_TRANSIT').length;
+    const totalBookedSeats = trips.reduce((acc, t) => acc + t.booked_seats, 0);
+    const totalCapacity = trips.reduce((acc, t) => acc + t.total_seats, 0);
 
     // A trip leaves on time when its delay is at most 15 minutes (MGR-002)
-    const onTimeTrips = this.trips.filter(t => (t.delay_minutes || 0) <= 15).length;
-    const moving = this.vehicles.filter(v => v.status === 'IN_TRANSIT' && v.speed_kmh > 0);
+    const onTimeTrips = trips.filter(t => (t.delay_minutes || 0) <= 15).length;
+    const moving = vehicles.filter(v => v.status === 'IN_TRANSIT' && v.speed_kmh > 0);
 
-    const corridors = this.routes
+    const corridors = routes
       .map(route => {
-        const routeTrips = this.trips.filter(t => t.route_id === route.route_id);
+        const routeTrips = trips.filter(t => t.route_id === route.route_id);
         const booked = routeTrips.reduce((acc, t) => acc + t.booked_seats, 0);
         const capacity = routeTrips.reduce((acc, t) => acc + t.total_seats, 0);
         return {
@@ -225,31 +259,32 @@ export class ManagerOperationsService {
           active_vehicles_count: activeVehicles,
           total_fleet_count: totalVehicles,
           overall_load_factor_pct: totalCapacity > 0 ? round1((totalBookedSeats / totalCapacity) * 100) : 0,
-          ...this._moneyFigures(this.bookings),
-          on_time_departure_rate_pct: this.trips.length > 0 ? round1((onTimeTrips / this.trips.length) * 100) : 100,
-          active_alerts_count: this.alerts.length,
+          ...this._moneyFigures(bookings),
+          on_time_departure_rate_pct: trips.length > 0 ? round1((onTimeTrips / trips.length) * 100) : 100,
+          active_alerts_count: alerts.length,
           fleet_average_speed_kmh: moving.length > 0 ? round1(moving.reduce((acc, v) => acc + v.speed_kmh, 0) / moving.length) : 0
         },
         corridors,
-        recent_alerts: this.alerts
+        recent_alerts: alerts
       }
     };
   }
 
-  getOperationsDashboardKPIs() {
-    return this.getDashboardKPIs();
+  getOperationsDashboardKPIs(operatorId = DEFAULT_OPERATOR_ID) {
+    return this.getDashboardKPIs(operatorId);
   }
 
   /**
    * MGR-003: Live Fleet Radar Map Telemetry
    */
-  getLiveFleetRadar(mockNow = Date.now()) {
+  getLiveFleetRadar(mockNow = Date.now(), operatorId = DEFAULT_OPERATOR_ID) {
+    const vehicles = this.vehicles.filter(v => v.operator_id === operatorId);
     return {
       success: true,
       data: {
         tracked_at: new Date(mockNow).toISOString(),
-        total_tracked_vehicles: this.vehicles.length,
-        vehicles: this.vehicles.map(v => {
+        total_tracked_vehicles: vehicles.length,
+        vehicles: vehicles.map(v => {
           const health = this._gpsHealth(v, mockNow);
           return {
             vehicle_id: v.vehicle_id,
@@ -285,22 +320,22 @@ export class ManagerOperationsService {
   /**
    * MGR-005: Fleet Roster & Vehicles
    */
-  getFleetRoster() {
+  getFleetRoster(operatorId = DEFAULT_OPERATOR_ID) {
     return {
       success: true,
-      data: this.vehicles
+      data: this.vehicles.filter(v => v.operator_id === operatorId)
     };
   }
 
-  getFleet() {
-    return this.getFleetRoster();
+  getFleet(operatorId = DEFAULT_OPERATOR_ID) {
+    return this.getFleetRoster(operatorId);
   }
 
-  getFleetVehicles() {
-    return this.getFleetRoster();
+  getFleetVehicles(operatorId = DEFAULT_OPERATOR_ID) {
+    return this.getFleetRoster(operatorId);
   }
 
-  addVehicle({ plate_number, model = 'Thaco Mobihome VIP', total_seats = 34 }) {
+  addVehicle({ plate_number, model = 'Thaco Mobihome VIP', total_seats = 34 }, operatorId = DEFAULT_OPERATOR_ID) {
     const newVehicle = {
       vehicle_id: `veh_${Date.now()}`,
       plate_number,
@@ -313,7 +348,8 @@ export class ManagerOperationsService {
       speed_kmh: 0,
       heading: 0,
       gps_status: 'LIVE',
-      gps_health: 'LIVE'
+      gps_health: 'LIVE',
+      operator_id: operatorId
     };
     this.vehicles.push(newVehicle);
     return { success: true, data: newVehicle };
@@ -322,18 +358,18 @@ export class ManagerOperationsService {
   /**
    * MGR-008: Crew Directory
    */
-  getCrewDrivers() {
+  getCrewDrivers(operatorId = DEFAULT_OPERATOR_ID) {
     return {
       success: true,
-      data: this.drivers
+      data: this.drivers.filter(d => d.operator_id === operatorId)
     };
   }
 
-  getCrew() {
-    return this.getCrewDrivers();
+  getCrew(operatorId = DEFAULT_OPERATOR_ID) {
+    return this.getCrewDrivers(operatorId);
   }
 
-  addDriver({ staff_id, full_name, phone, license_class = 'FC' }) {
+  addDriver({ staff_id, full_name, phone, license_class = 'FC' }, operatorId = DEFAULT_OPERATOR_ID) {
     const newDriver = {
       driver_id: `drv_${Date.now()}`,
       staff_id,
@@ -342,7 +378,8 @@ export class ManagerOperationsService {
       license_class,
       license_expiry: '2028-12-31',
       safety_score: 98.0,
-      status: 'ON_DUTY'
+      status: 'ON_DUTY',
+      operator_id: operatorId
     };
     this.drivers.push(newDriver);
     return { success: true, data: newDriver };
@@ -351,20 +388,21 @@ export class ManagerOperationsService {
   /**
    * MGR-011: Routes
    */
-  getRoutes() {
+  getRoutes(operatorId = DEFAULT_OPERATOR_ID) {
     return {
       success: true,
-      data: this.routes
+      data: this.routes.filter(r => r.operator_id === operatorId)
     };
   }
 
-  addRoute({ name, distance_km, base_fare_vnd, stops_count = 4 }) {
+  addRoute({ name, distance_km, base_fare_vnd, stops_count = 4 }, operatorId = DEFAULT_OPERATOR_ID) {
     const newRoute = {
       route_id: `rt_${Date.now()}`,
       name,
       distance_km,
       base_fare_vnd,
-      stops_count
+      stops_count,
+      operator_id: operatorId
     };
     this.routes.push(newRoute);
     return { success: true, data: newRoute };
@@ -373,14 +411,14 @@ export class ManagerOperationsService {
   /**
    * MGR-014: Dispatch Board Timeline
    */
-  getDispatchBoard(shiftDate = new Date().toISOString().split('T')[0]) {
+  getDispatchBoard(shiftDate = new Date().toISOString().split('T')[0], operatorId = DEFAULT_OPERATOR_ID) {
     this.releaseExpiredHotlineHolds();
     return {
       success: true,
       data: {
         shift_date: shiftDate,
-        total_trips: this.trips.length,
-        trips: this.trips.map(t => {
+        total_trips: this.trips.filter(t => t.operator_id === operatorId).length,
+        trips: this.trips.filter(t => t.operator_id === operatorId).map(t => {
           const route = this.routes.find(r => r.route_id === t.route_id);
           const vehicle = this.vehicles.find(v => v.vehicle_id === t.vehicle_id);
           return {
@@ -408,10 +446,10 @@ export class ManagerOperationsService {
   /**
    * MGR-013: seat inventory of a trip, seat by seat. The legacy counters stay for the dashboard.
    */
-  getSeatMatrix(tripId, mockNow = Date.now()) {
+  getSeatMatrix(tripId, mockNow = Date.now(), operatorId = DEFAULT_OPERATOR_ID) {
     this.releaseExpiredHotlineHolds(mockNow);
     const trip = this.findTrip(tripId);
-    if (!trip) return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
+    if (!trip || trip.operator_id !== operatorId) return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
 
     const matrix = this._inventory()?.getSeatMatrix(tripId, mockNow);
     const seats = matrix?.success ? matrix.data.seats : [];
@@ -432,10 +470,10 @@ export class ManagerOperationsService {
   /**
    * MGR-013 / BR-INVENTORY-001: block seats for a technical reason or open them again.
    */
-  setSeatLock(tripId, { seatCodes, locked, reason, staffId }, mockNow = Date.now()) {
+  setSeatLock(tripId, { seatCodes, locked, reason, staffId }, mockNow = Date.now(), operatorId = DEFAULT_OPERATOR_ID) {
     this.releaseExpiredHotlineHolds(mockNow);
     const trip = this.findTrip(tripId);
-    if (!trip) return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
+    if (!trip || trip.operator_id !== operatorId) return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
     const inventory = this._inventory();
     if (!inventory) return { success: false, error: 'Kho ghế chưa sẵn sàng', code: 'INVENTORY_UNAVAILABLE' };
     return inventory.setSeatBlock(tripId, seatCodes, locked, { reason, staffId, mockNow });
@@ -456,12 +494,13 @@ export class ManagerOperationsService {
     reservationId = null,
     pickupStopId = null,
     dropoffStopId = null,
-    mockNow = Date.now()
+    mockNow = Date.now(),
+    operatorId = DEFAULT_OPERATOR_ID
   }) {
     this.releaseExpiredHotlineHolds(mockNow);
 
     const trip = this.findTrip(tripId);
-    if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+    if (!trip || trip.operator_id !== operatorId) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
     if (!Array.isArray(seatCodes) || seatCodes.length === 0) {
       return { success: false, error: 'Vui lòng chọn ít nhất 1 ghế', code: 'NO_SEAT_SELECTED' };
     }
@@ -520,7 +559,8 @@ export class ManagerOperationsService {
       pickup_stop_id: resolvedSegment.pickup_stop_id,
       dropoff_stop_id: resolvedSegment.dropoff_stop_id,
       issued_at: new Date(mockNow).toISOString(),
-      channel: 'POS_HOTLINE'
+      channel: 'POS_HOTLINE',
+      operator_id: operatorId
     };
 
     this.bookings.push(newBooking);
@@ -562,12 +602,13 @@ export class ManagerOperationsService {
     agentStaffId = 'stf_hotline_01',
     pickupStopId = null,
     dropoffStopId = null,
-    mockNow = Date.now()
+    mockNow = Date.now(),
+    operatorId = DEFAULT_OPERATOR_ID
   }) {
     this.releaseExpiredHotlineHolds(mockNow);
 
     const trip = this.findTrip(tripId);
-    if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+    if (!trip || trip.operator_id !== operatorId) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
     if (!Array.isArray(seatCodes) || seatCodes.length === 0) {
       return { success: false, error: 'Vui lòng chọn ít nhất 1 ghế', code: 'NO_SEAT_SELECTED' };
     }
@@ -640,7 +681,8 @@ export class ManagerOperationsService {
       hold_until: holdUntil,
       created_at: new Date(mockNow).toISOString(),
       created_by: agentStaffId,
-      notes
+      notes,
+      operator_id: operatorId
     };
 
     inventory?.lockSeats(tripId, seatCodes, `hotline:${reservationId}`, holdUntilMs, { pickupStopId, dropoffStopId });
@@ -708,11 +750,11 @@ export class ManagerOperationsService {
    * The replacement must be a real vehicle that is free and has at least as many seats as are booked,
    * so every passenger keeps the same seat code. Nothing changes unless every check passes.
    */
-  replaceTripVehicle(tripId, newVehicleIdOrPlate, reason = 'Sự cố hỏng hóc kỹ thuật động cơ', newDriverId = null) {
+  replaceTripVehicle(tripId, newVehicleIdOrPlate, reason = 'Sự cố hỏng hóc kỹ thuật động cơ', newDriverId = null, operatorId = DEFAULT_OPERATOR_ID) {
     const trip = this.findTrip(tripId);
-    if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+    if (!trip || trip.operator_id !== operatorId) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
 
-    const targetVehicle = this.vehicles.find(v => v.vehicle_id === newVehicleIdOrPlate || v.plate_number === newVehicleIdOrPlate);
+    const targetVehicle = this.vehicles.find(v => (v.vehicle_id === newVehicleIdOrPlate || v.plate_number === newVehicleIdOrPlate) && v.operator_id === operatorId);
     if (!targetVehicle) {
       return { success: false, error: 'Không tìm thấy xe thay thế trong đội xe', code: 'VEHICLE_NOT_FOUND' };
     }
@@ -726,7 +768,7 @@ export class ManagerOperationsService {
         code: 'CAPACITY_INSUFFICIENT'
       };
     }
-    const newDriver = newDriverId ? this.drivers.find(d => d.driver_id === newDriverId) : null;
+    const newDriver = newDriverId ? this.drivers.find(d => d.driver_id === newDriverId && d.operator_id === operatorId) : null;
     if (newDriverId && !newDriver) {
       return { success: false, error: 'Không tìm thấy tài xế thay thế', code: 'DRIVER_NOT_FOUND' };
     }
@@ -760,7 +802,8 @@ export class ManagerOperationsService {
       type: 'EMERGENCY_VEHICLE_SWAP',
       severity: 'RED',
       message: `Chuyến ${tripId}: Đã thay xe từ ${oldPlate} sang ${targetVehicle.plate_number} do "${reason}". Hành khách giữ nguyên mã ghế và đã được gửi thông báo.`,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      operator_id: operatorId
     });
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
@@ -786,16 +829,16 @@ export class ManagerOperationsService {
     };
   }
 
-  executeEmergencyVehicleSwap(tripId, { newVehiclePlate, newDriverId, reason }) {
-    return this.replaceTripVehicle(tripId, newVehiclePlate, reason, newDriverId);
+  executeEmergencyVehicleSwap(tripId, { newVehiclePlate, newDriverId, reason, operatorId = DEFAULT_OPERATOR_ID }) {
+    return this.replaceTripVehicle(tripId, newVehiclePlate, reason, newDriverId, operatorId);
   }
 
   /**
    * MGR-024: Trip Delay & Disruption Management
    */
-  broadcastTripDelay(tripId, delayMinutes, reason = 'Kẹt xe đường bộ') {
+  broadcastTripDelay(tripId, delayMinutes, reason = 'Kẹt xe đường bộ', operatorId = DEFAULT_OPERATOR_ID) {
     const trip = this.findTrip(tripId);
-    if (!trip) return { success: false, error: 'Chuyến xe không tồn tại' };
+    if (!trip || trip.operator_id !== operatorId) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
 
     trip.delay_minutes = delayMinutes;
     const msg = `Chuyến ${tripId} chậm ${delayMinutes} phút do ${reason}`;
@@ -831,7 +874,7 @@ export class ManagerOperationsService {
   /**
    * MGR-022: A refund request opened by a cancellation (PAX-021) or an overdue payment (OQ-008).
    */
-  createRefundRequest({ pnr, ticket_id = null, trip_id = null, amount_vnd, reason, source = 'PASSENGER_CANCEL', policy = null }) {
+  createRefundRequest({ pnr, ticket_id = null, trip_id = null, amount_vnd, reason, source = 'PASSENGER_CANCEL', policy = null, operator_id = DEFAULT_OPERATOR_ID }) {
     const request = {
       refund_id: `ref_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`,
       pnr,
@@ -842,7 +885,8 @@ export class ManagerOperationsService {
       source,
       policy,
       status: 'REFUND_REQUESTED',
-      requested_at: new Date().toISOString()
+      requested_at: new Date().toISOString(),
+      operator_id
     };
     this.refundRequests.push(request);
     return request;
@@ -851,8 +895,8 @@ export class ManagerOperationsService {
   /**
    * MGR-022: Approve or reject an open refund request, exactly once.
    */
-  processRefundApproval(refundId, approved, notes = '') {
-    const request = this.refundRequests.find(r => r.refund_id === refundId);
+  processRefundApproval(refundId, approved, notes = '', operatorId = DEFAULT_OPERATOR_ID) {
+    const request = this.refundRequests.find(r => r.refund_id === refundId && (!operatorId || r.operator_id === operatorId));
     if (!request) {
       return { success: false, error: 'Không tìm thấy yêu cầu hoàn tiền', code: 'REFUND_NOT_FOUND' };
     }
@@ -882,19 +926,20 @@ export class ManagerOperationsService {
   /**
    * MGR-027: Executive report for a period (inclusive dates, YYYY-MM-DD). Without a period, everything.
    */
-  getExecutiveReport({ startDate, endDate } = {}) {
+  getExecutiveReport({ startDate, endDate } = {}, operatorId = DEFAULT_OPERATOR_ID) {
     const round1 = (n) => parseFloat(n.toFixed(1));
     const inPeriod = (booking) => {
       const day = String(booking.issued_at || '').slice(0, 10);
       return (!startDate || day >= startDate) && (!endDate || day <= endDate);
     };
-    const bookings = this.bookings.filter(inPeriod);
+    const trips = this.trips.filter(t => t.operator_id === operatorId);
+    const bookings = this.bookings.filter(b => trips.some(t => t.trip_id === b.trip_id) && inPeriod(b));
     const money = this._moneyFigures(bookings);
     const share = (channels) => money.gross_revenue_vnd > 0
       ? round1((bookings.filter(b => channels.includes(b.channel)).reduce((sum, b) => sum + b.total_fare_vnd, 0) / money.gross_revenue_vnd) * 100)
       : 0;
 
-    const delays = this.trips.map(t => t.delay_minutes || 0);
+    const delays = trips.map(t => t.delay_minutes || 0);
     const onTimeTrips = delays.filter(d => d <= 15).length;
 
     return {
@@ -918,7 +963,7 @@ export class ManagerOperationsService {
     };
   }
 
-  getExecutiveReports(options) {
-    return this.getExecutiveReport(options);
+  getExecutiveReports(options, operatorId = DEFAULT_OPERATOR_ID) {
+    return this.getExecutiveReport(options, operatorId);
   }
 }

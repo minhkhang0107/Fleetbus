@@ -130,7 +130,7 @@ describe('Spec conformance: no-show, replay and manager figures', () => {
     const { services } = createFleetBusServer();
     const manager = services.managerService;
 
-    const onTimeShare = () => parseFloat(((manager.trips.filter((t) => (t.delay_minutes || 0) <= 15).length / manager.trips.length) * 100).toFixed(1));
+    const onTimeShare = () => parseFloat(((manager.trips.filter(t => t.operator_id === "op_saomai").filter((t) => (t.delay_minutes || 0) <= 15).length / manager.trips.filter(t => t.operator_id === "op_saomai").length) * 100).toFixed(1));
     const before = manager.getDashboardKPIs().data.kpi_metrics;
     assert.strictEqual(before.on_time_departure_rate_pct, onTimeShare());
 
@@ -144,7 +144,7 @@ describe('Spec conformance: no-show, replay and manager figures', () => {
     assert.strictEqual(delayed.fleet_average_speed_kmh, expectedSpeed);
 
     const corridor = manager.getDashboardKPIs().data.corridors.find((c) => c.corridor.includes('Thanh Hóa'));
-    const thTrips = manager.trips.filter((t) => t.route_id === 'rt_hn_th');
+    const thTrips = manager.trips.filter(t => t.operator_id === "op_saomai").filter((t) => t.route_id === 'rt_hn_th');
     assert.strictEqual(corridor.load_factor_pct, parseFloat(((thTrips.reduce((s, t) => s + t.booked_seats, 0) / thTrips.reduce((s, t) => s + t.total_seats, 0)) * 100).toFixed(1)));
   });
 

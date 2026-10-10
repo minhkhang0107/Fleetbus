@@ -27,8 +27,8 @@ describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-03
     assert.strictEqual(kpiRes.success, true);
     assert.strictEqual(kpiRes.data.kpi_metrics.active_vehicles_count, 1);
     assert.strictEqual(kpiRes.data.kpi_metrics.total_fleet_count, 4);
-    const totalBooked = managerService.trips.reduce((sum, t) => sum + t.booked_seats, 0);
-    const totalSeats = managerService.trips.reduce((sum, t) => sum + t.total_seats, 0);
+    const totalBooked = managerService.trips.filter(t => t.operator_id === "op_saomai").reduce((sum, t) => sum + t.booked_seats, 0);
+    const totalSeats = managerService.trips.filter(t => t.operator_id === "op_saomai").reduce((sum, t) => sum + t.total_seats, 0);
     assert.strictEqual(kpiRes.data.kpi_metrics.overall_load_factor_pct, parseFloat(((totalBooked / totalSeats) * 100).toFixed(1)));
     assert.ok(kpiRes.data.kpi_metrics.gross_revenue_vnd > 0);
     assert.ok(kpiRes.data.corridors.length >= 2);
@@ -131,8 +131,8 @@ describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-03
     assert.strictEqual(reportRes.success, true);
     assert.ok(reportRes.data.financial_summary.total_revenue_vnd > 0);
     // On time means a delay of at most 15 minutes; the rate is computed from the trips
-    const onTime = managerService.trips.filter((t) => (t.delay_minutes || 0) <= 15).length;
-    const expectedRate = `${parseFloat(((onTime / managerService.trips.length) * 100).toFixed(1))}%`;
+    const onTime = managerService.trips.filter(t => t.operator_id === "op_saomai" && (t.delay_minutes || 0) <= 15).length;
+    const expectedRate = `${parseFloat(((onTime / managerService.trips.filter(t => t.operator_id === "op_saomai").length) * 100).toFixed(1))}%`;
     assert.strictEqual(reportRes.data.punctuality_summary.on_time_departure_rate, expectedRate);
     assert.strictEqual(reportRes.data.financial_summary.net_revenue_vnd, reportRes.data.financial_summary.total_revenue_vnd - reportRes.data.financial_summary.refunded_vnd);
   });

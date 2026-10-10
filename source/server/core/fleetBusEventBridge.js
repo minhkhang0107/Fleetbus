@@ -17,6 +17,7 @@ export class FleetBusEventBridge extends EventEmitter {
    */
   requestRefund(request) {
     const { managerService } = this.services || {};
+    request.operator_id = operatorOfTrip(this.services, request.trip_id);
     if (managerService && typeof managerService.createRefundRequest === 'function') {
       return managerService.createRefundRequest(request);
     }
@@ -125,7 +126,8 @@ export class FleetBusEventBridge extends EventEmitter {
               total_fare_vnd: order.amount_vnd,
               payment_status: 'PAID',
               issued_at: new Date().toISOString(),
-              channel: 'PASSENGER_APP'
+              channel: 'PASSENGER_APP',
+              operator_id: operatorOfTrip(this.services, tripId)
             });
           }
         }
@@ -284,7 +286,8 @@ export class FleetBusEventBridge extends EventEmitter {
           type: incident.type || 'SOS_INCIDENT',
           severity: (incident.type === 'VEHICLE_BREAKDOWN' || incident.type === 'ACCIDENT') ? 'RED' : 'AMBER',
           message: `Chuyến ${tripId}: ${incident.description || 'Có sự cố'} (Dự kiến chậm +${incident.estimated_delay_minutes || 0} phút)`,
-          created_at: incident.reported_at || new Date().toISOString()
+          created_at: incident.reported_at || new Date().toISOString(),
+          operator_id: operatorOfTrip(this.services, tripId)
         });
       }
 
@@ -528,7 +531,8 @@ export class FleetBusEventBridge extends EventEmitter {
           type: 'PAYMENT_UNMATCHED_OVERDUE',
           severity: 'AMBER',
           message: `Đơn ${order.pnr} nhận ${amountVnd} đ sau khi hết hạn. Đã tạo yêu cầu hoàn tiền`,
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
+          operator_id: operatorOfTrip(this.services, order.trip_id)
         });
       }
     });
@@ -541,7 +545,8 @@ export class FleetBusEventBridge extends EventEmitter {
           type: 'PAYMENT_AMOUNT_MISMATCH',
           severity: 'AMBER',
           message: `Đơn ${order.pnr} nhận ${receivedVnd} đ, cần ${order.amount_vnd} đ. Chưa xuất vé`,
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
+          operator_id: operatorOfTrip(this.services, order.trip_id)
         });
       }
     });
@@ -577,7 +582,8 @@ export class FleetBusEventBridge extends EventEmitter {
           total_fare_vnd: fareVnd,
           payment_status: 'PAID',
           issued_at: new Date().toISOString(),
-          channel: 'DRIVER_HAIL'
+          channel: 'DRIVER_HAIL',
+          operator_id: operatorOfTrip(this.services, tripId)
         });
       }
     });
