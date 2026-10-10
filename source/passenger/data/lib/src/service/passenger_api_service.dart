@@ -308,8 +308,11 @@ class PassengerApiClientService {
    * PAX-018: Live tracking snapshot. When no GPS ping has arrived, `has_position` is false and
    * `signal_status` is NO_SIGNAL; the screen must say so instead of drawing a bus.
    */
-  Future<Map<String, dynamic>> getLiveRadarHUD(String tripId) {
-    return _get('/api/v1/trips/$tripId/tracking');
+  Future<Map<String, dynamic>> getLiveRadarHUD(String tripId, {String? ticketId}) {
+    return _get(
+      '/api/v1/trips/$tripId/tracking',
+      query: ticketId == null ? null : {'ticket_id': ticketId},
+    );
   }
 
   /**

@@ -12,6 +12,7 @@ import 'package:app/src/presentation/passenger/passenger_login_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_splash_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_ticket_qr_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_live_radar_screen.dart';
+import 'package:app/src/presentation/passenger/passenger_route_map.dart';
 import 'package:flutter/material.dart';
 import 'package:data/src/service/passenger_api_service.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +21,7 @@ import 'package:http/testing.dart';
 
 /// Rules of the passenger app state against a fake FleetBus server (shapes taken from the live API).
 void main() {
+  passengerMapTiles = false;
   const stops = [
     {'stop_id': 'stp_hn_gb', 'name': 'Bến xe Giáp Bát', 'city': 'Hà Nội', 'order': 1, 'pickup_allowed': true, 'dropoff_allowed': false},
     {'stop_id': 'stp_nb', 'name': 'Bến xe Ninh Bình', 'city': 'Ninh Bình', 'order': 2, 'pickup_allowed': true, 'dropoff_allowed': true},
@@ -245,6 +247,7 @@ void main() {
 
     expect(find.text('Đến điểm đón'), findsOneWidget);
     expect(find.text('Cách điểm đón'), findsOneWidget);
+    expect(find.byType(PassengerRouteMap), findsOneWidget);
 
     // Switch to boarded
     ticketStatus = 'BOARDED';
@@ -257,6 +260,7 @@ void main() {
     expect(find.text('Đã lên xe'), findsOneWidget);
     expect(find.text('Điểm trả'), findsOneWidget);
     expect(find.text('Phía Bắc Thanh Hóa'), findsOneWidget);
+    expect(find.byType(PassengerRouteMap), findsOneWidget);
     
     // Cleanup pending timers
     await tester.pumpWidget(const SizedBox());

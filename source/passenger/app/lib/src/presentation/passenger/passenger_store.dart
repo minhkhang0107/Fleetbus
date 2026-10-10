@@ -186,13 +186,66 @@ class AppNotice {
 
 enum GpsSignal { live, stale, offline, none }
 
+class TrackingTarget {
+  const TrackingTarget({
+    required this.stopId,
+    required this.name,
+    required this.lat,
+    required this.lng,
+    required this.isDropoff,
+  });
+  final String stopId;
+  final String name;
+  final double lat;
+  final double lng;
+  final bool isDropoff;
+}
+
+class TrackingStop {
+  const TrackingStop({
+    required this.name,
+    required this.lat,
+    required this.lng,
+    this.stopId = '',
+    this.order,
+  });
+  final String stopId;
+  final String name;
+  final double lat;
+  final double lng;
+  final int? order;
+}
+
 class Tracking {
-  const Tracking(this.signal, {this.etaMinutes, this.distanceKm, this.speed, this.text = ''});
+  const Tracking(
+    this.signal, {
+    this.etaMinutes,
+    this.distanceKm,
+    this.speed,
+    this.text = '',
+    this.busLat,
+    this.busLng,
+    this.bearing,
+    this.target,
+    this.stops = const [],
+    this.route = const [],
+    this.passedTarget = false,
+    this.publicView = false,
+  });
+
   final GpsSignal signal;
   final int? etaMinutes;
   final double? distanceKm;
   final double? speed;
   final String text;
+  final double? busLat;
+  final double? busLng;
+  final double? bearing;
+  final TrackingTarget? target;
+  final List<TrackingStop> stops;
+  final List<(double, double)> route;
+  final bool passedTarget;
+  final bool publicView;
 }
 
 /// Result of a call: null message means success.
@@ -650,18 +703,73 @@ class PassengerStore extends ChangeNotifier {
   }
 
   // ---------- Tracking and notices (PAX-018, PAX-020) ----------
-  Future<Tracking> loadTracking(String tripId) async {
-    final r = await _call(() => api.getLiveRadarHUD(tripId));
+  Future<Tracking> loadTracking(String tripId, {String? ticketId}) async {
+    final r = await _call(() => api.getLiveRadarHUD(tripId, ticketId: ticketId));
     if (!r.ok) return Tracking(GpsSignal.none, text: r.error!);
     final d = r.value!;
-    final signal = switch (d['signal_status']) { 'LIVE' => GpsSignal.live, 'STALE' => GpsSignal.stale, 'OFFLINE' => GpsSignal.offline, _ => GpsSignal.none };
+    final signal = switch (d['signal_status']) {
+      'LIVE' => GpsSignal.live,
+      'STALE' => GpsSignal.stale,
+      'OFFLINE' => GpsSignal.offline,
+      _ => GpsSignal.none,
+    };
     final pos = d['bus_position'] as Map<String, dynamic>?;
+    final busLat = (pos?['lat'] as num?)?.toDouble();
+    final busLng = (pos?['lng'] as num?)?.toDouble();
+    final bearing = (pos?['bearing_deg'] as num?)?.toDouble();
+    final speed = (pos?['speed_kmh'] as num?)?.toDouble();
+
+    final rawTarget = d['target_stop'] as Map<String, dynamic>?;
+    TrackingTarget? target;
+    if (rawTarget != null && rawTarget['lat'] is num && rawTarget['lng'] is num) {
+      target = TrackingTarget(
+        stopId: '${rawTarget['stop_id'] ?? ''}',
+        name: '${rawTarget['name'] ?? ''}',
+        lat: (rawTarget['lat'] as num).toDouble(),
+        lng: (rawTarget['lng'] as num).toDouble(),
+        isDropoff: rawTarget['kind'] == 'DROPOFF',
+      );
+    }
+
+    final rawStops = d['stops'] as List?;
+    final stops = <TrackingStop>[
+      if (rawStops != null)
+        for (final s in rawStops)
+          if (s is Map && s['lat'] is num && s['lng'] is num)
+            TrackingStop(
+              stopId: '${s['stop_id'] ?? ''}',
+              name: '${s['name'] ?? ''}',
+              lat: (s['lat'] as num).toDouble(),
+              lng: (s['lng'] as num).toDouble(),
+              order: (s['order'] as num?)?.toInt(),
+            ),
+    ];
+
+    final rawRoute = d['route_shape'] as List?;
+    final route = <(double, double)>[
+      if (rawRoute != null)
+        for (final pt in rawRoute)
+          if (pt is List && pt.length >= 2 && pt[0] is num && pt[1] is num)
+            ((pt[0] as num).toDouble(), (pt[1] as num).toDouble()),
+    ];
+
+    final passedTarget = d['has_passed_target'] == true;
+    final publicView = d['view'] == 'PUBLIC';
+
     return Tracking(
       signal,
       etaMinutes: (d['eta_minutes'] as num?)?.toInt(),
       distanceKm: (d['distance_meters'] as num?) == null ? null : (d['distance_meters'] as num) / 1000,
-      speed: (pos?['speed_kmh'] as num?)?.toDouble(),
-      text: d['hud_status_text'] ?? '',
+      speed: speed,
+      text: '${d['hud_status_text'] ?? ''}',
+      busLat: busLat,
+      busLng: busLng,
+      bearing: bearing,
+      target: target,
+      stops: stops,
+      route: route,
+      passedTarget: passedTarget,
+      publicView: publicView,
     );
   }
 
