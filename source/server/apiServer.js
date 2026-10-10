@@ -22,6 +22,9 @@ import { handlePassengerRoutes } from './routes/passengerRoutes.js';
 import { handleDriverRoutes } from './routes/driverRoutes.js';
 import { handleManagerRoutes } from './routes/managerRoutes.js';
 import { handleWebhookRoutes } from './routes/webhookRoutes.js';
+import { handlePlatformRoutes } from './routes/platformRoutes.js';
+import { renderOnboardingPage, renderOnboardingNotFound } from './web/onboarding.js';
+import { findOperatorByCode } from './core/operators.js';
 import { FleetBusEventBridge } from './core/fleetBusEventBridge.js';
 import { getWebhookSecret, getAuthMode, isProduction } from './config.js';
 import { resolveAccess, authenticate, IdempotencyStore, resolveOperator } from './core/gateway.js';
@@ -58,6 +61,7 @@ export function createFleetBusServer(customServices = {}) {
       if (handleDriverRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleManagerRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleWebhookRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handlePlatformRoutes(req, res, pathname, parsedUrl, services)) return;
     } catch (err) {
       sendError(res, err.message, 'INTERNAL_SERVER_ERROR', 500);
       return;
@@ -143,6 +147,20 @@ export function createFleetBusServer(customServices = {}) {
       }
     }
 
+    const onboarding = req.method === 'GET' && pathname.match(/^\/o\/([A-Za-z0-9]{1,32})\/?$/);
+    if (onboarding) {
+      const op = findOperatorByCode(onboarding[1]);
+      if (!op || op.active === false) {
+        res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(renderOnboardingNotFound());
+        return;
+      }
+      const host = req.headers.host || `localhost:${process.env.PORT || 3000}`;
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(renderOnboardingPage(op, `http://${host}/o/${op.code}`));
+      return;
+    }
+
     if (pathname === '/manager' || pathname === '/ops' || pathname === '/manager.html' || pathname === '/admin') {
       const distPath = path.resolve(__dirname, '../../source/manager/web_dist/index.html');
       const htmlPath = path.resolve(__dirname, '../../docs/designs/manager_portal.html');
@@ -167,7 +185,7 @@ export function createFleetBusServer(customServices = {}) {
       req.identity = auth.identity;
     }
 
-    const exemptFromOperator = pathname === '/health' || pathname === '/openapi.json' || pathname === '/api/v1/openapi.json' || pathname.startsWith('/api/v1/webhooks/');
+    const exemptFromOperator = pathname === '/health' || pathname === '/openapi.json' || pathname === '/api/v1/openapi.json' || pathname.startsWith('/api/v1/webhooks/') || pathname.startsWith('/api/v1/platform/');
     if (!exemptFromOperator) {
       const opResult = resolveOperator(req, parsedUrl, req.identity, { production: isProduction() });
       if (!opResult.ok) {
@@ -176,6 +194,10 @@ export function createFleetBusServer(customServices = {}) {
       }
       req.operator = opResult.operator;
       req.operatorId = opResult.operator.operator_id;
+      // Every ops request the platform admin makes inside a company is recorded (spec 2.3).
+      if (req.identity?.role === 'PLATFORM_ADMIN') {
+        services.managerService.recordAudit({ actor: req.identity.sub, role: 'PLATFORM_ADMIN', action: `PLATFORM_ACCESS ${req.method}`, resource: pathname, ip: req.socket?.remoteAddress || null, operator_id: req.operatorId });
+      }
     }
 
     if (services.config.authMode === 'enforce' && access.kind !== 'public' && access.idempotent) {

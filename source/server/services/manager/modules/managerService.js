@@ -8,11 +8,11 @@ import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
 import { verifyTotp } from '../../../core/totp.js';
 import { getStaffTotpSecret } from '../../../config.js';
-import { DEFAULT_OPERATOR_ID, findOperatorById, publicOperatorProfile } from '../../../core/operators.js';
+import { DEFAULT_OPERATOR_ID, OPERATOR_INACTIVE, findOperatorById, publicOperatorProfile } from '../../../core/operators.js';
 
 const POS_PAYMENT_METHODS = ['CASH_POS', 'CARD_POS', 'BANK_TRANSFER'];
 // BR-MGR-AUTH-001: these roles need a TOTP code on every login (ROLE_OPS_ADMIN and ROLE_FINANCE of the spec)
-const TOTP_ROLES = ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER'];
+const TOTP_ROLES = ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'PLATFORM_ADMIN'];
 const HOLD_POLICIES = ['UNTIL_DEPARTURE_OFFSET', 'CUSTOM_EXPIRY_MINUTES'];
 // BR-POS-006: one phone number holds at most this many seats at once across all trips
 const HOTLINE_MAX_SEATS_PER_PHONE = 4;
@@ -65,6 +65,16 @@ export const MOCK_MANAGERS_DB = [
     role: 'CASHIER',
     permissions: ['POS_ISSUE', 'BOOKING_SEARCH'],
     operator_id: 'op_xuyenviet'
+  },
+  {
+    // Platform owner: belongs to no bus company (spec 2.3).
+    user_id: 'plat_01',
+    username: 'root@busgo.vn',
+    password_hash: hashSecret('root123'),
+    full_name: 'Quản trị nền tảng',
+    role: 'PLATFORM_ADMIN',
+    permissions: ['PLATFORM_ALL'],
+    operator_id: null
   }
 ];
 
@@ -181,6 +191,11 @@ export class ManagerOperationsService {
     }
     this.loginGuard.succeed(key);
 
+    const operator = user.operator_id ? findOperatorById(user.operator_id) : null;
+    if (operator && operator.active === false) {
+      return { success: false, error: OPERATOR_INACTIVE.message, code: OPERATOR_INACTIVE.code };
+    }
+
     const token = signToken(
       { sub: user.user_id, role: user.role, permissions: user.permissions, kind: 'staff', operator_id: user.operator_id },
       { prefix: TOKEN_PREFIXES.staff, ttlSeconds: 8 * 3600, now: mockNow }
@@ -196,7 +211,7 @@ export class ManagerOperationsService {
           role: user.role,
           permissions: user.permissions
         },
-        operator: publicOperatorProfile(findOperatorById(user.operator_id)),
+        operator: publicOperatorProfile(operator),
         token
       }
     };

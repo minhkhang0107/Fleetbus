@@ -46,11 +46,12 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       const username = String(body.username || body.email || '').trim().toLowerCase();
       const result = managerService.authenticateStaff(username, body.password, body.totp ?? body.totpCode ?? null);
       if (result.success) {
-        managerService.recordAudit({ actor: result.data.user.user_id, role: result.data.user.role, action: 'LOGIN', resource: username, ip: req.socket?.remoteAddress || null, operator_id: result.data.operator.operator_id });
+        managerService.recordAudit({ actor: result.data.user.user_id, role: result.data.user.role, action: 'LOGIN', resource: username, ip: req.socket?.remoteAddress || null, operator_id: result.data.operator?.operator_id ?? null });
         sendSuccess(res, result.data || result);
       } else {
         managerService.recordAudit({ action: result.code === 'ACCOUNT_LOCKED' ? 'LOGIN_LOCKED' : 'LOGIN_FAILED', resource: username, ip: req.socket?.remoteAddress || null });
-        sendError(res, result.error, result.code, result.code === 'ACCOUNT_LOCKED' ? 429 : 401, result);
+        const status = result.code === 'ACCOUNT_LOCKED' ? 429 : result.code === 'OPERATOR_INACTIVE' ? 403 : 401;
+        sendError(res, result.error, result.code, status, result);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;

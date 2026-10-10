@@ -4,7 +4,7 @@
  */
 import crypto from 'crypto';
 import { verifyToken } from './tokens.js';
-import { DEFAULT_OPERATOR_ID, findOperatorByCode, findOperatorById, normalizeOperatorCode } from './operators.js';
+import { DEFAULT_OPERATOR_ID, OPERATOR_INACTIVE, findOperatorByCode, findOperatorById, normalizeOperatorCode } from './operators.js';
 
 const API = '/api/v1';
 
@@ -28,7 +28,7 @@ const PASSENGER_RULES = [
 const IDEMPOTENT_RULES = {
   passenger: /\/(seats\/hold|hold-seats|bookings\/create|checkout\/create-order|delegate|qr\/reissue|cancel)$/,
   driver: /\/(readiness|start|arrive|boarding|boarding\/manual|board-qr|payments\/cod-collect|collect-cod|onboard-hail|incidents?|end|no-show|batch-replay)$/,
-  staff: /\/(pos\/(orders|bookings|hotline-hold)|refunds\/[^/]+\/process|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem)$/
+  staff: /\/(platform\/operators(\/[^/]+\/(activate|deactivate))?|pos\/(orders|bookings|hotline-hold)|refunds\/[^/]+\/process|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem)$/
 };
 
 // Staff permissions by role (MGR-029). The first matching rule decides; no rule means any staff role.
@@ -44,6 +44,9 @@ const STAFF_RULES = [
 
 export const ADMIN_ROLE = 'FLEET_DIRECTOR';
 
+/** Runs the platform (all bus companies); acts in one company only when it names it (spec 2.3). */
+export const PLATFORM_ROLE = 'PLATFORM_ADMIN';
+
 export function resolveAccess(method, pathname) {
   if (!pathname.startsWith(API) && pathname !== '/health' && pathname !== '/openapi.json') {
     return { kind: 'public', idempotent: false };
@@ -54,7 +57,7 @@ export function resolveAccess(method, pathname) {
 
   let kind = null;
   if (pathname.startsWith(`${API}/driver/`)) kind = 'driver';
-  else if (pathname.startsWith(`${API}/ops/`)) kind = 'staff';
+  else if (pathname.startsWith(`${API}/ops/`) || pathname.startsWith(`${API}/platform/`)) kind = 'staff';
   else if (PASSENGER_RULES.some(re => re.test(pathname))) kind = 'passenger';
   if (!kind) return { kind: 'public', idempotent: false };
 
@@ -84,8 +87,12 @@ export function authenticate(req, access, pathname) {
   }
 
   if (access.kind === 'staff') {
+    // Platform endpoints are for the platform admin only; it may also use every ops endpoint of the company it names.
+    if (pathname.startsWith(`${API}/platform/`) && identity.role !== PLATFORM_ROLE) {
+      return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Vai trò của bạn không được phép thực hiện thao tác này' };
+    }
     const rule = STAFF_RULES.find(([re]) => re.test(pathname));
-    if (rule && !rule[1].includes(identity.role)) {
+    if (rule && identity.role !== PLATFORM_ROLE && !rule[1].includes(identity.role)) {
       return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Vai trò của bạn không được phép thực hiện thao tác này' };
     }
   }
@@ -149,6 +156,12 @@ export function resolveOperator(req, parsedUrl, identity, { production }) {
     }
   }
 
+  // The platform admin has no company of its own: it must name the one it acts in.
+  if (identity?.role === PLATFORM_ROLE) {
+    if (!explicitOp) return { ok: false, status: 400, code: 'OPERATOR_REQUIRED', message: 'Chọn nhà xe cần xem (X-Operator-Code)' };
+    return { ok: true, operator: explicitOp };
+  }
+
   let identityOp = null;
   if (identity) {
     const opId = identity.operator_id || DEFAULT_OPERATOR_ID;
@@ -164,6 +177,7 @@ export function resolveOperator(req, parsedUrl, identity, { production }) {
 
   const resolvedOp = identityOp || explicitOp;
 
+  if (resolvedOp && resolvedOp.active === false) return OPERATOR_INACTIVE;
   if (resolvedOp) {
     return { ok: true, operator: resolvedOp };
   }
