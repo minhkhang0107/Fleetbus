@@ -339,7 +339,35 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
       return true;
     }
-    const tracking = trackingService.getLiveTrackingHUD(tripId);
+    const url = new URL(req.url, 'http://x');
+    const ticketId = url.searchParams.get('ticket_id');
+    let pickupStopId = null;
+    let dropoffStopId = null;
+    let boarded = false;
+    let view = 'PUBLIC';
+
+    if (ticketId && paymentService.tickets) {
+      const ticket = paymentService.tickets.get(ticketId);
+      if (ticket && ticket.trip_id === tripId && ticket.status !== 'CANCELLED') {
+        pickupStopId = ticket.pickup_stop_id || null;
+        dropoffStopId = ticket.dropoff_stop_id || null;
+        boarded = ticket.status === 'BOARDED';
+        view = 'TICKET';
+      }
+    }
+
+    const detail = searchService.getTripDetail(tripId);
+    const stops = (detail && detail.success && detail.data && Array.isArray(detail.data.stops))
+      ? detail.data.stops
+      : [];
+
+    const tracking = trackingService.getTripRadar(tripId, {
+      pickupStopId,
+      dropoffStopId,
+      boarded,
+      stops,
+      view
+    });
     sendSuccess(res, tracking.data || tracking);
     return true;
   }
