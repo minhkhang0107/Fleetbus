@@ -17,6 +17,11 @@ String resolvePassengerBaseUrl([String? customUrl]) {
   if (customUrl != null && customUrl.isNotEmpty) {
     return customUrl;
   }
+  // Physical device on the LAN: --dart-define=FLEETBUS_API_URL=http://<host-ip>:3000
+  const fromDefine = String.fromEnvironment('FLEETBUS_API_URL');
+  if (fromDefine.isNotEmpty) {
+    return fromDefine;
+  }
   // Android emulator loopback alias to host machine
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     return 'http://10.0.2.2:3000';

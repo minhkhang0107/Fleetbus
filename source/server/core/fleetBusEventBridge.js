@@ -148,9 +148,10 @@ export class FleetBusEventBridge extends EventEmitter {
     // 2. PASSENGER_BOARDED: Driver QR Scan -> Passenger Ticket & Manager Boarded Count
     // -------------------------------------------------------------------------
     this.on('PASSENGER_BOARDED', ({ tripId, passenger, ticketId, pnr, now = Date.now() }) => {
-      // A. Passenger Wallet: Mark ticket as BOARDED in payment service
+      // Hoist ticket lookup so step B can use it
+      let ticket = null;
       if (paymentService && paymentService.tickets) {
-        const ticket = paymentService.tickets.get(ticketId) || Array.from(paymentService.tickets.values()).find(t => t.pnr === pnr && t.seat_code === passenger?.seat_code);
+        ticket = paymentService.tickets.get(ticketId) || Array.from(paymentService.tickets.values()).find(t => t.pnr === pnr && t.seat_code === passenger?.seat_code);
         if (ticket) {
           ticket.status = 'BOARDED';
           ticket.boarded_at = new Date(now).toISOString();
@@ -161,9 +162,24 @@ export class FleetBusEventBridge extends EventEmitter {
       if (trackingService && typeof trackingService.sendNotification === 'function') {
         const phone = passenger?.passenger_phone || passenger?.phone;
         if (phone) {
+          let tripDesc = 'chuyến của bạn';
+          if (ticket && typeof ticket.route_name === 'string' && ticket.route_name.trim() && ticket.departure_time) {
+            const route = ticket.route_name.replace(/\s*\([^)]*\)\s*$/, '').trim();
+            const depDate = new Date(ticket.departure_time);
+            if (route && !isNaN(depDate.getTime())) {
+              const vnDate = new Date(depDate.getTime() + 7 * 60 * 60 * 1000);
+              const hh = String(vnDate.getUTCHours()).padStart(2, '0');
+              const mm = String(vnDate.getUTCMinutes()).padStart(2, '0');
+              const dd = String(vnDate.getUTCDate()).padStart(2, '0');
+              const MM = String(vnDate.getUTCMonth() + 1).padStart(2, '0');
+              tripDesc = `chuyến ${route} khởi hành ${hh}:${mm} ngày ${dd}/${MM}`;
+            }
+          }
+          const seat = passenger?.seat_code || ticket?.seat_code || 'đã đặt';
+
           trackingService.sendNotification(phone, {
             title: 'Chào mừng quý khách lên xe!',
-            body: `Bạn đã hoàn tất soát vé lên xe chuyến ${tripId} (Ghế ${passenger?.seat_code || 'đã đặt'}). Chúc bạn chuyến đi thượng lộ bình an!`,
+            body: `Bạn đã lên xe ${tripDesc} (Ghế ${seat}). Chúc bạn thượng lộ bình an!`,
             type: 'BOARDING_REMINDER',
             payload: { trip_id: tripId, ticket_id: ticketId, seat_code: passenger?.seat_code }
           });
