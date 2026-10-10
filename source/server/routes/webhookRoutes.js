@@ -5,6 +5,7 @@
 import crypto from 'crypto';
 import { sendSuccess, sendError, readRawBody, parseJson } from '../middleware/httpUtils.js';
 import { API_CATALOG } from '../core/apiCatalog.js';
+import { findOperatorByCode, DEFAULT_OPERATOR_ID } from '../core/operators.js';
 
 function signatureMatches(secret, rawBody, provided) {
   const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
@@ -15,8 +16,21 @@ function signatureMatches(secret, rawBody, provided) {
 export function handleWebhookRoutes(req, res, pathname, parsedUrl, services) {
   const { paymentService } = services;
 
-  // POST /api/v1/webhooks/vietqr/ipn (PAX-014)
-  if (pathname === '/api/v1/webhooks/vietqr/ipn' && req.method === 'POST') {
+  // POST /api/v1/webhooks/vietqr/ipn (PAX-014) or POST /api/v1/webhooks/vietqr/:operatorCode/ipn
+  const webhookRegex = /^\/api\/v1\/webhooks\/vietqr(?:\/([^/]+))?\/ipn$/;
+  const match = pathname.match(webhookRegex);
+  if (match && req.method === 'POST') {
+    let operatorId = DEFAULT_OPERATOR_ID;
+    const operatorCode = match[1];
+    if (operatorCode) {
+      const op = findOperatorByCode(operatorCode);
+      if (!op) {
+        sendError(res, 'Không tìm thấy nhà xe', 'OPERATOR_NOT_FOUND', 404);
+        return true;
+      }
+      operatorId = op.operator_id;
+    }
+
     readRawBody(req).then(raw => {
       const secret = services.config?.webhookSecret;
       if (secret && !signatureMatches(secret, raw, req.headers['x-signature'])) {
@@ -29,7 +43,8 @@ export function handleWebhookRoutes(req, res, pathname, parsedUrl, services) {
         transferMemo: body.transferMemo,
         amountVnd: body.amountVnd,
         bankRef: body.bankRef,
-        now: body.now
+        now: body.now,
+        operatorId
       });
 
       if (!result.success) {

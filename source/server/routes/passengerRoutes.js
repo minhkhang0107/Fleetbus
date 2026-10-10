@@ -4,11 +4,16 @@
  */
 
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
-import { publicOperatorProfile } from '../core/operators.js';
+import { publicOperatorProfile, DEFAULT_OPERATOR_ID } from '../core/operators.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 
 // With authentication enforced, a ticket or order may only be used by its owner (or its holder, where allowed).
 function forbidTicket(req, res, paymentService, ticketId, { ownerOnly = false } = {}) {
+  const ticket = paymentService.tickets.get(ticketId);
+  if (!ticket || (ticket.operator_id || DEFAULT_OPERATOR_ID) !== (req.operatorId || DEFAULT_OPERATOR_ID)) {
+    sendError(res, 'Không tìm thấy vé', 'TICKET_NOT_FOUND', 404);
+    return true;
+  }
   if (!req.identity) return false;
   const access = paymentService.getTicketAccess(ticketId, req.identity.phone);
   if (access === 'NONE' || (ownerOnly && access === 'HOLDER')) {
@@ -19,6 +24,11 @@ function forbidTicket(req, res, paymentService, ticketId, { ownerOnly = false } 
 }
 
 function forbidOrder(req, res, paymentService, orderId) {
+  const order = paymentService.orders.get(orderId) || paymentService.orders.get(paymentService.pnrIndex.get(orderId));
+  if (!order || (order.operator_id || DEFAULT_OPERATOR_ID) !== (req.operatorId || DEFAULT_OPERATOR_ID)) {
+    sendError(res, 'Không tìm thấy đơn hàng', 'ORDER_NOT_FOUND', 404);
+    return true;
+  }
   if (!req.identity) return false;
   if (paymentService.getOrderAccess(orderId, req.identity.phone) === 'NONE') {
     sendError(res, 'Bạn không có quyền với đơn hàng này', 'FORBIDDEN', 403);
@@ -244,7 +254,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   if (pathname === '/api/v1/passenger/tickets' && req.method === 'GET') {
     const tab = parsedUrl.searchParams.get('tab') || 'UPCOMING';
     const phone = req.identity ? req.identity.phone : parsedUrl.searchParams.get('phone');
-    const wallet = paymentService.getTicketsByPhone(phone, tab);
+    const wallet = paymentService.getTicketsByPhone(phone, tab, req.operatorId);
     if (wallet.success) {
       sendSuccess(res, wallet.data);
     } else {
@@ -403,7 +413,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       sendError(res, 'Thiếu thông tin người dùng', 'USER_REQUIRED', 400);
       return true;
     }
-    const notifs = trackingService.getNotifications(phone);
+    const notifs = trackingService.getNotifications(phone, req.operatorId);
     sendSuccess(res, notifs.data || notifs);
     return true;
   }
@@ -494,7 +504,11 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     const token = (req.headers.authorization || '').replace(/^Bearer /, '');
     const profile = authService.getProfile(token);
     if (profile.success) {
-      sendSuccess(res, profile.data);
+      const data = { ...profile.data };
+      if (data.phone) {
+        data.wallet_balance_vnd = paymentService.getWalletBalance(data.phone, req.operatorId);
+      }
+      sendSuccess(res, data);
     } else {
       sendError(res, profile.error, profile.code, 401);
     }

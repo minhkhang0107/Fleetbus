@@ -6,6 +6,7 @@
 import { calculateHaversineDistance, calculateETA } from '../core/cryptoEngine.js';
 import { REST_STOPS, REST_STOP_AFTER_MS, STILL_SPEED_KMH } from '../../../core/restStops.js';
 import { stopCoords, routeShape, distanceAlongRoute, signedDistanceAlongRoute } from '../../../core/geo.js';
+import { DEFAULT_OPERATOR_ID } from '../../../core/operators.js';
 
 export class PassengerTrackingService {
   constructor() {
@@ -296,7 +297,7 @@ export class PassengerTrackingService {
   /**
    * PAX-020: Send & retrieve Push Notifications
    */
-  sendNotification(phone, { title, body, type = 'GENERAL', payload = {} }) {
+  sendNotification(phone, { title, body, type = 'GENERAL', payload = {}, operatorId = DEFAULT_OPERATOR_ID }) {
     const normalized = phone.replace(/[\s\-\.]/g, '');
     const userNotifs = this.notifications.get(normalized) || [];
 
@@ -306,6 +307,7 @@ export class PassengerTrackingService {
       body,
       type, // 'TRIP_UPDATE' | 'DELAY' | 'SWAP' | 'BOARDING_REMINDER' | 'PAYMENT_SUCCESS'
       payload,
+      operator_id: operatorId,
       is_read: false,
       created_at: new Date().toISOString()
     };
@@ -316,9 +318,9 @@ export class PassengerTrackingService {
     return { success: true, data: notif };
   }
 
-  getNotifications(phone) {
+  getNotifications(phone, operatorId = DEFAULT_OPERATOR_ID) {
     const normalized = phone.replace(/[\s\-\.]/g, '');
-    const list = this.notifications.get(normalized) || [];
+    const list = (this.notifications.get(normalized) || []).filter(n => (n.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
     const unreadCount = list.filter(n => !n.is_read).length;
 
     return {

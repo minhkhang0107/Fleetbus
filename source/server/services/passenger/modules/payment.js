@@ -12,6 +12,7 @@ import {
 } from '../core/cryptoEngine.js';
 import { validateVietnamPhone, calculateRefundAmount } from '../core/formatters.js';
 import { getTicketSecret } from '../../../config.js';
+import { findOperatorById, DEFAULT_OPERATOR_ID } from '../../../core/operators.js';
 
 // PAX-025: a delay longer than this waives the cancellation fee
 const DELAY_WAIVER_AFTER_MINUTES = 30;
@@ -28,12 +29,12 @@ export class PassengerPaymentService {
   /**
    * REV-04: Credit change owed to a passenger into the BusGo wallet.
    */
-  creditWallet(phone, amountVnd, ref, reason = 'Tiền thừa COD') {
+  creditWallet(phone, amountVnd, ref, reason = 'Tiền thừa COD', operatorId = DEFAULT_OPERATOR_ID) {
     const phoneCheck = validateVietnamPhone(phone);
     if (!phoneCheck.isValid || !(amountVnd > 0)) {
       return { success: false, error: 'Không thể cộng tiền vào ví', code: 'INVALID_WALLET_CREDIT' };
     }
-    const credit = { phone: phoneCheck.normalized, amount_vnd: amountVnd, ref, reason, credited_at: new Date().toISOString() };
+    const credit = { phone: phoneCheck.normalized, amount_vnd: amountVnd, ref, reason, operator_id: operatorId, credited_at: new Date().toISOString() };
     this.walletCredits.push(credit);
     return { success: true, data: credit };
   }
@@ -64,10 +65,10 @@ export class PassengerPaymentService {
     return order.payer?.phone && normalize(order.payer.phone) === normalize(phone) ? 'OWNER' : 'NONE';
   }
 
-  getWalletBalance(phone) {
+  getWalletBalance(phone, operatorId = DEFAULT_OPERATOR_ID) {
     const normalized = validateVietnamPhone(phone).normalized || phone;
     return this.walletCredits
-      .filter(c => c.phone === normalized)
+      .filter(c => c.phone === normalized && (c.operator_id || DEFAULT_OPERATOR_ID) === operatorId)
       .reduce((sum, c) => sum + c.amount_vnd, 0);
   }
 
@@ -76,15 +77,17 @@ export class PassengerPaymentService {
    */
   createPaymentOrder({ holdId, trip, seatCodes, payer, passengers, amountVnd, pickupStop, dropoffStop, pickupStopId = null, dropoffStopId = null, mockNow = Date.now() }) {
     const orderId = `ord_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+    const operatorId = trip.operator_id || DEFAULT_OPERATOR_ID;
+    const operator = findOperatorById(operatorId);
     let pnr;
     do {
       pnr = `BG-${Math.floor(100000 + Math.random() * 900000)}`;
     } while (this.pnrIndex.has(pnr));
 
-    const bankBin = '970415'; // VietinBank
-    const accountNumber = '1088219999';
-    const accountName = 'FLEETBUS VIET NAM JSC';
-    const transferMemo = `BUSGO ${pnr.replace('-', '')}`;
+    const bankBin = operator.bank.bin;
+    const accountNumber = operator.bank.account_number;
+    const accountName = operator.bank.account_name;
+    const transferMemo = `${operator.memo_prefix} ${pnr.replace('-', '')}`;
 
     const vietQrPayload = generateVietQRPayload({
       bankBin,
@@ -98,6 +101,7 @@ export class PassengerPaymentService {
       pnr,
       hold_id: holdId,
       trip_id: trip.trip_id,
+      operator_id: operatorId,
       route_name: trip.route_name,
       departure_time: trip.departure_time,
       seat_codes: seatCodes,
@@ -111,7 +115,7 @@ export class PassengerPaymentService {
       payment_method: 'VIETQR_NAPAS247',
       payment_status: 'PENDING_PAYMENT',
       payment_details: {
-        bank_name: 'VietinBank',
+        bank_name: operator.bank.bank_name,
         bank_bin: bankBin,
         account_number: accountNumber,
         account_name: accountName,
@@ -168,6 +172,7 @@ export class PassengerPaymentService {
         pnr: order.pnr,
         order_id: order.order_id,
         trip_id: order.trip_id,
+        operator_id: order.operator_id || DEFAULT_OPERATOR_ID,
         route_name: order.route_name,
         departure_time: order.departure_time,
         seat_code: seatCode,
@@ -209,12 +214,12 @@ export class PassengerPaymentService {
    * Handle VietQR Webhook Callback (PAX-014, OQ-008)
    * The order is matched on the PNR inside the transfer memo and the received amount must equal the order amount.
    */
-  handleVietQrCallback({ transferMemo, amountVnd, bankRef, now = Date.now() }) {
+  handleVietQrCallback({ transferMemo, amountVnd, bankRef, operatorId = DEFAULT_OPERATOR_ID, now = Date.now() }) {
     const pnrMatch = /BG-?(\d{6})/i.exec(String(transferMemo || ''));
     const orderId = pnrMatch ? this.pnrIndex.get(`BG-${pnrMatch[1]}`) : null;
     const matchedOrder = orderId ? this.orders.get(orderId) : null;
 
-    if (!matchedOrder) {
+    if (!matchedOrder || (matchedOrder.operator_id || DEFAULT_OPERATOR_ID) !== operatorId) {
       return { success: false, error: 'Không tìm thấy đơn hàng khớp với nội dung chuyển khoản', code: 'ORDER_NOT_MATCHED' };
     }
 
@@ -276,7 +281,7 @@ export class PassengerPaymentService {
    * PAX-016: Get passenger ticket wallet with tab filters (UPCOMING, COMPLETED, CANCELLED).
    * The phone must be a complete, valid number and is matched exactly.
    */
-  getTicketsByPhone(phone, filter = 'UPCOMING') {
+  getTicketsByPhone(phone, filter = 'UPCOMING', operatorId = DEFAULT_OPERATOR_ID) {
     const phoneCheck = validateVietnamPhone(phone);
     if (!phoneCheck.isValid) {
       return { success: false, error: phoneCheck.message, code: 'INVALID_PHONE' };
@@ -286,6 +291,7 @@ export class PassengerPaymentService {
     const userTickets = [];
 
     for (const ticket of this.tickets.values()) {
+      if ((ticket.operator_id || DEFAULT_OPERATOR_ID) !== operatorId) continue;
       const owns = normalizeStored(ticket.passenger_phone) === normalized
         || (ticket.owner_phone && normalizeStored(ticket.owner_phone) === normalized);
       const delegated = ticket.delegated_to?.phone && normalizeStored(ticket.delegated_to.phone) === normalized;

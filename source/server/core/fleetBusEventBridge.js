@@ -4,6 +4,7 @@
  */
 
 import EventEmitter from 'events';
+import { operatorOfTrip } from './tenancy.js';
 
 export class FleetBusEventBridge extends EventEmitter {
   constructor() {
@@ -134,7 +135,7 @@ export class FleetBusEventBridge extends EventEmitter {
       if (trackingService && typeof trackingService.sendNotification === 'function') {
         const phone = order.payer?.phone || tickets[0]?.passenger_phone;
         if (phone) {
-          trackingService.sendNotification(phone, {
+          trackingService.sendNotification(phone, { operatorId: operatorOfTrip(this.services, tripId),
             title: 'Thanh toán thành công & Xuất vé điện tử',
             body: `Mã vé ${order.pnr} cho chuyến xe ${order.route_name || tripId} đã sẵn sàng trong Ví vé!`,
             type: 'PAYMENT_SUCCESS',
@@ -177,7 +178,7 @@ export class FleetBusEventBridge extends EventEmitter {
           }
           const seat = passenger?.seat_code || ticket?.seat_code || 'đã đặt';
 
-          trackingService.sendNotification(phone, {
+          trackingService.sendNotification(phone, { operatorId: operatorOfTrip(this.services, tripId),
             title: 'Chào mừng quý khách lên xe!',
             body: `Bạn đã lên xe ${tripDesc} (Ghế ${seat}). Chúc bạn thượng lộ bình an!`,
             type: 'BOARDING_REMINDER',
@@ -216,7 +217,7 @@ export class FleetBusEventBridge extends EventEmitter {
         mgrTrip.no_show_passengers = (mgrTrip.no_show_passengers || 0) + 1;
       }
       if (phone && trackingService && typeof trackingService.sendNotification === 'function') {
-        trackingService.sendNotification(phone, {
+        trackingService.sendNotification(phone, { operatorId: operatorOfTrip(this.services, tripId),
           title: 'Vé được ghi nhận vắng mặt',
           body: `Tài xế đã ghi nhận bạn vắng mặt tại chuyến ${tripId} (Ghế ${seatCode}). Vui lòng liên hệ tổng đài nếu có nhầm lẫn.`,
           type: 'NO_SHOW',
@@ -304,7 +305,7 @@ export class FleetBusEventBridge extends EventEmitter {
           if (trip && trip.manifest) {
             for (const p of trip.manifest) {
               if (p.passenger_phone) {
-                trackingService.sendNotification(p.passenger_phone, {
+                trackingService.sendNotification(p.passenger_phone, { operatorId: operatorOfTrip(this.services, tripId),
                   title: 'Thông báo sự cố chuyến đi',
                   body: `Chuyến ${tripId} gặp sự cố: ${incident.description}. Dự kiến trễ khoảng ${incident.estimated_delay_minutes || 0} phút.`,
                   type: 'DELAY',
@@ -411,7 +412,7 @@ export class FleetBusEventBridge extends EventEmitter {
           if (trip && trip.manifest) {
             for (const p of trip.manifest) {
               if (p.passenger_phone) {
-                trackingService.sendNotification(p.passenger_phone, {
+                trackingService.sendNotification(p.passenger_phone, { operatorId: operatorOfTrip(this.services, tripId),
                   title: 'Đổi xe khẩn cấp',
                   body: `Chuyến xe của bạn được chuyển sang xe biển số mới ${newPlate} do: ${reason}. Vị trí ghế của bạn được giữ nguyên!`,
                   type: 'SWAP',
@@ -450,7 +451,7 @@ export class FleetBusEventBridge extends EventEmitter {
           if (trip && trip.manifest) {
             for (const p of trip.manifest) {
               if (p.passenger_phone) {
-                trackingService.sendNotification(p.passenger_phone, {
+                trackingService.sendNotification(p.passenger_phone, { operatorId: operatorOfTrip(this.services, tripId),
                   title: 'Thông báo trễ chuyến',
                   body: `Chuyến đi bị hoãn ${delayMinutes} phút do ${reason}. Quý khách vui lòng theo dõi trên Radar trực tiếp.`,
                   type: 'DELAY',
@@ -581,9 +582,9 @@ export class FleetBusEventBridge extends EventEmitter {
       }
     });
 
-    this.on('WALLET_CREDIT_REQUESTED', ({ ticketId, phone, amountVnd }) => {
+    this.on('WALLET_CREDIT_REQUESTED', ({ tripId, ticketId, phone, amountVnd }) => {
       if (paymentService && typeof paymentService.creditWallet === 'function') {
-        paymentService.creditWallet(phone, amountVnd, ticketId, 'Tiền thừa khi lên xe');
+        paymentService.creditWallet(phone, amountVnd, ticketId, 'Tiền thừa khi lên xe', operatorOfTrip(this.services, tripId));
       }
     });
 
