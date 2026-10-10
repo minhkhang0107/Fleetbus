@@ -78,7 +78,7 @@ class DriverManifestScreen extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   child: Row(children: [
                     SizedBox(width: 52, child: Text(p.seat, style: dmono(size: 18))),
-                    Expanded(child: Text(p.name, style: dsans(size: 16, weight: FontWeight.w600))),
+                    Expanded(child: Text(p.homeDropoff != null ? '${p.name} · trả tận nhà: ${p.homeDropoff}' : p.name, style: dsans(size: 16, weight: FontWeight.w600))),
                   ]),
                 ),
             ]),
@@ -195,8 +195,13 @@ class _PassengerRow extends StatelessWidget {
                 Text(p.name, style: dsans(size: 15, weight: FontWeight.w600)),
                 Text.rich(TextSpan(children: [
                   TextSpan(text: p.phone, style: dmono(size: 12, weight: FontWeight.w500, color: DTokens.muted)),
-                  TextSpan(text: ' · ${p.pay} · xuống ${DriverScope.of(context).stopById(p.to).short}', style: dsans(size: 12, color: DTokens.muted)),
+                  TextSpan(text: ' · ${p.pay} · xuống ${p.homeDropoff != null ? 'tận nhà' : DriverScope.of(context).stopById(p.to).short}', style: dsans(size: 12, color: DTokens.muted)),
                 ])),
+                if (p.homePickup != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text('Đón tận nhà${p.pickupWindow != null ? ' ${p.pickupWindow}' : ''}: ${p.homePickup}${p.homeNote.isNotEmpty ? ' · ${p.homeNote}' : ''}', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.warnInk)),
+                  ),
               ]),
             ),
             pill,

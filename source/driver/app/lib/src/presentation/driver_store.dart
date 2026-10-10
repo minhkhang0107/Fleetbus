@@ -39,6 +39,12 @@ class Passenger {
     this.status = PaxStatus.waiting,
     this.boardedAt,
     this.hail = false,
+    this.homePickup,
+    this.homeDropoff,
+    this.homeNote = '',
+    this.pickupWindow,
+    this.homeLat,
+    this.homeLng,
   });
   final String ticketId;
   final String seat;
@@ -52,6 +58,15 @@ class Passenger {
   final PaxStatus status;
   final int? boardedAt;
   final bool hail;
+  /// Home pickup / drop-off address (spec 3.1); the passenger still rides from [from] to [to].
+  final String? homePickup;
+  final String? homeDropoff;
+  final String homeNote;
+  /// "05:00–05:40": the window promised to a home pickup.
+  final String? pickupWindow;
+  /// Pinned position of the home pickup, drawn on the driver map.
+  final double? homeLat;
+  final double? homeLng;
   bool get codDue => cod > 0 && !paid;
 
   factory Passenger.fromJson(Map<String, dynamic> j) {
@@ -77,8 +92,22 @@ class Passenger {
       status: switch (j['boarding_status']) { 'BOARDED' => PaxStatus.boarded, 'NO_SHOW' => PaxStatus.noShow, _ => PaxStatus.waiting },
       boardedAt: boardedAt == null ? null : boardedAt.hour * 60 + boardedAt.minute,
       hail: j['is_hail_passenger'] == true,
+      homePickup: j['home_pickup']?['address'],
+      homeDropoff: j['home_dropoff']?['address'],
+      homeNote: '${j['home_pickup']?['note'] ?? j['home_dropoff']?['note'] ?? ''}',
+      pickupWindow: _window(j['home_pickup']),
+      homeLat: (j['home_pickup']?['lat'] as num?)?.toDouble(),
+      homeLng: (j['home_pickup']?['lng'] as num?)?.toDouble(),
     );
   }
+}
+
+String? _window(dynamic home) {
+  final from = DateTime.tryParse('${home?['window_from'] ?? ''}')?.toUtc().add(const Duration(hours: 7));
+  final to = DateTime.tryParse('${home?['window_to'] ?? ''}')?.toUtc().add(const Duration(hours: 7));
+  if (from == null || to == null) return null;
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${two(from.hour)}:${two(from.minute)}–${two(to.hour)}:${two(to.minute)}';
 }
 
 class QueuedAction {

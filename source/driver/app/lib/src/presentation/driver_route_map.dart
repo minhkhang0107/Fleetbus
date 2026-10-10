@@ -114,6 +114,18 @@ class _DriverRouteMapState extends State<DriverRouteMap> {
                   Container(width: 12, height: 12, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white, border: Border.all(color: DTokens.bg, width: 3))),
                 ]),
               ),
+          // Home pickups still waiting: a house the driver (or the pickup run) has to reach.
+          for (final p in store.manifest)
+            if (p.status == PaxStatus.waiting && p.homeLat != null && p.homeLng != null)
+              Marker(
+                point: LatLng(p.homeLat!, p.homeLng!),
+                width: 28,
+                height: 28,
+                child: Tooltip(
+                  message: '${p.seat} · ${p.homePickup ?? ''}',
+                  child: Container(decoration: BoxDecoration(shape: BoxShape.circle, color: DTokens.warn, border: Border.all(color: Colors.white, width: 2)), child: const Icon(Icons.home, size: 15, color: Colors.white)),
+                ),
+              ),
           Marker(
             point: LatLng(store.lat, store.lng),
             width: 30,

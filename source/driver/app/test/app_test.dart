@@ -284,4 +284,19 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     store.dispose();
   });
+
+  test('a home pickup passenger carries the address, note, window and pin', () {
+    final p = Passenger.fromJson({
+      'ticket_id': 'tkt_1',
+      'seat_code': 'A05',
+      'passenger_name': 'Nguyễn An',
+      'phone_masked': '098****321',
+      'payment_method': 'VIETQR',
+      'pickup_stop_id': 'stp_hn_gb',
+      'dropoff_stop_id': 'stp_th_pb',
+      'boarding_status': 'ISSUED',
+      'home_pickup': {'address': '12 ngõ 34 Giải Phóng', 'lat': 20.99, 'lng': 105.84, 'note': 'cổng xanh', 'window_from': '2026-08-27T22:00:00Z', 'window_to': '2026-08-27T22:40:00Z'},
+    });
+    expect((p.homePickup, p.homeNote, p.pickupWindow, p.homeLat, p.homeLng, p.homeDropoff), ('12 ngõ 34 Giải Phóng', 'cổng xanh', '05:00–05:40', 20.99, 105.84, null));
+  });
 }
