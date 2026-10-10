@@ -3,6 +3,8 @@
  * Implements PAX-004 (Home), PAX-005 (Location Picker), PAX-006 (Search Results), PAX-007 (Trip Detail).
  */
 
+import { stopCoords, routeShape } from '../../../core/geo.js';
+
 export const STATIONS_DATABASE = [
   {
     station_id: 'stp_hn_gb',
@@ -217,9 +219,22 @@ export class PassengerSearchService {
       return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
     }
 
+    const stops = (trip.stops || []).map(s => {
+      const coords = stopCoords(s.stop_id);
+      if (coords) {
+        return { ...s, lat: coords.lat, lng: coords.lng };
+      }
+      const { lat, lng, ...rest } = s;
+      return rest;
+    });
+
     return {
       success: true,
-      data: trip
+      data: {
+        ...trip,
+        stops,
+        route_shape: routeShape(trip.trip_id) || null
+      }
     };
   }
 

@@ -15,6 +15,14 @@ function sendBoardingError(res, result, status = 400) {
   sendError(res, result.error, result.code, status);
 }
 
+// App sends telemetry every 5 s; offline batches go through batch-replay without rate limit.
+export const lastAcceptedTelemetry = new Map();
+
+export function isTelemetryRateLimited(tripId, now = Date.now()) {
+  const lastTime = lastAcceptedTelemetry.get(tripId);
+  return typeof lastTime === 'number' && now - lastTime < 1000;
+}
+
 export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   const { driverService } = services;
 
@@ -106,6 +114,10 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
+      if (isTelemetryRateLimited(tripId)) {
+        sendError(res, 'Gửi vị trí quá dày, tối thiểu 1 giây một lần', 'TELEMETRY_RATE_LIMITED', 429);
+        return;
+      }
       const result = driverService.recordTelemetry(tripId, {
         lat: body.lat,
         lng: body.lng,
@@ -114,6 +126,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
         is_offline: body.is_offline
       });
       if (result.success) {
+        lastAcceptedTelemetry.set(tripId, Date.now());
         sendSuccess(res, result);
       } else {
         sendError(res, result.error, result.code || 'TELEMETRY_ERROR', result.code === 'TRIP_NOT_FOUND' ? 404 : 400);

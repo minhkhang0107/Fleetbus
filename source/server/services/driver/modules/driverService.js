@@ -15,6 +15,7 @@ import { getTicketSecret } from '../../../config.js';
 import { maskPhone, validateVietnamPhone } from '../../passenger/core/formatters.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
+import { stopCoords, routeShape } from '../../../core/geo.js';
 
 const CHANGE_METHODS = ['CASH_RETURNED', 'REST_STOP_DEBT_RECEIPT', 'WALLET_CREDIT'];
 const NO_SHOW_GRACE_MINUTES = 10;
@@ -226,7 +227,20 @@ export class DriverCockpitService {
   }
 
   _publicTrip(trip) {
-    return { ...trip, manifest: trip.manifest.map(p => this._publicPassenger(p)) };
+    const stops = (trip.stops || []).map(s => {
+      const coords = stopCoords(s.stop_id);
+      if (coords) {
+        return { ...s, lat: coords.lat, lng: coords.lng };
+      }
+      const { lat, lng, ...rest } = s;
+      return rest;
+    });
+    return {
+      ...trip,
+      stops,
+      route_shape: routeShape(trip.trip_id) || null,
+      manifest: (trip.manifest || []).map(p => this._publicPassenger(p))
+    };
   }
 
   /**
