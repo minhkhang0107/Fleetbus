@@ -1,6 +1,11 @@
 // Bus companies on the platform. Mutable: the platform admin creates, edits and (de)activates them.
 const SEED_CREATED_AT = '2026-10-01T00:00:00.000Z';
 
+/** Pickup / drop-off offer of a company that only serves its fixed stops (spec 3). */
+export function defaultServiceConfig() {
+  return { pickup_modes: ['FIXED_STOP'], dropoff_modes: ['FIXED_LOCATION'], allow_home_to_home: false, approaching_threshold_minutes: 10, service_areas: [] };
+}
+
 export const OPERATORS = [
   {
     operator_id: 'op_saomai',
@@ -13,7 +18,18 @@ export const OPERATORS = [
     memo_prefix: 'SAOMAI',
     default: true,
     active: true,
-    created_at: SEED_CREATED_AT
+    created_at: SEED_CREATED_AT,
+    // Home pickup inside Hà Nội, home drop-off in Thanh Hóa city.
+    service_config: {
+      pickup_modes: ['FIXED_STOP', 'HOME_PICKUP'],
+      dropoff_modes: ['FIXED_LOCATION', 'HOME_DROPOFF'],
+      allow_home_to_home: true,
+      approaching_threshold_minutes: 10,
+      service_areas: [
+        { area_id: 'sa_saomai_hn', name: 'Nội thành Hà Nội', kind: 'PICKUP', polygon: [[21.075, 105.755], [21.075, 105.885], [20.945, 105.885], [20.945, 105.755]], fee_vnd: 50000, lead_time_minutes: 120, service_hours: { from: '04:30', to: '22:00' }, active: true },
+        { area_id: 'sa_saomai_th', name: 'TP Thanh Hóa', kind: 'DROPOFF', polygon: [[19.845, 105.725], [19.845, 105.835], [19.755, 105.835], [19.755, 105.725]], fee_vnd: 30000, lead_time_minutes: 0, service_hours: { from: '00:00', to: '23:59' }, active: true }
+      ]
+    }
   },
   {
     operator_id: 'op_xuyenviet',
@@ -25,7 +41,8 @@ export const OPERATORS = [
     bank: { bin: '970436', bank_name: 'Vietcombank', account_number: '0071000123456', account_name: 'XUYEN VIET LINES' },
     memo_prefix: 'XUYENVIET',
     active: true,
-    created_at: SEED_CREATED_AT
+    created_at: SEED_CREATED_AT,
+    service_config: defaultServiceConfig()
   }
 ];
 
@@ -56,7 +73,9 @@ export function publicOperatorProfile(op) {
     short_name: op.short_name,
     hotline: op.hotline,
     primary_color: op.primary_color,
-    onboarding_url: `/o/${op.code}`
+    onboarding_url: `/o/${op.code}`,
+    pickup_modes: [...(op.service_config?.pickup_modes || ['FIXED_STOP'])],
+    dropoff_modes: [...(op.service_config?.dropoff_modes || ['FIXED_LOCATION'])]
   };
 }
 
@@ -89,7 +108,7 @@ function cleanBank(bank) {
 }
 
 export function listOperators() {
-  return OPERATORS.map(op => ({ ...op, bank: { ...op.bank } }));
+  return OPERATORS.map(op => structuredClone(op));
 }
 
 export function createOperator(input = {}, now = Date.now()) {
@@ -109,7 +128,8 @@ export function createOperator(input = {}, now = Date.now()) {
     bank: cleanBank(fields.bank),
     memo_prefix: fields.memo_prefix,
     active: true,
-    created_at: new Date(now).toISOString()
+    created_at: new Date(now).toISOString(),
+    service_config: defaultServiceConfig()
   };
   OPERATORS.push(op);
   return { ok: true, operator: op };

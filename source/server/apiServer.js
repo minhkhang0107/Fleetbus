@@ -23,6 +23,7 @@ import { handleDriverRoutes } from './routes/driverRoutes.js';
 import { handleManagerRoutes } from './routes/managerRoutes.js';
 import { handleWebhookRoutes } from './routes/webhookRoutes.js';
 import { handlePlatformRoutes } from './routes/platformRoutes.js';
+import { handleServiceConfigRoutes } from './routes/serviceConfigRoutes.js';
 import { renderOnboardingPage, renderOnboardingNotFound } from './web/onboarding.js';
 import { findOperatorByCode } from './core/operators.js';
 import { FleetBusEventBridge } from './core/fleetBusEventBridge.js';
@@ -62,6 +63,7 @@ export function createFleetBusServer(customServices = {}) {
       if (handleManagerRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleWebhookRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handlePlatformRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handleServiceConfigRoutes(req, res, pathname, parsedUrl, services)) return;
     } catch (err) {
       sendError(res, err.message, 'INTERNAL_SERVER_ERROR', 500);
       return;
