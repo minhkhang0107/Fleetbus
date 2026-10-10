@@ -121,6 +121,7 @@ class Ticket {
     required this.dep,
     required this.seat,
     required this.pickup,
+    this.dropoff = '',
     required this.paid,
     required this.name,
     required this.status,
@@ -134,6 +135,7 @@ class Ticket {
   final String dep;
   final String seat;
   final String pickup;
+  final String dropoff;
   final int paid;
   final String name;
   String plate;
@@ -165,6 +167,7 @@ class Ticket {
       dep: _hhmm(dep),
       seat: j['seat_code'] ?? '',
       pickup: '${j['pickup_stop'] ?? ''}'.replaceFirst('Bến xe ', ''),
+      dropoff: '${j['dropoff_stop'] ?? ''}'.replaceFirst('Bến xe ', ''),
       paid: (j['fare_vnd'] as num?)?.toInt() ?? 0,
       name: j['passenger_name'] ?? '',
       status: status,

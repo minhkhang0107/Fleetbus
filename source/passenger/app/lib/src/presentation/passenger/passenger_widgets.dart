@@ -52,6 +52,47 @@ ThemeData passengerTheme() {
   );
 }
 
+/// Tablets (portrait from 720 dp) and desktops: screens put their blocks side by side instead of one long column.
+bool pWide(BuildContext context) => MediaQuery.sizeOf(context).width >= 720;
+
+/// Caps the width of [child] and centers it, for forms and single lists on wide screens.
+class PMaxWidth extends StatelessWidget {
+  const PMaxWidth({super.key, required this.child, this.maxWidth = 600});
+  final Widget child;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) => Align(
+        alignment: Alignment.topCenter,
+        heightFactor: 1,
+        child: ConstrainedBox(constraints: BoxConstraints(maxWidth: maxWidth), child: child),
+      );
+}
+
+/// Scrolling body made of two groups of blocks: one column on phones ([left] then [right]),
+/// two columns side by side on wide screens.
+class PSplit extends StatelessWidget {
+  const PSplit({super.key, required this.left, required this.right, this.padding = const EdgeInsets.all(16), this.leftFlex = 1, this.rightFlex = 1});
+  final List<Widget> left;
+  final List<Widget> right;
+  final EdgeInsets padding;
+  final int leftFlex;
+  final int rightFlex;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!pWide(context)) return ListView(padding: padding, children: [...left, ...right]);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(flex: leftFlex, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: left)),
+        const SizedBox(width: 24),
+        Expanded(flex: rightFlex, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: right)),
+      ]),
+    );
+  }
+}
+
 /// White app bar with a back arrow, a title and an optional subtitle (no fake status bar).
 class TopBar extends StatelessWidget implements PreferredSizeWidget {
   const TopBar({super.key, required this.title, this.subtitle, this.trailing, this.showBack = true, this.onBack, this.large = false});
@@ -250,11 +291,12 @@ class BottomAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         decoration: const BoxDecoration(color: PTokens.surface, border: Border(top: BorderSide(color: PTokens.line))),
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        padding: EdgeInsets.fromLTRB(pWide(context) ? 24 : 16, 12, pWide(context) ? 24 : 16, 12),
         child: SafeArea(
           top: false,
           child: column
-              ? Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: _gap(children))
+              // Stacked buttons keep a button width on wide screens instead of spanning the screen.
+              ? PMaxWidth(maxWidth: 480, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: _gap(children)))
               : Row(children: _gap(children)),
         ),
       );
@@ -352,6 +394,7 @@ Future<T?> showAppSheet<T>(BuildContext context, {required Widget Function(Build
     isDismissible: dismissible,
     enableDrag: dismissible,
     backgroundColor: PTokens.surface,
+    constraints: const BoxConstraints(maxWidth: 600),
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
     builder: (ctx) => Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),

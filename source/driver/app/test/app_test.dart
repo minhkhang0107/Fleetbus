@@ -1,7 +1,17 @@
 import 'dart:convert';
 
+import 'package:app/src/presentation/driver_cockpit_dashboard.dart';
+import 'package:app/src/presentation/driver_end_trip_screen.dart';
+import 'package:app/src/presentation/driver_incident_dialog.dart';
+import 'package:app/src/presentation/driver_login_screen.dart';
+import 'package:app/src/presentation/driver_manifest_screen.dart';
+import 'package:app/src/presentation/driver_qr_scanner_screen.dart';
+import 'package:app/src/presentation/driver_readiness_screen.dart';
 import 'package:app/src/presentation/driver_store.dart';
+import 'package:app/src/presentation/driver_widgets.dart';
+import 'package:app/src/presentation/main_shell_screen.dart';
 import 'package:app/src/service/driver_api_service.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -162,6 +172,20 @@ void main() {
     store.dispose();
   });
 
+  test('the stop screen lists who gets off there, once they are on board', () async {
+    final store = await started();
+    final a01 = store.manifest.firstWhere((p) => p.seat == 'A01');
+    expect(store.dropOffPassengers, isEmpty);
+    expect(await store.board(a01), isNull);
+    store.leaveStop();
+    await store.arrive();
+    expect(store.dropOffPassengers, isEmpty, reason: 'A01 gets off at Thanh Hóa, not Ninh Bình');
+    store.leaveStop();
+    await store.arrive();
+    expect(store.dropOffPassengers.map((p) => p.seat), ['A01'], reason: 'A02 never boarded, so only A01 gets off');
+    store.dispose();
+  });
+
   test('a lost network lists the action for later instead of failing silently', () async {
     final store = DriverStore(api: DriverApiClientService(baseUrl: 'http://test', client: MockClient((_) async => throw http.ClientException('down'))));
     expect(await store.login('TX8821', '123456'), contains('Không kết nối được'));
@@ -173,4 +197,38 @@ void main() {
     expect(store.incident!.delay, 15);
     store.dispose();
   });
+
+  // The dashboard tablet is 1280x720 landscape; phones stay the reference design.
+  for (final (name, size) in const [('tablet 1280x720', Size(1280, 720)), ('phone 390x844', Size(390, 844))]) {
+    testWidgets('every driver screen lays out without overflow on a $name', (tester) async {
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        tester.platformDispatcher.clearTextScaleFactorTestValue();
+      });
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1.0;
+      // The test font draws every glyph 1 em wide; Geist averages about 0.6 em, so scale text to match it.
+      tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+      final store = storeWithServer();
+      await tester.runAsync(() async {
+        expect(await store.login('TX8821', '123456'), isNull);
+      });
+      const screens = <Widget>[DriverLoginScreen(), MainShellScreen(), DriverReadinessScreen(), DriverCockpitDashboard(), DriverManifestScreen(), DriverQrScannerScreen(), DriverEndTripScreen(), DriverIncidentScreen()];
+      for (final screen in screens) {
+        await tester.pumpWidget(DriverScope(store: store, child: MaterialApp(home: screen)));
+        await tester.pump();
+        expect(tester.takeException(), isNull, reason: '${screen.runtimeType} on $name');
+      }
+      if (size.width >= 840) {
+        // Wide: the login form keeps a readable width instead of spanning the screen.
+        await tester.pumpWidget(DriverScope(store: store, child: const MaterialApp(home: DriverLoginScreen())));
+        await tester.pump();
+        expect(tester.getSize(find.byType(TextField).first).width, lessThanOrEqualTo(440));
+        expect(dWide(tester.element(find.byType(DriverLoginScreen))), isTrue);
+      }
+      await tester.pumpWidget(const SizedBox());
+      store.dispose();
+    });
+  }
 }

@@ -15,7 +15,7 @@ class PassengerSplashScreen extends StatelessWidget {
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 480), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Expanded(
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                 Container(
@@ -39,7 +39,7 @@ class PassengerSplashScreen extends StatelessWidget {
               label: 'Xem chuyến, đăng nhập sau',
               onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const PassengerMainShell())),
             ),
-          ]),
+          ]))),
         ),
       ),
     );

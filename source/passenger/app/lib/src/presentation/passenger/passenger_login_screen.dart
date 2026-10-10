@@ -16,14 +16,14 @@ class PassengerLoginScreen extends StatelessWidget {
       appBar: const TopBar(title: 'Đăng nhập'),
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: OtpForm(
+        child: PMaxWidth(maxWidth: 480, child: OtpForm(
           intro: 'Nhập số điện thoại để nhận mã xác thực.',
           confirmLabel: 'Xác nhận',
           onVerified: (phone) {
             Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const PassengerMainShell()), (_) => false);
             showToast(context, 'Đã đăng nhập');
           },
-        ),
+        )),
       ),
     );
   }

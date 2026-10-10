@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
@@ -21,6 +23,8 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
   bool _loading = true;
   String? _error;
 
+  Timer? _poll;
+
   @override
   void initState() {
     super.initState();
@@ -31,7 +35,26 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
         _loading = false;
         _error = error;
       });
+      if (widget.ticket.status == TicketStatus.active) {
+        // FLOW-06: the passenger app asks again every 10 seconds.
+        _poll = Timer.periodic(const Duration(seconds: 10), (_) async {
+          if (widget.ticket.status != TicketStatus.active) {
+            _poll?.cancel();
+            return;
+          }
+          await PassengerScope.read(context).loadPass(widget.ticket);
+          if (widget.ticket.status != TicketStatus.active) {
+            _poll?.cancel();
+          }
+        });
+      }
     });
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
   }
 
   Future<void> _reissue(PassengerStore store) async {
@@ -112,7 +135,7 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
     };
     return Scaffold(
       appBar: TopBar(title: 'Vé lên xe', trailing: pill),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
+      body: PSplit(left: [
         if (t.delay > 0 && usable) ...[
           Material(
             color: PTokens.warnSoft,
@@ -167,7 +190,8 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
           )
         else if (t.status == TicketStatus.boarded)
           AppCard(child: Text('Bạn đã lên xe. Vé không còn mã QR để dùng lại hay chia sẻ.', style: sans(size: 14, color: PTokens.muted))),
-        gap(14),
+      ], right: [
+        if (!pWide(context)) gap(14),
         AppCard(
           padding: const EdgeInsets.all(16),
           child: Column(children: [

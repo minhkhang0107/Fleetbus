@@ -30,7 +30,7 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
           bottom: false,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            child: PMaxWidth(maxWidth: 720, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Text('Vé của tôi', style: sans(size: 22, weight: FontWeight.w700)),
               gap(14),
               Container(
@@ -41,7 +41,7 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
                   _tab('Lịch sử', _history, () => setState(() => _history = true)),
                 ]),
               ),
-            ]),
+            ])),
           ),
         ),
       ),
@@ -56,12 +56,20 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
               )
             : RefreshIndicator(
                 onRefresh: store.loadTickets,
-                child: ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: list.length,
-                  separatorBuilder: (_, __) => gap(12),
-                  itemBuilder: (_, i) => TicketCard(ticket: list[i]),
-                ),
+                child: pWide(context)
+                    // Two tickets per row on wide screens.
+                    ? LayoutBuilder(builder: (context, box) {
+                        final w = (box.maxWidth - 48 - 16) / 2;
+                        return ListView(padding: const EdgeInsets.all(24), children: [
+                          Wrap(spacing: 16, runSpacing: 12, children: [for (final t in list) SizedBox(width: w, child: TicketCard(ticket: t))]),
+                        ]);
+                      })
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: list.length,
+                        separatorBuilder: (_, __) => gap(12),
+                        itemBuilder: (_, i) => TicketCard(ticket: list[i]),
+                      ),
               ),
       ),
     ]);
@@ -138,9 +146,15 @@ class TicketCard extends StatelessWidget {
             if (active) ...[
               gap(10),
               Row(children: [
-                Expanded(child: PrimaryButton(label: 'Mở vé', onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerTicketQrScreen(ticket: t))))),
+                Expanded(child: PrimaryButton(label: 'Mở vé', onPressed: () {
+                  final store = PassengerScope.read(context);
+                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerTicketQrScreen(ticket: t))).then((_) => store.loadTickets());
+                })),
                 const SizedBox(width: 8),
-                Expanded(child: GhostButton(label: 'Theo dõi xe', onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerLiveRadarScreen(ticket: t))))),
+                Expanded(child: GhostButton(label: 'Theo dõi xe', onPressed: () {
+                  final store = PassengerScope.read(context);
+                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerLiveRadarScreen(ticket: t))).then((_) => store.loadTickets());
+                })),
               ]),
             ],
           ]),

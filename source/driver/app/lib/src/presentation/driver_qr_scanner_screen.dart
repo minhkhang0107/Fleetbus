@@ -83,18 +83,42 @@ class DriverQrScannerScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final frame = Center(
+      child: Container(
+        width: 240,
+        height: 240,
+        decoration: BoxDecoration(border: Border.all(color: const Color(0xFF22C55E), width: 3), borderRadius: BorderRadius.circular(16)),
+        child: Center(child: Container(height: 2, margin: const EdgeInsets.symmetric(horizontal: 8), color: const Color(0xCC22C55E))),
+      ),
+    );
+    final pinButton = BigButton(label: 'Khách không có vé trên máy: nhập PIN', outline: true, color: const Color(0xFFE2E8F0), height: dWide(context) ? 72 : 56, onPressed: () => _pinEntry(context));
+    if (dWide(context)) {
+      // Tablet: camera frame on the left, the instruction and the PIN path on the right.
+      return Scaffold(
+        backgroundColor: Colors.black,
+        appBar: const DHeader(title: 'Quét vé lên xe', close: true),
+        body: Row(children: [
+          Expanded(child: frame),
+          Container(
+            width: 420,
+            color: DTokens.bg,
+            padding: const EdgeInsets.all(24),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('Đưa mã QR trên điện thoại hoặc vé in của khách vào khung', style: dsans(size: 20, weight: FontWeight.w600, height: 1.4)),
+              const SizedBox(height: 12),
+              Text('Không quét được thì hỏi khách mã PIN dự phòng 6 số in trên vé.', style: dsans(size: 16, color: DTokens.sub, height: 1.5)),
+              const SizedBox(height: 24),
+              pinButton,
+            ]),
+          ),
+        ]),
+      );
+    }
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: const DHeader(title: 'Quét vé lên xe', close: true),
       body: Stack(fit: StackFit.expand, children: [
-        Center(
-          child: Container(
-          width: 240,
-          height: 240,
-          decoration: BoxDecoration(border: Border.all(color: const Color(0xFF22C55E), width: 3), borderRadius: BorderRadius.circular(16)),
-          child: Center(child: Container(height: 2, margin: const EdgeInsets.symmetric(horizontal: 8), color: const Color(0xCC22C55E))),
-          ),
-        ),
+        frame,
         Positioned(
           bottom: 32,
           left: 16,
@@ -105,7 +129,7 @@ class DriverQrScannerScreen extends StatelessWidget {
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          child: BigButton(label: 'Khách không có vé trên máy: nhập PIN', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => _pinEntry(context)),
+          child: pinButton,
         ),
       ),
     );

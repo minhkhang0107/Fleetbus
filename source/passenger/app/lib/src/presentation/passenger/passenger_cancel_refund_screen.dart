@@ -54,7 +54,7 @@ class PassengerDelayNoticeScreen extends StatelessWidget {
     final t = ticket;
     return Scaffold(
       appBar: const TopBar(title: 'Thông báo chuyến'),
-      body: ListView(padding: const EdgeInsets.fromLTRB(16, 20, 16, 16), children: [
+      body: PMaxWidth(maxWidth: 720, child: ListView(padding: const EdgeInsets.fromLTRB(16, 20, 16, 16), children: [
         const Align(alignment: Alignment.centerLeft, child: Pill('Nhà xe công bố lúc 06:35', PillKind.warn)),
         gap(8),
         Text('Chuyến của bạn khởi hành chậm ${t.delay} phút', style: sans(size: 24, weight: FontWeight.w700, height: 1.25)),
@@ -88,7 +88,7 @@ class PassengerDelayNoticeScreen extends StatelessWidget {
             TextSpan(text: 'Chuyến chậm hơn 30 phút nên hủy lúc này được hoàn đủ ${vnd(t.paid)} về tài khoản đã chuyển, không mất phí.', style: sans(size: 13, color: const Color(0xFF1E40AF), height: 1.5)),
           ])),
         ),
-      ]),
+      ])),
       bottomNavigationBar: BottomAction(column: true, children: [
         PrimaryButton(label: 'Giữ vé, đi lúc ${t.departure}', onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => PassengerTicketQrScreen(ticket: t)))),
         GhostButton(label: 'Hủy vé, hoàn ${vnd(t.paid)}', color: PTokens.danger, borderColor: const Color(0xFFFCA5A5), onPressed: () => confirmCancelTicket(context, t)),

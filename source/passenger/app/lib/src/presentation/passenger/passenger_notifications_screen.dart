@@ -20,7 +20,7 @@ class PassengerNotificationsScreen extends StatelessWidget {
       ),
       const Divider(height: 1, color: PTokens.line),
       Expanded(
-        child: notices.isEmpty
+        child: PMaxWidth(maxWidth: 720, child: notices.isEmpty
             ? Padding(padding: const EdgeInsets.all(16), child: AppCard(child: Text('Chưa có thông báo', textAlign: TextAlign.center, style: sans(size: 15, weight: FontWeight.w600))))
             : RefreshIndicator(
           onRefresh: store.loadNotices,
@@ -45,7 +45,7 @@ class PassengerNotificationsScreen extends StatelessWidget {
             );
           },
         ),
-        ),
+        )),
       ),
     ]);
   }

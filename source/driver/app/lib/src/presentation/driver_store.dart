@@ -171,6 +171,8 @@ class DriverStore extends ChangeNotifier {
   bool get lastStop => stops.isNotEmpty && stopIndex == stops.length - 1;
   int get speed => moving ? 62 : 0;
   List<Passenger> get atStopPassengers => manifest.where((p) => p.from == stop.id && !p.hail).toList();
+  /// Passengers on board who get off at the current stop, so the crew can open the hold for them.
+  List<Passenger> get dropOffPassengers => manifest.where((p) => p.to == stop.id && p.status == PaxStatus.boarded).toList();
   int get boardedCount => manifest.where((p) => p.status == PaxStatus.boarded).length;
   int get hailCount => manifest.where((p) => p.hail).length;
   int get debtIssued => debts.fold(0, (a, d) => a + d.amount);

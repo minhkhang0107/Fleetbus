@@ -39,7 +39,7 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
         Container(
           color: PTokens.surface,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          child: Column(children: [
+          child: PMaxWidth(maxWidth: 720, child: Column(children: [
             Row(children: [
               for (final d in PassengerStore.dates) ...[
                 if (d != PassengerStore.dates.first) const SizedBox(width: 8),
@@ -57,7 +57,7 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
               const SizedBox(width: 8),
               _Choice(label: 'Nhiều chỗ', selected: store.sort == 'seats', onTap: () => store.setSort('seats'), pill: true),
             ]),
-          ]),
+          ])),
         ),
         const Divider(height: 1, color: PTokens.line),
         Expanded(
@@ -85,19 +85,30 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
                     ]),
                   ),
                 )
-              : ListView(padding: const EdgeInsets.all(16), children: [
-                  for (final t in open) ...[_TripCard(trip: t), gap(12)],
-                  for (final t in full)
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(borderRadius: BorderRadius.circular(PTokens.radius), border: Border.all(color: PTokens.lineStrong)),
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text('${t.dep} · ${t.type} · Hết chỗ', style: sans(size: 14, weight: FontWeight.w600, color: PTokens.muted)),
-                        gap(4),
-                        Text('Bến xe ${t.from} → ${t.to}', style: sans(size: 13, color: PTokens.muted)),
-                      ]),
-                    ),
-                ]),
+              : LayoutBuilder(builder: (context, box) {
+                  // Two trip cards per row on wide screens, one on phones.
+                  final cols = pWide(context) ? 2 : 1;
+                  final pad = cols == 2 ? 24.0 : 16.0;
+                  final cardWidth = (box.maxWidth - pad * 2 - 16 * (cols - 1)) / cols;
+                  return ListView(padding: EdgeInsets.all(pad), children: [
+                    Wrap(spacing: 16, runSpacing: 12, children: [
+                      for (final t in open) SizedBox(width: cardWidth, child: _TripCard(trip: t)),
+                      for (final t in full)
+                        SizedBox(
+                          width: cardWidth,
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(borderRadius: BorderRadius.circular(PTokens.radius), border: Border.all(color: PTokens.lineStrong)),
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text('${t.dep} · ${t.type} · Hết chỗ', style: sans(size: 14, weight: FontWeight.w600, color: PTokens.muted)),
+                              gap(4),
+                              Text('Bến xe ${t.from} → ${t.to}', style: sans(size: 13, color: PTokens.muted)),
+                            ]),
+                          ),
+                        ),
+                    ]),
+                  ]);
+                }),
         ),
       ]),
     );

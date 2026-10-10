@@ -51,6 +51,36 @@ ThemeData driverTheme() {
   );
 }
 
+/// The dashboard tablet is 1280x720 landscape: from this width screens go side by side instead of
+/// stretching phone layouts edge to edge.
+bool dWide(BuildContext context) => MediaQuery.sizeOf(context).width >= 840;
+
+/// Caps the width of [child] and centers it, for forms and lists that read badly at full tablet width.
+class DMaxWidth extends StatelessWidget {
+  const DMaxWidth({super.key, required this.child, this.maxWidth = 720});
+  final Widget child;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) => Align(
+        alignment: Alignment.topCenter,
+        heightFactor: 1,
+        child: ConstrainedBox(constraints: BoxConstraints(maxWidth: maxWidth), child: child),
+      );
+}
+
+/// Confirm / cancel pair of a sheet: stacked on phones, side by side (cancel left) on the tablet.
+class SheetActions extends StatelessWidget {
+  const SheetActions({super.key, required this.primary, required this.secondary});
+  final Widget primary;
+  final Widget secondary;
+
+  @override
+  Widget build(BuildContext context) => dWide(context)
+      ? Row(crossAxisAlignment: CrossAxisAlignment.end, children: [Expanded(child: secondary), const SizedBox(width: 10), Expanded(child: primary)])
+      : Column(mainAxisSize: MainAxisSize.min, children: [primary, const SizedBox(height: 8), secondary]);
+}
+
 /// Tall action button; [subtitle] adds a second line (72 dp primary actions).
 class BigButton extends StatelessWidget {
   const BigButton({super.key, required this.label, required this.onPressed, this.color = DTokens.primary, this.foreground = Colors.white, this.subtitle, this.height = 56, this.outline = false, this.icon});
@@ -127,10 +157,11 @@ class Panel extends StatelessWidget {
 }
 
 class Stat extends StatelessWidget {
-  const Stat(this.label, this.value, {super.key, this.color = DTokens.ink});
+  const Stat(this.label, this.value, {super.key, this.color = DTokens.ink, this.size = 20});
   final String label;
   final String value;
   final Color color;
+  final double size;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -138,7 +169,7 @@ class Stat extends StatelessWidget {
         decoration: BoxDecoration(color: DTokens.bg, borderRadius: BorderRadius.circular(8)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label, style: dsans(size: 12, color: color == DTokens.ink ? DTokens.muted : color)),
-          Text(value, style: dmono(size: 20, color: color)),
+          Text(value, style: dmono(size: size, color: color)),
         ]),
       );
 }
@@ -182,6 +213,7 @@ Future<T?> showDriverSheet<T>(BuildContext context, {required Widget Function(Bu
       isScrollControlled: true,
       backgroundColor: DTokens.panel,
       barrierColor: const Color(0xB8020617),
+      constraints: const BoxConstraints(maxWidth: 640),
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) => Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),

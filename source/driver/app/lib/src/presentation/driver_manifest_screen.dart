@@ -19,9 +19,10 @@ class DriverManifestScreen extends StatelessWidget {
             const SizedBox(height: 8),
             Text('Ghế ${waiting.map((p) => p.seat).join(', ')}. Rời trạm thì các khách này vẫn ở trạng thái chưa xử lý; điều hành sẽ gọi cho họ.', style: dsans(size: 15, color: DTokens.sub, height: 1.5)),
             const SizedBox(height: 14),
-            BigButton(label: 'Vẫn rời trạm', onPressed: () => Navigator.of(ctx).pop(true)),
-            const SizedBox(height: 8),
-            BigButton(label: 'Chờ thêm', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop(false)),
+            SheetActions(
+              primary: BigButton(label: 'Vẫn rời trạm', onPressed: () => Navigator.of(ctx).pop(true)),
+              secondary: BigButton(label: 'Chờ thêm', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop(false)),
+            ),
           ]));
       if (yes != true) return;
     }
@@ -35,9 +36,10 @@ class DriverManifestScreen extends StatelessWidget {
           const SizedBox(height: 8),
           Text('${p.name} · ${p.phone}. Vé không được hoàn tiền, ghế được bán lại từ trạm này. Khách nhận thông báo.', style: dsans(size: 15, color: DTokens.sub, height: 1.5)),
           const SizedBox(height: 14),
-          BigButton(label: 'Vắng mặt', color: DTokens.danger, onPressed: () => Navigator.of(ctx).pop(true)),
-          const SizedBox(height: 8),
-          BigButton(label: 'Chờ thêm', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop(false)),
+          SheetActions(
+            primary: BigButton(label: 'Vắng mặt', color: DTokens.danger, onPressed: () => Navigator.of(ctx).pop(true)),
+            secondary: BigButton(label: 'Chờ thêm', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop(false)),
+          ),
         ]));
     if (yes != true || !context.mounted) return;
     final error = await store.markNoShow(p);
@@ -51,36 +53,104 @@ class DriverManifestScreen extends StatelessWidget {
     final list = store.atStopPassengers;
     final boarded = list.where((p) => p.status == PaxStatus.boarded).length;
     final opensAt = hhmm(store.noShowFrom());
-    return Scaffold(
-      appBar: DHeader(
-        title: store.stop.name,
-        subtitle: 'Đón ${list.length} khách · rời trạm ${store.stop.time} · bây giờ ${hhmm(store.clock)}',
-        trailing: Text('$boarded/${list.length}', style: dmono(size: 16, color: DTokens.okInk)),
-      ),
-      body: ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 16), children: [
-        BigButton(label: 'Quét vé', height: 64, icon: Icons.qr_code_scanner, onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverQrScannerScreen()))),
-        const SizedBox(height: 12),
-        if (list.isEmpty) Text('Không có khách đón ở trạm này.', style: dsans(size: 14, color: DTokens.muted)),
-        for (final p in list) ...[
-          _PassengerRow(
-            p: p,
-            noShowOpen: store.noShowOpen,
-            opensAt: opensAt,
-            onBoard: () async {
-              final error = await store.board(p);
-              if (context.mounted) dToast(context, error ?? 'Ghế ${p.seat} đã lên xe');
-            },
-            onCod: () => showCodSheet(context, p),
-            onNoShow: () => _noShow(context, store, p),
+    Widget row(Passenger p) => _PassengerRow(
+          p: p,
+          noShowOpen: store.noShowOpen,
+          opensAt: opensAt,
+          onBoard: () async {
+            final error = await store.board(p);
+            if (context.mounted) dToast(context, error ?? 'Ghế ${p.seat} đã lên xe');
+          },
+          onCod: () => showCodSheet(context, p),
+          onNoShow: () => _noShow(context, store, p),
+        );
+    final drops = store.dropOffPassengers;
+    final allHandled = list.every((p) => p.status != PaxStatus.waiting);
+    final dropOff = drops.isEmpty
+        ? null
+        : Panel(
+            border: DTokens.line,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Khách xuống ở trạm này · ${drops.length}', style: dsans(size: 15, weight: FontWeight.w700, color: DTokens.warnInk)),
+              const SizedBox(height: 8),
+              for (final p in drops)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(children: [
+                    SizedBox(width: 52, child: Text(p.seat, style: dmono(size: 18))),
+                    Expanded(child: Text(p.name, style: dsans(size: 16, weight: FontWeight.w600))),
+                  ]),
+                ),
+            ]),
+          );
+    final scan = BigButton(label: 'Quét vé', height: dWide(context) ? 72 : 64, icon: Icons.qr_code_scanner, onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverQrScannerScreen())));
+    // A walk-up passenger at the stop is sold from here too, without going back to the cockpit.
+    final hail = BigButton(label: 'Khách vẫy', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => showHailSheet(context));
+    // Once nobody is left waiting, leaving the stop is the main action.
+    final leave = allHandled
+        ? BigButton(label: 'Rời trạm', color: DTokens.ok, height: 72, onPressed: () => _leave(context, store))
+        : BigButton(label: 'Rời trạm', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => _leave(context, store));
+    final empty = Panel(child: Text('Không có khách đón ở trạm này.', style: dsans(size: 16, color: DTokens.sub)));
+    final header = DHeader(
+      title: store.stop.name,
+      subtitle: 'Đón ${list.length} · trả ${drops.length} khách · rời trạm ${store.stop.time} · bây giờ ${hhmm(store.clock)}',
+      trailing: Text('$boarded/${list.length}', style: dmono(size: 16, color: DTokens.okInk)),
+    );
+    if (dWide(context)) {
+      // Tablet: stop summary and the two stop actions on the left, passenger cards two per row on the right.
+      return Scaffold(
+        appBar: header,
+        body: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Container(
+            width: 320,
+            padding: const EdgeInsets.all(20),
+            decoration: const BoxDecoration(border: Border(right: BorderSide(color: DTokens.lineSoft))),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Row(children: [
+                Expanded(child: Stat('Đã lên', '$boarded/${list.length}', color: DTokens.okInk, size: 28)),
+                const SizedBox(width: 8),
+                Expanded(child: Stat('Rời trạm', store.stop.time, size: 28)),
+              ]),
+              const SizedBox(height: 16),
+              scan,
+              const SizedBox(height: 10),
+              hail,
+              const Spacer(),
+              leave,
+            ]),
           ),
-          const SizedBox(height: 8),
-        ],
+          Expanded(
+            child: LayoutBuilder(builder: (context, box) {
+              final cols = box.maxWidth >= 760 ? 2 : 1;
+              final cardWidth = (box.maxWidth - 40 - 12 * (cols - 1)) / cols;
+              return SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  if (dropOff != null) ...[dropOff, const SizedBox(height: 12)],
+                  list.isEmpty ? empty : Wrap(spacing: 12, runSpacing: 12, children: [for (final p in list) SizedBox(width: cardWidth, child: row(p))]),
+                ]),
+              );
+            }),
+          ),
+        ]),
+      );
+    }
+    return Scaffold(
+      appBar: header,
+      body: ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 16), children: [
+        scan,
+        const SizedBox(height: 8),
+        hail,
+        const SizedBox(height: 12),
+        if (dropOff != null) ...[dropOff, const SizedBox(height: 12)],
+        if (list.isEmpty) empty,
+        for (final p in list) ...[row(p), const SizedBox(height: 8)],
       ]),
       bottomNavigationBar: SafeArea(
         child: Container(
           decoration: const BoxDecoration(border: Border(top: BorderSide(color: DTokens.lineSoft))),
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          child: BigButton(label: 'Rời trạm', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => _leave(context, store)),
+          child: leave,
         ),
       ),
     );

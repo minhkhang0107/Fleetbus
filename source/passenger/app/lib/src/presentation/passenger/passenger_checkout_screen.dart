@@ -87,7 +87,7 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
       body: Column(children: [
         const HoldBanner(),
         Expanded(
-          child: ListView(padding: const EdgeInsets.all(16), children: [
+          child: PSplit(leftFlex: 3, rightFlex: 2, left: [
             AppCard(
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Row(children: [
@@ -121,15 +121,20 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
               SizedBox(width: 120, child: GhostButton(label: store.voucher == null ? 'Áp dụng' : 'Bỏ mã', onPressed: () => _applyVoucher(store))),
             ]),
             if (_voucherMessage != null) ...[gap(6), Text(_voucherMessage!, style: sans(size: 13, weight: FontWeight.w500, color: _voucherOk ? PTokens.success : PTokens.danger))],
-            gap(16),
+          ], right: [
+            if (!pWide(context)) gap(16),
             AppCard(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                value: store.insured,
-                onChanged: store.setInsured,
-                title: Text('Bảo hiểm chuyến đi', style: sans(size: 14, weight: FontWeight.w600)),
-                subtitle: Text('Không bắt buộc · 10.000 đ mỗi ghế', style: sans(size: 12, color: PTokens.muted)),
+              // Its own Material so the tile ripple shows above the card colour.
+              child: Material(
+                color: Colors.transparent,
+                child: SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: store.insured,
+                  onChanged: store.setInsured,
+                  title: Text('Bảo hiểm chuyến đi', style: sans(size: 14, weight: FontWeight.w600)),
+                  subtitle: Text('Không bắt buộc · 10.000 đ mỗi ghế', style: sans(size: 12, color: PTokens.muted)),
+                ),
               ),
             ),
             gap(16),
@@ -142,7 +147,7 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
               const Spacer(),
               const Icon(Icons.qr_code_2, size: 18, color: PTokens.primary),
               const SizedBox(width: 6),
-              Text('VietQR chuyển khoản', style: sans(size: 14, weight: FontWeight.w600)),
+              Flexible(child: Text('VietQR chuyển khoản', textAlign: TextAlign.end, style: sans(size: 14, weight: FontWeight.w600))),
             ]),
           ]),
         ),

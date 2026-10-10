@@ -34,7 +34,11 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> {
   }
 
   Future<void> _load() async {
-    final t = await PassengerScope.read(context).loadTracking(widget.ticket.tripId);
+    final store = PassengerScope.read(context);
+    if (widget.ticket.status == TicketStatus.active) {
+      await store.loadPass(widget.ticket);
+    }
+    final t = await store.loadTracking(widget.ticket.tripId);
     if (mounted) setState(() => _tracking = t);
   }
 
@@ -56,6 +60,60 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> {
       GpsSignal.offline => ('Xe ngoại tuyến. ', 'Vị trí dưới đây đã cũ; giờ đến chỉ là ước tính.'),
       GpsSignal.none => ('Chưa nhận tín hiệu từ xe. ', 'Vị trí sẽ hiện khi xe bắt đầu chạy.'),
     };
+    final wide = pWide(context);
+    final map = Container(
+      color: const Color(0xFFEEF2F6),
+      child: LayoutBuilder(builder: (context, c) {
+        final w = c.maxWidth, h = c.maxHeight;
+        return Stack(children: [
+          Positioned.fill(child: CustomPaint(painter: _MapPainter())),
+          Positioned(left: w * 0.62, top: h * 0.08, child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: PTokens.ink, borderRadius: BorderRadius.circular(6)), child: Text('Điểm đón của bạn', style: sans(size: 12, weight: FontWeight.w600, color: Colors.white)))),
+          Positioned(
+            left: w * 0.40,
+            top: h * 0.56,
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: live ? PTokens.primary : Colors.white,
+                border: Border.all(color: live ? Colors.white : const Color(0xFF94A3B8), width: 3),
+              ),
+              child: Icon(Icons.directions_bus, size: 20, color: live ? Colors.white : const Color(0xFF64748B)),
+            ),
+          ),
+          Positioned(
+            left: w * 0.30,
+            top: h * 0.56 + 48,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(color: Colors.white, border: Border.all(color: PTokens.lineStrong), borderRadius: BorderRadius.circular(6)),
+              child: Text(live ? '${tr?.speed?.round() ?? 0} km/h · vừa cập nhật' : (signal == GpsSignal.none ? 'Chưa có vị trí' : 'Vị trí cũ'), style: sans(size: 12, color: const Color(0xFF334155))),
+            ),
+          ),
+        ]);
+      }),
+    );
+    final info = Container(
+      decoration: BoxDecoration(color: PTokens.surface, border: wide ? const Border(left: BorderSide(color: PTokens.line)) : const Border(top: BorderSide(color: PTokens.line))),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      child: SafeArea(
+        top: false,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            if (ticket.status == TicketStatus.boarded) ...[
+              const Expanded(child: _Metric('Trạng thái', 'Đã lên xe')),
+              Expanded(child: _Metric('Điểm trả', ticket.dropoff.isNotEmpty ? ticket.dropoff : ticket.route.split(' → ').last)),
+            ] else ...[
+              Expanded(child: _Metric('Đến điểm đón', tr?.etaMinutes == null ? '—' : '${live ? '' : '~'}${tr!.etaMinutes} phút')),
+              Expanded(child: _Metric('Cách điểm đón', tr?.distanceKm == null ? '—' : '${live ? '' : '~'}${tr!.distanceKm!.toStringAsFixed(1)} km')),
+            ],
+          ]),
+          gap(14),
+          GhostButton(label: 'Gọi tổng đài 1900 6868', onPressed: () => showToast(context, 'Đang gọi 1900 6868')),
+        ]),
+      ),
+    );
     return Scaffold(
       appBar: TopBar(title: 'Xe của chuyến ${ticket.dep}', subtitle: '${ticket.date} · ${ticket.route}', trailing: pill),
       body: Column(children: [
@@ -80,55 +138,10 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> {
             ),
           ),
         Expanded(
-          child: Container(
-            color: const Color(0xFFEEF2F6),
-            child: LayoutBuilder(builder: (context, c) {
-              final w = c.maxWidth, h = c.maxHeight;
-              return Stack(children: [
-                Positioned.fill(child: CustomPaint(painter: _MapPainter())),
-                Positioned(left: w * 0.62, top: h * 0.08, child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: PTokens.ink, borderRadius: BorderRadius.circular(6)), child: Text('Điểm đón của bạn', style: sans(size: 12, weight: FontWeight.w600, color: Colors.white)))),
-                Positioned(
-                  left: w * 0.40,
-                  top: h * 0.56,
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: live ? PTokens.primary : Colors.white,
-                      border: Border.all(color: live ? Colors.white : const Color(0xFF94A3B8), width: 3),
-                    ),
-                    child: Icon(Icons.directions_bus, size: 20, color: live ? Colors.white : const Color(0xFF64748B)),
-                  ),
-                ),
-                Positioned(
-                  left: w * 0.30,
-                  top: h * 0.56 + 48,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(color: Colors.white, border: Border.all(color: PTokens.lineStrong), borderRadius: BorderRadius.circular(6)),
-                    child: Text(live ? '${tr?.speed?.round() ?? 0} km/h · vừa cập nhật' : (signal == GpsSignal.none ? 'Chưa có vị trí' : 'Vị trí cũ'), style: sans(size: 12, color: const Color(0xFF334155))),
-                  ),
-                ),
-              ]);
-            }),
-          ),
+          // Wide screens keep the map large and put the figures in a side panel.
+          child: wide ? Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Expanded(child: map), SizedBox(width: 360, child: info)]) : map,
         ),
-        Container(
-          decoration: const BoxDecoration(color: PTokens.surface, border: Border(top: BorderSide(color: PTokens.line))),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-          child: SafeArea(
-            top: false,
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Row(children: [
-                Expanded(child: _Metric('Đến điểm đón', tr?.etaMinutes == null ? '—' : '${live ? '' : '~'}${tr!.etaMinutes} phút')),
-                Expanded(child: _Metric('Cách điểm đón', tr?.distanceKm == null ? '—' : '${live ? '' : '~'}${tr!.distanceKm!.toStringAsFixed(1)} km')),
-              ]),
-              gap(14),
-              GhostButton(label: 'Gọi tổng đài 1900 6868', onPressed: () => showToast(context, 'Đang gọi 1900 6868')),
-            ]),
-          ),
-        ),
+        if (!wide) info,
       ]),
     );
   }

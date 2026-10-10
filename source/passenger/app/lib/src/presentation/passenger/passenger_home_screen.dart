@@ -16,7 +16,7 @@ class PassengerHomeScreen extends StatelessWidget {
     final upcoming = store.tickets.where((t) => t.status == TicketStatus.active).toList();
     final name = store.userName;
     return SafeArea(
-      child: ListView(padding: const EdgeInsets.fromLTRB(16, 24, 16, 24), children: [
+      child: PSplit(padding: const EdgeInsets.fromLTRB(16, 24, 16, 24), leftFlex: 5, rightFlex: 4, left: [
         Row(children: [
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -78,13 +78,14 @@ class PassengerHomeScreen extends StatelessWidget {
             ),
           ]),
         ),
+      ], right: [
         if (upcoming.isNotEmpty) ...[
-          gap(20),
+          if (!pWide(context)) gap(20),
           Text('Chuyến sắp đi', style: sans(size: 15, weight: FontWeight.w600)),
           gap(10),
           _UpcomingCard(ticket: upcoming.last),
         ],
-        gap(20),
+        if (upcoming.isNotEmpty || !pWide(context)) gap(20),
         Text('Tìm lại gần đây', style: sans(size: 15, weight: FontWeight.w600)),
         gap(10),
         Wrap(spacing: 8, runSpacing: 8, children: [

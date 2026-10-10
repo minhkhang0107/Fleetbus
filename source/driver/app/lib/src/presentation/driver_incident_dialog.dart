@@ -24,62 +24,76 @@ class _DriverIncidentScreenState extends State<DriverIncidentScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: DHeader(
-        title: 'Báo sự cố',
-        close: true,
-        trailing: FilledButton(
-          onPressed: () => dToast(context, 'Đang gọi 112'),
-          style: FilledButton.styleFrom(backgroundColor: DTokens.danger, minimumSize: const Size(64, 44), shape: const StadiumBorder()),
-          child: Text('Gọi 112', style: dsans(size: 14, weight: FontWeight.w700, color: Colors.white)),
-        ),
+    final what = <Widget>[
+      Text('Chuyện gì xảy ra?', style: dsans(size: 15, weight: FontWeight.w600)),
+      const SizedBox(height: 10),
+      GridView.count(
+        crossAxisCount: 2,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 2.4,
+        children: [
+          for (final t in ['Kẹt xe', 'Xe hỏng', 'Tai nạn', 'Khác']) ChoiceTile(label: t, danger: true, center: true, height: 72, selected: _type == t, onTap: () => setState(() => _type = t)),
+        ],
       ),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
-        Text('Chuyện gì xảy ra?', style: dsans(size: 15, weight: FontWeight.w600)),
-        const SizedBox(height: 10),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 2.4,
-          children: [
-            for (final t in ['Kẹt xe', 'Xe hỏng', 'Tai nạn', 'Khác']) ChoiceTile(label: t, danger: true, center: true, height: 72, selected: _type == t, onTap: () => setState(() => _type = t)),
-          ],
-        ),
-        const SizedBox(height: 20),
-        Text('Ước tính chậm bao lâu?', style: dsans(size: 15, weight: FontWeight.w600)),
-        const SizedBox(height: 10),
-        Row(children: [
-          for (final d in [15, 30, 45, 60]) ...[
-            if (d != 15) const SizedBox(width: 8),
-            Expanded(child: ChoiceTile(label: d == 60 ? '60+' : '$d', danger: true, center: true, selected: _delay == d, onTap: () => setState(() => _delay = d))),
-          ],
-        ]),
-        const SizedBox(height: 20),
-        TextField(controller: _note, maxLines: 3, style: dsans(size: 15), decoration: const InputDecoration(labelText: 'Ghi chú (không bắt buộc)')),
-        const SizedBox(height: 16),
-        Text('Điều hành nhận ngay cùng vị trí xe. Khách trên chuyến chỉ thấy giờ mới khi điều hành công bố.', style: dsans(size: 13, color: DTokens.muted, height: 1.5)),
+      const SizedBox(height: 20),
+      Text('Ước tính chậm bao lâu?', style: dsans(size: 15, weight: FontWeight.w600)),
+      const SizedBox(height: 10),
+      Row(children: [
+        for (final d in [15, 30, 45, 60]) ...[
+          if (d != 15) const SizedBox(width: 8),
+          Expanded(child: ChoiceTile(label: d == 60 ? '60+' : '$d', danger: true, center: true, selected: _delay == d, onTap: () => setState(() => _delay = d))),
+        ],
       ]),
+    ];
+    final note = <Widget>[
+      TextField(controller: _note, maxLines: 3, style: dsans(size: 15), decoration: const InputDecoration(labelText: 'Ghi chú (không bắt buộc)')),
+      const SizedBox(height: 16),
+      Text('Điều hành nhận ngay cùng vị trí xe. Khách trên chuyến chỉ thấy giờ mới khi điều hành công bố.', style: dsans(size: 13, color: DTokens.muted, height: 1.5)),
+    ];
+    final send = BigButton(
+      label: 'Gửi cho điều hành',
+      color: DTokens.danger,
+      height: 72,
+      onPressed: () async {
+        final error = await DriverScope.read(context).reportIncident(_type, _delay);
+        if (!context.mounted) return;
+        if (error != null) {
+          dToast(context, error);
+          return;
+        }
+        Navigator.of(context).pop();
+        dToast(context, DriverScope.read(context).offline ? 'Mất mạng · sẽ gửi khi có sóng' : 'Đã gửi cho điều hành');
+      },
+    );
+    final header = DHeader(
+  title: 'Báo sự cố',
+  close: true,
+  trailing: FilledButton(
+    onPressed: () => dToast(context, 'Đang gọi 112'),
+    style: FilledButton.styleFrom(backgroundColor: DTokens.danger, minimumSize: const Size(64, 44), shape: const StadiumBorder()),
+    child: Text('Gọi 112', style: dsans(size: 14, weight: FontWeight.w700, color: Colors.white)),
+  ),
+);
+    if (dWide(context)) {
+      // Tablet: what happened on the left, the note and the send button on the right, nothing to scroll.
+      return Scaffold(
+        appBar: header,
+        body: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(child: ListView(padding: const EdgeInsets.all(20), children: what)),
+          Expanded(child: ListView(padding: const EdgeInsets.fromLTRB(0, 20, 20, 20), children: [...note, const SizedBox(height: 16), send])),
+        ]),
+      );
+    }
+    return Scaffold(
+      appBar: header,
+      body: ListView(padding: const EdgeInsets.all(16), children: [...what, const SizedBox(height: 20), ...note]),
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          child: BigButton(
-            label: 'Gửi cho điều hành',
-            color: DTokens.danger,
-            height: 72,
-            onPressed: () async {
-              final error = await DriverScope.read(context).reportIncident(_type, _delay);
-              if (!context.mounted) return;
-              if (error != null) {
-                dToast(context, error);
-                return;
-              }
-              Navigator.of(context).pop();
-              dToast(context, DriverScope.read(context).offline ? 'Mất mạng · sẽ gửi khi có sóng' : 'Đã gửi cho điều hành');
-            },
-          ),
+          child: send,
         ),
       ),
     );

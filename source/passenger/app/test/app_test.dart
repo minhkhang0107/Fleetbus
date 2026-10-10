@@ -1,6 +1,18 @@
 import 'dart:convert';
 
+import 'package:app/main.dart';
 import 'package:app/src/presentation/passenger/passenger_store.dart';
+import 'package:app/src/presentation/passenger/passenger_payment_processing_screen.dart';
+import 'package:app/src/presentation/passenger/passenger_checkout_screen.dart';
+import 'package:app/src/presentation/passenger/passenger_seat_map_screen.dart';
+import 'package:app/src/presentation/passenger/passenger_trip_detail_screen.dart';
+import 'package:app/src/presentation/passenger/passenger_search_results_screen.dart';
+import 'package:app/src/presentation/passenger/passenger_main_shell.dart';
+import 'package:app/src/presentation/passenger/passenger_login_screen.dart';
+import 'package:app/src/presentation/passenger/passenger_splash_screen.dart';
+import 'package:app/src/presentation/passenger/passenger_ticket_qr_screen.dart';
+import 'package:app/src/presentation/passenger/passenger_live_radar_screen.dart';
+import 'package:flutter/material.dart';
 import 'package:data/src/service/passenger_api_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -35,6 +47,7 @@ void main() {
     'fare_vnd': 220000,
     'passenger_name': 'Nguyễn An',
     'pickup_stop': 'Bến xe Giáp Bát',
+    'dropoff_stop': 'Bến xe Phía Bắc Thanh Hóa',
     'status': 'ACTIVE',
   };
 
@@ -183,4 +196,135 @@ void main() {
     expect(vnd(1250000), '1.250.000 đ');
     expect(vnd(-50000), '−50.000 đ');
   });
+
+  testWidgets('the ticket screen turns to "Đã lên xe" after the fake server switches the ticket to BOARDED and the poll fires', (tester) async {
+    final store = storeWithServer();
+    paid = true;
+    await store.verifyOtp('0987654321', '123456');
+    await store.loadTickets();
+    final ticket = store.tickets.single;
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(
+        store: store,
+        child: PassengerTicketQrScreen(ticket: ticket),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Hợp lệ'), findsOneWidget);
+    
+    // Switch the server to BOARDED
+    ticketStatus = 'BOARDED';
+    
+    // Wait for the poll (10 seconds)
+    await tester.pump(const Duration(seconds: 11));
+    await tester.pumpAndSettle();
+    
+    expect(find.text('Đã lên xe'), findsWidgets); // Pill and text
+    expect(find.text('Bạn đã lên xe. Vé không còn mã QR để dùng lại hay chia sẻ.'), findsOneWidget);
+    
+    // Cleanup pending timers
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('the radar shows Đã lên xe for a boarded ticket', (tester) async {
+    final store = storeWithServer();
+    paid = true;
+    await store.verifyOtp('0987654321', '123456');
+    await store.loadTickets();
+    final ticket = store.tickets.single;
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(
+        store: store,
+        child: PassengerLiveRadarScreen(ticket: ticket),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Đến điểm đón'), findsOneWidget);
+    expect(find.text('Cách điểm đón'), findsOneWidget);
+
+    // Switch to boarded
+    ticketStatus = 'BOARDED';
+    
+    // Wait for the radar's poll (10 seconds)
+    await tester.pump(const Duration(seconds: 11));
+    await tester.pumpAndSettle();
+    
+    expect(find.text('Trạng thái'), findsOneWidget);
+    expect(find.text('Đã lên xe'), findsOneWidget);
+    expect(find.text('Điểm trả'), findsOneWidget);
+    expect(find.text('Phía Bắc Thanh Hóa'), findsOneWidget);
+    
+    // Cleanup pending timers
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('phones and tablets use the full screen; only desktop widths get a 1280 dp frame', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    tester.view.devicePixelRatio = 1.0;
+    final store = storeWithServer();
+    for (final (size, width) in const [(Size(1500, 1000), 1280.0), (Size(1200, 768), 1200.0), (Size(768, 1200), 768.0), (Size(400, 800), 400.0)]) {
+      tester.view.physicalSize = size;
+      await tester.pumpWidget(BusGoPassengerApp(store: store));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byType(Scaffold)).width, width, reason: '$size');
+    }
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  // ROD2 tablet in landscape (1200x768 dp) and portrait (768x1200 dp), and a phone.
+  for (final (name, size) in const [('landscape tablet', Size(1200, 768)), ('portrait tablet', Size(768, 1200)), ('phone', Size(390, 844))]) {
+    testWidgets('every passenger screen lays out without overflow on a $name', (tester) async {
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        tester.platformDispatcher.clearTextScaleFactorTestValue();
+      });
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1.0;
+      // The test font draws every glyph 1 em wide; Geist averages about 0.6 em, so scale text to match it.
+      tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+      final store = storeWithServer();
+      paid = true;
+      await store.verifyOtp('0987654321', '123456');
+      await store.loadTrips();
+      store.chooseTrip(store.trips.single);
+      await store.loadSeatMap();
+      store.toggleSeat('A02');
+      await store.holdSeats();
+      await store.createOrder('Nguyễn An', '0987654321');
+      await store.loadTickets();
+      final ticket = store.tickets.single;
+      await store.loadPass(ticket);
+      final screens = <Widget>[
+        const PassengerSplashScreen(),
+        const PassengerLoginScreen(),
+        const PassengerMainShell(),
+        const PassengerMainShell(initialTab: 1),
+        const PassengerMainShell(initialTab: 3),
+        const PassengerSearchResultsScreen(),
+        const PassengerTripDetailScreen(),
+        const PassengerSeatMapScreen(),
+        const PassengerCheckoutScreen(),
+        const PassengerPaymentProcessingScreen(name: 'Nguyễn An', phone: '0987654321'),
+        PassengerBookingSuccessScreen(ticket: ticket, phone: '0987654321'),
+        PassengerTicketQrScreen(ticket: ticket),
+        PassengerLiveRadarScreen(ticket: ticket),
+      ];
+      for (final screen in screens) {
+        await tester.pumpWidget(PassengerScope(store: store, child: MaterialApp(builder: phoneColumnBuilder, home: screen)));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(tester.takeException(), isNull, reason: '${screen.runtimeType} on $name');
+      }
+      await tester.pumpWidget(const SizedBox());
+      store.stopHold();
+    });
+  }
 }

@@ -112,9 +112,10 @@ Future<void> showHailSheet(BuildContext context) async {
           child: Row(children: [Expanded(child: Text('Giá vé (giá chung của chuyến)', style: dsans(size: 14, color: DTokens.muted))), Text(vnd(store.fare), style: dmono(size: 22))]),
         ),
         const SizedBox(height: 14),
-        BigButton(label: 'Đã thu ${vnd(store.fare)} · Cho lên xe', color: DTokens.ok, height: 72, onPressed: () => Navigator.of(ctx).pop(true)),
-        const SizedBox(height: 8),
-        BigButton(label: 'Hủy', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop(false)),
+        SheetActions(
+          primary: BigButton(label: 'Đã thu ${vnd(store.fare)} · Cho lên xe', color: DTokens.ok, height: 72, onPressed: () => Navigator.of(ctx).pop(true)),
+          secondary: BigButton(label: 'Hủy', outline: true, color: const Color(0xFFE2E8F0), height: dWide(ctx) ? 72 : 56, onPressed: () => Navigator.of(ctx).pop(false)),
+        ),
       ])));
   if (ok != true || !context.mounted) return;
   final error = await store.sellHail(seat, to);

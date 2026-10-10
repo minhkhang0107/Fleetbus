@@ -20,7 +20,7 @@ class PassengerProfileScreen extends StatelessWidget {
       ),
       const Divider(height: 1, color: PTokens.line),
       Expanded(
-        child: ListView(padding: const EdgeInsets.all(16), children: [
+        child: PMaxWidth(maxWidth: 720, child: ListView(padding: const EdgeInsets.all(16), children: [
           AppCard(
             child: Row(children: [
               CircleAvatar(radius: 24, backgroundColor: PTokens.primarySoft, child: Text(store.loggedIn ? 'NA' : '?', style: sans(size: 15, weight: FontWeight.w600, color: PTokens.primaryDark))),
@@ -56,7 +56,7 @@ class PassengerProfileScreen extends StatelessWidget {
               }
             },
           ),
-        ]),
+        ])),
       ),
     ]);
   }

@@ -91,7 +91,7 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
         body: Column(children: [
           const HoldBanner(),
           Expanded(
-            child: ListView(padding: const EdgeInsets.all(16), children: [
+            child: PSplit(left: [
               AppCard(
                 padding: const EdgeInsets.all(16),
                 child: Column(children: [
@@ -110,7 +110,8 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
                   SizedBox(width: 180, child: GhostButton(label: 'Lưu ảnh mã QR', onPressed: () => showToast(context, 'Đã lưu ảnh mã QR vào thư viện'))),
                 ]),
               ),
-              gap(14),
+            ], right: [
+              if (!pWide(context)) gap(14),
               AppCard(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: Column(children: [
@@ -171,7 +172,7 @@ class PassengerBookingSuccessScreen extends StatelessWidget {
             child: IconButton(tooltip: 'Đóng và về trang chủ', onPressed: () => PassengerMainShell.openTab(context, 0), icon: const Icon(Icons.close)),
           ),
           Expanded(
-            child: ListView(padding: const EdgeInsets.symmetric(horizontal: 24), children: [
+            child: PMaxWidth(child: ListView(padding: const EdgeInsets.symmetric(horizontal: 24), children: [
               Center(
                 child: Container(
                   width: 72,
@@ -215,11 +216,11 @@ class PassengerBookingSuccessScreen extends StatelessWidget {
               ),
               gap(20),
               Text('Có mặt ở điểm đón trước 15 phút. Vé dùng được cả khi mất mạng; bạn có thể lưu ảnh hoặc in vé. Mỗi vé chỉ lên xe một lần.', textAlign: TextAlign.center, style: sans(size: 13, color: PTokens.muted, height: 1.5)),
-            ]),
+            ])),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            child: PMaxWidth(maxWidth: 480, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               PrimaryButton(
                 label: 'Xem vé lên xe',
                 onPressed: () {
@@ -229,7 +230,7 @@ class PassengerBookingSuccessScreen extends StatelessWidget {
               ),
               gap(8),
               GhostButton(label: 'Về trang chủ', onPressed: () => PassengerMainShell.openTab(context, 0)),
-            ]),
+            ])),
           ),
         ]),
       ),

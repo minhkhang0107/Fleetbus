@@ -47,15 +47,15 @@ class _PassengerLocationPickerScreenState extends State<PassengerLocationPickerS
         Container(
           color: PTokens.surface,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          child: TextField(
+          child: PMaxWidth(maxWidth: 720, child: TextField(
             autofocus: true,
             onChanged: (v) => setState(() => _query = v),
             style: sans(size: 15),
             decoration: const InputDecoration(hintText: 'Tỉnh, thành phố hoặc bến xe', prefixIcon: Icon(Icons.search)),
-          ),
+          )),
         ),
         Expanded(
-          child: items.isEmpty
+          child: PMaxWidth(maxWidth: 720, child: items.isEmpty
               ? Padding(padding: const EdgeInsets.all(16), child: Text('Không tìm thấy địa điểm. Thử gõ tên tỉnh, ví dụ "Thanh Hoa".', style: sans(size: 14, color: PTokens.muted)))
               : ListView.separated(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -74,7 +74,7 @@ class _PassengerLocationPickerScreenState extends State<PassengerLocationPickerS
                       },
                     );
                   },
-                ),
+                )),
         ),
       ]),
     );

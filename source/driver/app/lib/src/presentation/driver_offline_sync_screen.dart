@@ -11,7 +11,7 @@ class DriverOfflineSyncScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = DriverScope.of(context);
     return SafeArea(
-      child: ListView(padding: const EdgeInsets.all(16), children: [
+      child: DMaxWidth(child: ListView(padding: const EdgeInsets.all(16), children: [
         Text('Đồng bộ', style: dsans(size: 22, weight: FontWeight.w700)),
         const SizedBox(height: 16),
         Panel(
@@ -47,7 +47,7 @@ class DriverOfflineSyncScreen extends StatelessWidget {
                   if (context.mounted) dToast(context, n > 0 ? 'Đã kết nối lại · $n thao tác đã xử lý' : 'Vẫn chưa có mạng');
                 },
         ),
-      ]),
+      ])),
     );
   }
 }

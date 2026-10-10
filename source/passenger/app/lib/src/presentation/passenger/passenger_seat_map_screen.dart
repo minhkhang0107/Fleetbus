@@ -45,31 +45,51 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerCheckoutScreen()));
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final store = PassengerScope.of(context);
-    final seats = store.deckSeats(store.deck);
+  /// Rows of one deck: the A column on the left, the aisle, the B column on the right.
+  List<Widget> _deckRows(PassengerStore store, int deck) {
+    final seats = store.deckSeats(deck);
     final left = seats.keys.where((c) => c.startsWith('A')).toList();
     final right = seats.keys.where((c) => c.startsWith('B')).toList();
     final rows = left.length > right.length ? left.length : right.length;
+    return [
+      Row(children: [const Icon(Icons.adjust, size: 18, color: PTokens.muted), const SizedBox(width: 8), Text('Đầu xe', style: sans(size: 12, color: PTokens.muted))]),
+      gap(10),
+      for (var i = 0; i < rows; i++) ...[
+        Row(children: [
+          Expanded(child: i < left.length ? _SeatButton(code: left[i], state: seats[left[i]]!, onLimit: () => setState(() => _limitHit = true)) : const SizedBox()),
+          const SizedBox(width: 68),
+          Expanded(child: i < right.length ? _SeatButton(code: right[i], state: seats[right[i]]!, onLimit: () => setState(() => _limitHit = true)) : const SizedBox()),
+        ]),
+        gap(10),
+      ],
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final store = PassengerScope.of(context);
+    final wide = pWide(context);
+    final decks = store.decks.isEmpty ? [1] : store.decks;
     final p = store.stop(store.pickup);
     final d = store.stop(store.dropoff);
     return Scaffold(
       appBar: TopBar(title: 'Chọn ghế', subtitle: '${p.short} → ${d.short} · tối đa ${PassengerStore.maxSeats} ghế'),
       body: Column(children: [
         Container(
+          width: double.infinity,
           color: PTokens.surface,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
           child: Column(children: [
-            Container(
+            // Wide screens show every deck at once, so the deck switch is only for phones.
+            if (!wide) Container(
               padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
               child: Row(children: [
-                for (final d in store.decks.isEmpty ? [1] : store.decks)
+                for (final d in decks)
                   _DeckTab(label: '${d == 1 ? 'Tầng dưới' : 'Tầng trên'} · ${store.freeOnDeck(d)} trống', selected: store.deck == d, onTap: () => store.setDeck(d)),
               ]),
             ),
-            gap(10),
+            if (!wide) gap(10),
             Wrap(spacing: 12, runSpacing: 6, children: const [
               _Legend(fill: PTokens.surface, border: Color(0xFF94A3B8), label: 'Trống'),
               _Legend(fill: PTokens.primary, border: PTokens.primary, label: 'Bạn chọn'),
@@ -84,19 +104,33 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
               ? const Center(child: CircularProgressIndicator())
               : _error != null
               ? Padding(padding: const EdgeInsets.all(16), child: Text(_error!, style: sans(size: 15, color: PTokens.danger)))
+              : wide
+              ? SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(children: [
+                    Row(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+                      for (final d in decks) ...[
+                        if (d != decks.first) const SizedBox(width: 24),
+                        Flexible(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 380),
+                            // Each deck in its own card so the two seat plans don't read as one.
+                            child: AppCard(padding: const EdgeInsets.fromLTRB(16, 14, 16, 6), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                            Text('${d == 1 ? 'Tầng dưới' : 'Tầng trên'} · ${store.freeOnDeck(d)} trống', style: sans(size: 15, weight: FontWeight.w600)),
+                            gap(10),
+                            ..._deckRows(store, d),
+                          ])),
+                          ),
+                        ),
+                      ],
+                    ]),
+                    if (_limitHit) Text('Mỗi lần đặt tối đa ${PassengerStore.maxSeats} ghế.', style: sans(size: 13, color: PTokens.danger)),
+                  ]),
+                )
               : ListView(padding: const EdgeInsets.fromLTRB(32, 16, 32, 16), children: [
-            Row(children: [const Icon(Icons.adjust, size: 18, color: PTokens.muted), const SizedBox(width: 8), Text('Đầu xe', style: sans(size: 12, color: PTokens.muted))]),
-            gap(10),
-            for (var i = 0; i < rows; i++) ...[
-              Row(children: [
-                Expanded(child: i < left.length ? _SeatButton(code: left[i], state: seats[left[i]]!, onLimit: () => setState(() => _limitHit = true)) : const SizedBox()),
-                const SizedBox(width: 68),
-                Expanded(child: i < right.length ? _SeatButton(code: right[i], state: seats[right[i]]!, onLimit: () => setState(() => _limitHit = true)) : const SizedBox()),
-              ]),
-              gap(10),
-            ],
-            if (_limitHit) Text('Mỗi lần đặt tối đa ${PassengerStore.maxSeats} ghế.', style: sans(size: 13, color: PTokens.danger)),
-          ]),
+                  ..._deckRows(store, store.deck),
+                  if (_limitHit) Text('Mỗi lần đặt tối đa ${PassengerStore.maxSeats} ghế.', style: sans(size: 13, color: PTokens.danger)),
+                ]),
         ),
       ]),
       bottomNavigationBar: BottomAction(children: [

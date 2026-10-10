@@ -19,14 +19,15 @@ class PassengerTripDetailScreen extends StatelessWidget {
     final d = store.stop(store.dropoff);
     return Scaffold(
       appBar: TopBar(title: 'Điểm đón và điểm trả', subtitle: '${trip.dep} · ${store.travelDate.short.replaceAll(' · ', ' ')} · ${trip.type.split(' ').first} ${trip.plate}'),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
+      body: PSplit(left: [
         Text('Bạn lên xe ở đâu?', style: sans(size: 15, weight: FontWeight.w600)),
         gap(8),
         for (final s in stops.where((s) => s.pickup)) ...[
           _StopOption(stop: s, selected: s.id == store.pickup, enabled: true, onTap: () => store.setPickup(s.id)),
           gap(8),
         ],
-        gap(12),
+      ], right: [
+        if (!pWide(context)) gap(12),
         Text('Bạn xuống xe ở đâu?', style: sans(size: 15, weight: FontWeight.w600)),
         gap(8),
         for (final s in stops.where((s) => s.dropoff)) ...[

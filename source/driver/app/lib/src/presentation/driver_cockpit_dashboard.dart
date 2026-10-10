@@ -24,19 +24,20 @@ class DriverCockpitDashboard extends StatelessWidget {
             const SizedBox(height: 12),
             TextField(controller: why, maxLines: 3, style: dsans(size: 15), decoration: InputDecoration(labelText: 'Lý do', errorText: error)),
             const SizedBox(height: 14),
-            BigButton(
-              label: 'Tiếp tục kết thúc chuyến',
-              color: DTokens.danger,
-              onPressed: () {
-                if (why.text.trim().length < 5) {
-                  setSheet(() => error = 'Ghi lý do, ít nhất 5 ký tự.');
-                  return;
-                }
-                Navigator.of(ctx).pop(why.text.trim());
-              },
+            SheetActions(
+              primary: BigButton(
+                label: 'Tiếp tục kết thúc chuyến',
+                color: DTokens.danger,
+                onPressed: () {
+                  if (why.text.trim().length < 5) {
+                    setSheet(() => error = 'Ghi lý do, ít nhất 5 ký tự.');
+                    return;
+                  }
+                  Navigator.of(ctx).pop(why.text.trim());
+                },
+              ),
+              secondary: BigButton(label: 'Quay lại', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop()),
             ),
-            const SizedBox(height: 8),
-            BigButton(label: 'Quay lại', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop()),
           ]),
         ));
     if (reason == null || !context.mounted) return;
@@ -52,6 +53,110 @@ class DriverCockpitDashboard extends StatelessWidget {
     final drop = store.manifest.where((p) => p.to == s.id && p.status == PaxStatus.boarded).length;
     final cod = store.manifest.where((p) => p.from == s.id && p.codDue && p.status == PaxStatus.waiting).length;
     final eta = (toMinutes(s.time) - store.clock).clamp(1, 999);
+    final wide = dWide(context);
+    final speed = _bigMetric('Tốc độ', '${store.speed}', 'km/h');
+    // Stopped but not yet confirmed at the stop: the bus is there, a countdown would be wrong.
+    final next = store.atStop
+        ? _bigMetric('Đến trạm kế', 'Tại', 'trạm')
+        : !store.moving
+            ? _bigMetric('Đến trạm kế', 'Đã tới', '')
+            : _bigMetric('Đến trạm kế', '$eta', 'phút');
+    final stopCard = Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: const Color(0xFF172554), border: Border.all(color: const Color(0xFF1D4ED8)), borderRadius: BorderRadius.circular(12)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Text('${store.atStop ? 'Đang ở trạm' : 'Trạm kế'} ${store.stopIndex + 1}/${store.stops.length}', style: dsans(size: 13, color: const Color(0xFFBFDBFE))),
+          const Spacer(),
+          Text(s.time, style: dmono(size: 13, weight: FontWeight.w500, color: const Color(0xFFBFDBFE))),
+        ]),
+        const SizedBox(height: 8),
+        Text(s.name, style: dsans(size: wide ? 30 : 24, weight: FontWeight.w700)),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: Stat('Đón', '$board', size: wide ? 28 : 20)),
+          const SizedBox(width: 8),
+          Expanded(child: Stat('Trả', '$drop', size: wide ? 28 : 20)),
+          const SizedBox(width: 8),
+          Expanded(child: Stat('Thu COD', '$cod', color: DTokens.warnInk, size: wide ? 28 : 20)),
+        ]),
+      ]),
+    );
+    final progress = Panel(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Column(children: [
+        Row(children: [Text('Đã lên xe', style: dsans(size: 14, color: DTokens.sub)), const Spacer(), Text('${store.boardedCount}/${store.manifest.length}', style: dmono(size: 15))]),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(value: store.manifest.isEmpty ? 0 : store.boardedCount / store.manifest.length, minHeight: 8, color: const Color(0xFF22C55E), backgroundColor: DTokens.line),
+        ),
+      ]),
+    );
+    final actions = <Widget>[
+      if (store.moving)
+        Semantics(
+          liveRegion: true,
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: DTokens.panel, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF475569))),
+            child: Row(children: [
+              const Icon(Icons.lock_outline, color: DTokens.sub),
+              const SizedBox(width: 12),
+              Expanded(child: Text('Xe đang chạy. Quét vé, danh sách khách và bán vé vẫy mở lại khi xe dừng.', style: dsans(size: 15, color: DTokens.sub, height: 1.4))),
+            ]),
+          ),
+        )
+      else ...[
+        BigButton(
+          label: store.lastStop
+            ? 'Đã đến bến cuối · Kết thúc chuyến'
+            : store.atStop
+                ? 'Mở danh sách đón trả'
+                : board > 0
+                    ? 'Đã đến trạm · Đón khách'
+                    : drop > 0
+                        ? 'Đã đến trạm · Trả khách'
+                        : 'Đã đến trạm',
+          height: 72,
+          icon: Icons.place_outlined,
+          onPressed: () async {
+            final error = await store.arrive();
+            if (!context.mounted) return;
+            if (error != null) {
+              dToast(context, error);
+              return;
+            }
+            if (store.lastStop) {
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverEndTripScreen()));
+              return;
+            }
+            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverManifestScreen()));
+          },
+        ),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: BigButton(label: 'Quét vé', outline: true, color: const Color(0xFFE2E8F0), icon: Icons.qr_code_scanner, onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverQrScannerScreen())))),
+          const SizedBox(width: 10),
+          Expanded(child: BigButton(label: 'Khách vẫy', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => showHailSheet(context))),
+        ]),
+      ],
+    ];
+    final incident = BigButton(
+      label: 'Báo sự cố',
+      height: 72,
+      outline: true,
+      color: const Color(0xFFEF4444),
+      icon: Icons.warning_amber_rounded,
+      onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverIncidentScreen())),
+    );
+    final earlyEnd = store.moving || store.lastStop
+        ? null
+        : TextButton(
+            onPressed: () => _earlyEnd(context),
+            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+            child: Text('Kết thúc chuyến sớm', style: dsans(size: 15, weight: FontWeight.w600, color: DTokens.sub)),
+          );
     return PopScope(
       canPop: false,
       child: Scaffold(
@@ -78,107 +183,36 @@ class DriverCockpitDashboard extends StatelessWidget {
                 child: Text('Đã báo ${store.incident!.type.toLowerCase()} lúc ${hhmm(store.incident!.at)} · ước tính chậm ${store.incident!.delay} phút. Điều hành đã nhận.', style: dsans(size: 13, color: DTokens.dangerInk)),
               ),
             Expanded(
-              child: ListView(padding: const EdgeInsets.all(16), children: [
-                Row(children: [
-                  Expanded(child: _bigMetric('Tốc độ', '${store.speed}', 'km/h')),
-                  const SizedBox(width: 12),
-                  Expanded(child: store.atStop ? _bigMetric('Đến trạm kế', 'Tại', 'trạm') : _bigMetric('Đến trạm kế', '$eta', 'phút')),
-                ]),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(color: const Color(0xFF172554), border: Border.all(color: const Color(0xFF1D4ED8)), borderRadius: BorderRadius.circular(12)),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    Row(children: [
-                      Text('${store.atStop ? 'Đang ở trạm' : 'Trạm kế'} ${store.stopIndex + 1}/${store.stops.length}', style: dsans(size: 13, color: const Color(0xFFBFDBFE))),
-                      const Spacer(),
-                      Text(s.time, style: dmono(size: 13, weight: FontWeight.w500, color: const Color(0xFFBFDBFE))),
-                    ]),
-                    const SizedBox(height: 8),
-                    Text(s.name, style: dsans(size: 24, weight: FontWeight.w700)),
-                    const SizedBox(height: 12),
-                    Row(children: [
-                      Expanded(child: Stat('Đón', '$board')),
-                      const SizedBox(width: 8),
-                      Expanded(child: Stat('Trả', '$drop')),
-                      const SizedBox(width: 8),
-                      Expanded(child: Stat('Thu COD', '$cod', color: DTokens.warnInk)),
-                    ]),
-                  ]),
-                ),
-                const SizedBox(height: 12),
-                Panel(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  child: Column(children: [
-                    Row(children: [Text('Đã lên xe', style: dsans(size: 14, color: DTokens.sub)), const Spacer(), Text('${store.boardedCount}/${store.manifest.length}', style: dmono(size: 15))]),
-                    const SizedBox(height: 8),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(999),
-                      child: LinearProgressIndicator(value: store.manifest.isEmpty ? 0 : store.boardedCount / store.manifest.length, minHeight: 8, color: const Color(0xFF22C55E), backgroundColor: DTokens.line),
-                    ),
-                  ]),
-                ),
-                const SizedBox(height: 12),
-                if (store.moving)
-                  Semantics(
-                    liveRegion: true,
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(color: DTokens.panel, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF475569))),
-                      child: Row(children: [
-                        const Icon(Icons.lock_outline, color: DTokens.sub),
-                        const SizedBox(width: 12),
-                        Expanded(child: Text('Xe đang chạy. Quét vé, danh sách khách và bán vé vẫy mở lại khi xe dừng.', style: dsans(size: 15, color: DTokens.sub, height: 1.4))),
+              child: wide
+                  // Tablet: what the driver reads at a glance on the left, the next stop and its actions on the right.
+                  ? SingleChildScrollView(
+                      padding: const EdgeInsets.all(20),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Expanded(flex: 2, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [speed, const SizedBox(height: 12), next, const SizedBox(height: 12), progress])),
+                        const SizedBox(width: 20),
+                        Expanded(flex: 3, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [stopCard, const SizedBox(height: 12), ...actions])),
                       ]),
-                    ),
-                  )
-                else ...[
-                  BigButton(
-                    label: store.lastStop ? 'Đã đến bến cuối · Kết thúc chuyến' : store.atStop ? 'Mở danh sách đón' : 'Đã đến trạm · Đón khách',
-                    height: 72,
-                    icon: Icons.place_outlined,
-                    onPressed: () async {
-                      final error = await store.arrive();
-                      if (!context.mounted) return;
-                      if (error != null) {
-                        dToast(context, error);
-                        return;
-                      }
-                      if (store.lastStop) {
-                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverEndTripScreen()));
-                        return;
-                      }
-                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverManifestScreen()));
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  Row(children: [
-                    Expanded(child: BigButton(label: 'Quét vé', outline: true, color: const Color(0xFFE2E8F0), icon: Icons.qr_code_scanner, onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverQrScannerScreen())))),
-                    const SizedBox(width: 10),
-                    Expanded(child: BigButton(label: 'Khách vẫy', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => showHailSheet(context))),
-                  ]),
-                ],
-              ]),
+                    )
+                  : ListView(padding: const EdgeInsets.all(16), children: [
+                      Row(children: [Expanded(child: speed), const SizedBox(width: 12), Expanded(child: next)]),
+                      const SizedBox(height: 12),
+                      stopCard,
+                      const SizedBox(height: 12),
+                      progress,
+                      const SizedBox(height: 12),
+                      ...actions,
+                    ]),
             ),
             Container(
               decoration: const BoxDecoration(border: Border(top: BorderSide(color: DTokens.lineSoft))),
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                BigButton(
-                  label: 'Báo sự cố',
-                  height: 72,
-                  outline: true,
-                  color: const Color(0xFFEF4444),
-                  icon: Icons.warning_amber_rounded,
-                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverIncidentScreen())),
-                ),
-                if (!store.moving && !store.lastStop)
-                  TextButton(
-                    onPressed: () => _earlyEnd(context),
-                    style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-                    child: Text('Kết thúc chuyến sớm', style: dsans(size: 15, weight: FontWeight.w600, color: DTokens.sub)),
-                  ),
-              ]),
+              padding: EdgeInsets.fromLTRB(wide ? 20 : 16, 12, wide ? 20 : 16, wide ? 12 : 8),
+              child: wide
+                  ? Row(children: [
+                      if (earlyEnd != null) earlyEnd,
+                      const Spacer(),
+                      SizedBox(width: 400, child: incident),
+                    ])
+                  : Column(mainAxisSize: MainAxisSize.min, children: [incident, if (earlyEnd != null) earlyEnd]),
             ),
           ]),
         ),

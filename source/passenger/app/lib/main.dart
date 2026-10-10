@@ -9,6 +9,27 @@ void main() {
   runApp(BusGoPassengerApp(store: PassengerStore()));
 }
 
+// Phones and tablets use the whole screen; only very wide screens (desktop, web) get a centered
+// 1280 dp frame. Screens switch to two columns from 720 dp (pWide).
+Widget phoneColumnBuilder(BuildContext context, Widget? child) {
+  if (child == null) return const SizedBox.shrink();
+  final mq = MediaQuery.of(context);
+  const maxWidth = 1280.0;
+  if (mq.size.width <= maxWidth) return child;
+  return ColoredBox(
+    color: PTokens.line,
+    child: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: maxWidth),
+        child: MediaQuery(
+          data: mq.copyWith(size: Size(maxWidth, mq.size.height)),
+          child: child,
+        ),
+      ),
+    ),
+  );
+}
+
 class BusGoPassengerApp extends StatefulWidget {
   const BusGoPassengerApp({super.key, required this.store});
   final PassengerStore store;
@@ -59,6 +80,7 @@ class _BusGoPassengerAppState extends State<BusGoPassengerApp> {
         title: 'BusGo',
         debugShowCheckedModeBanner: false,
         theme: passengerTheme(),
+        builder: phoneColumnBuilder,
         home: const PassengerSplashScreen(),
       ),
     );

@@ -21,6 +21,25 @@ class _MainShellScreenState extends State<MainShellScreen> {
   @override
   Widget build(BuildContext context) {
     const pages = [DriverTodayTripsScreen(), DriverOfflineSyncScreen(), _ProfileTab()];
+    if (dWide(context)) {
+      // Landscape tablet: the tabs move to a rail on the left and give the height back to the content.
+      return Scaffold(
+        body: Row(children: [
+          Container(
+            width: 104,
+            decoration: const BoxDecoration(color: DTokens.panel2, border: Border(right: BorderSide(color: DTokens.lineSoft))),
+            child: SafeArea(
+              right: false,
+              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                for (final (i, icon, label) in const [(0, Icons.directions_bus_outlined, 'Chuyến'), (1, Icons.sync, 'Đồng bộ'), (2, Icons.person_outline, 'Hồ sơ')])
+                  SizedBox(height: 88, child: _tab(i, icon, label)),
+              ]),
+            ),
+          ),
+          Expanded(child: IndexedStack(index: _index, children: pages)),
+        ]),
+      );
+    }
     return Scaffold(
       body: IndexedStack(index: _index, children: pages),
       bottomNavigationBar: Container(
@@ -30,9 +49,9 @@ class _MainShellScreenState extends State<MainShellScreen> {
           child: SizedBox(
             height: 68,
             child: Row(children: [
-              _tab(0, Icons.directions_bus_outlined, 'Chuyến'),
-              _tab(1, Icons.sync, 'Đồng bộ'),
-              _tab(2, Icons.person_outline, 'Hồ sơ'),
+              Expanded(child: _tab(0, Icons.directions_bus_outlined, 'Chuyến')),
+              Expanded(child: _tab(1, Icons.sync, 'Đồng bộ')),
+              Expanded(child: _tab(2, Icons.person_outline, 'Hồ sơ')),
             ]),
           ),
         ),
@@ -43,20 +62,18 @@ class _MainShellScreenState extends State<MainShellScreen> {
   Widget _tab(int i, IconData icon, String label) {
     final selected = _index == i;
     final color = selected ? DTokens.primaryInk : DTokens.muted;
-    return Expanded(
-      child: Semantics(
-        selected: selected,
-        button: true,
-        label: label,
-        excludeSemantics: true,
-        child: InkWell(
-          onTap: () => setState(() => _index = i),
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(icon, color: color),
-            const SizedBox(height: 4),
-            Text(label, style: dsans(size: 13, weight: selected ? FontWeight.w600 : FontWeight.w400, color: color)),
-          ]),
-        ),
+    return Semantics(
+      selected: selected,
+      button: true,
+      label: label,
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: () => setState(() => _index = i),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, color: color),
+          const SizedBox(height: 4),
+          Text(label, style: dsans(size: 13, weight: selected ? FontWeight.w600 : FontWeight.w400, color: color)),
+        ]),
       ),
     );
   }
@@ -70,7 +87,7 @@ class _ProfileTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = DriverScope.of(context);
     return SafeArea(
-      child: ListView(padding: const EdgeInsets.all(16), children: [
+      child: DMaxWidth(child: ListView(padding: const EdgeInsets.all(16), children: [
         Text('Hồ sơ', style: dsans(size: 22, weight: FontWeight.w700)),
         const SizedBox(height: 16),
         Panel(
@@ -97,7 +114,7 @@ class _ProfileTab extends StatelessWidget {
             Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const DriverLoginScreen()), (_) => false);
           },
         ),
-      ]),
+      ])),
     );
   }
 }
