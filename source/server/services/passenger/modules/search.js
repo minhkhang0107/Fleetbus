@@ -13,7 +13,8 @@ export const STATIONS_DATABASE = [
     address: 'Km 6 Giải Phóng, Giáp Bát, Hoàng Mai, Hà Nội',
     lat: 20.9806,
     lng: 105.8413,
-    popular: true
+    popular: true,
+    operator_ids: ['op_saomai']
   },
   {
     station_id: 'stp_hn_my_dinh',
@@ -22,7 +23,8 @@ export const STATIONS_DATABASE = [
     address: '20 Phạm Hùng, Mỹ Đình, Nam Từ Liêm, Hà Nội',
     lat: 21.0285,
     lng: 105.7783,
-    popular: true
+    popular: true,
+    operator_ids: ['op_saomai', 'op_xuyenviet']
   },
   {
     station_id: 'stp_hn_nuoc_ngam',
@@ -31,7 +33,8 @@ export const STATIONS_DATABASE = [
     address: '01 Ngọc Hồi, Hoàng Liệt, Hoàng Mai, Hà Nội',
     lat: 20.9634,
     lng: 105.8446,
-    popular: true
+    popular: true,
+    operator_ids: ['op_saomai']
   },
   {
     station_id: 'stp_th_pb',
@@ -40,7 +43,8 @@ export const STATIONS_DATABASE = [
     address: 'Nguyễn Chí Thanh, Nam Ngạn, TP. Thanh Hóa',
     lat: 19.8067,
     lng: 105.7852,
-    popular: true
+    popular: true,
+    operator_ids: ['op_saomai', 'op_xuyenviet']
   },
   {
     station_id: 'stp_th_sam_son',
@@ -49,7 +53,8 @@ export const STATIONS_DATABASE = [
     address: 'Đường Lê Lợi, Sầm Sơn, Thanh Hóa',
     lat: 19.7423,
     lng: 105.9012,
-    popular: true
+    popular: true,
+    operator_ids: ['op_saomai']
   },
   {
     station_id: 'stp_na_vinh',
@@ -58,7 +63,8 @@ export const STATIONS_DATABASE = [
     address: 'Đường Cao Thắng, TP. Vinh, Nghệ An',
     lat: 18.6672,
     lng: 105.6791,
-    popular: true
+    popular: true,
+    operator_ids: ['op_saomai']
   },
   {
     station_id: 'stp_dn_tt',
@@ -67,13 +73,25 @@ export const STATIONS_DATABASE = [
     address: '185 Tôn Đức Thắng, Hòa Minh, Liên Chiểu, Đà Nẵng',
     lat: 16.0592,
     lng: 108.1673,
-    popular: true
+    popular: true,
+    operator_ids: ['op_saomai']
+  },
+  {
+    station_id: 'stp_nb',
+    name: 'Bến xe Ninh Bình',
+    city: 'Ninh Bình',
+    address: 'Đường Lê Đại Hành, TP. Ninh Bình',
+    lat: 20.2531,
+    lng: 105.9748,
+    popular: true,
+    operator_ids: ['op_saomai', 'op_xuyenviet']
   }
 ];
 
 export const MOCK_TRIPS_DATABASE = [
   {
     trip_id: 'trp_hn_th_01',
+    operator_id: 'op_saomai',
     route_id: 'rot_hn_th',
     route_name: 'Hà Nội — Thanh Hóa (Cao tốc)',
     vehicle_type: 'VIP_CABIN',
@@ -97,6 +115,7 @@ export const MOCK_TRIPS_DATABASE = [
   },
   {
     trip_id: 'trp_hn_th_02',
+    operator_id: 'op_saomai',
     route_id: 'rot_hn_th',
     route_name: 'Hà Nội — Thanh Hóa (Cao tốc)',
     vehicle_type: 'SLEEPER_34',
@@ -118,6 +137,7 @@ export const MOCK_TRIPS_DATABASE = [
   },
   {
     trip_id: 'trp_hn_th_03',
+    operator_id: 'op_saomai',
     route_id: 'rot_hn_th',
     route_name: 'Hà Nội — Sầm Sơn VIP Limousine',
     vehicle_type: 'VIP_CABIN',
@@ -135,6 +155,28 @@ export const MOCK_TRIPS_DATABASE = [
       { stop_id: 'stp_hn_gb', name: 'Bến xe Giáp Bát', city: 'Hà Nội', order: 1, pickup_allowed: true, dropoff_allowed: false },
       { stop_id: 'stp_th_sam_son', name: 'Bến xe Sầm Sơn', city: 'Thanh Hóa', order: 2, pickup_allowed: false, dropoff_allowed: true }
     ]
+  },
+  {
+    trip_id: 'trp_xv_hn_th_01',
+    operator_id: 'op_xuyenviet',
+    route_id: 'rot_xv_hn_th',
+    route_name: 'Hà Nội — Thanh Hóa (Xuyên Việt)',
+    vehicle_type: 'VIP_CABIN',
+    vehicle_title: 'Limousine Xuyên Việt 22 Phòng',
+    plate_number: '30H-246.80',
+    departure_time: '2026-08-28T08:30:00+07:00',
+    arrival_time: '2026-08-28T11:00:00+07:00',
+    duration_minutes: 150,
+    base_fare_vnd: 200000,
+    total_seats: 22,
+    available_seats_count: 22,
+    rating: 4.8,
+    amenities: ['wifi', 'water', 'usb_charging'],
+    stops: [
+      { stop_id: 'stp_hn_my_dinh', name: 'Bến xe Mỹ Đình', city: 'Hà Nội', order: 1, pickup_allowed: true, dropoff_allowed: false },
+      { stop_id: 'stp_nb', name: 'Bến xe Ninh Bình', city: 'Ninh Bình', order: 2, pickup_allowed: true, dropoff_allowed: true },
+      { stop_id: 'stp_th_pb', name: 'Bến xe Phía Bắc Thanh Hóa', city: 'Thanh Hóa', order: 3, pickup_allowed: false, dropoff_allowed: true }
+    ]
   }
 ];
 
@@ -142,13 +184,18 @@ export class PassengerSearchService {
   /**
    * PAX-005: Location / Station search with diacritics fuzzy matching
    */
-  searchStations(query = '', limit = 10) {
+  searchStations(query = '', limit = 10, operatorId = null) {
     const q = this._normalizeVietnamese(query.trim());
+    let stations = STATIONS_DATABASE;
+    if (operatorId) {
+      stations = stations.filter(s => s.operator_ids && s.operator_ids.includes(operatorId));
+    }
+    
     if (!q) {
-      return STATIONS_DATABASE.filter(s => s.popular).slice(0, limit);
+      return stations.filter(s => s.popular).slice(0, limit);
     }
 
-    return STATIONS_DATABASE.filter(station => {
+    return stations.filter(station => {
       const matchName = this._normalizeVietnamese(station.name).includes(q);
       const matchCity = this._normalizeVietnamese(station.city).includes(q);
       const matchAddress = this._normalizeVietnamese(station.address).includes(q);
@@ -166,13 +213,16 @@ export class PassengerSearchService {
       date, // YYYY-MM-DD
       vehicleType, // 'VIP_CABIN' | 'SLEEPER_34'
       timeSlot, // 'MORNING' (05:00-12:00), 'AFTERNOON' (12:00-18:00), 'EVENING' (18:00-24:00)
-      sortBy = 'DEPARTURE_ASC' // 'PRICE_ASC' | 'PRICE_DESC' | 'DEPARTURE_ASC'
+      sortBy = 'DEPARTURE_ASC', // 'PRICE_ASC' | 'PRICE_DESC' | 'DEPARTURE_ASC'
+      operatorId
     } = criteria;
 
     const normOrigin = this._normalizeVietnamese(originCity);
     const normDest = this._normalizeVietnamese(destinationCity);
 
     let results = MOCK_TRIPS_DATABASE.filter(trip => {
+      if (operatorId && trip.operator_id !== operatorId) return false;
+
       // Must have a pickup stop in origin city and dropoff stop in destination city with order pickup < dropoff
       const pickupStop = trip.stops.find(s => this._normalizeVietnamese(s.city) === normOrigin && s.pickup_allowed);
       const dropoffStop = trip.stops.find(s => this._normalizeVietnamese(s.city) === normDest && s.dropoff_allowed);
@@ -213,9 +263,12 @@ export class PassengerSearchService {
   /**
    * PAX-007: Get Trip Detail
    */
-  getTripDetail(tripId) {
+  getTripDetail(tripId, operatorId = null) {
     const trip = MOCK_TRIPS_DATABASE.find(t => t.trip_id === tripId);
     if (!trip) {
+      return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
+    }
+    if (operatorId && trip.operator_id !== operatorId) {
       return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
     }
 

@@ -6,6 +6,7 @@
 import { validateVietnamPhone } from '../core/formatters.js';
 import { isProduction } from '../../../config.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
+import { findOperatorById, DEFAULT_OPERATOR_ID, publicOperatorProfile } from '../../../core/operators.js';
 
 export class PassengerAuthService {
   constructor(options = {}) {
@@ -15,7 +16,7 @@ export class PassengerAuthService {
     this.maintenanceActive = options.maintenanceActive ?? false;
 
     this.sessions = new Map(); // token -> session
-    this.otpStore = new Map(); // phone -> { otp, expiresAt, attempts, lastSentAt }
+    this.otpStore = new Map(); // operatorId:phone -> { otp, expiresAt, attempts, lastSentAt }
     this.otpCooldownSeconds = 60;
     this.otpTtlSeconds = 180; // 3 minutes
   }
@@ -52,14 +53,15 @@ export class PassengerAuthService {
   /**
    * PAX-002: Request OTP via Vietnam phone number
    */
-  requestOTP(phone, mockNow = Date.now()) {
+  requestOTP(phone, mockNow = Date.now(), operatorId = DEFAULT_OPERATOR_ID) {
     const phoneCheck = validateVietnamPhone(phone);
     if (!phoneCheck.isValid) {
       return { success: false, error: phoneCheck.message, code: 'INVALID_PHONE' };
     }
 
     const normalized = phoneCheck.normalized;
-    const existing = this.otpStore.get(normalized);
+    const cacheKey = `${operatorId}:${normalized}`;
+    const existing = this.otpStore.get(cacheKey);
 
     // Check 60s cooldown
     if (existing && mockNow - existing.lastSentAt < this.otpCooldownSeconds * 1000) {
@@ -78,7 +80,7 @@ export class PassengerAuthService {
     const otp = normalized === '0912345678' ? '882199' : Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = mockNow + this.otpTtlSeconds * 1000;
 
-    this.otpStore.set(normalized, {
+    this.otpStore.set(cacheKey, {
       otp,
       expiresAt,
       attempts: 0,
@@ -100,30 +102,32 @@ export class PassengerAuthService {
   /**
    * PAX-003: Verify 6-digit OTP
    */
-  verifyOTP(phone, inputOtp, mockNow = Date.now()) {
+  verifyOTP(phone, inputOtp, mockNow = Date.now(), operatorId = DEFAULT_OPERATOR_ID) {
     const phoneCheck = validateVietnamPhone(phone);
     if (!phoneCheck.isValid) {
       return { success: false, error: phoneCheck.message, code: 'INVALID_PHONE' };
     }
 
     const normalized = phoneCheck.normalized;
-    const record = this.otpStore.get(normalized);
+    const cacheKey = `${operatorId}:${normalized}`;
+    const record = this.otpStore.get(cacheKey);
 
     if (!record) {
       return { success: false, error: 'Chưa có yêu cầu OTP cho số điện thoại này', code: 'NO_OTP_RECORD' };
     }
 
     if (mockNow > record.expiresAt) {
-      this.otpStore.delete(normalized);
+      this.otpStore.delete(cacheKey);
       return { success: false, error: 'Mã OTP đã hết hạn. Vui lòng gửi lại', code: 'OTP_EXPIRED' };
     }
 
     if (record.attempts >= 5) {
-      this.otpStore.delete(normalized);
+      this.otpStore.delete(cacheKey);
       return { success: false, error: 'Bạn đã nhập sai quá 5 lần. Vui lòng yêu cầu mã mới', code: 'MAX_ATTEMPTS_EXCEEDED' };
     }
 
-    if (record.otp !== inputOtp) {
+    // "The fixed test OTP 882199 for 0912345678 applies to every operator."
+    if (record.otp !== inputOtp && !(normalized === '0912345678' && inputOtp === '882199')) {
       record.attempts += 1;
       return {
         success: false,
@@ -134,18 +138,28 @@ export class PassengerAuthService {
     }
 
     // OTP Verified -> Create Auth Session
-    this.otpStore.delete(normalized);
+    this.otpStore.delete(cacheKey);
+    
+    const op = findOperatorById(operatorId);
+    const opCode = op ? op.code : 'UNKNOWN';
+    let userId = `usr_${normalized.slice(-6)}`;
+    if (operatorId !== DEFAULT_OPERATOR_ID) {
+      userId = `usr_${opCode.toLowerCase()}_${normalized.slice(-6)}`;
+    }
+
     const user = {
-      user_id: `usr_${normalized.slice(-6)}`,
+      user_id: userId,
       phone: normalized,
       full_name: normalized === '0912345678' ? 'Nguyễn Văn An' : 'Hành khách BusGo',
       email: `${normalized}@passenger.busgo.vn`,
       role: 'ROLE_PASSENGER',
-      created_at: new Date(mockNow).toISOString()
+      created_at: new Date(mockNow).toISOString(),
+      operator_id: operatorId,
+      operator: publicOperatorProfile(op)
     };
 
     const token = signToken(
-      { sub: user.user_id, phone: normalized, role: user.role, kind: 'passenger' },
+      { sub: user.user_id, phone: normalized, role: user.role, kind: 'passenger', operator_id: operatorId },
       { prefix: TOKEN_PREFIXES.passenger, ttlSeconds: 12 * 3600, now: mockNow }
     );
     this.sessions.set(token, user);

@@ -4,7 +4,7 @@
  */
 
 // Trips that can be sold: the passenger search trips and the trips on the manager and driver boards.
-const SEEDED_TRIPS = ['trp_hn_th_01', 'trp_hn_th_02', 'trp_hn_th_03', 'trp_991823', 'trp_991824'];
+const SEEDED_TRIPS = ['trp_hn_th_01', 'trp_hn_th_02', 'trp_hn_th_03', 'trp_991823', 'trp_991824', 'trp_xv_hn_th_01'];
 
 export class PassengerSeatMapService {
   constructor() {

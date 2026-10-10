@@ -5,6 +5,7 @@
 
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
 import { publicOperatorProfile } from '../core/operators.js';
+import { tripVisibleTo } from '../core/tenancy.js';
 
 // With authentication enforced, a ticket or order may only be used by its owner (or its holder, where allowed).
 function forbidTicket(req, res, paymentService, ticketId, { ownerOnly = false } = {}) {
@@ -57,7 +58,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   // POST /api/v1/passenger/auth/request-otp or /api/v1/auth/passenger/otp/request (PAX-002)
   if ((pathname === '/api/v1/passenger/auth/request-otp' || pathname === '/api/v1/auth/passenger/otp/request') && req.method === 'POST') {
     parseJsonBody(req).then(body => {
-      const result = authService.requestOTP(body.phone, body.now);
+      const result = authService.requestOTP(body.phone, body.now, req.operatorId);
       if (result.success) {
         sendSuccess(res, result.data);
       } else {
@@ -70,7 +71,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   // POST /api/v1/passenger/auth/verify-otp or /api/v1/auth/passenger/otp/verify (PAX-003)
   if ((pathname === '/api/v1/passenger/auth/verify-otp' || pathname === '/api/v1/auth/passenger/otp/verify') && req.method === 'POST') {
     parseJsonBody(req).then(body => {
-      const result = authService.verifyOTP(body.phone, body.otp, body.now);
+      const result = authService.verifyOTP(body.phone, body.otp, body.now, req.operatorId);
       if (result.success) {
         sendSuccess(res, result.data);
       } else {
@@ -99,7 +100,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   // GET /api/v1/passenger/stations or /api/v1/routes/stops/search or /api/v1/stations (PAX-005)
   if ((pathname === '/api/v1/passenger/stations' || pathname === '/api/v1/routes/stops/search' || pathname === '/api/v1/stations') && req.method === 'GET') {
     const q = parsedUrl.searchParams.get('q') || '';
-    const stations = searchService.searchStations(q);
+    const stations = searchService.searchStations(q, 10, req.operatorId);
     sendSuccess(res, stations);
     return true;
   }
@@ -110,7 +111,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     const dest = parsedUrl.searchParams.get('destination') || parsedUrl.searchParams.get('destinationCity') || 'Thanh Hóa';
     const vehicleType = parsedUrl.searchParams.get('vehicle_type');
     const timeSlot = parsedUrl.searchParams.get('time_slot');
-    const trips = searchService.searchTrips({ originCity: origin, destinationCity: dest, vehicleType, timeSlot });
+    const trips = searchService.searchTrips({ originCity: origin, destinationCity: dest, vehicleType, timeSlot, operatorId: req.operatorId });
     sendSuccess(res, trips.data || trips);
     return true;
   }
@@ -119,6 +120,10 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   if ((pathname.startsWith('/api/v1/passenger/trips/') || pathname.startsWith('/api/v1/trips/')) && pathname.endsWith('/seat-map') && req.method === 'GET') {
     const parts = pathname.split('/');
     const tripId = parts[pathname.startsWith('/api/v1/passenger/') ? 5 : 4];
+    if (!tripVisibleTo(services, tripId, req.operatorId)) {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+      return true;
+    }
     // No stops asked means the whole route; stops given are checked against the trip (PAX-008, BR-SEAT-001)
     const pickupId = parsedUrl.searchParams.get('pickup_stop_id');
     const dropoffId = parsedUrl.searchParams.get('dropoff_stop_id');
@@ -135,6 +140,10 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   if ((pathname.startsWith('/api/v1/passenger/trips/') || pathname.startsWith('/api/v1/trips/')) && (pathname.endsWith('/hold-seats') || pathname.endsWith('/seats/hold')) && req.method === 'POST') {
     const parts = pathname.split('/');
     const tripId = parts[pathname.startsWith('/api/v1/passenger/') ? 5 : 4];
+    if (!tripVisibleTo(services, tripId, req.operatorId)) {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+      return true;
+    }
     parseJsonBody(req).then(body => {
       const userId = req.identity?.sub || body.userId;
       if (!userId) {
@@ -169,6 +178,11 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         return;
       }
 
+      if (!tripVisibleTo(services, tripId, req.operatorId)) {
+        sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+        return;
+      }
+
       const checkoutValidation = checkoutService.validateManifest({
         payerInfo,
         passengerList,
@@ -180,7 +194,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         return;
       }
 
-      const tripDetailRes = searchService.getTripDetail(tripId);
+      const tripDetailRes = searchService.getTripDetail(tripId, req.operatorId);
       if (!tripDetailRes.success) {
         sendError(res, tripDetailRes.error, tripDetailRes.code || 'TRIP_NOT_FOUND', 404);
         return;
@@ -340,7 +354,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   if (req.method === 'GET' && (TRIP_SUB_RE('radar').test(pathname) || TRIP_SUB_RE('tracking').test(pathname))) {
     const parts = pathname.split('/');
     const tripId = parts[pathname.startsWith('/api/v1/passenger/') ? 5 : 4];
-    if (!isKnownTrip(services, tripId)) {
+    if (!tripVisibleTo(services, tripId, req.operatorId)) {
       sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
       return true;
     }
@@ -354,14 +368,18 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     if (ticketId && paymentService.tickets) {
       const ticket = paymentService.tickets.get(ticketId);
       if (ticket && ticket.trip_id === tripId && ticket.status !== 'CANCELLED') {
-        pickupStopId = ticket.pickup_stop_id || null;
-        dropoffStopId = ticket.dropoff_stop_id || null;
-        boarded = ticket.status === 'BOARDED';
-        view = 'TICKET';
+        if (!tripVisibleTo(services, ticket.trip_id, req.operatorId)) {
+           // Ignore ticket if operator differs
+        } else {
+          pickupStopId = ticket.pickup_stop_id || null;
+          dropoffStopId = ticket.dropoff_stop_id || null;
+          boarded = ticket.status === 'BOARDED';
+          view = 'TICKET';
+        }
       }
     }
 
-    const detail = searchService.getTripDetail(tripId);
+    const detail = searchService.getTripDetail(tripId, req.operatorId);
     const stops = (detail && detail.success && detail.data && Array.isArray(detail.data.stops))
       ? detail.data.stops
       : [];
@@ -392,7 +410,12 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
 
   // GET /api/v1/trips/:tripId/stops (PAX-008)
   if (req.method === 'GET' && TRIP_SUB_RE('stops').test(pathname)) {
-    const detail = searchService.getTripDetail(pathname.match(TRIP_SUB_RE('stops'))[1]);
+    const tripId = pathname.match(TRIP_SUB_RE('stops'))[1];
+    if (!tripVisibleTo(services, tripId, req.operatorId)) {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+      return true;
+    }
+    const detail = searchService.getTripDetail(tripId, req.operatorId);
     if (detail.success) {
       sendSuccess(res, { trip_id: detail.data.trip_id, stops: detail.data.stops });
     } else {
@@ -404,6 +427,10 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   // DELETE /api/v1/trips/:tripId/seats/hold (PAX-010: release the caller's hold)
   if (req.method === 'DELETE' && TRIP_SUB_RE('seats/hold').test(pathname)) {
     const tripId = pathname.match(TRIP_SUB_RE('seats/hold'))[1];
+    if (!tripVisibleTo(services, tripId, req.operatorId)) {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+      return true;
+    }
     const userId = req.identity?.sub || parsedUrl.searchParams.get('userId');
     if (!userId) {
       sendError(res, 'Thiếu thông tin người dùng', 'USER_REQUIRED', 400);
@@ -418,7 +445,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   if (req.method === 'GET' && (TRIP_SUB_RE('disruptions').test(pathname) || TRIP_SUB_RE('replacement-info').test(pathname))) {
     const isReplacement = pathname.endsWith('/replacement-info');
     const tripId = pathname.match(TRIP_SUB_RE(isReplacement ? 'replacement-info' : 'disruptions'))[1];
-    if (!isKnownTrip(services, tripId)) {
+    if (!tripVisibleTo(services, tripId, req.operatorId)) {
       sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
       return true;
     }
@@ -476,7 +503,12 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
 
   // GET /api/v1/trips/:tripId (PAX-007)
   if (req.method === 'GET' && TRIP_DETAIL_RE.test(pathname)) {
-    const detail = searchService.getTripDetail(pathname.match(TRIP_DETAIL_RE)[1]);
+    const tripId = pathname.match(TRIP_DETAIL_RE)[1];
+    if (!tripVisibleTo(services, tripId, req.operatorId)) {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+      return true;
+    }
+    const detail = searchService.getTripDetail(tripId, req.operatorId);
     if (detail.success) {
       sendSuccess(res, detail.data);
     } else {
