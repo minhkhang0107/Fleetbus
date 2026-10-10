@@ -23,8 +23,8 @@ import { handleDriverRoutes } from './routes/driverRoutes.js';
 import { handleManagerRoutes } from './routes/managerRoutes.js';
 import { handleWebhookRoutes } from './routes/webhookRoutes.js';
 import { FleetBusEventBridge } from './core/fleetBusEventBridge.js';
-import { getWebhookSecret, getAuthMode } from './config.js';
-import { resolveAccess, authenticate, IdempotencyStore } from './core/gateway.js';
+import { getWebhookSecret, getAuthMode, isProduction } from './config.js';
+import { resolveAccess, authenticate, IdempotencyStore, resolveOperator } from './core/gateway.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -77,7 +77,7 @@ export function createFleetBusServer(customServices = {}) {
         return;
       }
 
-      const scope = `${req.identity.sub}:${req.method}:${pathname}:${key}`;
+      const scope = `${req.operatorId}:${req.identity.sub}:${req.method}:${pathname}:${key}`;
       const begin = idempotency.begin(scope, IdempotencyStore.fingerprint(raw));
       if (begin.state === 'reused') {
         sendError(res, 'Idempotency-Key này đã dùng cho một yêu cầu khác', 'IDEMPOTENCY_KEY_REUSED', 422);
@@ -165,10 +165,22 @@ export function createFleetBusServer(customServices = {}) {
         return;
       }
       req.identity = auth.identity;
-      if (access.idempotent) {
-        dispatchIdempotent(req, res, pathname, parsedUrl);
+    }
+
+    const exemptFromOperator = pathname === '/health' || pathname === '/openapi.json' || pathname === '/api/v1/openapi.json' || pathname.startsWith('/api/v1/webhooks/');
+    if (!exemptFromOperator) {
+      const opResult = resolveOperator(req, parsedUrl, req.identity, { production: isProduction() });
+      if (!opResult.ok) {
+        sendError(res, opResult.message, opResult.code, opResult.status);
         return;
       }
+      req.operator = opResult.operator;
+      req.operatorId = opResult.operator.operator_id;
+    }
+
+    if (services.config.authMode === 'enforce' && access.kind !== 'public' && access.idempotent) {
+      dispatchIdempotent(req, res, pathname, parsedUrl);
+      return;
     }
 
     dispatchRoutes(req, res, pathname, parsedUrl);

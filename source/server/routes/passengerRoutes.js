@@ -4,6 +4,7 @@
  */
 
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { publicOperatorProfile } from '../core/operators.js';
 
 // With authentication enforced, a ticket or order may only be used by its owner (or its holder, where allowed).
 function forbidTicket(req, res, paymentService, ticketId, { ownerOnly = false } = {}) {
@@ -45,7 +46,11 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   if ((pathname === '/api/v1/passenger/config' || pathname === '/api/v1/app/config') && req.method === 'GET') {
     const version = req.headers['x-app-version'] || '3.0.0';
     const config = authService.checkAppConfig(version);
-    sendSuccess(res, config.data || config);
+    const responseData = config.data || config;
+    if (req.operator) {
+      responseData.operator = publicOperatorProfile(req.operator);
+    }
+    sendSuccess(res, responseData);
     return true;
   }
 

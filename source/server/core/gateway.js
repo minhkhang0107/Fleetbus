@@ -4,6 +4,7 @@
  */
 import crypto from 'crypto';
 import { verifyToken } from './tokens.js';
+import { DEFAULT_OPERATOR_ID, findOperatorByCode, findOperatorById, normalizeOperatorCode } from './operators.js';
 
 const API = '/api/v1';
 
@@ -129,4 +130,45 @@ export class IdempotencyStore {
     entry.status = status;
     entry.body = body;
   }
+}
+
+/**
+ * Resolves the operator for a request based on identity, headers, or query parameters.
+ */
+export function resolveOperator(req, parsedUrl, identity, { production }) {
+  const explicitCode = req.headers['x-operator-code'] || parsedUrl.searchParams.get('operator');
+  const normalizedCode = normalizeOperatorCode(explicitCode);
+  
+  let explicitOp = null;
+  if (normalizedCode) {
+    explicitOp = findOperatorByCode(normalizedCode);
+    if (!explicitOp) {
+      return { ok: false, status: 404, code: 'OPERATOR_NOT_FOUND', message: 'Mã nhà xe không đúng' };
+    }
+  }
+
+  let identityOp = null;
+  if (identity) {
+    const opId = identity.operator_id || DEFAULT_OPERATOR_ID;
+    identityOp = findOperatorById(opId);
+    if (!identityOp) {
+      return { ok: false, status: 404, code: 'OPERATOR_NOT_FOUND', message: 'Mã nhà xe không đúng' };
+    }
+  }
+
+  if (identityOp && explicitOp && identityOp.operator_id !== explicitOp.operator_id) {
+    return { ok: false, status: 403, code: 'OPERATOR_MISMATCH', message: 'Mã nhà xe không khớp' };
+  }
+
+  const resolvedOp = identityOp || explicitOp;
+
+  if (resolvedOp) {
+    return { ok: true, operator: resolvedOp };
+  }
+
+  if (production) {
+    return { ok: false, status: 400, code: 'OPERATOR_REQUIRED', message: 'Cần mã nhà xe' };
+  }
+
+  return { ok: true, operator: findOperatorById(DEFAULT_OPERATOR_ID) };
 }
