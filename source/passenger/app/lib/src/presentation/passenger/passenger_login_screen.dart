@@ -12,12 +12,16 @@ class PassengerLoginScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final op = PassengerScope.of(context).operator;
+    final title = op != null ? 'Đăng nhập · ${op.shortName}' : 'Đăng nhập';
+    final intro = op != null ? 'Nhập số điện thoại để đăng nhập vào ${op.name}.' : 'Nhập số điện thoại để nhận mã xác thực.';
+    
     return Scaffold(
-      appBar: const TopBar(title: 'Đăng nhập'),
+      appBar: TopBar(title: title),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: PMaxWidth(maxWidth: 480, child: OtpForm(
-          intro: 'Nhập số điện thoại để nhận mã xác thực.',
+          intro: intro,
           confirmLabel: 'Xác nhận',
           onVerified: (phone) {
             Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const PassengerMainShell()), (_) => false);

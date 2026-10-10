@@ -15,11 +15,14 @@ class PassengerHomeScreen extends StatelessWidget {
     final store = PassengerScope.of(context);
     final upcoming = store.tickets.where((t) => t.status == TicketStatus.active).toList();
     final name = store.userName;
+    final op = store.operator;
+    final recent = store.recentPairs;
     return SafeArea(
       child: PSplit(padding: const EdgeInsets.fromLTRB(16, 24, 16, 24), leftFlex: 5, rightFlex: 4, left: [
         Row(children: [
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if (op != null) Text(op.name, style: sans(size: 12, weight: FontWeight.w600, color: PTokens.primary)),
               Text(name == null ? 'Xin chào' : 'Xin chào, ${name.split(' ').last}', style: sans(size: 13, color: PTokens.muted)),
               Text('Bạn muốn đi đâu?', style: sans(size: 22, weight: FontWeight.w700)),
             ]),
@@ -85,13 +88,19 @@ class PassengerHomeScreen extends StatelessWidget {
           gap(10),
           _UpcomingCard(ticket: upcoming.last),
         ],
-        if (upcoming.isNotEmpty || !pWide(context)) gap(20),
-        Text('Tìm lại gần đây', style: sans(size: 15, weight: FontWeight.w600)),
-        gap(10),
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          _RecentChip(label: 'Hà Nội → Thanh Hóa', origin: 'hn', dest: 'th'),
-          _RecentChip(label: 'Hà Nội → Ninh Bình', origin: 'hn', dest: 'nb'),
-        ]),
+        if (recent.isNotEmpty) ...[
+          if (upcoming.isNotEmpty || !pWide(context)) gap(20),
+          Text('Tìm lại gần đây', style: sans(size: 15, weight: FontWeight.w600)),
+          gap(10),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final pair in recent)
+              _RecentChip(
+                label: '${store.places[pair[0]]?.city} → ${store.places[pair[1]]?.city}',
+                origin: pair[0],
+                dest: pair[1],
+              ),
+          ]),
+        ],
       ]),
     );
   }

@@ -39,8 +39,9 @@ class _PassengerLocationPickerScreenState extends State<PassengerLocationPickerS
 
   @override
   Widget build(BuildContext context) {
+    final storePlaces = PassengerScope.of(context).places.values;
     final q = foldVietnamese(_query.trim());
-    final items = PassengerStore.places.values.where((p) => q.isEmpty || foldVietnamese('${p.city} ${p.station} ${p.altStations.join(' ')}').contains(q)).toList();
+    final items = storePlaces.where((p) => q.isEmpty || foldVietnamese('${p.city} ${p.station} ${p.altStations.join(' ')}').contains(q)).toList();
     return Scaffold(
       appBar: TopBar(title: widget.isOrigin ? 'Chọn điểm đi' : 'Chọn điểm đến'),
       body: Column(children: [

@@ -2,9 +2,33 @@ import 'dart:async';
 
 import 'package:data/src/service/passenger_api_service.dart';
 import 'package:flutter/widgets.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// State of the passenger app, backed by the FleetBus API (`PassengerApiClientService`, OQ-029).
 /// Screens follow the Claude Design canvas "FleetBus — Thiết kế lại 3 app".
+
+class OperatorInfo {
+  const OperatorInfo({
+    required this.code,
+    required this.name,
+    required this.shortName,
+    required this.hotline,
+    required this.primaryColor,
+  });
+  final String code;
+  final String name;
+  final String shortName;
+  final String hotline;
+  final String primaryColor;
+
+  factory OperatorInfo.fromJson(Map<String, dynamic> j) => OperatorInfo(
+        code: j['code'] ?? '',
+        name: j['name'] ?? '',
+        shortName: j['short_name'] ?? '',
+        hotline: j['hotline'] ?? '',
+        primaryColor: j['primary_color'] ?? '',
+      );
+}
 
 class Place {
   const Place(this.code, this.city, this.station, this.altStations);
@@ -286,12 +310,9 @@ class PassengerStore extends ChangeNotifier {
 
   final PassengerApiClientService api;
 
-  static const places = <String, Place>{
-    'hn': Place('hn', 'Hà Nội', 'Bến xe Giáp Bát', ['Bến xe Mỹ Đình', 'Bến xe Nước Ngầm']),
-    'th': Place('th', 'Thanh Hóa', 'Bến xe Phía Bắc', ['Bến xe Phía Nam', 'Bến xe Sầm Sơn']),
-    'nb': Place('nb', 'Ninh Bình', 'Bến xe Ninh Bình', []),
-    'hp': Place('hp', 'Hải Phòng', 'Bến xe Niệm Nghĩa', ['Bến xe Cầu Rào']),
-  };
+  OperatorInfo? operator;
+  Map<String, Place> places = {};
+
   static const dates = [
     TravelDate('27/08', 'T5 · 27/08', 'Thứ Năm, 27/08'),
     TravelDate('28/08', 'T6 · 28/08', 'Thứ Sáu, 28/08'),
@@ -307,8 +328,8 @@ class PassengerStore extends ChangeNotifier {
   String? devOtp; // development server only: fills the OTP field like an SMS autofill
 
   // Search
-  String origin = 'hn';
-  String dest = 'th';
+  String origin = '';
+  String dest = '';
   String date = '28/08';
   String sort = 'time';
   List<Trip> trips = [];
@@ -349,8 +370,27 @@ class PassengerStore extends ChangeNotifier {
   List<AppNotice> notices = [];
   bool unread = false;
 
-  Place get originPlace => places[origin]!;
-  Place get destPlace => places[dest]!;
+  Place get originPlace => places.isEmpty ? const Place('', '—', '', []) : (places[origin] ?? const Place('', '—', '', []));
+  Place get destPlace => places.isEmpty ? const Place('', '—', '', []) : (places[dest] ?? const Place('', '—', '', []));
+
+  List<List<String>> get recentPairs {
+    if (places.isEmpty) return [];
+    final hn = places.values.where((p) => p.city == 'Hà Nội').firstOrNull?.code;
+    final th = places.values.where((p) => p.city == 'Thanh Hóa').firstOrNull?.code;
+    final nb = places.values.where((p) => p.city == 'Ninh Bình').firstOrNull?.code;
+    final hp = places.values.where((p) => p.city == 'Hải Phòng').firstOrNull?.code;
+    
+    final list = <List<String>>[];
+    if (hn != null && th != null) list.add([hn, th]);
+    if (hn != null && nb != null) list.add([hn, nb]);
+    if (hn != null && hp != null) list.add([hn, hp]);
+    if (list.isEmpty && places.length >= 2) {
+      final keys = places.keys.toList();
+      list.add([keys[0], keys[1]]);
+    }
+    return list.take(2).toList();
+  }
+
   TravelDate get travelDate => dates.firstWhere((d) => d.id == date);
 
   ApiResult<Map<String, dynamic>> _result(Map<String, dynamic> json) {
@@ -366,6 +406,93 @@ class PassengerStore extends ChangeNotifier {
     }
   }
 
+  // ---------- Operator & Places ----------
+  Future<String?> selectOperator(String rawCode) async {
+    final code = rawCode.trim().toUpperCase();
+    if (code.isEmpty) return 'Nhập mã nhà xe';
+    
+    final r = await _call(() => api.getAppConfig(operatorCode: code));
+    if (!r.ok) return r.error;
+    
+    api.operatorCode = code;
+    operator = OperatorInfo.fromJson(r.value!['operator'] as Map<String, dynamic>);
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('operator_code', code);
+    
+    await loadPlaces();
+    notifyListeners();
+    return null;
+  }
+
+  Future<void> restoreOperator() async {
+    final prefs = await SharedPreferences.getInstance();
+    final code = prefs.getString('operator_code');
+    if (code != null && code.isNotEmpty) {
+      await selectOperator(code); // silently ignore errors
+    }
+  }
+
+  Future<void> changeOperator() async {
+    logout();
+    operator = null;
+    places.clear();
+    trips.clear();
+    tickets.clear();
+    notices.clear();
+    api.operatorCode = null;
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('operator_code');
+    
+    notifyListeners();
+  }
+
+  String _foldToCode(String text) {
+    const from = 'àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ';
+    const to = 'aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd';
+    var lower = text.toLowerCase().replaceAll(' ', '');
+    for (var i = 0; i < from.length; i++) {
+      lower = lower.replaceAll(from[i], to[i]);
+    }
+    return lower;
+  }
+
+  Future<void> loadPlaces() async {
+    try {
+      final json = await api.searchStations('');
+      final cityGroups = <String, List<Map<String, dynamic>>>{};
+      for (final s in json) {
+        final city = s['city'] as String? ?? '';
+        if (city.isEmpty) continue;
+        final code = _foldToCode(city);
+        (cityGroups[code] ??= []).add(s as Map<String, dynamic>);
+      }
+      
+      places.clear();
+      for (final e in cityGroups.entries) {
+        final code = e.key;
+        final group = e.value;
+        final city = group.first['city'] as String;
+        final sorted = group.toList()..sort((a, b) => (b['popular'] == true ? 1 : 0).compareTo(a['popular'] == true ? 1 : 0));
+        final mainStation = sorted.first['name'] as String;
+        final alt = sorted.skip(1).map((s) => s['name'] as String).toList();
+        places[code] = Place(code, city, mainStation, alt);
+      }
+
+      if (places.isNotEmpty) {
+        final hn = places.values.where((p) => p.city == 'Hà Nội').firstOrNull;
+        origin = hn?.code ?? places.keys.first;
+        
+        final th = places.values.where((p) => p.city == 'Thanh Hóa').firstOrNull;
+        dest = th?.code ?? places.keys.lastWhere((k) => k != origin, orElse: () => places.keys.first);
+      }
+    } catch (_) {
+      // Ignore network errors on loadPlaces as instructed or leave empty
+    }
+  }
+
+
   // ---------- Login (PAX-002 / PAX-003) ----------
   Future<String?> requestOtp(String phone) async {
     final r = await _call(() => api.requestOtp(phone));
@@ -377,6 +504,13 @@ class PassengerStore extends ChangeNotifier {
   Future<String?> verifyOtp(String phone, String otp) async {
     final r = await _call(() => api.verifyOtp(phone, otp));
     if (!r.ok) return r.error;
+    
+    final userOperatorCode = r.value!['user']?['operator']?['code'];
+    if (userOperatorCode != operator?.code) {
+      api.authToken = null;
+      return 'Tài khoản không thuộc nhà xe này';
+    }
+    
     userPhone = phone;
     final name = r.value!['user']?['full_name'];
     userName = name is String && name != 'Hành khách BusGo' ? name : null;

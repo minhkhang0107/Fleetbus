@@ -18,9 +18,13 @@ import 'package:data/src/service/passenger_api_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Rules of the passenger app state against a fake FleetBus server (shapes taken from the live API).
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
   passengerMapTiles = false;
   const stops = [
     {'stop_id': 'stp_hn_gb', 'name': 'Bến xe Giáp Bát', 'city': 'Hà Nội', 'order': 1, 'pickup_allowed': true, 'dropoff_allowed': false},
@@ -57,7 +61,7 @@ void main() {
   late bool paid;
   late String ticketStatus;
 
-  PassengerStore storeWithServer() {
+  Future<PassengerStore> storeWithServer({bool selectOp = true}) async {
     sent = [];
     paid = false;
     ticketStatus = 'ACTIVE';
@@ -66,8 +70,38 @@ void main() {
       Map<String, dynamic>? data;
       Object? list;
       final path = req.url.path;
+      if (path.endsWith('/app/config')) {
+        final code = req.url.queryParameters['operator'] ?? '';
+        if (code == 'SAOMAI') {
+          data = {'operator': {'operator_id': 'op1', 'code': 'SAOMAI', 'name': 'Nhà xe Sao Mai', 'short_name': 'Sao Mai', 'hotline': '1900 6868', 'primary_color': '#E11D48'}};
+        } else if (code == 'XUYENVIET') {
+          data = {'operator': {'operator_id': 'op2', 'code': 'XUYENVIET', 'name': 'Xuyên Việt Lines', 'short_name': 'Xuyên Việt', 'hotline': '1900 2468', 'primary_color': '#2563EB'}};
+        } else {
+          return http.Response(jsonEncode({'status': 'error', 'code': 'OPERATOR_NOT_FOUND', 'message': 'Mã nhà xe không đúng'}), 404, headers: {'content-type': 'application/json; charset=utf-8'});
+        }
+      }
+      if (path.endsWith('/routes/stops/search')) {
+        final op = req.headers['x-operator-code'];
+        if (op == 'XUYENVIET') {
+          list = [
+            {'stop_id': 'md', 'name': 'Bến xe Mỹ Đình', 'city': 'Hà Nội', 'popular': true},
+            {'stop_id': 'nb', 'name': 'Bến xe Ninh Bình', 'city': 'Ninh Bình', 'popular': true},
+            {'stop_id': 'th', 'name': 'Bến xe Phía Bắc', 'city': 'Thanh Hóa', 'popular': true},
+          ];
+        } else {
+          list = [
+            {'stop_id': 'gb', 'name': 'Bến xe Giáp Bát', 'city': 'Hà Nội', 'popular': true},
+            {'stop_id': 'md', 'name': 'Bến xe Mỹ Đình', 'city': 'Hà Nội', 'popular': false},
+            {'stop_id': 'nb', 'name': 'Bến xe Ninh Bình', 'city': 'Ninh Bình', 'popular': true},
+            {'stop_id': 'th', 'name': 'Bến xe Phía Bắc', 'city': 'Thanh Hóa', 'popular': true},
+            {'stop_id': 'hp', 'name': 'Bến xe Niệm Nghĩa', 'city': 'Hải Phòng', 'popular': true},
+          ];
+        }
+      }
       if (path.endsWith('/otp/request')) data = {'mock_otp': '123456'};
-      if (path.endsWith('/otp/verify')) data = {'token': 'tok', 'user': {'full_name': 'Hành khách BusGo'}};
+      if (path.endsWith('/otp/verify')) {
+        data = {'token': 'tok', 'user': {'full_name': 'Hành khách BusGo', 'operator': {'code': req.headers['x-operator-code'] ?? 'SAOMAI'}}};
+      }
       if (path.endsWith('/trips/search')) list = [trip];
       if (path.endsWith('/seat-map')) {
         data = {
@@ -102,13 +136,17 @@ void main() {
       }
       return http.Response(jsonEncode({'status': 'success', 'data': list ?? data ?? {}}), 200, headers: {'content-type': 'application/json; charset=utf-8'});
     });
-    return PassengerStore(api: PassengerApiClientService(baseUrl: 'http://test', client: client));
+    final store = PassengerStore(api: PassengerApiClientService(baseUrl: 'http://test', client: client));
+    if (selectOp) {
+      await store.selectOperator('SAOMAI');
+    }
+    return store;
   }
 
   Map<String, dynamic> bodyOf(String suffix) => jsonDecode(sent.lastWhere((r) => r.url.path.endsWith(suffix)).body) as Map<String, dynamic>;
 
   test('OTP: the development code is kept for the field and the token logs in', () async {
-    final store = storeWithServer();
+    final store = await storeWithServer();
     expect(await store.requestOtp('0987654321'), isNull);
     expect(store.devOtp, '123456');
     expect(await store.verifyOtp('0987654321', '123456'), isNull);
@@ -117,7 +155,7 @@ void main() {
   });
 
   test('search maps trips and spreads stop times between departure and arrival', () async {
-    final store = storeWithServer();
+    final store = await storeWithServer();
     await store.loadTrips();
     expect(store.trips, hasLength(1));
     final t = store.trips.single;
@@ -128,7 +166,7 @@ void main() {
   });
 
   test('the hold carries the chosen segment and seats taken by others cannot be picked', () async {
-    final store = storeWithServer();
+    final store = await storeWithServer();
     await store.loadTrips();
     store.chooseTrip(store.trips.single);
     expect(await store.loadSeatMap(), isNull);
@@ -143,7 +181,7 @@ void main() {
   });
 
   test('no ticket before the bank confirms; after it the wallet ticket becomes the receipt', () async {
-    final store = storeWithServer();
+    final store = await storeWithServer();
     await store.verifyOtp('0987654321', '123456');
     await store.loadTrips();
     store.chooseTrip(store.trips.single);
@@ -164,7 +202,7 @@ void main() {
   });
 
   test('the pass shows the server QR and PIN; a boarded ticket stays in upcoming as Đã lên xe', () async {
-    final store = storeWithServer();
+    final store = await storeWithServer();
     paid = true;
     await store.verifyOtp('0987654321', '123456');
     final t = store.tickets.isEmpty ? (await store.loadTickets().then((_) => store.tickets.single)) : store.tickets.single;
@@ -178,7 +216,7 @@ void main() {
   });
 
   test('a reissue after departure reports BOARDING_STARTED', () async {
-    final store = storeWithServer();
+    final store = await storeWithServer();
     paid = true;
     await store.verifyOtp('0987654321', '123456');
     await store.loadTickets();
@@ -200,7 +238,7 @@ void main() {
   });
 
   testWidgets('the ticket screen turns to "Đã lên xe" after the fake server switches the ticket to BOARDED and the poll fires', (tester) async {
-    final store = storeWithServer();
+    final store = await storeWithServer();
     paid = true;
     await store.verifyOtp('0987654321', '123456');
     await store.loadTickets();
@@ -231,7 +269,7 @@ void main() {
   });
 
   testWidgets('the radar shows Đã lên xe for a boarded ticket', (tester) async {
-    final store = storeWithServer();
+    final store = await storeWithServer();
     paid = true;
     await store.verifyOtp('0987654321', '123456');
     await store.loadTickets();
@@ -272,7 +310,7 @@ void main() {
       tester.view.resetDevicePixelRatio();
     });
     tester.view.devicePixelRatio = 1.0;
-    final store = storeWithServer();
+    final store = await storeWithServer(selectOp: false);
     for (final (size, width) in const [(Size(1500, 1000), 1280.0), (Size(1200, 768), 1200.0), (Size(768, 1200), 768.0), (Size(400, 800), 400.0)]) {
       tester.view.physicalSize = size;
       await tester.pumpWidget(BusGoPassengerApp(store: store));
@@ -294,7 +332,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       // The test font draws every glyph 1 em wide; Geist averages about 0.6 em, so scale text to match it.
       tester.platformDispatcher.textScaleFactorTestValue = 0.6;
-      final store = storeWithServer();
+      final store = await storeWithServer();
       paid = true;
       await store.verifyOtp('0987654321', '123456');
       await store.loadTrips();
@@ -306,23 +344,27 @@ void main() {
       await store.loadTickets();
       final ticket = store.tickets.single;
       await store.loadPass(ticket);
+
+      final unselectedStore = await storeWithServer(selectOp: false);
+
       final screens = <Widget>[
-        const PassengerSplashScreen(),
-        const PassengerLoginScreen(),
-        const PassengerMainShell(),
-        const PassengerMainShell(initialTab: 1),
-        const PassengerMainShell(initialTab: 3),
-        const PassengerSearchResultsScreen(),
-        const PassengerTripDetailScreen(),
-        const PassengerSeatMapScreen(),
-        const PassengerCheckoutScreen(),
-        const PassengerPaymentProcessingScreen(name: 'Nguyễn An', phone: '0987654321'),
-        PassengerBookingSuccessScreen(ticket: ticket, phone: '0987654321'),
-        PassengerTicketQrScreen(ticket: ticket),
-        PassengerLiveRadarScreen(ticket: ticket),
+        PassengerScope(store: unselectedStore, child: const PassengerSplashScreen()),
+        PassengerScope(store: store, child: const PassengerSplashScreen()),
+        PassengerScope(store: store, child: const PassengerLoginScreen()),
+        PassengerScope(store: store, child: const PassengerMainShell()),
+        PassengerScope(store: store, child: const PassengerMainShell(initialTab: 1)),
+        PassengerScope(store: store, child: const PassengerMainShell(initialTab: 3)),
+        PassengerScope(store: store, child: const PassengerSearchResultsScreen()),
+        PassengerScope(store: store, child: const PassengerTripDetailScreen()),
+        PassengerScope(store: store, child: const PassengerSeatMapScreen()),
+        PassengerScope(store: store, child: const PassengerCheckoutScreen()),
+        PassengerScope(store: store, child: const PassengerPaymentProcessingScreen(name: 'Nguyễn An', phone: '0987654321')),
+        PassengerScope(store: store, child: PassengerBookingSuccessScreen(ticket: ticket, phone: '0987654321')),
+        PassengerScope(store: store, child: PassengerTicketQrScreen(ticket: ticket)),
+        PassengerScope(store: store, child: PassengerLiveRadarScreen(ticket: ticket)),
       ];
       for (final screen in screens) {
-        await tester.pumpWidget(PassengerScope(store: store, child: MaterialApp(builder: phoneColumnBuilder, home: screen)));
+        await tester.pumpWidget(MaterialApp(builder: phoneColumnBuilder, home: screen));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 100));
         expect(tester.takeException(), isNull, reason: '${screen.runtimeType} on $name');

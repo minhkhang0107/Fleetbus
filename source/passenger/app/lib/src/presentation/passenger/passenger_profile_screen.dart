@@ -40,11 +40,29 @@ class PassengerProfileScreen extends StatelessWidget {
               _row('Hành khách thường đi', '2'),
               const Divider(height: 1, color: Color(0xFFF1F5F9)),
               _row('Điểm đón đã lưu', 'Giáp Bát'),
-              const Divider(height: 1, color: Color(0xFFF1F5F9)),
-              _row('Tổng đài hỗ trợ', '1900 6868'),
             ]),
           ),
           gap(16),
+          if (store.operator != null) ...[
+            AppCard(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Nhà xe', style: sans(size: 13, color: PTokens.muted)),
+                gap(4),
+                Text(store.operator!.name, style: sans(size: 15, weight: FontWeight.w600)),
+                Text('Tổng đài ${store.operator!.hotline}', style: sans(size: 14, color: PTokens.muted)),
+              ]),
+            ),
+            gap(16),
+            GhostButton(
+              label: 'Đổi nhà xe',
+              onPressed: () {
+                store.changeOperator();
+                Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const PassengerSplashScreen()), (_) => false);
+              },
+            ),
+            gap(16),
+          ],
           GhostButton(
             label: store.loggedIn ? 'Đăng xuất' : 'Đăng nhập',
             onPressed: () {

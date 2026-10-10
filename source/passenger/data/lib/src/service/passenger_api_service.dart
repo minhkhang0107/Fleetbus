@@ -45,10 +45,14 @@ class PassengerApiClientService {
   /// Session token of the signed-in passenger (set by [verifyOtp]).
   String? authToken;
 
+  /// Selected operator code (sent as X-Operator-Code)
+  String? operatorCode;
+
   PassengerApiClientService({
     String? baseUrl,
     http.Client? client,
     this.authToken,
+    this.operatorCode,
   })  : baseUrl = resolvePassengerBaseUrl(baseUrl),
         _client = client ?? http.Client();
 
@@ -57,6 +61,7 @@ class PassengerApiClientService {
     'x-app-version': '3.0.0',
     if (authToken != null) 'Authorization': 'Bearer $authToken',
     if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey,
+    if (operatorCode != null) 'X-Operator-Code': operatorCode!,
   };
 
   Map<String, dynamic> _decode(http.Response response) {
@@ -90,8 +95,8 @@ class PassengerApiClientService {
   /**
    * PAX-001: App Config handshake
    */
-  Future<Map<String, dynamic>> getAppConfig() {
-    return _get('/api/v1/app/config');
+  Future<Map<String, dynamic>> getAppConfig({String? operatorCode}) {
+    return _get('/api/v1/app/config', query: operatorCode != null ? {'operator': operatorCode} : null);
   }
 
   /**

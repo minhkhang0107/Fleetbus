@@ -44,6 +44,7 @@ class _BusGoPassengerAppState extends State<BusGoPassengerApp> {
   @override
   void initState() {
     super.initState();
+    widget.store.restoreOperator();
     // BR-HOLD-004: when the hold or the payment window runs out, go back to the seat map and say why.
     widget.store.onHoldExpired = () {
       final nav = _navigator.currentState;
