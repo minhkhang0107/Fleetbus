@@ -3,6 +3,8 @@
  * Implements PAX-008 (Pickup/Dropoff), PAX-009 (2D Seat Map), PAX-010 (10-Min Seat Hold Engine).
  */
 
+import { MOCK_TRIPS_DATABASE } from './search.js';
+
 // Trips that can be sold: the passenger search trips and the trips on the manager and driver boards.
 const SEEDED_TRIPS = ['trp_hn_th_01', 'trp_hn_th_02', 'trp_hn_th_03', 'trp_991823', 'trp_991824', 'trp_xv_hn_th_01'];
 
@@ -28,6 +30,8 @@ export class PassengerSeatMapService {
   }
 
   _initMockTripLayout(tripId) {
+    // A seat costs the trip's base fare from the catalog (trips only on the ops boards keep 220.000 đ)
+    const fare = MOCK_TRIPS_DATABASE.find(t => t.trip_id === tripId)?.base_fare_vnd ?? 220000;
     const seats = [];
     // Deck 1 (Tầng 1): A01-A06, B01-B05
     for (let i = 1; i <= 6; i++) {
@@ -37,7 +41,7 @@ export class PassengerSeatMapService {
         row: i,
         column: 1,
         type: 'VIP_CABIN',
-        price_vnd: 220000,
+        price_vnd: fare,
         bookings: i === 3 ? [{ whole: true, pnr: null }] : []
       });
     }
@@ -48,7 +52,7 @@ export class PassengerSeatMapService {
         row: i,
         column: 3,
         type: 'VIP_CABIN',
-        price_vnd: 220000,
+        price_vnd: fare,
         bookings: []
       });
     }
@@ -60,7 +64,7 @@ export class PassengerSeatMapService {
         row: i - 6,
         column: 1,
         type: 'VIP_CABIN',
-        price_vnd: 220000,
+        price_vnd: fare,
         bookings: []
       });
     }
@@ -71,7 +75,7 @@ export class PassengerSeatMapService {
         row: i - 5,
         column: 3,
         type: 'VIP_CABIN',
-        price_vnd: 220000,
+        price_vnd: fare,
         bookings: i === 6 ? [{ whole: true, pnr: null }] : []
       });
     }
