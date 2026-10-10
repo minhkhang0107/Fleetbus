@@ -10,6 +10,11 @@ import 'passenger_widgets.dart';
 /// When false, TileLayer is omitted so tests do not make network requests.
 bool passengerMapTiles = true;
 
+/// OpenStreetMap raster tiles. The main tile.openstreetmap.org host is blocked by some Vietnamese ISPs,
+/// so the default is the OSM France community server (same OSM data, Vietnamese labels only);
+/// override with --dart-define=MAP_TILE_URL=... for another provider.
+const passengerMapTileUrl = String.fromEnvironment('MAP_TILE_URL', defaultValue: 'https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png');
+
 /// Real OpenStreetMap route tracking map showing trip route, stops, target, and bus.
 class PassengerRouteMap extends StatefulWidget {
   const PassengerRouteMap({
@@ -121,13 +126,13 @@ class PassengerRouteMapState extends State<PassengerRouteMap> {
   void _fitRoute() {
     final pts = _getFitPoints();
     if (pts.isNotEmpty) {
-      _mapController.fitCamera(
-        CameraFit.bounds(
-          bounds: LatLngBounds.fromPoints(pts),
-          padding: const EdgeInsets.all(40),
-          maxZoom: 16,
-        ),
-      );
+      // Fit, then snap to a whole zoom level so the raster tiles are drawn at their native size.
+      final fitted = CameraFit.bounds(
+        bounds: LatLngBounds.fromPoints(pts),
+        padding: const EdgeInsets.all(40),
+        maxZoom: 16,
+      ).fit(_mapController.camera);
+      _mapController.move(fitted.center, fitted.zoom.floorToDouble());
     } else {
       _mapController.move(const LatLng(20.5, 105.9), 8);
     }
@@ -354,13 +359,18 @@ class PassengerRouteMapState extends State<PassengerRouteMap> {
                 : null,
             initialCenter: const LatLng(20.5, 105.9),
             initialZoom: 8,
+            // North stays up: a rotated map only confuses someone checking where the bus is.
+            interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
           ),
           children: [
             if (passengerMapTiles)
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                urlTemplate: passengerMapTileUrl,
+                subdomains: const ['a', 'b', 'c'],
                 userAgentPackageName: 'vn.busgo.passenger',
-                tileProvider: widget.tileProvider,
+                // Keep requests that the first camera jump makes obsolete: aborting them left the
+                // whole-route tiles stuck on the ROD2 tablet until the user moved the map.
+                tileProvider: widget.tileProvider ?? NetworkTileProvider(abortObsoleteRequests: false),
               ),
             PolylineLayer(polylines: polylines),
             MarkerLayer(markers: markers),
