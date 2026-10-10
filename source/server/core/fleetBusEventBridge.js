@@ -390,6 +390,73 @@ export class FleetBusEventBridge extends EventEmitter {
       }
     });
 
+    this.on('HOTLINE_HOLD_CREATED', ({ tripId, reservation, farePerSeat, operator }) => {
+      if (driverService && driverService.activeTrips) {
+        const driverTrip = driverService.activeTrips.get(tripId);
+        if (driverTrip) {
+          for (const seatCode of reservation.seat_codes) {
+            const ticketId = `hl_${reservation.reservation_id}_${seatCode}`;
+            driverTrip.manifest.push({
+              ticket_id: ticketId,
+              pnr: reservation.pnr,
+              passenger_name: reservation.passenger_name,
+              passenger_phone: reservation.phone,
+              seat_code: seatCode,
+              pickup_stop: driverTrip.stops.find(s => s.stop_id === reservation.pickup_stop_id)?.name || driverTrip.stops[0]?.name || null,
+              dropoff_stop: driverTrip.stops.find(s => s.stop_id === reservation.dropoff_stop_id)?.name || driverTrip.stops.at(-1)?.name || null,
+              pickup_stop_id: reservation.pickup_stop_id,
+              dropoff_stop_id: reservation.dropoff_stop_id,
+              boarding_status: 'ISSUED',
+              payment_method: 'COD',
+              cod_amount_vnd: farePerSeat,
+              source: 'HOTLINE',
+              reservation_id: reservation.reservation_id,
+              boarded_at: null
+            });
+          }
+          driverTrip.booked_passengers_count = driverTrip.manifest.length;
+        }
+      }
+    });
+
+    this.on('HOTLINE_HOLD_RELEASED', ({ tripId, reservationId }) => {
+      if (driverService && driverService.activeTrips) {
+        const driverTrip = driverService.activeTrips.get(tripId);
+        if (driverTrip) {
+          driverTrip.manifest = driverTrip.manifest.filter(m => m.reservation_id !== reservationId || m.boarding_status === 'BOARDED');
+          driverTrip.booked_passengers_count = driverTrip.manifest.length;
+        }
+      }
+    });
+
+    this.on('HOTLINE_HOLD_CONVERTED', ({ tripId, reservationId, seatCode }) => {
+      if (managerService && managerService.hotlineReservations) {
+        const rsv = managerService.hotlineReservations.find(r => r.reservation_id === reservationId);
+        if (rsv && rsv.hold_status === 'HELD_HOTLINE') {
+          // Initialize tracking of converted seats
+          if (!rsv.converted_seats) rsv.converted_seats = [];
+          if (!rsv.converted_seats.includes(seatCode)) rsv.converted_seats.push(seatCode);
+
+          if (rsv.converted_seats.length === rsv.seat_codes.length) {
+            rsv.hold_status = 'CONVERTED';
+            rsv.converted_at = new Date().toISOString();
+            
+            // Move from held to booked
+            const trip = managerService.findTrip(tripId);
+            if (trip) {
+              trip.held_seats = Math.max(0, (trip.held_seats || 0) - rsv.seat_codes.length);
+              trip.booked_seats = (trip.booked_seats || 0) + rsv.seat_codes.length;
+            }
+          }
+        }
+      }
+    });
+
+    // A phone hold whose pickup stop the bus has left is released (the passenger did not board).
+    this.on('STOP_ARRIVED', () => {
+      managerService?.releaseExpiredHotlineHolds?.();
+    });
+
     // -------------------------------------------------------------------------
     // 6. VEHICLE_SWAPPED: Manager Emergency Swap -> Driver Vehicle Plate & Passenger Disruption
     // -------------------------------------------------------------------------
@@ -571,6 +638,9 @@ export class FleetBusEventBridge extends EventEmitter {
       const mgrTrip = managerService.trips?.find(t => t.trip_id === tripId);
       if (mgrTrip) {
         mgrTrip.booked_seats = (mgrTrip.booked_seats || 0) + 1;
+        mgrTrip.boarded_passengers = (mgrTrip.boarded_passengers || 0) + 1;
+        mgrTrip.on_board = (mgrTrip.boarded_passengers || 0) - (mgrTrip.alighted_passengers || 0);
+        mgrTrip.on_board_count = mgrTrip.on_board;
       }
       if (managerService.bookings && !managerService.bookings.some(b => b.pnr === passenger.pnr)) {
         managerService.bookings.push({
@@ -585,6 +655,16 @@ export class FleetBusEventBridge extends EventEmitter {
           channel: 'DRIVER_HAIL',
           operator_id: operatorOfTrip(this.services, tripId)
         });
+      }
+    });
+
+    this.on('PASSENGERS_ALIGHTED', ({ tripId, ticketIds }) => {
+      if (!managerService) return;
+      const mgrTrip = managerService.trips?.find(t => t.trip_id === tripId);
+      if (mgrTrip) {
+        mgrTrip.alighted_passengers = (mgrTrip.alighted_passengers || 0) + ticketIds.length;
+        mgrTrip.on_board = (mgrTrip.boarded_passengers || 0) - mgrTrip.alighted_passengers;
+        mgrTrip.on_board_count = mgrTrip.on_board;
       }
     });
 

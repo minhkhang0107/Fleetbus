@@ -33,8 +33,10 @@ const IDEMPOTENT_RULES = {
 
 // Staff permissions by role (MGR-029). The first matching rule decides; no rule means any staff role.
 const STAFF_RULES = [
+  [/^\/api\/v1\/ops\/pos\/hotline-hold/, ['FLEET_DIRECTOR', 'CASHIER', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/pos\//, ['FLEET_DIRECTOR', 'CASHIER']],
-  [/^\/api\/v1\/ops\/(refunds|reports|payments|audit-logs)/, ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER']],
+  [/^\/api\/v1\/ops\/audit-logs/, ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'DISPATCHER']],
+  [/^\/api\/v1\/ops\/(refunds|reports|payments)/, ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER']],
   [/^\/api\/v1\/ops\/bookings/, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']],
   [/^\/api\/v1\/ops\/trips\/[^/]+\/(delay|replace-vehicle|swap-vehicle|seats\/override-lock)$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/debt-receipts\//, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']]

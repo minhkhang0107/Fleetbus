@@ -91,13 +91,15 @@ describe('Spec conformance: seat inventory integrity', () => {
   it('TC-SPEC-A46: a hotline hold locks the seat for everyone until it expires (MGR-020, REV-06)', async () => {
     const t0 = Date.now();
     const booked = services.managerService.findTrip(TRIP).booked_seats;
+    const held = services.managerService.findTrip(TRIP).held_seats || 0;
     const res = await api('/api/v1/ops/pos/hotline-hold', {
       method: 'POST',
       body: { tripId: TRIP, passengerName: 'Khach Goi', phone: '0911000222', seatCodes: ['A06'], holdPolicy: 'CUSTOM_EXPIRY_MINUTES', customExpiryMinutes: 30, now: t0 }
     });
     assert.strictEqual(res.status, 201, JSON.stringify(res.body));
     assert.strictEqual(seatState('A06'), 'LOCKED_BY_OTHER');
-    assert.strictEqual(services.managerService.findTrip(TRIP).booked_seats, booked + 1);
+    assert.strictEqual(services.managerService.findTrip(TRIP).held_seats, held + 1);
+    assert.strictEqual(services.managerService.findTrip(TRIP).booked_seats, booked);
 
     const online = await hold(['A06'], 'u_online');
     assert.strictEqual(online.status, 409);
@@ -107,6 +109,7 @@ describe('Spec conformance: seat inventory integrity', () => {
 
     const released = services.managerService.releaseExpiredHotlineHolds(t0 + 31 * MINUTE);
     assert.strictEqual(released.released_count, 1);
+    assert.strictEqual(services.managerService.findTrip(TRIP).held_seats, held);
     assert.strictEqual(services.managerService.findTrip(TRIP).booked_seats, booked);
     assert.strictEqual(services.seatMapService.getSeatMap(TRIP, null, null, t0 + 31 * MINUTE).data.seats.find((s) => s.seat_code === 'A06').segment_state, 'AVAILABLE');
   });
@@ -119,6 +122,7 @@ describe('Spec conformance: seat inventory integrity', () => {
     assert.strictEqual(created.status, 201);
     const reservation = created.body.data;
     const booked = services.managerService.findTrip(TRIP).booked_seats;
+    const held = services.managerService.findTrip(TRIP).held_seats || 0;
 
     const wrongSeats = await pos(['A07'], { reservationId: reservation.reservation_id });
     assert.strictEqual(wrongSeats.status, 409);
@@ -127,7 +131,8 @@ describe('Spec conformance: seat inventory integrity', () => {
     const converted = await pos(['A07', 'A08'], { reservationId: reservation.reservation_id });
     assert.strictEqual(converted.status, 201, JSON.stringify(converted.body));
     assert.strictEqual(services.managerService.hotlineReservations.find((r) => r.reservation_id === reservation.reservation_id).hold_status, 'CONVERTED');
-    assert.strictEqual(services.managerService.findTrip(TRIP).booked_seats, booked, 'seats were already counted when held');
+    assert.strictEqual(services.managerService.findTrip(TRIP).booked_seats, booked + 2, 'seats moved to booked');
+    assert.strictEqual(services.managerService.findTrip(TRIP).held_seats, held - 2, 'seats moved from held');
     assert.strictEqual(seatState('A07'), 'BOOKED');
   });
 

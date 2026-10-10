@@ -141,6 +141,7 @@ describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-03
     const service = new ManagerOperationsService();
     const trip = service.findTrip('trp_991823');
     const initialBooked = trip.booked_seats;
+    const initialHeld = trip.held_seats || 0;
     const t0 = 1724820000000;
 
     // 1. Create hotline hold until departure offset (T - 30 mins)
@@ -158,7 +159,8 @@ describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-03
     assert.strictEqual(holdRes.success, true);
     assert.strictEqual(holdRes.data.hold_status, 'HELD_HOTLINE');
     assert.ok(holdRes.data.hold_until);
-    assert.strictEqual(trip.booked_seats, initialBooked + 1);
+    assert.strictEqual(trip.held_seats, initialHeld + 1);
+    assert.strictEqual(trip.booked_seats, initialBooked);
 
     // 2. Before expiry: hold remains active
     const activeCheck = service.releaseExpiredHotlineHolds(t0 + 1000);

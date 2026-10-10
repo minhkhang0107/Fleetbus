@@ -425,7 +425,10 @@ export class ManagerOperationsService {
             ...t,
             route_name: route ? route.name : t.route_id,
             driver_name: vehicle ? vehicle.driver_name : 'Chưa gán',
-            load_factor_pct: parseFloat(((t.booked_seats / t.total_seats) * 100).toFixed(1))
+            booked_seats: t.booked_seats || 0,
+            held_seats: t.held_seats || 0,
+            on_board_count: (t.boarded_passengers || 0) - (t.alighted_passengers || 0),
+            load_factor_pct: parseFloat((((t.booked_seats || 0) / t.total_seats) * 100).toFixed(1))
           };
         })
       }
@@ -458,8 +461,9 @@ export class ManagerOperationsService {
       data: {
         trip_id: tripId,
         total_seats: trip.total_seats,
-        booked_seats: trip.booked_seats,
-        vacant_seats: trip.total_seats - trip.booked_seats,
+        booked_seats: trip.booked_seats || 0,
+        held_seats: trip.held_seats || 0,
+        vacant_seats: trip.total_seats - (trip.booked_seats || 0) - (trip.held_seats || 0),
         hotline_holds: this.hotlineReservations.filter(r => r.trip_id === tripId && r.hold_status === 'HELD_HOTLINE'),
         summary: matrix?.success ? matrix.data.summary : null,
         seats
@@ -570,8 +574,10 @@ export class ManagerOperationsService {
       reservation.hold_status = 'CONVERTED';
       reservation.converted_at = new Date(mockNow).toISOString();
       reservation.pnr = pnr;
+      trip.held_seats = Math.max(0, (trip.held_seats || 0) - reservation.seat_codes.length);
+      trip.booked_seats = (trip.booked_seats || 0) + reservation.seat_codes.length;
     } else {
-      trip.booked_seats += seatCodes.length;
+      trip.booked_seats = (trip.booked_seats || 0) + seatCodes.length;
     }
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
@@ -687,7 +693,18 @@ export class ManagerOperationsService {
 
     inventory?.lockSeats(tripId, seatCodes, `hotline:${reservationId}`, holdUntilMs, { pickupStopId, dropoffStopId });
     this.hotlineReservations.push(reservation);
-    trip.booked_seats += seatCodes.length;
+    trip.held_seats = (trip.held_seats || 0) + seatCodes.length;
+
+    if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      const route = this.routes.find(r => r.route_id === trip.route_id);
+      const farePerSeat = route ? route.base_fare_vnd : 220000;
+      this.eventBridge.emit('HOTLINE_HOLD_CREATED', {
+        tripId,
+        reservation,
+        farePerSeat,
+        operator: operatorId
+      });
+    }
 
     return {
       success: true,
@@ -703,16 +720,39 @@ export class ManagerOperationsService {
     const releasedList = [];
 
     for (const rsv of this.hotlineReservations) {
-      if (rsv.hold_status === 'HELD_HOTLINE' && mockNow > new Date(rsv.hold_until).getTime()) {
-        rsv.hold_status = 'EXPIRED_RELEASED';
-        rsv.released_at = new Date(mockNow).toISOString();
-        this._inventory()?.unlockSeats(rsv.trip_id, rsv.seat_codes, `hotline:${rsv.reservation_id}`);
-
+      if (rsv.hold_status === 'HELD_HOTLINE') {
         const trip = this.findTrip(rsv.trip_id);
-        if (trip) {
-          trip.booked_seats = Math.max(0, trip.booked_seats - rsv.seat_codes.length);
+        let shouldRelease = false;
+        let releaseStatus = 'EXPIRED_RELEASED';
+
+        if (trip && trip.status === 'IN_TRANSIT') {
+          const driverTrip = this.eventBridge?.services?.driverService?.activeTrips?.get(rsv.trip_id);
+          if (driverTrip) {
+            const pickupIndex = driverTrip.stops.findIndex(s => s.stop_id === rsv.pickup_stop_id);
+            if (pickupIndex !== -1 && driverTrip.current_stop_index > pickupIndex) {
+              shouldRelease = true;
+              releaseStatus = 'NO_SHOW_RELEASED';
+            }
+          }
+        } else if (mockNow > new Date(rsv.hold_until).getTime()) {
+          shouldRelease = true;
         }
-        releasedList.push(rsv);
+
+        if (shouldRelease) {
+          rsv.hold_status = releaseStatus;
+          rsv.released_at = new Date(mockNow).toISOString();
+          this._inventory()?.unlockSeats(rsv.trip_id, rsv.seat_codes, `hotline:${rsv.reservation_id}`);
+
+          if (trip) {
+            trip.held_seats = Math.max(0, (trip.held_seats || 0) - rsv.seat_codes.length);
+          }
+          
+          if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+            this.eventBridge.emit('HOTLINE_HOLD_RELEASED', { tripId: rsv.trip_id, reservationId: rsv.reservation_id });
+          }
+
+          releasedList.push(rsv);
+        }
       }
     }
 
@@ -738,7 +778,11 @@ export class ManagerOperationsService {
 
       const trip = this.findTrip(rsv.trip_id);
       if (trip) {
-        trip.booked_seats = Math.max(0, trip.booked_seats - rsv.seat_codes.length);
+        trip.held_seats = Math.max(0, (trip.held_seats || 0) - rsv.seat_codes.length);
+      }
+
+      if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+        this.eventBridge.emit('HOTLINE_HOLD_RELEASED', { tripId: rsv.trip_id, reservationId: rsv.reservation_id });
       }
     }
 

@@ -285,8 +285,9 @@ export class DriverCockpitService {
    * (it is needed for notifications) and never leaves in an API response.
    */
   _publicPassenger(passenger) {
-    const { passenger_phone: rawPhone, ...rest } = passenger;
-    return { ...rest, phone_masked: rest.phone_masked || (rawPhone ? maskPhone(rawPhone) : null) };
+    const { passenger_phone: rawPhone, phone: rawPhone2, ...rest } = passenger;
+    const phoneToMask = rawPhone || rawPhone2;
+    return { ...rest, phone_masked: rest.phone_masked || (phoneToMask ? maskPhone(phoneToMask) : null) };
   }
 
   _publicTrip(trip) {
@@ -300,6 +301,7 @@ export class DriverCockpitService {
     });
     return {
       ...trip,
+      on_board_count: trip.boarded_count - (trip.alighted_count || 0),
       stops,
       route_shape: routeShape(trip.trip_id) || null,
       manifest: (trip.manifest || []).map(p => this._publicPassenger(p))
@@ -406,6 +408,28 @@ export class DriverCockpitService {
       stop.arrived_at = new Date(mockNow).toISOString();
     }
     trip.current_stop_index = Math.max(trip.current_stop_index, index);
+
+    // F: Drop-off logic
+    const alightedTicketIds = [];
+    if (!trip.alighted_count) trip.alighted_count = 0;
+    
+    for (const p of trip.manifest) {
+      if (p.dropoff_stop_id === stopId && p.boarding_status === 'BOARDED' && !p.alighted_at) {
+        p.alighted_at = new Date(mockNow).toISOString();
+        trip.alighted_count += 1;
+        alightedTicketIds.push(p.ticket_id);
+      }
+    }
+
+    if (alightedTicketIds.length > 0 && this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('PASSENGERS_ALIGHTED', { tripId, stopId, ticketIds: alightedTicketIds });
+    }
+
+    // Emit STOP_ARRIVED for hotline release logic
+    if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+      this.eventBridge.emit('STOP_ARRIVED', { tripId, stopId, index });
+    }
+
     return { success: true, data: stop };
   }
 
@@ -823,6 +847,9 @@ export class DriverCockpitService {
     }
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
       this.eventBridge.emit('COD_COLLECTED', { tripId, ticketId, pnr: item.pnr, fareVnd: fareAmount });
+      if (item.source === 'HOTLINE' && item.reservation_id) {
+        this.eventBridge.emit('HOTLINE_HOLD_CONVERTED', { tripId, reservationId: item.reservation_id, seatCode: item.seat_code });
+      }
     }
     this._creditWalletIfNeeded(tripId, { ticketId, method, changeDue, phone: item.passenger_phone });
 
