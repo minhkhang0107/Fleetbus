@@ -32,6 +32,9 @@ class RoutePath {
   final List<double> _cumulative = [0.0];
   final List<double> _bearings = [];
 
+  /// The path points in order.
+  List<({double lat, double lng})> get points => List.unmodifiable(_points);
+
   /// Segment lengths in metres.
   List<double> get segmentLengths => List.unmodifiable(_segmentLengths);
 

@@ -7,6 +7,7 @@ import 'package:app/src/presentation/driver_login_screen.dart';
 import 'package:app/src/presentation/driver_manifest_screen.dart';
 import 'package:app/src/presentation/driver_qr_scanner_screen.dart';
 import 'package:app/src/presentation/driver_readiness_screen.dart';
+import 'package:app/src/presentation/driver_route_map.dart';
 import 'package:app/src/presentation/driver_store.dart';
 import 'package:app/src/presentation/driver_widgets.dart';
 import 'package:app/src/presentation/main_shell_screen.dart';
@@ -19,6 +20,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Rules of the driver app state against a fake FleetBus server that keeps the trip like the real one.
 void main() {
+  driverMapTiles = false;
   setUp(() => SharedPreferences.setMockInitialValues({}));
   late Map<String, dynamic> trip;
   late List<http.Request> sent;
@@ -257,4 +259,29 @@ void main() {
       store.dispose();
     });
   }
+
+  testWidgets('the driver map lists the stops still ahead with passengers to pick up and drop off', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    });
+    await tester.pumpWidget(DriverScope(store: store, child: MaterialApp(home: Scaffold(body: SingleChildScrollView(child: DriverRouteMap(store: store))))));
+    await tester.pump();
+    expect(find.text('Lộ trình còn lại'), findsOneWidget);
+    await tester.tap(find.text('Xem danh sách'));
+    await tester.pump();
+    expect(find.text('Bến xe Giáp Bát'), findsOneWidget);
+    expect(find.text('↑2 ↓0'), findsOneWidget, reason: 'two passengers wait at the first stop');
+    expect(find.text('Xem bản đồ'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
 }

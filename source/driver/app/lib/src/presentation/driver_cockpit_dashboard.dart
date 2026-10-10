@@ -5,6 +5,7 @@ import 'driver_end_trip_screen.dart';
 import 'driver_incident_dialog.dart';
 import 'driver_manifest_screen.dart';
 import 'driver_qr_scanner_screen.dart';
+import 'driver_route_map.dart';
 import 'driver_store.dart';
 import 'driver_widgets.dart';
 
@@ -188,7 +189,7 @@ class DriverCockpitDashboard extends StatelessWidget {
                   ? SingleChildScrollView(
                       padding: const EdgeInsets.all(20),
                       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Expanded(flex: 2, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [speed, const SizedBox(height: 12), next, const SizedBox(height: 12), progress])),
+                        Expanded(flex: 2, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [speed, const SizedBox(height: 12), next, const SizedBox(height: 12), progress, const SizedBox(height: 12), DriverRouteMap(store: store, height: 200)])),
                         const SizedBox(width: 20),
                         Expanded(flex: 3, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [stopCard, const SizedBox(height: 12), ...actions])),
                       ]),
@@ -199,6 +200,8 @@ class DriverCockpitDashboard extends StatelessWidget {
                       stopCard,
                       const SizedBox(height: 12),
                       progress,
+                      const SizedBox(height: 12),
+                      DriverRouteMap(store: store),
                       const SizedBox(height: 12),
                       ...actions,
                     ]),
