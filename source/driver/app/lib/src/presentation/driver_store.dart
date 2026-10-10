@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../service/driver_api_service.dart';
+import 'driver_route.dart';
 
 /// State of the driver app, backed by the FleetBus API (`DriverApiClientService`, OQ-029).
 ///
@@ -11,11 +12,13 @@ import '../service/driver_api_service.dart';
 /// stops are local, until the GPS plugin is wired; the position sent to the server follows them.
 
 class DriverStop {
-  const DriverStop(this.id, this.name, this.time, {this.arrived = false});
+  const DriverStop(this.id, this.name, this.time, {this.arrived = false, this.lat, this.lng});
   final String id;
   final String name;
   final String time;
   final bool arrived;
+  final double? lat;
+  final double? lng;
   String get short => name.replaceFirst('Bến xe ', '');
 }
 
@@ -83,6 +86,15 @@ class QueuedAction {
   final int at;
 }
 
+class _DriveLeg {
+  _DriveLeg({required this.path, required this.start, required this.end, required this.startedAt, this.targetStop});
+  final RoutePath path;
+  final double start;
+  final double end;
+  final DateTime startedAt;
+  final DriverStop? targetStop;
+}
+
 /// A trip of the shift as listed on the home screen.
 class ShiftTrip {
   const ShiftTrip(this.id, this.dep, this.route, this.plate, this.booked, this.status);
@@ -124,6 +136,8 @@ class DriverStore extends ChangeNotifier {
   static const debtLimit = 1000000;
   static const noShowGrace = 10;
   static const minutesBetweenStops = 45;
+  /// Simulated drive duration between two stops (demo speed-up; a real GPS replaces it).
+  static const driveSeconds = 30;
   static const checkKeys = ['tires_checked', 'brakes_fluid_checked', 'ac_cleanliness_checked', 'first_aid_extinguisher_checked', 'fuel_level_sufficient', 'gps_telemetry_beacon_active'];
   static const checks = ['Lốp và áp suất lốp', 'Phanh và dầu phanh', 'Điều hòa, vệ sinh khoang', 'Bình chữa cháy, túi cứu thương', 'Nhiên liệu đủ cho chuyến', 'Định vị GPS đang hoạt động'];
 
@@ -161,7 +175,11 @@ class DriverStore extends ChangeNotifier {
   bool offline = false;
   ({String type, int delay, int at})? incident;
   String? earlyEndReason;
+  RoutePath? _road;
+  _DriveLeg? _leg;
+  DateTime? _lastPing;
   double _lat = 20.9806, _lng = 105.8413;
+  double _bearing = 200;
 
   Timer? _clockTimer;
   Timer? _driveTimer;
@@ -170,6 +188,10 @@ class DriverStore extends ChangeNotifier {
   DriverStop get stop => stops.isEmpty ? const DriverStop('', '', '--:--') : stops[stopIndex];
   bool get lastStop => stops.isNotEmpty && stopIndex == stops.length - 1;
   int get speed => moving ? 62 : 0;
+  double get lat => _lat;
+  double get lng => _lng;
+  double get bearing => _bearing;
+  RoutePath? get road => _road;
   List<Passenger> get atStopPassengers => manifest.where((p) => p.from == stop.id && !p.hail).toList();
   /// Passengers on board who get off at the current stop, so the crew can open the hold for them.
   List<Passenger> get dropOffPassengers => manifest.where((p) => p.to == stop.id && p.status == PaxStatus.boarded).toList();
@@ -223,6 +245,7 @@ class DriverStore extends ChangeNotifier {
     tripId = null;
     shift = [];
     manifest = [];
+    _road = null;
     notifyListeners();
   }
 
@@ -263,8 +286,26 @@ class DriverStore extends ChangeNotifier {
     final dep = toMinutes(depTime == '--:--' ? '07:00' : depTime);
     final raw = (t['stops'] as List? ?? []).cast<Map<String, dynamic>>()..sort((a, b) => (a['order'] as num).compareTo(b['order'] as num));
     stops = [
-      for (var i = 0; i < raw.length; i++) DriverStop(raw[i]['stop_id'], raw[i]['name'], hhmm(dep + i * minutesBetweenStops), arrived: raw[i]['status'] == 'ARRIVED'),
+      for (var i = 0; i < raw.length; i++)
+        DriverStop(
+          raw[i]['stop_id'],
+          raw[i]['name'],
+          hhmm(dep + i * minutesBetweenStops),
+          arrived: raw[i]['status'] == 'ARRIVED',
+          lat: (raw[i]['lat'] as num?)?.toDouble(),
+          lng: (raw[i]['lng'] as num?)?.toDouble(),
+        ),
     ];
+    final rawShape = t['route_shape'];
+    if (rawShape is List && rawShape.length >= 2) {
+      try {
+        _road = RoutePath(rawShape);
+      } catch (_) {
+        _road = null;
+      }
+    } else {
+      _road = null;
+    }
     manifest = (t['manifest'] as List? ?? []).cast<Map<String, dynamic>>().map(Passenger.fromJson).toList();
     stopIndex = ((t['current_stop_index'] as num?)?.toInt() ?? 0).clamp(0, stops.isEmpty ? 0 : stops.length - 1);
     codCash = (t['total_cod_collected_vnd'] as num?)?.toInt() ?? 0;
@@ -338,11 +379,21 @@ class DriverStore extends ChangeNotifier {
 
   Future<void> sendTelemetry() async {
     if (tripId == null || trip != TripState.inTransit) return;
+    _lastPing = DateTime.now();
     if (moving) {
-      _lat -= 0.004;
-      _lng -= 0.001;
+      if (_leg != null) {
+        final elapsed = DateTime.now().difference(_leg!.startedAt).inMilliseconds / 1000.0;
+        final fraction = (elapsed / driveSeconds).clamp(0.0, 1.0);
+        final pos = _leg!.path.pointAt(_leg!.start + fraction * (_leg!.end - _leg!.start));
+        _lat = pos.lat;
+        _lng = pos.lng;
+        _bearing = pos.bearing;
+      } else {
+        _lat -= 0.004;
+        _lng -= 0.001;
+      }
     }
-    await _call(() => api.sendTelemetry(tripId!, lat: _lat, lng: _lng, speedKmh: speed.toDouble(), bearingDeg: 200));
+    await _call(() => api.sendTelemetry(tripId!, lat: _lat, lng: _lng, speedKmh: speed.toDouble(), bearingDeg: _bearing));
   }
 
   // ---------- Stops (DRI-008) ----------
@@ -363,12 +414,47 @@ class DriverStore extends ChangeNotifier {
     atStop = false;
     moving = true;
     stopIndex = (stopIndex + 1).clamp(0, stops.length - 1);
+    final nextStop = stops.isNotEmpty ? stops[stopIndex] : null;
+    final now = DateTime.now();
+    if (nextStop != null && nextStop.lat != null && nextStop.lng != null) {
+      final toLat = nextStop.lat!;
+      final toLng = nextStop.lng!;
+      if (_road != null && _road!.distanceTo(_lat, _lng) <= 2000 && _road!.distanceTo(toLat, toLng) <= 2000) {
+        _leg = _DriveLeg(
+          path: _road!,
+          start: _road!.project(_lat, _lng),
+          end: _road!.project(toLat, toLng),
+          startedAt: now,
+          targetStop: nextStop,
+        );
+      } else {
+        final straight = RoutePath.straight(_lat, _lng, toLat, toLng);
+        _leg = _DriveLeg(
+          path: straight,
+          start: 0,
+          end: straight.length,
+          startedAt: now,
+          targetStop: nextStop,
+        );
+      }
+    } else {
+      _leg = null;
+    }
     _driveTimer?.cancel();
-    _driveTimer = Timer(const Duration(seconds: 8), () {
+    _driveTimer = Timer(const Duration(seconds: driveSeconds), () {
+      final target = stops.isNotEmpty ? stops[stopIndex] : null;
+      if (target != null && target.lat != null && target.lng != null) {
+        _lat = target.lat!;
+        _lng = target.lng!;
+      }
       moving = false;
+      _leg = null;
+      unawaited(sendTelemetry());
       notifyListeners();
     });
-    unawaited(sendTelemetry());
+    if (_lastPing == null || now.difference(_lastPing!).inMilliseconds >= 1000) {
+      unawaited(sendTelemetry());
+    }
     notifyListeners();
   }
 
@@ -463,6 +549,7 @@ class DriverStore extends ChangeNotifier {
     _clockTimer = null;
     _driveTimer = null;
     _telemetryTimer = null;
+    _leg = null;
   }
 
   @override
