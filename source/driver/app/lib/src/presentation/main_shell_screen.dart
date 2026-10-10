@@ -92,9 +92,14 @@ class _ProfileTab extends StatelessWidget {
         const SizedBox(height: 16),
         Panel(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Trần Văn Bình', style: dsans(size: 18, weight: FontWeight.w700)),
+            Text(store.driverName.isNotEmpty ? store.driverName : 'Trần Văn Bình', style: dsans(size: 18, weight: FontWeight.w700)),
             const SizedBox(height: 6),
-            Text('Mã nhân viên TX8821', style: dsans(size: 14, color: DTokens.sub)),
+            Text('Mã nhân viên ${store.staffId.isNotEmpty ? store.staffId : 'TX8821'}', style: dsans(size: 14, color: DTokens.sub)),
+            if (store.operatorName.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text('${store.operatorName} · Tổng đài ${store.operatorHotline}', style: dsans(size: 14, color: DTokens.sub)),
+              ),
             Text('Bằng lái hạng FC · còn hạn đến 31/12/2028', style: dsans(size: 14, color: DTokens.sub)),
           ]),
         ),

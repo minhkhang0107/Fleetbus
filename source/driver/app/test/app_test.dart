@@ -15,9 +15,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Rules of the driver app state against a fake FleetBus server that keeps the trip like the real one.
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   late Map<String, dynamic> trip;
   late List<http.Request> sent;
 
@@ -55,8 +57,15 @@ void main() {
       final path = req.url.path;
       final body = req.body.isEmpty ? <String, dynamic>{} : jsonDecode(req.body) as Map<String, dynamic>;
       if (path.endsWith('/auth/driver/login')) {
-        if (body['pin'] != '123456') return fail(401, 'INVALID_CREDENTIALS', 'Mã nhân viên hoặc mã PIN không chính xác');
-        return ok({'token': 'tok', 'driver': {'full_name': 'Trần Văn Bình', 'staff_id': 'TX8821'}});
+        final op = req.headers['x-operator-code'] ?? 'SAOMAI';
+        if (op == 'XUYENVIET') {
+          if (body['pin'] != '246810' || body['staffIdOrPhone'] != 'TX7701') return fail(401, 'INVALID_CREDENTIALS', 'Mã nhân viên hoặc mã PIN không chính xác');
+          return ok({'token': 'tok', 'driver': {'full_name': 'Lê Văn Bảy', 'staff_id': 'TX7701'}, 'operator': {'code': 'XUYENVIET', 'name': 'Xuyên Việt Lines', 'hotline': '1900 1234'}});
+        } else if (op == 'SAOMAI') {
+          if (body['pin'] != '123456') return fail(401, 'INVALID_CREDENTIALS', 'Mã nhân viên hoặc mã PIN không chính xác');
+          return ok({'token': 'tok', 'driver': {'full_name': 'Trần Văn Bình', 'staff_id': 'TX8821'}, 'operator': {'code': 'SAOMAI', 'name': 'Sao Mai Bus', 'hotline': '1900 6868'}});
+        }
+        return fail(404, 'OPERATOR_NOT_FOUND', 'Mã nhà xe không đúng');
       }
       if (path.endsWith('/trips/today')) return ok({'trips': [trip]});
       if (path.endsWith('/readiness')) return ok({'status': 'READY'});
@@ -111,19 +120,36 @@ void main() {
 
   Future<DriverStore> started() async {
     final store = storeWithServer();
-    expect(await store.login('TX8821', '123456'), isNull);
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
     expect(await store.startTrip(), isNull);
     return store;
   }
 
   test('login loads the shift: route, departure, stops and manifest come from the server', () async {
     final store = storeWithServer();
-    expect(await store.login('TX8821', '000000'), 'Mã nhân viên hoặc mã PIN không chính xác');
-    expect(await store.login('TX8821', '123456'), isNull);
+    expect(await store.login('SAOMAI', 'TX8821', '000000'), 'Mã nhân viên hoặc mã PIN không chính xác');
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
     expect((store.driverName, store.tripId, store.route, store.depTime, store.plate), ('Trần Văn Bình', 'trp_hn_th_01', 'Hà Nội → Thanh Hóa', '07:00', '29B-882.19'));
     expect(store.stops.map((s) => s.time), ['07:00', '07:45', '08:30']);
     expect(store.manifest, hasLength(2));
     expect(store.readyToStart, isTrue, reason: 'the server already holds a complete checklist');
+    store.dispose();
+  });
+
+  test('login honours X-Operator-Code and updates operator fields', () async {
+    final store = storeWithServer();
+    expect(await store.login('', 'TX7701', '246810'), 'Nhập mã nhà xe.');
+    expect(await store.login('UNKNOWN', 'TX7701', '246810'), 'Mã nhà xe không đúng');
+    expect(await store.login('SAOMAI', 'TX7701', '246810'), 'Mã nhân viên hoặc mã PIN không chính xác');
+    
+    expect(await store.login('xuyenviet', 'TX7701', '246810'), isNull);
+    
+    final header = sent.lastWhere((r) => r.url.path.endsWith('/login')).headers['x-operator-code'];
+    expect(header, 'XUYENVIET', reason: 'Sends upper-case operator code in header');
+    
+    expect(store.operatorName, 'Xuyên Việt Lines');
+    expect(store.operatorHotline, '1900 1234');
+    expect(await DriverStore.savedOperatorCode(), 'XUYENVIET');
     store.dispose();
   });
 
@@ -188,7 +214,7 @@ void main() {
 
   test('a lost network lists the action for later instead of failing silently', () async {
     final store = DriverStore(api: DriverApiClientService(baseUrl: 'http://test', client: MockClient((_) async => throw http.ClientException('down'))));
-    expect(await store.login('TX8821', '123456'), contains('Không kết nối được'));
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), contains('Không kết nối được'));
     store.tripId = 'trp_hn_th_01';
     store.stops = const [DriverStop('stp_hn_gb', 'Bến xe Giáp Bát', '07:00')];
     await store.reportIncident('Kẹt xe', 15);
@@ -212,7 +238,7 @@ void main() {
       tester.platformDispatcher.textScaleFactorTestValue = 0.6;
       final store = storeWithServer();
       await tester.runAsync(() async {
-        expect(await store.login('TX8821', '123456'), isNull);
+        expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
       });
       const screens = <Widget>[DriverLoginScreen(), MainShellScreen(), DriverReadinessScreen(), DriverCockpitDashboard(), DriverManifestScreen(), DriverQrScannerScreen(), DriverEndTripScreen(), DriverIncidentScreen()];
       for (final screen in screens) {

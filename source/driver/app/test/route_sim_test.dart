@@ -6,8 +6,10 @@ import 'package:app/src/service/driver_api_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   group('RoutePath', () {
     final p0 = [21.0, 105.0];
     final p1 = [20.0, 105.0];
@@ -117,7 +119,7 @@ void main() {
 
     test('trip payload with lat/lng and 3-point route_shape parses into stops with coordinates and road', () async {
       final store = storeWithServer();
-      expect(await store.login('TX8821', '123456'), isNull);
+      expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
       expect(store.stops, hasLength(3));
       expect(store.stops[0].lat, 20.9806);
       expect(store.stops[0].lng, 105.8413);

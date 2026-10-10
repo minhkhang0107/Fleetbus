@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 
 import '../service/driver_api_service.dart';
 import 'driver_route.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// State of the driver app, backed by the FleetBus API (`DriverApiClientService`, OQ-029).
 ///
@@ -142,8 +143,16 @@ class DriverStore extends ChangeNotifier {
   static const checks = ['Lốp và áp suất lốp', 'Phanh và dầu phanh', 'Điều hòa, vệ sinh khoang', 'Bình chữa cháy, túi cứu thương', 'Nhiên liệu đủ cho chuyến', 'Định vị GPS đang hoạt động'];
 
   // Session and shift
+  String operatorCode = '';
+  String operatorName = '';
+  String operatorHotline = '';
   String driverName = '';
   String staffId = '';
+  
+  static Future<String> savedOperatorCode() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('driver_operator_code') ?? '';
+  }
   bool get loggedIn => api.authToken != null;
   List<ShiftTrip> shift = [];
   bool loading = false;
@@ -222,16 +231,30 @@ class DriverStore extends ChangeNotifier {
   }
 
   // ---------- Session (DRI-001, DRI-002) ----------
-  Future<String?> login(String staff, String pin) async {
+  Future<String?> login(String opCode, String staff, String pin) async {
+    if (opCode.trim().isEmpty) return 'Nhập mã nhà xe.';
     if (staff.trim().isEmpty) return 'Nhập mã nhân viên hoặc số điện thoại.';
     if (!RegExp(r'^\d{6}$').hasMatch(pin)) return 'Mã PIN gồm đúng 6 chữ số.';
     try {
+      api.operatorCode = opCode.trim().toUpperCase();
       final json = await api.login(staff.trim(), pin);
       final error = _error(json);
       if (error != null) return error;
+      
       final d = json['data']['driver'] as Map<String, dynamic>;
+      final op = json['data']['operator'] as Map<String, dynamic>?;
+      
       driverName = d['full_name'] ?? '';
       staffId = d['staff_id'] ?? staff.trim();
+      
+      if (op != null) {
+        operatorCode = op['code'] ?? api.operatorCode ?? '';
+        operatorName = op['name'] ?? '';
+        operatorHotline = op['hotline'] ?? '';
+        
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('driver_operator_code', operatorCode);
+      }
     } catch (_) {
       return 'Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.';
     }

@@ -13,12 +13,24 @@ class DriverLoginScreen extends StatefulWidget {
 }
 
 class _DriverLoginScreenState extends State<DriverLoginScreen> {
+  final _operator = TextEditingController();
   final _id = TextEditingController(text: 'TX8821');
   final _pin = TextEditingController();
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    DriverStore.savedOperatorCode().then((code) {
+      if (mounted && code.isNotEmpty) {
+        setState(() => _operator.text = code);
+      }
+    });
+  }
+
+  @override
   void dispose() {
+    _operator.dispose();
     _id.dispose();
     _pin.dispose();
     super.dispose();
@@ -28,7 +40,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
 
   Future<void> _submit() async {
     setState(() => _busy = true);
-    final error = await DriverScope.read(context).login(_id.text, _pin.text);
+    final error = await DriverScope.read(context).login(_operator.text, _id.text, _pin.text);
     if (!mounted) return;
     setState(() => _busy = false);
     if (error != null) {
@@ -38,31 +50,43 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
     Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const MainShellScreen()));
   }
 
-  Widget _brand({bool large = false}) => Row(children: [
-        Container(
-          width: large ? 72 : 48,
-          height: large ? 72 : 48,
-          decoration: BoxDecoration(color: DTokens.primary, borderRadius: BorderRadius.circular(large ? 18 : 12)),
-          child: Icon(Icons.directions_bus_outlined, color: Colors.white, size: large ? 40 : 26),
-        ),
-        SizedBox(width: large ? 16 : 12),
-        Flexible(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('BusGo Driver', style: dsans(size: large ? 30 : 20, weight: FontWeight.w700)),
-            Text('Ứng dụng cho tài xế và phụ xe', style: dsans(size: large ? 16 : 13, color: DTokens.muted)),
-          ]),
-        ),
-      ]);
-
-  Widget _hotline() => Text.rich(
-        TextSpan(children: [
-          TextSpan(text: 'Quên PIN? Gọi điều độ ', style: dsans(size: 13, color: DTokens.muted)),
-          TextSpan(text: '1900 6868', style: dmono(size: 13, weight: FontWeight.w600)),
+  Widget _brand({bool large = false}) {
+    final store = DriverScope.of(context);
+    final subtitle = store.operatorName.isNotEmpty ? store.operatorName : 'Ứng dụng cho tài xế và phụ xe';
+    return Row(children: [
+      Container(
+        width: large ? 72 : 48,
+        height: large ? 72 : 48,
+        decoration: BoxDecoration(color: DTokens.primary, borderRadius: BorderRadius.circular(large ? 18 : 12)),
+        child: Icon(Icons.directions_bus_outlined, color: Colors.white, size: large ? 40 : 26),
+      ),
+      SizedBox(width: large ? 16 : 12),
+      Flexible(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('BusGo Driver', style: dsans(size: large ? 30 : 20, weight: FontWeight.w700)),
+          Text(subtitle, style: dsans(size: large ? 16 : 13, color: DTokens.muted)),
         ]),
-        textAlign: TextAlign.center,
-      );
+      ),
+    ]);
+  }
+
+  Widget _hotline() {
+    final store = DriverScope.of(context);
+    final number = store.operatorHotline.isNotEmpty ? store.operatorHotline : '1900 6868';
+    return Text.rich(
+      TextSpan(children: [
+        TextSpan(text: 'Quên PIN? Gọi điều độ ', style: dsans(size: 13, color: DTokens.muted)),
+        TextSpan(text: number, style: dmono(size: 13, weight: FontWeight.w600)),
+      ]),
+      textAlign: TextAlign.center,
+    );
+  }
 
   List<Widget> _fields() => [
+        Text('MÃ NHÀ XE', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.sub)),
+        const SizedBox(height: 6),
+        TextField(controller: _operator, style: dmono(size: 18, weight: FontWeight.w600), decoration: const InputDecoration(hintText: 'Ví dụ SAOMAI'), textCapitalization: TextCapitalization.characters),
+        const SizedBox(height: 18),
         Text('MÃ NHÂN VIÊN HOẶC SỐ ĐIỆN THOẠI', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.sub)),
         const SizedBox(height: 6),
         TextField(controller: _id, style: dmono(size: 18, weight: FontWeight.w600)),

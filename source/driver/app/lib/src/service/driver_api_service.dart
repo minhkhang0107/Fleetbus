@@ -44,17 +44,20 @@ class DriverApiClientService {
 
   /// Session token of the signed-in driver (set by [login]).
   String? authToken;
+  String? operatorCode;
 
   DriverApiClientService({
     String? baseUrl,
     http.Client? client,
     this.authToken,
+    this.operatorCode,
   })  : baseUrl = resolveDriverBaseUrl(baseUrl),
         _client = client ?? http.Client();
 
   Map<String, String> _headers({String? idempotencyKey}) => {
     'Content-Type': 'application/json',
     if (authToken != null) 'Authorization': 'Bearer $authToken',
+    if (operatorCode != null) 'X-Operator-Code': operatorCode!,
     if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey,
   };
 
