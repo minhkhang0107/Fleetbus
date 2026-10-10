@@ -16,6 +16,7 @@ import { maskPhone, validateVietnamPhone } from '../../passenger/core/formatters
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
 import { stopCoords, routeShape } from '../../../core/geo.js';
+import { DEFAULT_OPERATOR_ID, findOperatorById, publicOperatorProfile } from '../../../core/operators.js';
 
 const CHANGE_METHODS = ['CASH_RETURNED', 'REST_STOP_DEBT_RECEIPT', 'WALLET_CREDIT'];
 const NO_SHOW_GRACE_MINUTES = 10;
@@ -33,7 +34,8 @@ export const MOCK_DRIVERS_DB = [
     license_valid_until: '2028-12-31',
     is_license_expired: false,
     assigned_vehicle_plate: '29B-123.45',
-    status: 'ACTIVE'
+    status: 'ACTIVE',
+    operator_id: 'op_saomai'
   },
   {
     driver_id: 'drv_9902b',
@@ -45,7 +47,8 @@ export const MOCK_DRIVERS_DB = [
     license_valid_until: '2025-01-01', // Expired license
     is_license_expired: true,
     assigned_vehicle_plate: '29B-678.90',
-    status: 'LICENSE_EXPIRED'
+    status: 'LICENSE_EXPIRED',
+    operator_id: 'op_saomai'
   },
   {
     driver_id: 'drv_9912b',
@@ -57,7 +60,21 @@ export const MOCK_DRIVERS_DB = [
     license_valid_until: '2028-06-30',
     is_license_expired: false,
     assigned_vehicle_plate: '29B-444.11',
-    status: 'ACTIVE'
+    status: 'ACTIVE',
+    operator_id: 'op_saomai'
+  },
+  {
+    driver_id: 'drv_xv_7701',
+    staff_id: 'TX7701',
+    phone: '0901777001',
+    pin: hashSecret('246810'),
+    full_name: 'Đỗ Minh Khoa',
+    license_class: 'FC',
+    license_valid_until: '2029-03-31',
+    is_license_expired: false,
+    assigned_vehicle_plate: '30H-246.80',
+    status: 'ACTIVE',
+    operator_id: 'op_xuyenviet'
   }
 ];
 
@@ -75,6 +92,7 @@ export class DriverCockpitService {
   _initMockShiftTrips() {
     const trip1 = {
       trip_id: 'trp_991823',
+      operator_id: 'op_saomai',
       driver_id: 'drv_8821a',
       base_fare_vnd: 220000,
       debts: [],
@@ -115,6 +133,7 @@ export class DriverCockpitService {
 
     const trip2 = {
       trip_id: 'trp_hn_th_01',
+      operator_id: 'op_saomai',
       driver_id: 'drv_8821a',
       base_fare_vnd: 220000,
       debts: [],
@@ -152,17 +171,55 @@ export class DriverCockpitService {
       manifest: []
     };
 
+    const trip3 = {
+      trip_id: 'trp_xv_hn_th_01',
+      operator_id: 'op_xuyenviet',
+      driver_id: 'drv_xv_7701',
+      base_fare_vnd: 200000,
+      debts: [],
+      total_hail_collected_vnd: 0,
+      route_name: 'Hà Nội — Thanh Hóa (Xuyên Việt)',
+      planned_departure_time: '2026-08-28T08:30:00+07:00',
+      status: 'READY',
+      vehicle_plate: '30H-246.80',
+      vehicle_model: 'Cabin Cung Điện VIP 22 Phòng',
+      total_capacity: 22,
+      booked_passengers_count: 0,
+      boarded_count: 0,
+      total_cod_collected_vnd: 0,
+      current_speed_kmh: 0,
+      current_lat: 21.0285,
+      current_lng: 105.7787,
+      current_stop_index: 0,
+      readiness_checklist: {
+        tires_checked: true,
+        brakes_fluid_checked: true,
+        ac_cleanliness_checked: true,
+        first_aid_extinguisher_checked: true,
+        fuel_level_sufficient: true,
+        gps_telemetry_beacon_active: true
+      },
+      stops: [
+        { stop_id: 'stp_hn_my_dinh', name: 'Bến xe Mỹ Đình', city: 'Hà Nội', order: 1, expected_board: 0, expected_alight: 0, status: 'PENDING' },
+        { stop_id: 'stp_nb', name: 'Bến xe Ninh Bình', city: 'Ninh Bình', order: 2, expected_board: 0, expected_alight: 0, status: 'PENDING' },
+        { stop_id: 'stp_th_pb', name: 'Bến xe Phía Bắc Thanh Hóa', city: 'Thanh Hóa', order: 3, expected_board: 0, expected_alight: 0, status: 'PENDING' }
+      ],
+      manifest: []
+    };
+
     this.activeTrips.set(trip1.trip_id, trip1);
     this.activeTrips.set(trip2.trip_id, trip2);
+    this.activeTrips.set(trip3.trip_id, trip3);
   }
 
   /**
    * DRI-001: Driver Authentication & License Verification
    */
-  authenticateDriver(staffIdOrPhone, pin, deviceInfo = {}, mockNow = Date.now()) {
+  authenticateDriver(staffIdOrPhone, pin, deviceInfo = {}, mockNow = Date.now(), operatorId = DEFAULT_OPERATOR_ID) {
     const input = (staffIdOrPhone || '').trim().toUpperCase();
+    const loginKey = `${operatorId}:${input}`;
 
-    const lockedFor = this.loginGuard.isLocked(input, mockNow);
+    const lockedFor = this.loginGuard.isLocked(loginKey, mockNow);
     if (lockedFor > 0) {
       return {
         success: false,
@@ -172,13 +229,16 @@ export class DriverCockpitService {
       };
     }
 
-    const driver = MOCK_DRIVERS_DB.find(d => d.staff_id === input || d.phone === input);
+    const driver = MOCK_DRIVERS_DB.find(d => 
+      (d.staff_id === input || d.phone === input) && 
+      (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId
+    );
 
     if (!driver || !verifySecret(String(pin ?? ''), driver.pin)) {
-      this.loginGuard.fail(input, mockNow);
+      this.loginGuard.fail(loginKey, mockNow);
       return { success: false, error: 'Mã nhân viên hoặc mã PIN không chính xác', code: 'INVALID_CREDENTIALS' };
     }
-    this.loginGuard.succeed(input);
+    this.loginGuard.succeed(loginKey);
 
     // BR-DRI-001: Commercial License check
     if (driver.is_license_expired || new Date(driver.license_valid_until) < new Date()) {
@@ -191,9 +251,11 @@ export class DriverCockpitService {
     }
 
     const token = signToken(
-      { sub: driver.driver_id, staff_id: driver.staff_id, role: 'ROLE_DRIVER', kind: 'driver' },
+      { sub: driver.driver_id, staff_id: driver.staff_id, role: 'ROLE_DRIVER', kind: 'driver', operator_id: operatorId },
       { prefix: TOKEN_PREFIXES.driver, ttlSeconds: 12 * 3600, now: mockNow }
     );
+
+    const op = findOperatorById(operatorId);
 
     return {
       success: true,
@@ -207,6 +269,7 @@ export class DriverCockpitService {
           license_valid_until: driver.license_valid_until,
           assigned_vehicle_plate: driver.assigned_vehicle_plate
         },
+        operator: publicOperatorProfile(op),
         token,
         mqtt_credentials: {
           broker_url: 'ssl://mqtt.busgo.vn:8883',

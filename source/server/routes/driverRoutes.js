@@ -39,7 +39,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   // POST /api/v1/driver/auth/login or /api/v1/auth/driver/login (DRI-001)
   if ((pathname === '/api/v1/driver/auth/login' || pathname === '/api/v1/auth/driver/login') && req.method === 'POST') {
     parseJsonBody(req).then(body => {
-      const result = driverService.authenticateDriver(body.staffIdOrPhone || body.staff_id || body.username, body.pin || body.password);
+      const result = driverService.authenticateDriver(body.staffIdOrPhone || body.staff_id || body.username, body.pin || body.password, {}, Date.now(), req.operatorId);
       if (result.success) {
         sendSuccess(res, result.data);
       } else {
