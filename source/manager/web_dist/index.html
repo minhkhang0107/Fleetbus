@@ -335,7 +335,7 @@ async function loadBoard() {
     <tr class="click ${state.selectedTrip === t.trip_id ? 'sel' : ''}" data-trip="${esc(t.trip_id)}">
       <td class="mono">${esc(hhmm(t.departure_time))}<div class="muted" style="font-size:12px">${esc(dmy(t.departure_time))}</div></td>
       <td>${esc(t.route_name || t.route_id)}<div class="muted mono" style="font-size:12px">${esc(t.trip_id)}</div></td>
-      <td class="mono">${esc(t.vehicle_plate)}<div class="muted" style="font-size:12px">${esc(t.driver_name || '')}</div></td>
+      <td class="mono">${t.vehicle_plate ? esc(t.vehicle_plate) : '<span class="pill warn">Chưa gán xe</span>'}<div class="muted" style="font-size:12px">${esc(t.driver_name || '')}</div></td>
       <td class="mono">${esc(t.booked_seats)}/${esc(t.total_seats)}${t.held_seats ? `<div class="muted" style="font-size:12px">giữ ${esc(t.held_seats)}</div>` : ''}</td>
       <td>${pill(t.status)}${t.delay_minutes ? ` <span class="pill warn">+${esc(t.delay_minutes)}p</span>` : ''}</td>
     </tr>`).join('') : '<tr><td colspan="5" class="muted">Không có chuyến trong ca.</td></tr>';
@@ -346,7 +346,7 @@ async function loadBoard() {
 async function openTrip(tripId) {
   state.selectedTrip = tripId;
   document.querySelectorAll('#board tr[data-trip]').forEach(tr => tr.classList.toggle('sel', tr.dataset.trip === tripId));
-  const [trip, inv, track, ops] = await Promise.all([api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/seat-inventory`), publicApi(`/api/v1/trips/${encodeURIComponent(tripId)}/tracking`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/operations`)]);
+  const [trip, inv, track, ops, assignOpts] = await Promise.all([api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/seat-inventory`), publicApi(`/api/v1/trips/${encodeURIComponent(tripId)}/tracking`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/operations`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/assign-options`)]);
   const opsData = ops.ok ? ops.data : null;
   if (!trip.ok) { $('#tripDetail').innerHTML = `<div class="error">${esc(trip.message)}</div>`; return; }
   // The board row has the route and driver names the trip record lacks.
@@ -361,6 +361,7 @@ async function openTrip(tripId) {
       <div><b>${esc(opsData ? opsData.stops.reduce((n, st) => n + st.counts.boarded, 0) : (t.boarded_passengers ?? 0))}</b><span>Đã lên xe</span></div>
       <div><b>${esc(opsData?.on_board_count ?? t.on_board_count ?? '—')}</b><span>Còn trên xe</span></div>
     </div>
+    ${assignOpts.ok ? assignBlock(assignOpts.data) : ''}
     <div id="tripMap" class="map"></div>
     <div class="muted" id="tripTrack" style="margin-top:6px"></div>
     <div class="section-title">Điểm dừng</div>
@@ -381,6 +382,15 @@ async function openTrip(tripId) {
       <button class="btn primary" type="submit">Giữ chỗ (khách trả tiền mặt khi lên xe)</button>
     </form>`;
   drawTripMap(track);
+  $('#assignForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    $('#assignError').textContent = '';
+    const r = await api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/assign`, { method: 'POST', idempotent: true, body: { vehicleId: f.vehicle.value, driverId: f.driver.value, scope: f.schedule.checked ? 'SCHEDULE' : 'TRIP' } });
+    if (!r.ok) { $('#assignError').textContent = r.message; return; }
+    toast(`Đã gán xe ${r.data.vehicle_plate}, tài xế ${r.data.driver_name}`);
+    loadBoard(); openTrip(tripId);
+  });
   $('#delayForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
@@ -399,6 +409,19 @@ async function openTrip(tripId) {
   });
 }
 
+// Bus and driver of the trip: unavailable ones stay listed, greyed, with the reason.
+function assignBlock(o) {
+  const locked = ['IN_TRANSIT', 'COMPLETED', 'CANCELLED'].includes(o.status);
+  const opt = (value, label, x) => `<option value="${esc(value)}" ${x.assigned ? 'selected' : ''} ${!x.available && !x.assigned ? 'disabled' : ''}>${esc(label)}${x.reason && !x.assigned ? ` — ${esc(x.reason)}` : ''}</option>`;
+  return `<div class="section-title">Xe và tài xế</div>
+    <form id="assignForm" class="card" style="padding:12px;margin-bottom:12px">
+      <div class="row"><div class="field grow"><label>Xe</label><select name="vehicle" required ${locked ? 'disabled' : ''}><option value="">— Chọn xe —</option>${o.vehicles.map(v => opt(v.vehicle_id, `${v.plate_number} · ${v.model} · ${v.total_seats} chỗ`, v)).join('')}</select></div>
+        <div class="field grow"><label>Tài xế</label><select name="driver" required ${locked ? 'disabled' : ''}><option value="">— Chọn tài xế —</option>${o.drivers.map(d => opt(d.driver_id, `${d.full_name} · ${d.staff_id}`, d)).join('')}</select></div></div>
+      <label class="row" style="gap:6px;margin-bottom:8px"><input type="checkbox" name="schedule" ${locked ? 'disabled' : ''}> Áp dụng cho các ngày sau của lịch chạy này</label>
+      <div class="error" id="assignError"></div>
+      ${locked ? '<p class="muted" style="margin:0">Chuyến đã chạy hoặc đã kết thúc, không đổi được xe và tài xế.</p>' : `<button class="btn primary" type="submit">${o.vehicle_id ? 'Đổi xe / tài xế' : 'Gán xe và tài xế'}</button>${o.sold_seats ? ` <span class="muted">Đã bán ${esc(o.sold_seats)} ghế: khách sẽ được báo nếu đổi.</span>` : ''}`}
+    </form>`;
+}
 function drawTripMap(track) {
   if (state.maps.trip) { state.maps.trip.remove(); state.maps.trip = null; }
   const el = $('#tripMap'); if (!el) return;

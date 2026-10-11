@@ -11,6 +11,13 @@ import { publicRouteService, resolveHomeBooking, routeServiceConfig } from '../c
 import { isProduction } from '../config.js';
 import { checkBookableDeparture, checkTravelDate, serviceCalendar } from '../core/serviceDate.js';
 
+// The plate passengers see is the bus the office gave the run; a day's run with no bus yet shows none.
+function withAssignedBus(services, trip) {
+  const ops = services.managerService?.trips?.find(t => t.trip_id === trip.trip_id);
+  if (ops) return { ...trip, plate_number: ops.vehicle_plate || null };
+  return trip.schedule_id ? { ...trip, plate_number: null } : trip;
+}
+
 // With authentication enforced, a ticket or order may only be used by its owner (or its holder, where allowed).
 function forbidTicket(req, res, paymentService, ticketId, { ownerOnly = false } = {}) {
   const ticket = paymentService.tickets.get(ticketId);
@@ -143,7 +150,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     const listed = date ? (found.data || []).filter(t => checkBookableDeparture(t.departure_time, Date.now(), { production: isProduction() }).ok) : (found.data || []);
     // Each trip says how its route offers pickup / drop-off (stop style and modes, set per company and route).
     // With stop coordinates and the road shape, so the app can draw the route line without another call.
-    sendSuccess(res, listed.map(t => ({ ...(searchService.getTripDetail(t.trip_id, req.operatorId).data || t), service: publicRouteService(req.operator?.service_config, t.route_id) })));
+    sendSuccess(res, listed.map(t => withAssignedBus(services, { ...(searchService.getTripDetail(t.trip_id, req.operatorId).data || t), service: publicRouteService(req.operator?.service_config, t.route_id) })));
     return true;
   }
 
@@ -625,7 +632,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     }
     const detail = searchService.getTripDetail(tripId, req.operatorId);
     if (detail.success) {
-      sendSuccess(res, { ...detail.data, service: publicRouteService(req.operator?.service_config, detail.data.route_id) });
+      sendSuccess(res, withAssignedBus(services, { ...detail.data, service: publicRouteService(req.operator?.service_config, detail.data.route_id) }));
     } else {
       sendError(res, detail.error, detail.code, 404);
     }

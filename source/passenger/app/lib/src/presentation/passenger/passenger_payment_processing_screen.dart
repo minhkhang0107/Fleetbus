@@ -207,7 +207,7 @@ class PassengerBookingSuccessScreen extends StatelessWidget {
                         KeyValue('Khởi hành', '${ticket.dep} · ${ticket.date.split(' ').last}', isMono: true),
                         KeyValue(ticket.homePickup != null ? 'Đón tận nhà${ticket.pickupWindow != null ? ' ${ticket.pickupWindow}' : ''}' : 'Điểm đón', ticket.homePickup ?? ticket.pickup),
                         KeyValue('Ghế', ticket.seat, isMono: true),
-                        KeyValue('Xe', ticket.plate, isMono: true),
+                        KeyValue('Xe', ticket.plate.isEmpty ? 'Nhà xe sẽ báo' : ticket.plate, isMono: ticket.plate.isNotEmpty),
                         KeyValue('Hành khách', ticket.name),
                       ],
                     ),

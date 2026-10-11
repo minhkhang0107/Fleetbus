@@ -450,7 +450,7 @@ export class ManagerOperationsService {
           return {
             ...t,
             route_name: route ? route.name : t.route_id,
-            driver_name: vehicle ? vehicle.driver_name : 'Chưa gán',
+            driver_name: this.drivers.find(d => d.driver_id === t.driver_id)?.full_name || 'Chưa gán',
             booked_seats: t.booked_seats || 0,
             held_seats: t.held_seats || 0,
             on_board_count: (t.boarded_passengers || 0) - (t.alighted_passengers || 0),
@@ -466,20 +466,106 @@ export class ManagerOperationsService {
     return this.trips.find(t => t.trip_id === tripId) || this.runResolver?.(tripId) || undefined;
   }
 
+  /** Start and end (ms) of a trip, from the passenger catalog when it is there, else 3 h from departure. */
+  _tripWindow(trip) {
+    const start = Date.parse(trip.departure_time);
+    const detail = this.eventBridge?.services?.searchService?.getTripDetail?.(trip.trip_id);
+    const end = Date.parse(detail?.data?.arrival_time) || start + 3 * 3600000;
+    return { start, end: Math.max(end, start) };
+  }
+
   /**
-   * The ops record of a schedule's run: same route, bus and driver as the schedule, nothing sold yet.
+   * MGR-017: the buses and drivers the office may give a trip, each with the reason it cannot when it cannot:
+   * under maintenance, too few seats for what is sold, licence expired or invalid on the day, or already on a trip
+   * that overlaps this one (30 min turnaround).
+   */
+  getAssignOptions(tripId, operatorId = DEFAULT_OPERATOR_ID) {
+    const trip = this.findTrip(tripId);
+    if (!trip || trip.operator_id !== operatorId) return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
+    const TURNAROUND = 30 * 60000;
+    const own = this._tripWindow(trip);
+    const sold = (trip.booked_seats || 0) + (trip.held_seats || 0);
+    const others = this.trips.filter(t => t.trip_id !== tripId && t.operator_id === operatorId && !['COMPLETED', 'CANCELLED'].includes(t.status));
+    const clash = (field, id) => others.find(t => {
+      if (t[field] !== id) return false;
+      const w = this._tripWindow(t);
+      return w.start < own.end + TURNAROUND && own.start < w.end + TURNAROUND;
+    });
+    const day = vnDate(own.start);
+    const vehicles = this.vehicles.filter(v => v.operator_id === operatorId).map(v => {
+      const busy = clash('vehicle_id', v.vehicle_id);
+      const reason = v.status === 'MAINTENANCE' ? 'Xe đang bảo dưỡng'
+        : (v.total_seats || 0) < sold ? `Xe ${v.total_seats} chỗ, chuyến đã bán ${sold} ghế`
+          : busy ? `Đang chạy chuyến ${busy.trip_id} trùng giờ` : null;
+      return { vehicle_id: v.vehicle_id, plate_number: v.plate_number, model: v.model, total_seats: v.total_seats, assigned: v.vehicle_id === trip.vehicle_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
+    });
+    const drivers = this.drivers.filter(d => d.operator_id === operatorId).map(d => {
+      const busy = clash('driver_id', d.driver_id);
+      const reason = d.status === 'LICENSE_EXPIRED' || (d.license_expiry && d.license_expiry < day) ? 'Bằng lái hết hạn vào ngày chạy'
+        : d.status === 'OFF_DUTY' || d.status === 'SUSPENDED' ? 'Tài xế không làm việc'
+          : busy ? `Đang chạy chuyến ${busy.trip_id} trùng giờ` : null;
+      return { driver_id: d.driver_id, staff_id: d.staff_id, full_name: d.full_name, license_expiry: d.license_expiry, assigned: d.driver_id === trip.driver_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
+    });
+    return { success: true, data: { trip_id: tripId, departure_time: trip.departure_time, status: trip.status, sold_seats: sold, vehicle_id: trip.vehicle_id || null, driver_id: trip.driver_id || null, vehicles, drivers } };
+  }
+
+  /**
+   * MGR-017: gives a trip its bus and driver. A trip already under way cannot be changed. With scope SCHEDULE, the
+   * pair also becomes the default of the schedule's future runs (not those already set up with another pair).
+   */
+  assignTrip(tripId, { vehicleId, driverId, scope = 'TRIP' } = {}, operatorId = DEFAULT_OPERATOR_ID) {
+    const options = this.getAssignOptions(tripId, operatorId);
+    if (!options.success) return options;
+    const trip = this.findTrip(tripId);
+    if (['IN_TRANSIT', 'COMPLETED', 'CANCELLED'].includes(trip.status)) {
+      return { success: false, error: 'Chuyến đã chạy hoặc đã kết thúc, không đổi được xe và tài xế', code: 'TRIP_ALREADY_RUNNING' };
+    }
+    if (!['TRIP', 'SCHEDULE'].includes(scope)) return { success: false, error: 'Phạm vi phải là TRIP hoặc SCHEDULE', code: 'VALIDATION_ERROR' };
+    const vehicle = options.data.vehicles.find(v => v.vehicle_id === vehicleId);
+    const driver = options.data.drivers.find(d => d.driver_id === driverId);
+    if (!vehicle) return { success: false, error: 'Không tìm thấy xe', code: 'VEHICLE_NOT_FOUND' };
+    if (!driver) return { success: false, error: 'Không tìm thấy tài xế', code: 'DRIVER_NOT_FOUND' };
+    if (!vehicle.available && !vehicle.assigned) return { success: false, error: vehicle.reason, code: 'VEHICLE_UNAVAILABLE', conflict_trip_id: vehicle.conflict_trip_id };
+    if (!driver.available && !driver.assigned) return { success: false, error: driver.reason, code: 'DRIVER_UNAVAILABLE', conflict_trip_id: driver.conflict_trip_id };
+
+    const previous = { vehicle_id: trip.vehicle_id || null, vehicle_plate: trip.vehicle_plate || null, driver_id: trip.driver_id || null };
+    trip.vehicle_id = vehicle.vehicle_id;
+    trip.vehicle_plate = vehicle.plate_number;
+    trip.driver_id = driver.driver_id;
+    if (scope === 'SCHEDULE') {
+      if (!this.scheduleAssignments) this.scheduleAssignments = {};
+      this.scheduleAssignments[trip.schedule_id || trip.trip_id] = { vehicle_id: vehicle.vehicle_id, driver_id: driver.driver_id };
+    }
+    this.eventBridge?.emit?.('TRIP_ASSIGNED', {
+      tripId,
+      vehiclePlate: vehicle.plate_number,
+      vehicleModel: vehicle.model,
+      capacity: vehicle.total_seats,
+      driverId: driver.driver_id,
+      driverName: driver.full_name,
+      previous
+    });
+    return { success: true, data: { trip_id: tripId, vehicle_id: vehicle.vehicle_id, vehicle_plate: vehicle.plate_number, driver_id: driver.driver_id, driver_name: driver.full_name, scope, previous } };
+  }
+
+  /**
+   * The ops record of a schedule's run: the schedule's bus and driver (the office's default for the schedule
+   * first, else the seed trip's), nothing sold yet.
    */
   createRunTrip(templateId, runTripId, trip) {
     const existing = this.trips.find(t => t.trip_id === runTripId);
     if (existing) return existing;
     const template = this.trips.find(t => t.trip_id === templateId);
+    const preset = this.scheduleAssignments?.[templateId];
+    const presetVehicle = preset ? this.vehicles.find(v => v.vehicle_id === preset.vehicle_id) : null;
     const run = {
       trip_id: runTripId,
       schedule_id: templateId,
-      driver_id: template?.driver_id || null,
+      driver_id: preset?.driver_id || template?.driver_id || null,
       route_id: trip.route_id || template?.route_id || null,
-      vehicle_id: template?.vehicle_id || null,
-      vehicle_plate: template?.vehicle_plate || trip.plate_number || null,
+      vehicle_id: preset?.vehicle_id || template?.vehicle_id || null,
+      // No bus yet means no plate: the catalog's sample plate is not a bus the office gave.
+      vehicle_plate: presetVehicle?.plate_number || template?.vehicle_plate || null,
       departure_time: trip.departure_time,
       status: 'SCHEDULED',
       booked_seats: 0,

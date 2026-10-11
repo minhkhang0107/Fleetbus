@@ -439,6 +439,48 @@ export class DriverCockpitService {
     return trip;
   }
 
+  /**
+   * The office gave a trip its bus and driver (MGR-017): the driver trip follows, created when there is none yet
+   * (from the schedule's trip, else from the passenger catalog trip).
+   */
+  applyAssignment(tripId, { driverId, vehiclePlate, vehicleModel, capacity }, catalogTrip = null, scheduleId = null) {
+    let trip = this.activeTrips.get(tripId);
+    if (!trip && scheduleId && catalogTrip) trip = this.createRunTrip(scheduleId, tripId, catalogTrip.departure_time);
+    if (!trip && catalogTrip) {
+      const first = catalogTrip.stops?.[0] ? stopCoords(catalogTrip.stops[0].stop_id) : null;
+      trip = {
+        trip_id: tripId,
+        schedule_id: scheduleId || null,
+        operator_id: catalogTrip.operator_id || DEFAULT_OPERATOR_ID,
+        base_fare_vnd: catalogTrip.base_fare_vnd,
+        route_name: catalogTrip.route_name,
+        planned_departure_time: catalogTrip.departure_time,
+        status: 'DISPATCHED',
+        manifest: [],
+        debts: [],
+        events: [],
+        booked_passengers_count: 0,
+        boarded_count: 0,
+        alighted_count: 0,
+        total_cod_collected_vnd: 0,
+        total_hail_collected_vnd: 0,
+        current_speed_kmh: 0,
+        current_lat: first?.lat ?? null,
+        current_lng: first?.lng ?? null,
+        current_stop_index: 0,
+        readiness_checklist: Object.fromEntries(['tires_checked', 'brakes_fluid_checked', 'ac_cleanliness_checked', 'first_aid_extinguisher_checked', 'fuel_level_sufficient', 'gps_telemetry_beacon_active'].map(k => [k, false])),
+        stops: (catalogTrip.stops || []).map(({ stop_id, name, city, order, kind }) => ({ stop_id, name, city, order, kind, expected_board: 0, expected_alight: 0, status: 'PENDING' }))
+      };
+      this.activeTrips.set(tripId, trip);
+    }
+    if (!trip) return null;
+    trip.driver_id = driverId;
+    trip.vehicle_plate = vehiclePlate;
+    if (vehicleModel) trip.vehicle_model = vehicleModel;
+    if (capacity) trip.total_capacity = capacity;
+    return trip;
+  }
+
   /** The driver's trips of today (Vietnam time); outside production the seed demo day too. */
   getTodayTrips(driverId, now = Date.now()) {
     const today = vnDate(now);

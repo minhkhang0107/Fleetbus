@@ -312,6 +312,31 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   }
 
   // GET /api/v1/ops/trips/:tripId (MGR-012)
+  // GET /api/v1/ops/trips/:tripId/assign-options and POST /api/v1/ops/trips/:tripId/assign (MGR-017)
+  const assign = pathname.match(/^\/api\/v1\/ops\/trips\/([^/]+)\/(assign|assign-options)$/);
+  if (assign && ((assign[2] === 'assign-options' && req.method === 'GET') || (assign[2] === 'assign' && req.method === 'POST'))) {
+    const tripId = assign[1];
+    const status = (code) => ({ TRIP_NOT_FOUND: 404, VEHICLE_NOT_FOUND: 404, DRIVER_NOT_FOUND: 404, VALIDATION_ERROR: 400 }[code] || 409);
+    if (assign[2] === 'assign-options') {
+      const result = managerService.getAssignOptions(tripId, req.operatorId);
+      if (result.success) sendSuccess(res, result.data);
+      else sendError(res, result.error, result.code, status(result.code));
+      return true;
+    }
+    parseJsonBody(req).then(body => {
+      const before = managerService.findTrip(tripId);
+      const snapshot = before ? { vehicle_id: before.vehicle_id || null, driver_id: before.driver_id || null } : null;
+      const result = managerService.assignTrip(tripId, { vehicleId: body.vehicleId || body.vehicle_id, driverId: body.driverId || body.driver_id, scope: body.scope || 'TRIP' }, req.operatorId);
+      if (!result.success) {
+        sendError(res, result.error, result.code, status(result.code), result.conflict_trip_id ? { conflict_trip_id: result.conflict_trip_id } : null);
+        return;
+      }
+      audit(req, managerService, { action: 'TRIP_ASSIGN', resource: tripId, before: snapshot, after: { vehicle_id: result.data.vehicle_id, driver_id: result.data.driver_id, scope: result.data.scope } });
+      sendSuccess(res, result.data);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
   // GET /api/v1/ops/trips/:tripId/operations: stops with passenger counts, home pickups and the event log (spec 5.2, 5.3)
   const operations = pathname.match(/^\/api\/v1\/ops\/trips\/([^/]+)\/operations$/);
   if (operations && req.method === 'GET') {

@@ -486,6 +486,28 @@ export class FleetBusEventBridge extends EventEmitter {
       }
     });
 
+    // MGR-017: the office gave a trip its bus and driver. The driver trip follows; passengers who already have a
+    // ticket are told once per new pair when the bus or the driver changed (spec 9).
+    this.on('TRIP_ASSIGNED', ({ tripId, vehiclePlate, vehicleModel, capacity, driverId, driverName, previous }) => {
+      const detail = services.searchService?.getTripDetail?.(tripId);
+      const catalogTrip = detail?.success ? detail.data : null;
+      driverService?.applyAssignment?.(tripId, { driverId, vehiclePlate, vehicleModel, capacity }, catalogTrip, parseRunId(tripId)?.templateId || null);
+      const changed = (previous?.vehicle_plate && previous.vehicle_plate !== vehiclePlate) || (previous?.driver_id && previous.driver_id !== driverId);
+      if (!changed || !paymentService?.tickets || !trackingService?.sendNotificationOnce) return;
+      const at = catalogTrip?.departure_time ? new Date(Date.parse(catalogTrip.departure_time) + 7 * 3600000).toISOString() : null;
+      const when = at ? `${at.slice(11, 16)} ngày ${at.slice(8, 10)}/${at.slice(5, 7)}` : tripId;
+      for (const ticket of paymentService.tickets.values()) {
+        if (ticket.trip_id !== tripId || !['ACTIVE', 'BOARDED'].includes(ticket.status)) continue;
+        trackingService.sendNotificationOnce(`${ticket.ticket_id}:ASSIGNED:${vehiclePlate}:${driverId}`, ticket.passenger_phone, {
+          operatorId: operatorOfTrip(this.services, tripId),
+          title: 'Nhà xe đổi xe hoặc tài xế',
+          body: `Chuyến ${when} của bạn chạy xe ${vehiclePlate}, tài xế ${driverName}. Vé và ghế ${ticket.seat_code} giữ nguyên.`,
+          type: 'TRIP_REASSIGNED',
+          payload: { trip_id: tripId, ticket_id: ticket.ticket_id, vehicle_plate: vehiclePlate }
+        });
+      }
+    });
+
     // -------------------------------------------------------------------------
     // 6. VEHICLE_SWAPPED: Manager Emergency Swap -> Driver Vehicle Plate & Passenger Disruption
     // -------------------------------------------------------------------------

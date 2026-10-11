@@ -192,7 +192,7 @@ class _TripCard extends StatelessWidget {
         Row(children: [
           Text(few ? 'Sắp hết: còn ${trip.seatsLeft} chỗ' : 'Còn ${trip.seatsLeft} chỗ', style: sans(size: 13, weight: FontWeight.w600, color: few ? const Color(0xFFB45309) : PTokens.success)),
           const Spacer(),
-          Text('Xe ${trip.plate}', style: sans(size: 13, color: PTokens.muted)),
+          Text(trip.plate.isEmpty ? 'Chưa có biển số xe' : 'Xe ${trip.plate}', style: sans(size: 13, color: PTokens.muted)),
         ]),
       ]),
     );
