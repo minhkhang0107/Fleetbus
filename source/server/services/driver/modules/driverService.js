@@ -11,12 +11,13 @@ import {
   verifyGroupBoardingQR,
   verifyTicketPin
 } from '../../passenger/core/cryptoEngine.js';
-import { getTicketSecret } from '../../../config.js';
+import { getTicketSecret, isProduction } from '../../../config.js';
 import { maskPhone, validateVietnamPhone } from '../../passenger/core/formatters.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
 import { stopCoords, routeShape } from '../../../core/geo.js';
 import { DEFAULT_OPERATOR_ID, findOperatorById, publicOperatorProfile } from '../../../core/operators.js';
+import { DEMO_DATE, vnDate } from '../../../core/serviceDate.js';
 
 const CHANGE_METHODS = ['CASH_RETURNED', 'REST_STOP_DEBT_RECEIPT', 'WALLET_CREDIT'];
 const NO_SHOW_GRACE_MINUTES = 10;
@@ -98,6 +99,8 @@ export class DriverCockpitService {
     this.incidents = [];
 
     this._initMockShiftTrips();
+    // The seed trips as they start: the model of each schedule's run on another day.
+    this.tripTemplates = new Map([...this.activeTrips].map(([id, t]) => [id, structuredClone(t)]));
   }
 
   _initMockShiftTrips() {
@@ -402,9 +405,49 @@ export class DriverCockpitService {
   /**
    * DRI-002: Get Today Assigned Trips (only the trips assigned to this driver)
    */
-  getTodayTrips(driverId) {
+  /**
+   * The driver trip of a schedule's run on another day: same driver, bus and stops as the schedule, no
+   * passengers yet, the vehicle check to do again. Null when the schedule has no driver trip.
+   */
+  createRunTrip(templateId, runTripId, departureTime) {
+    if (this.activeTrips.has(runTripId)) return this.activeTrips.get(runTripId);
+    const template = this.tripTemplates?.get(templateId);
+    if (!template) return null;
+    const first = template.stops?.[0] ? stopCoords(template.stops[0].stop_id) : null;
+    const trip = {
+      ...structuredClone(template),
+      trip_id: runTripId,
+      schedule_id: templateId,
+      planned_departure_time: departureTime,
+      status: 'DISPATCHED',
+      manifest: [],
+      debts: [],
+      events: [],
+      booked_passengers_count: 0,
+      boarded_count: 0,
+      alighted_count: 0,
+      total_cod_collected_vnd: 0,
+      total_hail_collected_vnd: 0,
+      current_stop_index: 0,
+      current_speed_kmh: 0,
+      current_lat: first?.lat ?? template.current_lat,
+      current_lng: first?.lng ?? template.current_lng,
+      readiness_checklist: Object.fromEntries(Object.keys(template.readiness_checklist || {}).map(k => [k, false])),
+      stops: (template.stops || []).map(({ arrived_at, skipped_at, ...s }) => ({ ...s, status: 'PENDING' }))
+    };
+    this.activeTrips.set(runTripId, trip);
+    return trip;
+  }
+
+  /** The driver's trips of today (Vietnam time); outside production the seed demo day too. */
+  getTodayTrips(driverId, now = Date.now()) {
+    const today = vnDate(now);
     const trips = Array.from(this.activeTrips.values())
       .filter(t => t.driver_id === driverId)
+      .filter(t => {
+        const day = t.planned_departure_time ? vnDate(Date.parse(t.planned_departure_time)) : null;
+        return !day || day === today || (!isProduction() && day === DEMO_DATE);
+      })
       .map(t => this._publicTrip(t));
     return {
       success: true,

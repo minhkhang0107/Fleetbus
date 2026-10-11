@@ -3,6 +3,7 @@
  * Implements MGR-001 through MGR-030 for Fleet Managers, Dispatchers, and Controllers.
  */
 
+import { DEMO_DATE, vnDate } from '../../../core/serviceDate.js';
 import { validateVietnamPhone } from '../../passenger/core/formatters.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
@@ -426,14 +427,24 @@ export class ManagerOperationsService {
   /**
    * MGR-014: Dispatch Board Timeline
    */
-  getDispatchBoard(shiftDate = new Date().toISOString().split('T')[0], operatorId = DEFAULT_OPERATOR_ID) {
+  /**
+   * MGR-014: the trips of a day (Vietnam time) for the office, every schedule's run of that day set up. Outside
+   * production, the seed demo day's trips are listed with today's when no day is asked.
+   */
+  getDispatchBoard(shiftDate = null, operatorId = DEFAULT_OPERATOR_ID, { now = Date.now(), production = false } = {}) {
     this.releaseExpiredHotlineHolds();
+    const day = shiftDate || vnDate(now);
+    this.runsForDate?.(day, operatorId);
+    const days = new Set([day]);
+    if (!shiftDate && !production) days.add(DEMO_DATE);
+    const trips = this.trips.filter(t => t.operator_id === operatorId && days.has(vnDate(Date.parse(t.departure_time))))
+      .sort((a, b) => Date.parse(a.departure_time) - Date.parse(b.departure_time));
     return {
       success: true,
       data: {
-        shift_date: shiftDate,
-        total_trips: this.trips.filter(t => t.operator_id === operatorId).length,
-        trips: this.trips.filter(t => t.operator_id === operatorId).map(t => {
+        shift_date: day,
+        total_trips: trips.length,
+        trips: trips.map(t => {
           const route = this.routes.find(r => r.route_id === t.route_id);
           const vehicle = this.vehicles.find(v => v.vehicle_id === t.vehicle_id);
           return {
@@ -450,8 +461,35 @@ export class ManagerOperationsService {
     };
   }
 
+  /** A trip of the board; a schedule's run on another day is set up on first use (see runResolver). */
   findTrip(tripId) {
-    return this.trips.find(t => t.trip_id === tripId);
+    return this.trips.find(t => t.trip_id === tripId) || this.runResolver?.(tripId) || undefined;
+  }
+
+  /**
+   * The ops record of a schedule's run: same route, bus and driver as the schedule, nothing sold yet.
+   */
+  createRunTrip(templateId, runTripId, trip) {
+    const existing = this.trips.find(t => t.trip_id === runTripId);
+    if (existing) return existing;
+    const template = this.trips.find(t => t.trip_id === templateId);
+    const run = {
+      trip_id: runTripId,
+      schedule_id: templateId,
+      driver_id: template?.driver_id || null,
+      route_id: trip.route_id || template?.route_id || null,
+      vehicle_id: template?.vehicle_id || null,
+      vehicle_plate: template?.vehicle_plate || trip.plate_number || null,
+      departure_time: trip.departure_time,
+      status: 'SCHEDULED',
+      booked_seats: 0,
+      held_seats: 0,
+      total_seats: trip.total_seats || template?.total_seats || 22,
+      delay_minutes: 0,
+      operator_id: trip.operator_id
+    };
+    this.trips.push(run);
+    return run;
   }
 
   /**

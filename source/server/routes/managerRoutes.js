@@ -8,6 +8,8 @@ import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.j
 import { maskPhone } from '../services/passenger/core/formatters.js';
 import { ADMIN_ROLE } from '../core/gateway.js';
 import { tripVisibleTo } from '../core/tenancy.js';
+import { parseServiceDate } from '../core/serviceDate.js';
+import { isProduction } from '../config.js';
 
 // Seat conflicts and reservation mismatches are conflicts (409); a missing trip or reservation is 404.
 function inventoryErrorStatus(code) {
@@ -95,8 +97,13 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
 
   // GET /api/v1/ops/dispatch/board or /api/v1/ops/dispatch/matrix or /api/v1/ops/trips (MGR-014, MGR-015, MGR-016)
   if ((pathname === '/api/v1/ops/dispatch/board' || pathname === '/api/v1/ops/dispatch/matrix' || pathname === '/api/v1/ops/trips') && req.method === 'GET') {
-    const shiftDate = parsedUrl.searchParams.get('shift_date') || new Date().toISOString().split('T')[0];
-    const dispatch = managerService.getDispatchBoard(shiftDate, req.operatorId);
+    // A day asked must be a real YYYY-MM-DD; none means today (Vietnam time).
+    const asked = parsedUrl.searchParams.get('shift_date') || parsedUrl.searchParams.get('date');
+    if (asked && !parseServiceDate(asked)) {
+      sendError(res, 'Ngày không hợp lệ (định dạng YYYY-MM-DD)', 'INVALID_DATE', 400);
+      return true;
+    }
+    const dispatch = managerService.getDispatchBoard(asked || null, req.operatorId, { production: isProduction() });
     sendSuccess(res, dispatch.data || dispatch);
     return true;
   }

@@ -350,6 +350,11 @@ export class PassengerSearchService {
     };
   }
 
+  /** Ids of a company's schedules. */
+  schedulesOf(operatorId) {
+    return [...SCHEDULE_TEMPLATES.values()].filter(t => !operatorId || t.operator_id === operatorId).map(t => t.trip_id);
+  }
+
   /** A schedule of the route (its stops are the route's stops), or null. */
   templateForRoute(routeId, operatorId = null) {
     return [...SCHEDULE_TEMPLATES.values()].find(t => t.route_id === routeId && (!operatorId || t.operator_id === operatorId)) || null;

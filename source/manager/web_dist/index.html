@@ -128,6 +128,7 @@
     <!-- Dispatch board + trip detail -->
     <div data-panel="dispatch" class="hidden">
       <h2>Điều độ chuyến</h2>
+      <div class="toolbar"><label class="muted" for="boardDate">Ngày chạy</label><input type="date" id="boardDate"><button class="btn" id="boardToday">Hôm nay</button><span class="muted" id="boardInfo"></span></div>
       <div class="split">
         <div class="card scroll" style="padding:0"><table><thead><tr><th>Giờ chạy</th><th>Chuyến</th><th>Xe</th><th>Ghế</th><th>Trạng thái</th></tr></thead><tbody id="board"></tbody></table></div>
         <div class="card" id="tripDetail"><p class="muted">Chọn một chuyến để xem chi tiết.</p></div>
@@ -321,8 +322,13 @@ async function loadOverview() {
 
 // ---------- dispatch ----------
 let boardTrips = [];
+// Day of the board (Vietnam time); empty = today, plus the demo day outside production.
+$('#boardDate').addEventListener('change', () => { state.selectedTrip = null; loadBoard(); });
+$('#boardToday').addEventListener('click', () => { $('#boardDate').value = ''; state.selectedTrip = null; loadBoard(); });
 async function loadBoard() {
-  const r = await api('/api/v1/ops/dispatch/board');
+  const day = $('#boardDate').value;
+  const r = await api(`/api/v1/ops/dispatch/board${day ? `?date=${day}` : ''}`);
+  if (r.ok) $('#boardInfo').textContent = `${r.data.total_trips} chuyến · ${r.data.shift_date.split('-').reverse().join('/')}`;
   if (!r.ok) { $('#board').innerHTML = `<tr><td colspan="5" class="error">${esc(r.message)}</td></tr>`; return; }
   boardTrips = r.data.trips || [];
   $('#board').innerHTML = boardTrips.length ? boardTrips.map(t => `

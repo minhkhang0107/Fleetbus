@@ -6,6 +6,7 @@
 import EventEmitter from 'events';
 import { operatorOfTrip } from './tenancy.js';
 import { findOperatorById } from './operators.js';
+import { DEMO_DATE, addDays, parseRunId, serviceCalendar } from './serviceDate.js';
 
 export class FleetBusEventBridge extends EventEmitter {
   constructor() {
@@ -53,6 +54,11 @@ export class FleetBusEventBridge extends EventEmitter {
         return driverService?.activeTrips?.get(tripId)?.stops || null;
       };
     }
+    // A schedule's run on another day gets its ops and driver trips the first time the office or a sale needs it.
+    if (managerService) {
+      managerService.runResolver = (tripId) => this.ensureRunOperations(tripId)?.managerTrip || null;
+      managerService.runsForDate = (date, operatorId) => this.runsForDate(date, operatorId);
+    }
     // PAX-025: the official delay of a trip is the one the manager declared (MGR-024)
     if (paymentService && managerService) {
       paymentService.getTripDelayMinutes = (tripId) => managerService.findTrip(tripId)?.delay_minutes || 0;
@@ -71,6 +77,8 @@ export class FleetBusEventBridge extends EventEmitter {
     // -------------------------------------------------------------------------
     this.on('TICKET_SETTLED', ({ order, tickets }) => {
       const tripId = order.trip_id;
+      // A ticket of a day's run must reach a driver and the office: set the run up if nobody has yet.
+      this.ensureRunOperations(tripId);
 
       // A. Seat Map: Permanently lock seats as BOOKED
       if (seatMapService && typeof seatMapService.confirmBooking === 'function') {
@@ -757,6 +765,35 @@ export class FleetBusEventBridge extends EventEmitter {
         });
       }
     }
+  }
+
+  /**
+   * Sets up the ops and driver trips of a schedule's run (`<schedule>_<YYYYMMDD>`) from the schedule: same route,
+   * bus and driver, nothing sold. Returns { managerTrip, driverTrip } or null for anything else.
+   */
+  ensureRunOperations(tripId) {
+    const { searchService, managerService, driverService } = this.services || {};
+    const run = parseRunId(tripId);
+    if (!run || !searchService) return null;
+    const detail = searchService.getTripDetail(tripId);
+    if (!detail?.success) return null;
+    const trip = detail.data;
+    const managerTrip = managerService?.trips?.find(t => t.trip_id === tripId) || managerService?.createRunTrip?.(run.templateId, tripId, trip) || null;
+    const driverTrip = driverService?.createRunTrip?.(run.templateId, tripId, trip.departure_time) || null;
+    return { managerTrip, driverTrip };
+  }
+
+  /** The runs of every schedule of a company on a day, set up for the office's board (days around the window only). */
+  runsForDate(date, operatorId) {
+    const { searchService } = this.services || {};
+    if (!searchService?.materializeRun) return [];
+    const { today, last_date: last } = serviceCalendar();
+    if (date !== DEMO_DATE && (date < addDays(today, -1) || date > last)) return [];
+    return searchService.schedulesOf(operatorId)
+      .map(id => searchService.materializeRun(id, date))
+      .filter(Boolean)
+      .map(t => (parseRunId(t.trip_id) ? this.ensureRunOperations(t.trip_id)?.managerTrip?.trip_id : t.trip_id))
+      .filter(Boolean);
   }
 }
 
