@@ -15,7 +15,7 @@ import { checkBookableDeparture, checkTravelDate, serviceCalendar } from '../cor
 function withAssignedBus(services, trip) {
   const ops = services.managerService?.trips?.find(t => t.trip_id === trip.trip_id);
   if (ops) return { ...trip, plate_number: ops.vehicle_plate || null };
-  return trip.schedule_id ? { ...trip, plate_number: null } : trip;
+  return trip.schedule_id ? { ...trip, plate_number: services.managerService?.defaultPlateFor?.(trip.schedule_id) ?? null } : trip;
 }
 
 // With authentication enforced, a ticket or order may only be used by its owner (or its holder, where allowed).

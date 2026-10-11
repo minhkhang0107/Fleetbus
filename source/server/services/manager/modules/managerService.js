@@ -548,6 +548,13 @@ export class ManagerOperationsService {
     return { success: true, data: { trip_id: tripId, vehicle_id: vehicle.vehicle_id, vehicle_plate: vehicle.plate_number, driver_id: driver.driver_id, driver_name: driver.full_name, scope, previous } };
   }
 
+  /** The plate a schedule's runs get by default (the office's default for the schedule, else the seed trip's). */
+  defaultPlateFor(scheduleId) {
+    const preset = this.scheduleAssignments?.[scheduleId];
+    if (preset) return this.vehicles.find(v => v.vehicle_id === preset.vehicle_id)?.plate_number || null;
+    return this.trips.find(t => t.trip_id === scheduleId)?.vehicle_plate || null;
+  }
+
   /**
    * The ops record of a schedule's run: the schedule's bus and driver (the office's default for the schedule
    * first, else the seed trip's), nothing sold yet.

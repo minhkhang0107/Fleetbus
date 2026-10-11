@@ -118,4 +118,13 @@ describe('The office gives a trip its bus and driver (MGR-017)', () => {
     const later = (await request(`/api/v1/ops/dispatch/board?date=${addDays(day, 2)}`, { token: dispatcher })).body.data.trips.find(t => t.trip_id === id('trp_hn_th_03', addDays(day, 2)));
     assert.deepStrictEqual([later.vehicle_plate, later.driver_name], ['29B-888.22', 'Phạm Quốc Huy']);
   });
+
+  it('passengers see the bus the run will get: its own, else the schedule\'s default, else none', async () => {
+    const plates = async (d) => Object.fromEntries((await request(`/api/v1/trips/search?origin=${encodeURIComponent('Hà Nội')}&destination=${encodeURIComponent('Thanh Hóa')}&date=${d}`)).body.data.map(t => [t.trip_id.split('_').slice(0, 4).join('_'), t.plate_number]));
+    const later = await plates(addDays(day, 5));
+    assert.strictEqual(later.trp_hn_th_01, '29B-882.19', 'the schedule\'s seed bus before the run is set up');
+    assert.strictEqual(later.trp_hn_th_02, null, 'no bus for this schedule yet');
+    assert.strictEqual(later.trp_hn_th_03, '29B-888.22', 'the default set with scope SCHEDULE');
+    assert.strictEqual((await plates(day)).trp_hn_th_02, '29B-444.11', 'the bus assigned to that day');
+  });
 });
