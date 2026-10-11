@@ -3,6 +3,7 @@
  * Implements PAX-004 (Home), PAX-005 (Location Picker), PAX-006 (Search Results), PAX-007 (Trip Detail).
  */
 
+import { DEMO_DATE, addDays, parseRunId, runId, serviceCalendar, vnDate } from '../../../core/serviceDate.js';
 import { stopCoords, routeShape } from '../../../core/geo.js';
 
 export const STATIONS_DATABASE = [
@@ -180,6 +181,9 @@ export const MOCK_TRIPS_DATABASE = [
   }
 ];
 
+// Schedules: the seed trips, each repeated every day at the same time.
+const SCHEDULE_TEMPLATES = new Map(MOCK_TRIPS_DATABASE.map(t => [t.trip_id, t]));
+
 export class PassengerSearchService {
   /**
    * PAX-005: Location / Station search with diacritics fuzzy matching
@@ -204,13 +208,53 @@ export class PassengerSearchService {
   }
 
   /**
+   * The run of a schedule on a travel day (spec 3.4: a Trip is one run on a date). The seed trips run on
+   * DEMO_DATE and keep their ids; any other day gets its own run `<schedule>_<YYYYMMDD>` with its own seats,
+   * created once and kept in the catalog so every service finds it.
+   */
+  materializeRun(templateId, date) {
+    const template = SCHEDULE_TEMPLATES.get(templateId);
+    if (!template) return null;
+    if (date === DEMO_DATE) return template;
+    const id = runId(templateId, date);
+    const existing = MOCK_TRIPS_DATABASE.find(t => t.trip_id === id);
+    if (existing) return existing;
+    // Same Vietnam clock time on the new day; arrival keeps the trip's duration.
+    const time = template.departure_time.slice(10);
+    const departure = `${date}${time}`;
+    const arrival = new Date(Date.parse(departure) + (Date.parse(template.arrival_time) - Date.parse(template.departure_time)));
+    const run = {
+      ...structuredClone(template),
+      trip_id: id,
+      schedule_id: templateId,
+      departure_time: departure,
+      arrival_time: `${vnDate(arrival.getTime())}T${new Date(arrival.getTime() + 7 * 3600000).toISOString().slice(11, 19)}+07:00`,
+      available_seats_count: template.total_seats
+    };
+    MOCK_TRIPS_DATABASE.push(run);
+    return run;
+  }
+
+  /** Finds a trip, creating a schedule's run when the id names one (e.g. after a server restart). */
+  _findTrip(tripId) {
+    const found = MOCK_TRIPS_DATABASE.find(t => t.trip_id === tripId);
+    if (found) return found;
+    const run = parseRunId(tripId);
+    if (!run) return null;
+    // Only days around the booking window: an id for any other day must not grow the catalog.
+    const { today, last_date: last } = serviceCalendar();
+    if (run.date < addDays(today, -1) || run.date > last) return null;
+    return this.materializeRun(run.templateId, run.date);
+  }
+
+  /**
    * PAX-006: Search Trips with segment matching, vehicle type and time filters
    */
   searchTrips(criteria = {}) {
     const {
       originCity = 'Hà Nội',
       destinationCity = 'Thanh Hóa',
-      date, // YYYY-MM-DD
+      date, // YYYY-MM-DD, already checked against the booking window by the route
       vehicleType, // 'VIP_CABIN' | 'SLEEPER_34'
       timeSlot, // 'MORNING' (05:00-12:00), 'AFTERNOON' (12:00-18:00), 'EVENING' (18:00-24:00)
       sortBy = 'DEPARTURE_ASC', // 'PRICE_ASC' | 'PRICE_DESC' | 'DEPARTURE_ASC'
@@ -220,7 +264,9 @@ export class PassengerSearchService {
     const normOrigin = this._normalizeVietnamese(originCity);
     const normDest = this._normalizeVietnamese(destinationCity);
 
-    let results = MOCK_TRIPS_DATABASE.filter(trip => {
+    // A travel day lists that day's runs of every schedule; without a day, the seed trips (old callers).
+    const pool = date ? [...SCHEDULE_TEMPLATES.keys()].map(id => this.materializeRun(id, date)) : [...SCHEDULE_TEMPLATES.values()];
+    let results = pool.filter(trip => {
       if (operatorId && trip.operator_id !== operatorId) return false;
 
       // Must have a pickup stop in origin city and dropoff stop in destination city with order pickup < dropoff
@@ -235,7 +281,8 @@ export class PassengerSearchService {
 
       // Filter by time slot
       if (timeSlot) {
-        const hour = new Date(trip.departure_time).getHours();
+        // Vietnam clock hour, whatever the server's time zone.
+        const hour = (new Date(trip.departure_time).getUTCHours() + 7) % 24;
         if (timeSlot === 'MORNING' && (hour < 5 || hour >= 12)) return false;
         if (timeSlot === 'AFTERNOON' && (hour < 12 || hour >= 18)) return false;
         if (timeSlot === 'EVENING' && (hour < 18 || hour >= 24)) return false;
@@ -264,7 +311,7 @@ export class PassengerSearchService {
    * PAX-007: Get Trip Detail
    */
   getTripDetail(tripId, operatorId = null) {
-    const trip = MOCK_TRIPS_DATABASE.find(t => t.trip_id === tripId);
+    const trip = this._findTrip(tripId);
     if (!trip) {
       return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
     }
@@ -286,7 +333,7 @@ export class PassengerSearchService {
       data: {
         ...trip,
         stops,
-        route_shape: routeShape(trip.trip_id) || null
+        route_shape: routeShape(trip.schedule_id || trip.trip_id) || null
       }
     };
   }

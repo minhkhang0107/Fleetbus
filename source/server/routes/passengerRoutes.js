@@ -9,6 +9,7 @@ import { tripVisibleTo } from '../core/tenancy.js';
 import { verifyToken } from '../core/tokens.js';
 import { resolveHomeBooking } from '../core/serviceAreas.js';
 import { isProduction } from '../config.js';
+import { checkBookableDeparture, checkTravelDate, serviceCalendar } from '../core/serviceDate.js';
 
 // With authentication enforced, a ticket or order may only be used by its owner (or its holder, where allowed).
 function forbidTicket(req, res, paymentService, ticketId, { ownerOnly = false } = {}) {
@@ -64,6 +65,8 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     if (req.operator) {
       responseData.operator = publicOperatorProfile(req.operator);
     }
+    // The app takes "today" and the bookable days from here, not from the phone's clock.
+    responseData.service_calendar = serviceCalendar(Date.now(), { production: isProduction() });
     sendSuccess(res, responseData);
     return true;
   }
@@ -124,7 +127,20 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     const dest = parsedUrl.searchParams.get('destination') || parsedUrl.searchParams.get('destinationCity') || 'Thanh Hóa';
     const vehicleType = parsedUrl.searchParams.get('vehicle_type');
     const timeSlot = parsedUrl.searchParams.get('time_slot');
-    const trips = searchService.searchTrips({ originCity: origin, destinationCity: dest, vehicleType, timeSlot, operatorId: req.operatorId });
+    // A travel day must be a real YYYY-MM-DD inside the booking window (today .. +30 days, Vietnam time).
+    const rawDate = parsedUrl.searchParams.get('date');
+    let date = null;
+    if (rawDate !== null) {
+      const day = checkTravelDate(rawDate, Date.now(), { production: isProduction() });
+      if (!day.ok) {
+        sendError(res, day.message, day.code, 400);
+        return true;
+      }
+      date = day.date;
+    }
+    const found = searchService.searchTrips({ originCity: origin, destinationCity: dest, vehicleType, timeSlot, date, operatorId: req.operatorId });
+    // Runs of the day that already left are not sold.
+    const trips = date ? (found.data || []).filter(t => checkBookableDeparture(t.departure_time, Date.now(), { production: isProduction() }).ok) : found;
     sendSuccess(res, trips.data || trips);
     return true;
   }
@@ -163,7 +179,13 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         sendError(res, 'Thiếu thông tin người dùng', 'USER_REQUIRED', 400);
         return;
       }
-      const result = seatMapService.holdSeats(tripId, body.seatCodes || [], userId, body.now, {
+      // The trip must still be on sale; the clock is the server's (a client "now" is honoured only in tests).
+      const bookable = checkBookableDeparture(searchService.getTripDetail(tripId, req.operatorId).data?.departure_time, Date.now(), { production: isProduction() });
+      if (!bookable.ok) {
+        sendError(res, bookable.message, bookable.code, 409);
+        return;
+      }
+      const result = seatMapService.holdSeats(tripId, body.seatCodes || [], userId, isProduction() ? undefined : body.now, {
         pickupStopId: body.pickupStopId || body.pickup_stop_id || null,
         dropoffStopId: body.dropoffStopId || body.dropoff_stop_id || null
       });
@@ -213,6 +235,11 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         return;
       }
       const tripDetail = tripDetailRes.data;
+      const bookable = checkBookableDeparture(tripDetail.departure_time, Date.now(), { production: isProduction() });
+      if (!bookable.ok) {
+        sendError(res, bookable.message, bookable.code, 409);
+        return;
+      }
 
       const holdCheck = seatMapService.validateHold(tripId, body.holdId, userId, seatCodes);
       if (!holdCheck.success) {

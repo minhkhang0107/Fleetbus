@@ -34,7 +34,8 @@ export function stopCoords(stopId) {
  * Returns the [lat, lng] array of road geometry points for tripId or null if not found.
  */
 export function routeShape(tripId) {
-  return ROUTE_SHAPES[tripId] || null;
+  // A day's run (`trp_hn_th_01_20261015`) drives the road of its schedule.
+  return ROUTE_SHAPES[tripId] || ROUTE_SHAPES[String(tripId).replace(/_\d{8}$/, '')] || null;
 }
 
 /**

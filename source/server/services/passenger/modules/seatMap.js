@@ -29,7 +29,15 @@ export class PassengerSeatMapService {
     }
   }
 
-  _initMockTripLayout(tripId) {
+  /** The seats of a trip; a schedule's run for another day gets an empty cabin the first time it is asked. */
+  _layout(tripId) {
+    if (!this.tripLayouts.has(tripId) && MOCK_TRIPS_DATABASE.some(t => t.trip_id === tripId && t.schedule_id)) {
+      this._initMockTripLayout(tripId, { seedBookings: false });
+    }
+    return this.tripLayouts.get(tripId);
+  }
+
+  _initMockTripLayout(tripId, { seedBookings = true } = {}) {
     // A seat costs the trip's base fare from the catalog (trips only on the ops boards keep 220.000 đ)
     const fare = MOCK_TRIPS_DATABASE.find(t => t.trip_id === tripId)?.base_fare_vnd ?? 220000;
     const seats = [];
@@ -42,7 +50,7 @@ export class PassengerSeatMapService {
         column: 1,
         type: 'VIP_CABIN',
         price_vnd: fare,
-        bookings: i === 3 ? [{ whole: true, pnr: null }] : []
+        bookings: seedBookings && i === 3 ? [{ whole: true, pnr: null }] : []
       });
     }
     for (let i = 1; i <= 5; i++) {
@@ -76,7 +84,7 @@ export class PassengerSeatMapService {
         column: 3,
         type: 'VIP_CABIN',
         price_vnd: fare,
-        bookings: i === 6 ? [{ whole: true, pnr: null }] : []
+        bookings: seedBookings && i === 6 ? [{ whole: true, pnr: null }] : []
       });
     }
 
@@ -192,7 +200,7 @@ export class PassengerSeatMapService {
    * PAX-009: Get Seat Map with real-time hold snapshot for the segment between two stops (the whole route by default)
    */
   getSeatMap(tripId, pickupStopId = null, dropoffStopId = null, mockNow = Date.now()) {
-    const layout = this.tripLayouts.get(tripId);
+    const layout = this._layout(tripId);
     if (!layout) {
       return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
     }
@@ -276,7 +284,7 @@ export class PassengerSeatMapService {
 
     this._cleanExpiredHolds(mockNow);
 
-    const layout = this.tripLayouts.get(tripId);
+    const layout = this._layout(tripId);
     if (!layout) {
       return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
     }
@@ -359,7 +367,7 @@ export class PassengerSeatMapService {
    * `ownerRef` lets the holder of a lock (a hotline reservation) sell the seats it locked.
    */
   checkSellable(tripId, seatCodes, mockNow = Date.now(), ownerRef = null, segment = {}) {
-    const layout = this.tripLayouts.get(tripId);
+    const layout = this._layout(tripId);
     if (!layout) {
       return { success: false, error: 'Chuyến xe không có sơ đồ ghế', code: 'TRIP_NOT_FOUND' };
     }
@@ -414,7 +422,7 @@ export class PassengerSeatMapService {
    * PARTIALLY_BOOKED (some segments sold) and BLOCKED (with the reason).
    */
   getSeatMatrix(tripId, mockNow = Date.now()) {
-    const layout = this.tripLayouts.get(tripId);
+    const layout = this._layout(tripId);
     if (!layout) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
     this._cleanExpiredHolds(mockNow);
 
@@ -478,7 +486,7 @@ export class PassengerSeatMapService {
    * unless every seat can change. A sold or held seat (on any segment) cannot be blocked.
    */
   setSeatBlock(tripId, seatCodes, locked, { reason = '', staffId = null, mockNow = Date.now() } = {}) {
-    const layout = this.tripLayouts.get(tripId);
+    const layout = this._layout(tripId);
     if (!layout) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
     if (!Array.isArray(seatCodes) || seatCodes.length === 0 || new Set(seatCodes).size !== seatCodes.length) {
       return { success: false, error: 'Vui lòng chọn ít nhất 1 ghế, không trùng nhau', code: 'NO_SEAT_SELECTED' };
@@ -520,7 +528,7 @@ export class PassengerSeatMapService {
    * Seat attributes (deck, price) from the trip layout, or null when unknown.
    */
   getSeatInfo(tripId, seatCode) {
-    const layout = this.tripLayouts.get(tripId);
+    const layout = this._layout(tripId);
     return layout?.seats.find(s => s.seat_code === seatCode) || null;
   }
 
@@ -588,7 +596,7 @@ export class PassengerSeatMapService {
    * Confirm booking: the seats are sold for the segment (the whole route by default) and the holds on it end.
    */
   confirmBooking(tripId, seatCodes = [], pnr = null, segment = {}) {
-    const layout = this.tripLayouts.get(tripId);
+    const layout = this._layout(tripId);
     if (!layout) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
 
     const resolved = this._resolveSegment(tripId, segment?.pickupStopId, segment?.dropoffStopId, { lenient: true });
@@ -611,7 +619,7 @@ export class PassengerSeatMapService {
    * the seat. With `fromStopId` only the segments from that stop on are released: the part already driven stays sold.
    */
   releaseBooking(tripId, seatCodes = [], { pnr = null, fromStopId = null } = {}) {
-    const layout = this.tripLayouts.get(tripId);
+    const layout = this._layout(tripId);
     if (!layout) return { success: false, error: 'Chuyến xe không tồn tại' };
     const cut = fromStopId ? this._stops(tripId).findIndex(s => s.stop_id === fromStopId) : -1;
 
