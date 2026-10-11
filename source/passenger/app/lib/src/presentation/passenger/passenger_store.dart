@@ -90,13 +90,17 @@ class Place {
 
 
 class Stop {
-  const Stop(this.id, this.name, this.city, this.time, {required this.pickup, required this.dropoff});
+  const Stop(this.id, this.name, this.city, this.time, {required this.pickup, required this.dropoff, this.station = true, this.lat, this.lng});
   final String id;
   final String name;
   final String city;
   final String time;
   final bool pickup;
   final bool dropoff;
+  /// A bus station (bến xe); false for a roadside point (điểm dọc đường).
+  final bool station;
+  final double? lat;
+  final double? lng;
   String get note => pickup && dropoff ? 'Đón và trả khách' : (pickup ? 'Điểm đón' : 'Điểm trả');
   String get short => name.replaceFirst('Bến xe ', '').replaceFirst('Phía Bắc Thanh Hóa', 'Phía Bắc TH');
 }
@@ -117,7 +121,20 @@ class Trip {
     required this.plate,
     required this.stops,
     this.day = '',
+    this.stopStyle = 'STATIONS',
+    this.pickupModes = const ['FIXED_STOP'],
+    this.dropoffModes = const ['FIXED_LOCATION'],
+    this.routeShape = const [],
   });
+  /// How the route offers fixed stops: ROUTE_LINE (drawn like a bus line) or STATIONS (stations only).
+  final String stopStyle;
+  /// The route's pickup / drop-off modes (the company default unless the route sets its own).
+  final List<String> pickupModes;
+  final List<String> dropoffModes;
+  final List<(double, double)> routeShape;
+  bool get routeLine => stopStyle == 'ROUTE_LINE';
+  bool get homePickup => pickupModes.contains('HOME_PICKUP');
+  bool get homeDropoff => dropoffModes.contains('HOME_DROPOFF');
   final String id;
   /// Departure day (YYYY-MM-DD, Vietnam time) of this run: what the ticket will say, whatever was picked.
   final String day;
@@ -149,6 +166,9 @@ class Trip {
           _hhmm(dep.add(Duration(minutes: n > 1 ? (minutes * i / (n - 1)).round() : 0))),
           pickup: raw[i]['pickup_allowed'] == true,
           dropoff: raw[i]['dropoff_allowed'] == true,
+          station: raw[i]['kind'] != 'ROADSIDE',
+          lat: (raw[i]['lat'] as num?)?.toDouble(),
+          lng: (raw[i]['lng'] as num?)?.toDouble(),
         ),
     ];
     final firstPick = stops.firstWhere((s) => s.pickup, orElse: () => stops.first);
@@ -168,6 +188,10 @@ class Trip {
       seatsLeft: (j['available_seats_count'] as num?)?.toInt() ?? 0,
       plate: j['plate_number'] ?? '',
       stops: stops,
+      stopStyle: '${j['service']?['stop_style'] ?? 'STATIONS'}',
+      pickupModes: [for (final m in (j['service']?['pickup_modes'] as List? ?? const ['FIXED_STOP'])) '$m'],
+      dropoffModes: [for (final m in (j['service']?['dropoff_modes'] as List? ?? const ['FIXED_LOCATION'])) '$m'],
+      routeShape: [for (final p in (j['route_shape'] as List? ?? const [])) ((p[0] as num).toDouble(), (p[1] as num).toDouble())],
     );
   }
 }
@@ -661,7 +685,7 @@ class PassengerStore extends ChangeNotifier {
     seatMap = [];
     deck = 1;
     notifyListeners();
-    if ((operator?.homePickup ?? false) || (operator?.homeDropoff ?? false)) loadServiceAreas();
+    if (t.homePickup || t.homeDropoff) loadServiceAreas();
   }
 
   /// Home service areas of the company, drawn on the address map.

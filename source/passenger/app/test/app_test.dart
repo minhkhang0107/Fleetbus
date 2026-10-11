@@ -44,6 +44,7 @@ void main() {
     'base_fare_vnd': 220000,
     'available_seats_count': 30,
     'stops': stops,
+    'service': {'stop_style': 'ROUTE_LINE', 'pickup_modes': ['FIXED_STOP', 'HOME_PICKUP'], 'dropoff_modes': ['FIXED_LOCATION']},
   };
   final ticket = {
     'ticket_id': 'tkt_BG1_A02',
@@ -272,6 +273,43 @@ void main() {
     await tester.tap(find.bySemanticsLabel('Thứ Tư, 11/11/2026'), warnIfMissed: false);
     await tester.pumpAndSettle();
     expect(store.date, '2026-11-10', reason: 'a day beyond the window cannot be picked');
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('a ROUTE_LINE route is drawn like a bus line: pick where to get on, then where to get off', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    tester.view.physicalSize = const Size(400, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+    late PassengerStore store;
+    await tester.runAsync(() async {
+      store = await storeWithServer();
+      await store.loadTrips();
+    });
+    store.chooseTrip(store.trips.single);
+    expect(store.trip!.routeLine, isTrue);
+    await tester.pumpWidget(PassengerScope(store: store, child: const MaterialApp(home: PassengerTripDetailScreen())));
+    await tester.pump();
+    expect(find.text('Lộ trình và điểm đón trả'), findsOneWidget);
+    expect(find.text('Lên xe'), findsOneWidget);
+    expect(find.text('Xuống xe'), findsOneWidget);
+    expect(find.text('Đón tận nhà'), findsOneWidget, reason: 'the route allows home pickup');
+    expect(find.text('Trả tận nhà'), findsNothing, reason: 'the route does not allow home drop-off');
+
+    await tester.tap(find.bySemanticsLabel(RegExp('^Bến xe Ninh Bình')));
+    await tester.pump();
+    expect(store.pickup, 'stp_nb', reason: 'first tap sets where to get on');
+    await tester.tap(find.bySemanticsLabel(RegExp('^Bến xe Giáp Bát')));
+    await tester.pump();
+    expect(store.dropoff, 'stp_th_pb', reason: 'Giáp Bát is before the pickup and only picks up: it cannot be the drop-off');
+    await tester.tap(find.bySemanticsLabel(RegExp('^Bến xe Phía Bắc Thanh Hóa')));
+    await tester.pump();
+    expect((store.pickup, store.dropoff), ('stp_nb', 'stp_th_pb'));
     await tester.pumpWidget(const SizedBox());
     store.dispose();
   });

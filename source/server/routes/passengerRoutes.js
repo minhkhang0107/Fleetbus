@@ -142,7 +142,8 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     // Runs of the day that already left are not sold.
     const listed = date ? (found.data || []).filter(t => checkBookableDeparture(t.departure_time, Date.now(), { production: isProduction() }).ok) : (found.data || []);
     // Each trip says how its route offers pickup / drop-off (stop style and modes, set per company and route).
-    sendSuccess(res, listed.map(t => ({ ...t, service: publicRouteService(req.operator?.service_config, t.route_id) })));
+    // With stop coordinates and the road shape, so the app can draw the route line without another call.
+    sendSuccess(res, listed.map(t => ({ ...(searchService.getTripDetail(t.trip_id, req.operatorId).data || t), service: publicRouteService(req.operator?.service_config, t.route_id) })));
     return true;
   }
 
