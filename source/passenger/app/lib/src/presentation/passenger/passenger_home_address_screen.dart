@@ -19,6 +19,9 @@ class PassengerHomeAddressScreen extends StatefulWidget {
 class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen> {
   final _address = TextEditingController();
   final _note = TextEditingController();
+  final _map = MapController();
+  bool _mapReady = false;
+  bool _fitted = false;
   LatLng? _pin;
   String? _error;
   bool _busy = false;
@@ -39,7 +42,20 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
   void dispose() {
     _address.dispose();
     _note.dispose();
+    _map.dispose();
     super.dispose();
+  }
+
+  /// Frames the service areas at a whole zoom level: at a fractional zoom the ROD2 tablet left the raster tiles
+  /// grey (same fix as the route map). Runs once the map is ready and the areas have arrived.
+  void _fitAreas(List<LatLng> points) {
+    if (!_mapReady || _fitted || points.length < 3) return;
+    _fitted = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final camera = CameraFit.bounds(bounds: LatLngBounds.fromPoints(points), padding: const EdgeInsets.all(24), maxZoom: 15).fit(_map.camera);
+      _map.move(camera.center, camera.zoom.floorToDouble());
+    });
   }
 
   Future<void> _confirm() async {
@@ -68,15 +84,20 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
     final areas = store.serviceAreas.where((a) => a.kind == kind).toList();
     final points = [for (final a in areas) for (final p in a.polygon) LatLng(p.lat, p.lng)];
     final verb = widget.pickupSide ? 'đón' : 'trả';
+    _fitAreas(points);
     final map = ClipRRect(
       borderRadius: BorderRadius.circular(PTokens.radius),
       child: SizedBox(
         height: pWide(context) ? 460 : 300,
         child: FlutterMap(
+          mapController: _map,
           options: MapOptions(
-            initialCameraFit: points.length >= 3 ? CameraFit.bounds(bounds: LatLngBounds.fromPoints(points), padding: const EdgeInsets.all(16)) : null,
-            initialCenter: points.isEmpty ? const LatLng(21.0, 105.84) : points.first,
+            initialCenter: _pin ?? (points.isEmpty ? const LatLng(21.0, 105.84) : points.first),
             initialZoom: 11,
+            onMapReady: () {
+              _mapReady = true;
+              _fitAreas(points);
+            },
             interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
             onTap: (_, point) => setState(() {
               _pin = point;

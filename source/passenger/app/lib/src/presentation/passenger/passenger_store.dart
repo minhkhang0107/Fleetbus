@@ -770,7 +770,8 @@ class PassengerStore extends ChangeNotifier {
   int get baseFare => (trip?.price ?? 0) * seats.length;
   int get insuranceFee => insured ? 10000 * seats.length : 0;
   int get discount => voucher == null ? 0 : (knownVouchers[voucher]! < baseFare ? knownVouchers[voucher]! : baseFare);
-  int get total => baseFare + insuranceFee - discount;
+  // The home pickup / drop-off fee is per order, not per seat (server rule).
+  int get total => baseFare + insuranceFee - discount + homeFees;
 
   void setInsured(bool value) {
     insured = value;
@@ -839,7 +840,7 @@ class PassengerStore extends ChangeNotifier {
     final issued = tickets.where((t) => t.pnr == orderPnr).toList();
     if (issued.isNotEmpty) {
       final first = issued.first;
-      lastTicket = Ticket(id: first.id, pnr: first.pnr, tripId: first.tripId, route: first.route, date: first.date, dep: first.dep, seat: issued.map((t) => t.seat).join(', '), pickup: first.pickup, paid: orderAmount, name: first.name, status: first.status, plate: trip?.plate ?? '');
+      lastTicket = Ticket(id: first.id, pnr: first.pnr, tripId: first.tripId, route: first.route, date: first.date, dep: first.dep, seat: issued.map((t) => t.seat).join(', '), pickup: first.pickup, paid: orderAmount, name: first.name, status: first.status, plate: trip?.plate ?? '', homePickup: first.homePickup, homeDropoff: first.homeDropoff, pickupWindow: first.pickupWindow);
       for (final t in issued) {
         t.plate = trip?.plate ?? '';
       }

@@ -221,6 +221,7 @@ void main() {
     await store.loadSeatMap();
     store.toggleSeat('A02');
     await store.holdSeats();
+    expect(store.total, 220000 + 50000, reason: 'the checkout total shows the home pickup fee');
     expect(await store.createOrder('Nguyễn An', '0987654321'), isNull);
     expect(bodyOf('/bookings/create')['homePickup'], {'address': '12 ngõ 34 Giải Phóng', 'lat': 20.99, 'lng': 105.84, 'note': 'cổng xanh'});
     expect(bodyOf('/bookings/create').containsKey('homeDropoff'), isFalse);

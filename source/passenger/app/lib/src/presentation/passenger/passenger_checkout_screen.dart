@@ -95,7 +95,7 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
                   Text('Ghế ${store.seats.join(', ')}', style: mono(size: 14)),
                 ]),
                 gap(6),
-                Text('${store.travelDate.short.replaceAll(' · ', ' ')} · Đón ${p.time} ${p.short} · Trả ${d.time} ${d.short}', style: sans(size: 13, color: PTokens.muted)),
+                Text('${store.travelDate.short.replaceAll(' · ', ' ')} · Đón ${store.homePickup != null ? 'tận nhà: ${store.homePickup!.address}' : '${p.time} ${p.short}'} · Trả ${store.homeDropoff != null ? 'tận nhà: ${store.homeDropoff!.address}' : '${d.time} ${d.short}'}', style: sans(size: 13, color: PTokens.muted)),
               ]),
             ),
             gap(16),
@@ -140,6 +140,8 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
             gap(16),
             _line('Giá vé ($n ghế)', vnd(store.baseFare)),
             if (store.insuranceFee > 0) _line('Bảo hiểm', vnd(store.insuranceFee)),
+            if (store.homePickup != null) _line('Phụ phí đón tận nhà', vnd(store.homePickup!.feeVnd)),
+            if (store.homeDropoff != null) _line('Phụ phí trả tận nhà', vnd(store.homeDropoff!.feeVnd)),
             if (store.discount > 0) _line('Mã ${store.voucher}', '−${vnd(store.discount)}', color: PTokens.success),
             const Divider(height: 20, color: PTokens.line),
             Row(children: [
