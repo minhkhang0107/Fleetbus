@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'passenger_date_picker.dart';
 import 'passenger_store.dart';
 import 'passenger_trip_detail_screen.dart';
 import 'passenger_widgets.dart';
@@ -33,22 +34,17 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
     return Scaffold(
       appBar: TopBar(
         title: '${store.originPlace.city} → ${store.destPlace.city}',
-        subtitle: store.loadingTrips ? 'Đang tìm chuyến…' : (open.isEmpty ? 'Không có chuyến còn chỗ' : '${open.length} chuyến còn chỗ'),
+        subtitle: '${store.travelDate.long} · ${store.loadingTrips ? 'đang tìm chuyến…' : (open.isEmpty ? 'không có chuyến còn chỗ' : '${open.length} chuyến còn chỗ')}',
       ),
       body: Column(children: [
         Container(
           color: PTokens.surface,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
           child: PMaxWidth(maxWidth: 720, child: Column(children: [
-            Row(children: [
-              for (final d in PassengerStore.dates) ...[
-                if (d != PassengerStore.dates.first) const SizedBox(width: 8),
-                Expanded(child: _Choice(label: d.short, selected: store.date == d.id, onTap: () {
-                  store.setDate(d.id);
-                  store.loadTrips();
-                }, height: 48)),
-              ],
-            ]),
+            TravelDateStrip(onChanged: (day) {
+              store.setDate(day);
+              store.loadTrips();
+            }),
             gap(10),
             Row(children: [
               _Choice(label: 'Sớm nhất', selected: store.sort == 'time', onTap: () => store.setSort('time'), pill: true),
@@ -116,12 +112,11 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
 }
 
 class _Choice extends StatelessWidget {
-  const _Choice({required this.label, required this.selected, required this.onTap, this.pill = false, this.height = 36});
+  const _Choice({required this.label, required this.selected, required this.onTap, this.pill = false});
   final String label;
   final bool selected;
   final VoidCallback onTap;
   final bool pill;
-  final double height;
 
   @override
   Widget build(BuildContext context) {
@@ -132,7 +127,7 @@ class _Choice extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(pill ? 999 : PTokens.radiusControl),
         child: Container(
-          height: height,
+          height: 36,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           alignment: Alignment.center,
           decoration: BoxDecoration(

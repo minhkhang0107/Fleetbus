@@ -19,7 +19,7 @@ class PassengerTripDetailScreen extends StatelessWidget {
     final p = store.stop(store.pickup);
     final d = store.stop(store.dropoff);
     return Scaffold(
-      appBar: TopBar(title: 'Điểm đón và điểm trả', subtitle: '${trip.dep} · ${store.travelDate.short.replaceAll(' · ', ' ')} · ${trip.type.split(' ').first} ${trip.plate}'),
+      appBar: TopBar(title: 'Điểm đón và điểm trả', subtitle: '${trip.dep} · ${TravelDate.of(trip.day.isEmpty ? store.date : trip.day).long} · ${trip.type.split(' ').first} ${trip.plate}'),
       body: PSplit(left: [
         Text('Bạn lên xe ở đâu?', style: sans(size: 15, weight: FontWeight.w600)),
         gap(8),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'passenger_location_picker_screen.dart';
 import 'passenger_search_results_screen.dart';
+import 'passenger_date_picker.dart';
 import 'passenger_store.dart';
 import 'passenger_ticket_qr_screen.dart';
 import 'passenger_widgets.dart';
@@ -62,11 +63,7 @@ class PassengerHomeScreen extends StatelessWidget {
             gap(12),
             Text('Ngày đi', style: sans(size: 12, color: PTokens.muted)),
             gap(4),
-            DropdownButtonFormField<String>(
-              initialValue: store.date,
-              items: [for (final d in PassengerStore.dates) DropdownMenuItem(value: d.id, child: Text(d.long, style: sans(size: 15, weight: FontWeight.w600)))],
-              onChanged: (v) => store.setDate(v!),
-            ),
+            const TravelDateField(),
             gap(12),
             PrimaryButton(
               label: 'Tìm chuyến',

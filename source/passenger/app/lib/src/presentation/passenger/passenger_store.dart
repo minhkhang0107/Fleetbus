@@ -4,6 +4,10 @@ import 'package:data/src/service/passenger_api_service.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'passenger_dates.dart';
+
+export 'passenger_dates.dart';
+
 /// State of the passenger app, backed by the FleetBus API (`PassengerApiClientService`, OQ-029).
 /// Screens follow the Claude Design canvas "FleetBus — Thiết kế lại 3 app".
 
@@ -84,12 +88,6 @@ class Place {
   final List<String> altStations;
 }
 
-class TravelDate {
-  const TravelDate(this.id, this.short, this.long);
-  final String id;
-  final String short;
-  final String long;
-}
 
 class Stop {
   const Stop(this.id, this.name, this.city, this.time, {required this.pickup, required this.dropoff});
@@ -118,8 +116,11 @@ class Trip {
     required this.seatsLeft,
     required this.plate,
     required this.stops,
+    this.day = '',
   });
   final String id;
+  /// Departure day (YYYY-MM-DD, Vietnam time) of this run: what the ticket will say, whatever was picked.
+  final String day;
   final String dep;
   final String arr;
   final String duration;
@@ -154,6 +155,7 @@ class Trip {
     final middle = stops.where((s) => s.pickup && s.dropoff).toList();
     return Trip(
       id: j['trip_id'],
+      day: '${dep.year.toString().padLeft(4, '0')}-${_two(dep.month)}-${_two(dep.day)}',
       dep: _hhmm(dep),
       arr: _hhmm(arr),
       duration: '${minutes ~/ 60} giờ${minutes % 60 == 0 ? '' : ' ${minutes % 60} phút'}',
@@ -260,7 +262,7 @@ String? _window(dynamic home) {
   final from = DateTime.tryParse('${home?['window_from'] ?? ''}');
   final to = DateTime.tryParse('${home?['window_to'] ?? ''}');
   if (from == null || to == null) return null;
-  final vn = (DateTime d) => d.toUtc().add(const Duration(hours: 7));
+  DateTime vn(DateTime d) => d.toUtc().add(const Duration(hours: 7));
   return '${_hhmm(vn(from))}–${_hhmm(vn(to))}';
 }
 
@@ -378,11 +380,6 @@ class PassengerStore extends ChangeNotifier {
   OperatorInfo? operator;
   Map<String, Place> places = {};
 
-  static const dates = [
-    TravelDate('27/08', 'T5 · 27/08', 'Thứ Năm, 27/08'),
-    TravelDate('28/08', 'T6 · 28/08', 'Thứ Sáu, 28/08'),
-    TravelDate('29/08', 'T7 · 29/08', 'Thứ Bảy, 29/08'),
-  ];
   static const knownVouchers = {'BUSGO50K': 50000};
   static const maxSeats = 5;
 
@@ -395,7 +392,11 @@ class PassengerStore extends ChangeNotifier {
   // Search
   String origin = '';
   String dest = '';
-  String date = '28/08';
+  /// Travel day, YYYY-MM-DD in Vietnam time; empty means the server's today.
+  String _date = '';
+  /// Today and the last bookable day, from the server (never the phone clock alone).
+  ServiceCalendar calendar = ServiceCalendar.fallback();
+  String get date => _date.isEmpty || !calendar.allows(_date) ? calendar.today : _date;
   String sort = 'time';
   List<Trip> trips = [];
   bool loadingTrips = false;
@@ -460,7 +461,8 @@ class PassengerStore extends ChangeNotifier {
     return list.take(2).toList();
   }
 
-  TravelDate get travelDate => dates.firstWhere((d) => d.id == date);
+  TravelDate get travelDate => TravelDate.of(date, today: calendar.today);
+  List<TravelDate> get bookableDates => [for (final d in calendar.days) TravelDate.of(d, today: calendar.today)];
 
   ApiResult<Map<String, dynamic>> _result(Map<String, dynamic> json) {
     if (json['status'] == 'success') return ApiResult(json['data'] is Map<String, dynamic> ? json['data'] as Map<String, dynamic> : {'value': json['data']});
@@ -485,6 +487,7 @@ class PassengerStore extends ChangeNotifier {
     
     api.operatorCode = code;
     operator = OperatorInfo.fromJson(r.value!['operator'] as Map<String, dynamic>);
+    calendar = ServiceCalendar.fromJson(r.value!['service_calendar'] as Map<String, dynamic>?);
     
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('operator_code', code);
@@ -616,8 +619,10 @@ class PassengerStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Picks a travel day; a day outside the booking window is ignored (the server refuses it anyway).
   void setDate(String id) {
-    date = id;
+    if (!calendar.allows(id)) return;
+    _date = id;
     notifyListeners();
   }
 
@@ -631,8 +636,12 @@ class PassengerStore extends ChangeNotifier {
     tripsError = null;
     notifyListeners();
     try {
-      final list = await api.searchTrips(origin: originPlace.city, destination: destPlace.city);
+      final list = await api.searchTrips(origin: originPlace.city, destination: destPlace.city, date: date);
       trips = list.cast<Map<String, dynamic>>().map(Trip.fromJson).toList();
+    } on SearchRefused catch (e) {
+      // The server's calendar moved (a new day began): take its answer and show why.
+      trips = [];
+      tripsError = e.message;
     } catch (_) {
       trips = [];
       tripsError = _networkError;

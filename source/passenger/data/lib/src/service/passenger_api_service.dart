@@ -141,13 +141,17 @@ class PassengerApiClientService {
     required String destination,
     String? vehicleType,
     String? timeSlot,
+    String? date,
   }) async {
     final json = await _get('/api/v1/trips/search', query: {
       'origin': origin,
       'destination': destination,
       if (vehicleType != null) 'vehicle_type': vehicleType,
       if (timeSlot != null) 'time_slot': timeSlot,
+      if (date != null) 'date': date,
     });
+    // A refused travel day (past, beyond the booking window, malformed) is reported, not shown as "no trips".
+    if (json['status'] == 'error') throw SearchRefused('${json['message'] ?? 'Không tìm được chuyến'}', '${json['code'] ?? ''}');
     return json['data'] ?? [];
   }
 
@@ -379,4 +383,13 @@ class PassengerApiClientService {
   Future<Map<String, dynamic>> getDisruptions(String tripId) {
     return _get('/api/v1/trips/$tripId/disruptions');
   }
+}
+
+/// The server refused a search (for example a travel day outside the booking window).
+class SearchRefused implements Exception {
+  const SearchRefused(this.message, this.code);
+  final String message;
+  final String code;
+  @override
+  String toString() => message;
 }

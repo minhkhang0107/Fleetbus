@@ -95,7 +95,7 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
                   Text('Ghế ${store.seats.join(', ')}', style: mono(size: 14)),
                 ]),
                 gap(6),
-                Text('${store.travelDate.short.replaceAll(' · ', ' ')} · Đón ${store.homePickup != null ? 'tận nhà: ${store.homePickup!.address}' : '${p.time} ${p.short}'} · Trả ${store.homeDropoff != null ? 'tận nhà: ${store.homeDropoff!.address}' : '${d.time} ${d.short}'}', style: sans(size: 13, color: PTokens.muted)),
+                Text('${TravelDate.of(store.trip!.day.isEmpty ? store.date : store.trip!.day).long} · Đón ${store.homePickup != null ? 'tận nhà: ${store.homePickup!.address}' : '${p.time} ${p.short}'} · Trả ${store.homeDropoff != null ? 'tận nhà: ${store.homeDropoff!.address}' : '${d.time} ${d.short}'}', style: sans(size: 13, color: PTokens.muted)),
               ]),
             ),
             gap(16),

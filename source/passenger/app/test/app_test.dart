@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:app/main.dart';
+import 'package:app/src/presentation/passenger/passenger_date_picker.dart';
 import 'package:app/src/presentation/passenger/passenger_home_address_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_store.dart';
 import 'package:app/src/presentation/passenger/passenger_payment_processing_screen.dart';
@@ -74,7 +75,7 @@ void main() {
       if (path.endsWith('/app/config')) {
         final code = req.url.queryParameters['operator'] ?? '';
         if (code == 'SAOMAI') {
-          data = {'operator': {'operator_id': 'op1', 'code': 'SAOMAI', 'name': 'Nhà xe Sao Mai', 'short_name': 'Sao Mai', 'hotline': '1900 6868', 'primary_color': '#E11D48', 'pickup_modes': ['FIXED_STOP', 'HOME_PICKUP'], 'dropoff_modes': ['FIXED_LOCATION']}};
+          data = {'operator': {'operator_id': 'op1', 'code': 'SAOMAI', 'name': 'Nhà xe Sao Mai', 'short_name': 'Sao Mai', 'hotline': '1900 6868', 'primary_color': '#E11D48', 'pickup_modes': ['FIXED_STOP', 'HOME_PICKUP'], 'dropoff_modes': ['FIXED_LOCATION']}, 'service_calendar': {'timezone': 'Asia/Ho_Chi_Minh', 'today': '2026-10-11', 'booking_window_days': 30, 'last_date': '2026-11-10', 'demo_dates': ['2026-08-28']}};
         } else if (code == 'XUYENVIET') {
           data = {'operator': {'operator_id': 'op2', 'code': 'XUYENVIET', 'name': 'Xuyên Việt Lines', 'short_name': 'Xuyên Việt', 'hotline': '1900 2468', 'primary_color': '#2563EB'}};
         } else {
@@ -120,7 +121,12 @@ void main() {
         data = {'serviceable': true, 'area_id': 'sa_hn', 'area_name': 'Nội thành Hà Nội', 'fee_vnd': 50000};
       }
       if (path.endsWith('/tickets/tkt_BG1_A02/share')) data = {'share_token': 'abc', 'share_url': '/t/abc'};
-      if (path.endsWith('/trips/search')) list = [trip];
+      if (path.endsWith('/trips/search')) {
+        if (req.url.queryParameters['date'] == '2026-10-12') {
+          return http.Response(jsonEncode({'status': 'error', 'code': 'DATE_IN_PAST', 'message': 'Ngày đi đã qua'}), 400, headers: {'content-type': 'application/json; charset=utf-8'});
+        }
+        list = [trip];
+      }
       if (path.endsWith('/seat-map')) {
         data = {
           'seats': [
@@ -196,6 +202,78 @@ void main() {
     expect(bodyOf('/seats/hold'), {'seatCodes': ['A02'], 'pickupStopId': 'stp_hn_gb', 'dropoffStopId': 'stp_th_pb'});
     expect(store.holdPhase, 'hold');
     store.stopHold();
+  });
+
+  test('travel days come from the server calendar: today by default, nothing outside the window, sent as YYYY-MM-DD', () async {
+    final store = await storeWithServer();
+    expect(store.calendar.today, '2026-10-11');
+    expect(store.date, '2026-10-11');
+    expect(store.travelDate.long, 'Chủ Nhật, 11/10/2026');
+    expect(store.travelDate.relative, 'Hôm nay');
+    expect(store.bookableDates.length, 32, reason: 'the demo day, then today and the 30 days after it');
+    expect(store.bookableDates.first.id, '2026-08-28');
+    expect(store.bookableDates.last.id, '2026-11-10');
+
+    store.setDate('2026-11-11');
+    expect(store.date, '2026-10-11', reason: 'a day beyond 30 days is ignored');
+    store.setDate('2026-10-10');
+    expect(store.date, '2026-10-11', reason: 'a past day is ignored');
+    store.setDate('11/10/2026');
+    expect(store.date, '2026-10-11', reason: 'only YYYY-MM-DD');
+    store.setDate('2026-11-10');
+    expect(store.date, '2026-11-10');
+
+    await store.loadTrips();
+    expect(sent.lastWhere((r) => r.url.path.endsWith('/trips/search')).url.queryParameters['date'], '2026-11-10');
+    expect(store.trips.single.day, '2026-08-28', reason: 'a trip carries its own departure day');
+
+    store.setDate('2026-10-12');
+    await store.loadTrips();
+    expect(store.trips, isEmpty);
+    expect(store.tripsError, 'Ngày đi đã qua', reason: 'a refused day is explained, not shown as "no trips"');
+  });
+
+  test('day labels: weekday, day/month with the year, and today/tomorrow', () {
+    expect(parseDay('2026-02-30'), isNull);
+    expect(parseDay('28/08'), isNull);
+    final d = TravelDate.of('2026-10-12', today: '2026-10-11');
+    expect((d.short, d.long, d.relative), ('T2 · 12/10', 'Thứ Hai, 12/10/2026', 'Ngày mai'));
+    expect(TravelDate.of('2027-01-01', today: '2026-12-31').long, 'Thứ Sáu, 01/01/2027');
+    expect(ServiceCalendar.fromJson({'today': 'x'}).today, vnDay(DateTime.now()), reason: 'a broken answer falls back to the phone, the server still decides');
+  });
+
+  testWidgets('the calendar greys days outside the window and picks a day', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    tester.view.physicalSize = const Size(800, 1280);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+    late PassengerStore store;
+    await tester.runAsync(() async {
+      store = await storeWithServer();
+    });
+    await tester.pumpWidget(PassengerScope(store: store, child: const MaterialApp(home: Scaffold(body: Padding(padding: EdgeInsets.all(16), child: TravelDateField())))));
+    expect(find.text('Chủ Nhật, 11/10/2026'), findsOneWidget);
+    await tester.tap(find.text('Ngày mai · 12/10'));
+    await tester.pump();
+    expect(store.date, '2026-10-12');
+    await tester.tap(find.text('Đổi'));
+    await tester.pumpAndSettle();
+    expect(find.text('Tháng 10/2026'), findsOneWidget);
+    expect(find.text('Tháng 11/2026'), findsOneWidget);
+    await tester.tap(find.bySemanticsLabel('Thứ Ba, 10/11/2026'));
+    await tester.pumpAndSettle();
+    expect(store.date, '2026-11-10');
+    await tester.tap(find.text('Đổi'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.bySemanticsLabel('Thứ Tư, 11/11/2026'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(store.date, '2026-11-10', reason: 'a day beyond the window cannot be picked');
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
   });
 
   test('home pickup: the server checks the pinned address, the ride starts at the first stop and the order carries it', () async {
