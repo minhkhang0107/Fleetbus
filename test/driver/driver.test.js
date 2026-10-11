@@ -29,8 +29,11 @@ describe('Phase Driver: Driver Tactical Cockpit Test Suite (DRI-001 to DRI-019)'
     const todayRes = driverService.getTodayTrips('drv_8821a');
     assert.strictEqual(todayRes.success, true);
     assert.ok(todayRes.data.trips.length > 0);
-    assert.strictEqual(todayRes.data.trips[0].vehicle_plate, '29B-123.45');
-    assert.strictEqual(todayRes.data.trips[0].booked_passengers_count, 28);
+    const shift = todayRes.data.trips.find(t => t.trip_id === 'trp_991823');
+    assert.strictEqual(shift.vehicle_plate, '29B-123.45');
+    assert.strictEqual(shift.booked_passengers_count, 28);
+    const times = todayRes.data.trips.map(t => Date.parse(t.planned_departure_time));
+    assert.deepStrictEqual(times, [...times].sort((x, y) => x - y), 'in departure order');
   });
 
   it('TC-DRV-03: Should process pre-start readiness inspection checklist (DRI-004)', () => {
