@@ -362,6 +362,17 @@ export class PassengerTrackingService {
     return { success: true, data: notif };
   }
 
+  /**
+   * Sends a notification only the first time for this key (spec 9: each event once per ticket), e.g.
+   * `tkt_X:PICKUP_APPROACHING`. Returns null when it was already sent.
+   */
+  sendNotificationOnce(key, phone, notification) {
+    if (!this.sentNotificationKeys) this.sentNotificationKeys = new Set();
+    if (!phone || this.sentNotificationKeys.has(key)) return null;
+    this.sentNotificationKeys.add(key);
+    return this.sendNotification(phone, notification).data;
+  }
+
   getNotifications(phone, operatorId = DEFAULT_OPERATOR_ID) {
     const normalized = phone.replace(/[\s\-\.]/g, '');
     const list = (this.notifications.get(normalized) || []).filter(n => (n.operator_id || DEFAULT_OPERATOR_ID) === operatorId);

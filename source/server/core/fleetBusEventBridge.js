@@ -5,6 +5,7 @@
 
 import EventEmitter from 'events';
 import { operatorOfTrip } from './tenancy.js';
+import { findOperatorById } from './operators.js';
 
 export class FleetBusEventBridge extends EventEmitter {
   constructor() {
@@ -256,8 +257,12 @@ export class FleetBusEventBridge extends EventEmitter {
           speed_kmh: telemetry.speed_kmh,
           bearing_deg: telemetry.bearing_deg,
           plate_number: telemetry.vehicle_plate,
+          seq: telemetry.seq,
+          accuracy_m: telemetry.accuracy_m,
+          recorded_at: telemetry.recorded_at,
           mockNow: pingAt
         });
+        this._notifyApproaching(tripId, pingAt);
       }
 
       // B. Manager Fleet Radar: the vehicle of the trip, found through the manager trip first and the plate second
@@ -456,8 +461,21 @@ export class FleetBusEventBridge extends EventEmitter {
     });
 
     // A phone hold whose pickup stop the bus has left is released (the passenger did not board).
-    this.on('STOP_ARRIVED', () => {
+    this.on('STOP_ARRIVED', ({ tripId, stopId }) => {
       managerService?.releaseExpiredHotlineHolds?.();
+      // Spec 9: "the bus is at your pickup", once per ticket.
+      const trip = driverService?.activeTrips?.get(tripId);
+      const stop = trip?.stops?.find(s => s.stop_id === stopId);
+      for (const p of this._waitingAtStops(trip)) {
+        if (p.pickup_stop_id !== stopId) continue;
+        trackingService?.sendNotificationOnce?.(`${p.ticket_id}:PICKUP_ARRIVED`, p.passenger_phone, {
+          operatorId: operatorOfTrip(this.services, tripId),
+          title: 'Xe đã tới điểm đón',
+          body: `Xe ${trip.vehicle_plate} đã tới ${stop?.name || 'điểm đón'}. Mời bạn lên xe, ghế ${p.seat_code}.`,
+          type: 'PICKUP_ARRIVED',
+          payload: { trip_id: tripId, ticket_id: p.ticket_id, stop_id: stopId }
+        });
+      }
     });
 
     // -------------------------------------------------------------------------
@@ -703,6 +721,42 @@ export class FleetBusEventBridge extends EventEmitter {
         }
       }
     });
+  }
+
+  /** Passengers still to be picked up at a stop (home pickups wait at home, not at the stop). */
+  _waitingAtStops(trip) {
+    return (trip?.manifest || []).filter(p => p.passenger_phone && !p.home_pickup && !['BOARDED', 'NO_SHOW', 'CANCELLED'].includes(p.boarding_status));
+  }
+
+  /**
+   * Spec 9: "the bus is approaching your pickup" once per ticket, when the along-road ETA from a live position is
+   * within the company's threshold (approaching_threshold_minutes), never from a stale position or by distance alone.
+   */
+  _notifyApproaching(tripId, now = Date.now()) {
+    const { driverService, trackingService } = this.services;
+    const trip = driverService?.activeTrips?.get(tripId);
+    if (!trip || trip.status !== 'IN_TRANSIT' || typeof trackingService?.getTripRadar !== 'function') return;
+    const operatorId = operatorOfTrip(this.services, tripId);
+    const threshold = findOperatorById(operatorId)?.service_config?.approaching_threshold_minutes ?? 10;
+    const waiting = this._waitingAtStops(trip);
+    const byStop = new Map();
+    for (const p of waiting) byStop.set(p.pickup_stop_id, [...(byStop.get(p.pickup_stop_id) || []), p]);
+    for (const [stopId, passengers] of byStop) {
+      const stop = trip.stops?.find(s => s.stop_id === stopId);
+      if (!stop || stop.status === 'ARRIVED') continue;
+      const radar = trackingService.getTripRadar(tripId, { pickupStopId: stopId, stops: trip.stops, canSeeBus: true, view: 'TICKET', mockNow: now }).data;
+      if (!radar?.has_position || radar.has_passed_target || radar.freshness?.state !== 'LIVE') continue;
+      if (!Number.isFinite(radar.eta_minutes) || radar.eta_minutes > threshold) continue;
+      for (const p of passengers) {
+        trackingService.sendNotificationOnce(`${p.ticket_id}:PICKUP_APPROACHING`, p.passenger_phone, {
+          operatorId,
+          title: 'Xe sắp tới điểm đón',
+          body: `Xe ${trip.vehicle_plate} còn khoảng ${radar.eta_minutes} phút nữa tới ${stop.name}. Bạn chuẩn bị ra điểm đón nhé.`,
+          type: 'PICKUP_APPROACHING',
+          payload: { trip_id: tripId, ticket_id: p.ticket_id, stop_id: stopId, eta_minutes: radar.eta_minutes }
+        });
+      }
+    }
   }
 }
 
