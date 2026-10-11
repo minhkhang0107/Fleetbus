@@ -80,7 +80,7 @@ class _DriverRouteMapState extends State<DriverRouteMap> {
             Expanded(child: Text(a.stop.name, style: dsans(size: 14, weight: a.index == store.stopIndex ? FontWeight.w700 : FontWeight.w400), overflow: TextOverflow.ellipsis)),
             Text('↑${a.board} ↓${a.drop}', style: dmono(size: 13, color: DTokens.sub)),
             // Spec 5.2: already boarded and excluded (no-show) at this stop.
-            if (a.boarded + a.excluded > 0) Text('  ✓${a.boarded} ✗${a.excluded}', style: dmono(size: 13, color: DTokens.muted)),
+            if (a.boarded + a.excluded > 0) Text('  lên ${a.boarded} · vắng ${a.excluded}', style: dsans(size: 13, color: DTokens.muted)),
           ]),
         ),
     ]);
