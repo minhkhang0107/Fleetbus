@@ -78,6 +78,17 @@ export const MOCK_DRIVERS_DB = [
   }
 ];
 
+// Spec 5.1 state names, mapped from the statuses the apps already use (adjustment A5).
+function tripLifecycle(status) {
+  return { DISPATCHED: 'SCHEDULED', SCHEDULED: 'SCHEDULED', READY: 'BOARDING', IN_TRANSIT: 'IN_PROGRESS', COMPLETED: 'COMPLETED', CANCELLED: 'CANCELLED' }[status] || status;
+}
+
+function stopLifecycle(trip, stop, index) {
+  if (stop.skipped_at) return 'SKIPPED';
+  if (stop.status === 'ARRIVED') return index < trip.current_stop_index || trip.status === 'COMPLETED' ? 'COMPLETED' : 'ARRIVED';
+  return 'UPCOMING';
+}
+
 export class DriverCockpitService {
   constructor(options = {}) {
     this.secretKey = options.secretKey || getTicketSecret();
@@ -290,21 +301,66 @@ export class DriverCockpitService {
     return { ...rest, phone_masked: rest.phone_masked || (phoneToMask ? maskPhone(phoneToMask) : null) };
   }
 
+  /**
+   * Operational events of a trip (spec 5.3): who did what, when, to which ticket or stop. Manual boardings are
+   * flagged so the office can review corrections.
+   */
+  _event(trip, type, fields = {}, at = Date.now()) {
+    if (!trip.events) trip.events = [];
+    trip.events.push({ type, trip_id: trip.trip_id, actor: trip.driver_id || null, at: new Date(at).toISOString(), ...fields });
+    if (trip.events.length > 2000) trip.events.shift();
+  }
+
+  /** Passenger counts of each stop (spec 5.2): to pick up, boarded, excluded (no-show/cancelled), to drop off. */
+  _stopCounts(trip, stopId) {
+    const pickups = (trip.manifest || []).filter(p => p.pickup_stop_id === stopId);
+    return {
+      confirmed: pickups.filter(p => p.boarding_status !== 'CANCELLED').length,
+      boarded: pickups.filter(p => p.boarding_status === 'BOARDED').length,
+      excluded: pickups.filter(p => ['NO_SHOW', 'CANCELLED'].includes(p.boarding_status)).length,
+      home_pickups: pickups.filter(p => p.home_pickup && p.boarding_status !== 'CANCELLED').length,
+      dropoffs: (trip.manifest || []).filter(p => p.dropoff_stop_id === stopId && p.boarding_status === 'BOARDED').length,
+      alighted: (trip.manifest || []).filter(p => p.dropoff_stop_id === stopId && p.alighted_at).length
+    };
+  }
+
   _publicTrip(trip) {
-    const stops = (trip.stops || []).map(s => {
+    const stops = (trip.stops || []).map((s, index) => {
+      const extra = { lifecycle_status: stopLifecycle(trip, s, index), counts: this._stopCounts(trip, s.stop_id) };
       const coords = stopCoords(s.stop_id);
       if (coords) {
-        return { ...s, lat: coords.lat, lng: coords.lng };
+        return { ...s, ...extra, lat: coords.lat, lng: coords.lng };
       }
       const { lat, lng, ...rest } = s;
-      return rest;
+      return { ...rest, ...extra };
     });
+    const { events, telemetry_history: history, ...rest } = trip;
     return {
-      ...trip,
+      ...rest,
+      lifecycle_status: tripLifecycle(trip.status),
       on_board_count: trip.boarded_count - (trip.alighted_count || 0),
       stops,
       route_shape: routeShape(trip.trip_id) || null,
       manifest: (trip.manifest || []).map(p => this._publicPassenger(p))
+    };
+  }
+
+  /** Stops with their counts and the event log of a trip, for the office (spec 5.2, 5.3). */
+  getTripOperations(tripId) {
+    const trip = this.activeTrips.get(tripId);
+    if (!trip) return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
+    const pub = this._publicTrip(trip);
+    return {
+      success: true,
+      data: {
+        trip_id: tripId,
+        status: trip.status,
+        lifecycle_status: pub.lifecycle_status,
+        on_board_count: pub.on_board_count,
+        stops: pub.stops.map(({ stop_id, name, order, time, lifecycle_status, counts, arrived_at, skipped_at }) => ({ stop_id, name, order, time, lifecycle_status, counts, arrived_at: arrived_at || null, skipped_at: skipped_at || null })),
+        home_pickups: trip.manifest.filter(p => p.home_pickup && p.boarding_status !== 'CANCELLED').map(p => ({ ticket_id: p.ticket_id, seat_code: p.seat_code, boarding_status: p.boarding_status, address: p.home_pickup.address, window_from: p.home_pickup.window_from || null, window_to: p.home_pickup.window_to || null })),
+        events: [...(trip.events || [])].reverse()
+      }
     };
   }
 
@@ -403,9 +459,22 @@ export class DriverCockpitService {
     if (index === -1) return { success: false, error: 'Không tìm thấy điểm dừng', code: 'STOP_NOT_FOUND' };
 
     const stop = trip.stops[index];
+    // Stops are served in order: the bus cannot come back to a stop it has left without visiting (spec 5.1).
+    if (stop.status !== 'ARRIVED' && index < trip.current_stop_index) {
+      return { success: false, error: `Xe đã qua ${stop.name}, không thể báo tới trạm này`, code: 'STOP_OUT_OF_ORDER' };
+    }
     if (stop.status !== 'ARRIVED') {
+      // Stops between the last one reached and this one were passed without a visit.
+      for (let i = trip.current_stop_index; i < index; i++) {
+        const passed = trip.stops[i];
+        if (passed.status !== 'ARRIVED' && !passed.skipped_at) {
+          passed.skipped_at = new Date(mockNow).toISOString();
+          this._event(trip, 'STOP_SKIPPED', { stop_id: passed.stop_id }, mockNow);
+        }
+      }
       stop.status = 'ARRIVED';
       stop.arrived_at = new Date(mockNow).toISOString();
+      this._event(trip, 'STOP_ARRIVED', { stop_id: stop.stop_id }, mockNow);
     }
     trip.current_stop_index = Math.max(trip.current_stop_index, index);
 
@@ -418,6 +487,7 @@ export class DriverCockpitService {
         p.alighted_at = new Date(mockNow).toISOString();
         trip.alighted_count += 1;
         alightedTicketIds.push(p.ticket_id);
+        this._event(trip, 'ALIGHTED', { ticket_id: p.ticket_id, seat_code: p.seat_code, stop_id: stopId }, mockNow);
       }
     }
 
@@ -484,6 +554,7 @@ export class DriverCockpitService {
 
     trip.status = 'IN_TRANSIT';
     trip.actual_start_time = new Date().toISOString();
+    this._event(trip, 'TRIP_STARTED');
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
       this.eventBridge.emit('TRIP_STARTED', { tripId, vehiclePlate: trip.vehicle_plate });
@@ -640,6 +711,13 @@ export class DriverCockpitService {
     passenger.boarded_at = new Date(mockNow).toISOString();
     if (scanMethod) passenger.scan_method = scanMethod;
     trip.boarded_count += 1;
+    this._event(trip, 'BOARDED', {
+      ticket_id: passenger.ticket_id,
+      seat_code: passenger.seat_code,
+      stop_id: trip.stops?.[trip.current_stop_index]?.stop_id || null,
+      method: scanMethod || 'SCAN',
+      manual: scanMethod === 'MANUAL_OVERRIDE'
+    }, mockNow);
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
       this.eventBridge.emit('PASSENGER_BOARDED', {
@@ -1000,6 +1078,7 @@ export class DriverCockpitService {
     trip.manifest.push(newPassenger);
     trip.boarded_count += 1;
     trip.booked_passengers_count += 1;
+    this._event(trip, 'BOARDED', { ticket_id: newPassenger.ticket_id, seat_code: newPassenger.seat_code, stop_id: newPassenger.pickup_stop_id || null, method: 'HAIL', manual: false }, mockNow);
     trip.total_hail_collected_vnd += fare;
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
@@ -1055,6 +1134,7 @@ export class DriverCockpitService {
 
     item.boarding_status = 'NO_SHOW';
     item.no_show_reason = reason;
+    this._event(trip, 'NO_SHOW', { ticket_id: ticketId, seat_code: item.seat_code, stop_id: item.pickup_stop_id, reason, passenger_requested: passengerRequestedCancel }, mockNow);
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
       this.eventBridge.emit('PASSENGER_NO_SHOW', {
@@ -1300,6 +1380,7 @@ export class DriverCockpitService {
 
     trip.status = 'COMPLETED';
     trip.completed_at = summary.completed_at;
+    this._event(trip, 'TRIP_COMPLETED', { early_end_reason: summary.early_end_reason });
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
       this.eventBridge.emit('TRIP_COMPLETED', {

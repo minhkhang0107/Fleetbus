@@ -241,6 +241,9 @@ const STATUS = {
   READY: ['Sẵn sàng', 'info'], DISPATCHED: ['Đã điều', 'info'], SCHEDULED: ['Chờ chạy', ''], IN_TRANSIT: ['Đang chạy', 'ok'],
   COMPLETED: ['Hoàn thành', ''], CANCELLED: ['Đã hủy', 'danger'], ASSIGNED: ['Đã phân công', 'info'], STANDBY: ['Chờ', ''], MAINTENANCE: ['Bảo dưỡng', 'warn']
 };
+const STOP_STATUS = { UPCOMING: ['Sắp tới', ''], APPROACHING: ['Xe sắp tới', 'info'], ARRIVED: ['Xe đang ở trạm', 'ok'], COMPLETED: ['Đã rời', ''], SKIPPED: ['Bỏ qua', 'warn'] };
+const stopPill = (status) => { const [label, kind] = STOP_STATUS[status] || [status || '—', '']; return `<span class="pill ${kind}">${esc(label)}</span>`; };
+const EVENT_LABEL = { TRIP_STARTED: 'Xuất bến', STOP_ARRIVED: 'Tới trạm', STOP_SKIPPED: 'Bỏ qua trạm', BOARDED: 'Lên xe', NO_SHOW: 'Vắng mặt', ALIGHTED: 'Xuống xe', TRIP_COMPLETED: 'Kết thúc chuyến' };
 const pill = (status) => { const [label, kind] = STATUS[status] || [status || '—', '']; return `<span class="pill ${kind}">${esc(label)}</span>`; };
 const gpsPill = (g) => g === 'LIVE' ? '<span class="pill ok">Trực tiếp</span>' : g === 'STALE' ? '<span class="pill warn">Tín hiệu cũ</span>' : '<span class="pill">Mất tín hiệu</span>';
 
@@ -337,7 +340,8 @@ async function loadBoard() {
 async function openTrip(tripId) {
   state.selectedTrip = tripId;
   document.querySelectorAll('#board tr[data-trip]').forEach(tr => tr.classList.toggle('sel', tr.dataset.trip === tripId));
-  const [trip, inv, track] = await Promise.all([api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/seat-inventory`), publicApi(`/api/v1/trips/${encodeURIComponent(tripId)}/tracking`)]);
+  const [trip, inv, track, ops] = await Promise.all([api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/seat-inventory`), publicApi(`/api/v1/trips/${encodeURIComponent(tripId)}/tracking`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/operations`)]);
+  const opsData = ops.ok ? ops.data : null;
   if (!trip.ok) { $('#tripDetail').innerHTML = `<div class="error">${esc(trip.message)}</div>`; return; }
   const t = trip.data; const s = inv.ok ? inv.data.summary || {} : {};
   const stops = track?.stops || [];
@@ -353,7 +357,11 @@ async function openTrip(tripId) {
     <div id="tripMap" class="map"></div>
     <div class="muted" id="tripTrack" style="margin-top:6px"></div>
     <div class="section-title">Điểm dừng</div>
-    <div>${stops.length ? stops.map(st => `<div class="row" style="padding:3px 0"><span class="mono muted">${esc(st.order)}</span><span class="grow">${esc(st.name)}</span></div>`).join('') : '<p class="muted">Chưa có dữ liệu điểm dừng.</p>'}</div>
+    ${opsData ? `<table><thead><tr><th>Trạm</th><th>Trạng thái</th><th title="Khách đón / đã lên / đã loại">Đón</th><th title="Khách xuống">Trả</th></tr></thead><tbody>${opsData.stops.map(st => `<tr><td>${esc(st.name)}${st.counts.home_pickups ? ` <span class="pill warn">${esc(st.counts.home_pickups)} tận nhà</span>` : ''}</td><td>${stopPill(st.lifecycle_status)}</td><td class="mono">${esc(st.counts.confirmed)} / ${esc(st.counts.boarded)} / ${esc(st.counts.excluded)}</td><td class="mono">${esc(st.counts.dropoffs + st.counts.alighted)}</td></tr>`).join('')}</tbody></table>
+      ${opsData.home_pickups.length ? `<div class="section-title">Đón tận nhà</div>${opsData.home_pickups.map(h => `<div class="row" style="padding:3px 0"><span class="mono">${esc(h.seat_code)}</span><span class="grow">${esc(h.address)}</span><span class="mono muted">${h.window_from ? `${esc(hhmm(h.window_from))}–${esc(hhmm(h.window_to))}` : ''}</span></div>`).join('')}` : ''}
+      <div class="section-title">Nhật ký chuyến</div>
+      <div style="max-height:180px;overflow:auto">${opsData.events.length ? opsData.events.slice(0, 50).map(ev => `<div class="row" style="padding:2px 0;font-size:13px"><span class="mono muted">${esc(hhmm(ev.at))}</span><span class="grow">${esc(EVENT_LABEL[ev.type] || ev.type)} ${esc(ev.seat_code || '')} ${esc(ev.stop_id || '')}${ev.manual ? ' <span class="pill warn">thủ công</span>' : ''}</span><span class="muted">${esc(ev.actor || '')}</span></div>`).join('') : '<p class="muted">Chưa có sự kiện.</p>'}</div>`
+    : `<div>${stops.length ? stops.map(st => `<div class="row" style="padding:3px 0"><span class="mono muted">${esc(st.order)}</span><span class="grow">${esc(st.name)}</span></div>`).join('') : '<p class="muted">Chưa có dữ liệu điểm dừng.</p>'}</div>`}
     <div class="section-title">Báo trễ chính thức</div>
     <form class="row" id="delayForm"><input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="minutes" type="number" min="5" max="600" value="15"> <input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="reason" placeholder="Lý do (khách nhận được)"><button class="btn" type="submit">Công bố</button></form>
     <div class="section-title">Giữ chỗ qua tổng đài</div>

@@ -7,6 +7,7 @@ import { DEFAULT_OPERATOR_ID } from '../core/operators.js';
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
 import { maskPhone } from '../services/passenger/core/formatters.js';
 import { ADMIN_ROLE } from '../core/gateway.js';
+import { tripVisibleTo } from '../core/tenancy.js';
 
 // Seat conflicts and reservation mismatches are conflicts (409); a missing trip or reservation is 404.
 function inventoryErrorStatus(code) {
@@ -304,6 +305,19 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   }
 
   // GET /api/v1/ops/trips/:tripId (MGR-012)
+  // GET /api/v1/ops/trips/:tripId/operations: stops with passenger counts, home pickups and the event log (spec 5.2, 5.3)
+  const operations = pathname.match(/^\/api\/v1\/ops\/trips\/([^/]+)\/operations$/);
+  if (operations && req.method === 'GET') {
+    const tripId = operations[1];
+    const result = tripVisibleTo(services, tripId, req.operatorId) ? services.driverService.getTripOperations(tripId) : null;
+    if (!result || !result.success) {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+      return true;
+    }
+    sendSuccess(res, result.data);
+    return true;
+  }
+
   if (TRIP_DETAIL_RE.test(pathname) && req.method === 'GET') {
     const tripId = pathname.match(TRIP_DETAIL_RE)[1];
     const trip = managerService.findTrip(tripId);

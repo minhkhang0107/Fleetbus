@@ -76,7 +76,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     if (result.success) {
       sendSuccess(res, result.data);
     } else {
-      sendError(res, result.error, result.code, ['TRIP_NOT_FOUND', 'STOP_NOT_FOUND'].includes(result.code) ? 404 : 400);
+      sendError(res, result.error, result.code, ['TRIP_NOT_FOUND', 'STOP_NOT_FOUND'].includes(result.code) ? 404 : (result.code === 'STOP_OUT_OF_ORDER' ? 409 : 400));
     }
     return true;
   }
