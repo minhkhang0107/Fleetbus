@@ -526,6 +526,21 @@ async function loadService() {
 }
 let companyStopStyle = 'STATIONS';
 const STOP_STYLE_LABEL = { ROUTE_LINE: 'Tuyến kiểu xe buýt (điểm đón trả dọc đường)', STATIONS: 'Chỉ tại bến' };
+// Stops of a route: arrival time (empty = estimated from the road), pickup / drop-off, shown to passengers.
+function stopsEditor(rt) {
+  if (!rt.stops?.length) return '<p class="muted" style="margin:0">Tuyến chưa có chuyến trong lịch, chưa có điểm dừng.</p>';
+  const own = rt.own.stops || {};
+  return `<details><summary style="cursor:pointer;font-weight:600">Điểm dừng (${rt.stops.length}) · giờ đến, đón trả, ẩn hiện</summary>
+    <table style="margin-top:8px"><thead><tr><th>Điểm</th><th>Loại</th><th>Giờ đến (phút sau xuất bến)</th><th>Đón</th><th>Trả</th><th>Hiện với khách</th></tr></thead><tbody>
+    ${rt.stops.map((st, i) => `<tr data-stop="${esc(st.stop_id)}" data-route-id="${esc(rt.route_id)}">
+      <td>${esc(st.name)}</td><td>${st.kind === 'ROADSIDE' ? '<span class="pill">Dọc đường</span>' : '<span class="pill info">Bến xe</span>'}</td>
+      <td><input name="offset" inputmode="numeric" style="width:90px;border:1px solid var(--line-strong);border-radius:6px;padding:4px 6px" value="${Number.isInteger(own[st.stop_id]?.offset_minutes) ? own[st.stop_id].offset_minutes : ''}" placeholder="${esc(st.offset_minutes)}" ${i === 0 ? 'disabled title="Điểm xuất phát"' : ''}> ${st.time_source === 'ESTIMATED' ? '<span class="muted" style="font-size:12px">ước tính</span>' : ''}</td>
+      <td><input type="checkbox" name="pickup" ${(own[st.stop_id]?.pickup ?? st.base_pickup) ? 'checked' : ''}></td>
+      <td><input type="checkbox" name="dropoff" ${(own[st.stop_id]?.dropoff ?? st.base_dropoff) ? 'checked' : ''}></td>
+      <td><input type="checkbox" name="visible" ${st.hidden ? '' : 'checked'} ${i === 0 ? 'disabled' : ''}></td></tr>`).join('')}
+    </tbody></table>
+    <button class="btn primary" style="margin-top:8px" data-save-stops="${esc(rt.route_id)}">Lưu điểm dừng</button></details>`;
+}
 async function loadRouteConfigs() {
   const box = $('#routeConfigs'); if (!box) return;
   const r = await api('/api/v1/ops/service-config/routes');
@@ -537,12 +552,32 @@ async function loadRouteConfigs() {
       <td><select name="stop_style"><option value="">Theo nhà xe (${esc(STOP_STYLE_LABEL[companyStopStyle])})</option>${Object.entries(STOP_STYLE_LABEL).map(([v, l]) => `<option value="${v}" ${rt.own.stop_style === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></td>
       <td>${modeBoxes(rt, 'pickup_modes', ['FIXED_STOP', 'HOME_PICKUP'])}</td>
       <td>${modeBoxes(rt, 'dropoff_modes', ['FIXED_LOCATION', 'HOME_DROPOFF'])}</td>
-      <td><button class="btn" data-save>Lưu</button></td></tr>`).join('')}</tbody></table>`;
+      <td><button class="btn" data-save>Lưu</button></td></tr>
+    <tr data-stops-of="${esc(rt.route_id)}"><td colspan="5" style="padding-top:0">${stopsEditor(rt)}</td></tr>`).join('')}</tbody></table>`;
+  box.querySelectorAll('button[data-save-stops]').forEach(b => b.addEventListener('click', async () => {
+    const routeId = b.dataset.saveStops;
+    const rows = [...box.querySelectorAll(`tr[data-stop][data-route-id="${routeId}"]`)];
+    const stops = {};
+    for (const row of rows) {
+      const raw = row.querySelector('input[name="offset"]').value.trim();
+      if (raw !== '' && !/^\d+$/.test(raw)) { toast('Giờ đến là số phút sau giờ xuất bến'); return; }
+      stops[row.dataset.stop] = {
+        offset_minutes: raw === '' ? null : Number(raw),
+        pickup: row.querySelector('input[name="pickup"]').checked,
+        dropoff: row.querySelector('input[name="dropoff"]').checked,
+        hidden: !row.querySelector('input[name="visible"]').checked
+      };
+    }
+    const r2 = await api(`/api/v1/ops/service-config/routes/${encodeURIComponent(routeId)}`, { method: 'PUT', body: { stops } });
+    toast(r2.ok ? 'Đã lưu điểm dừng' : r2.message);
+    if (r2.ok) loadRouteConfigs();
+  }));
   box.querySelectorAll('input[data-inherit]').forEach(cb => cb.addEventListener('change', () => {
     cb.closest('td').querySelectorAll(`input[name="${cb.dataset.inherit}"]`).forEach(i => { i.disabled = cb.checked; });
   }));
   box.querySelectorAll('button[data-save]').forEach(b => b.addEventListener('click', async () => {
     const row = b.closest('tr');
+    if (!row.dataset.route) return;
     const modes = (name) => row.querySelector(`input[data-inherit="${name}"]`).checked ? null : [...row.querySelectorAll(`input[name="${name}"]:checked`)].map(i => i.value);
     const body = { stop_style: row.querySelector('select[name="stop_style"]').value || null, pickup_modes: modes('pickup_modes'), dropoff_modes: modes('dropoff_modes') };
     const r2 = await api(`/api/v1/ops/service-config/routes/${encodeURIComponent(row.dataset.route)}`, { method: 'PUT', body });

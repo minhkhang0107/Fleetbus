@@ -149,6 +149,14 @@ class _TripCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final few = trip.seatsLeft <= 3;
+    // The passenger's own ride on this trip: where they get on and off, at what time.
+    final ride = PassengerScope.of(context).rideFor(trip);
+    final i = trip.stops.indexOf(ride.on);
+    final j = trip.stops.indexOf(ride.off);
+    final between = j > i ? j - i - 1 : 0;
+    int toMin(String hhmm) => int.parse(hhmm.substring(0, 2)) * 60 + int.parse(hhmm.substring(3, 5));
+    final mins = (toMin(ride.off.time) - toMin(ride.on.time) + 24 * 60) % (24 * 60);
+    final rideDuration = '${mins ~/ 60} giờ${mins % 60 == 0 ? '' : ' ${mins % 60} phút'}';
     return AppCard(
       padding: const EdgeInsets.all(16),
       onTap: () {
@@ -167,18 +175,18 @@ class _TripCard extends StatelessWidget {
         ]),
         gap(12),
         Row(children: [
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(trip.dep, style: mono(size: 20, weight: FontWeight.w700)), Text(trip.from, style: sans(size: 12, color: PTokens.muted))]),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(ride.on.time, style: mono(size: 20, weight: FontWeight.w700)), Text(ride.on.short, style: sans(size: 12, color: PTokens.muted))]),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Column(children: [
-                Text(trip.duration, style: sans(size: 12, color: PTokens.muted)),
+                Text(rideDuration, style: sans(size: 12, color: PTokens.muted)),
                 const Divider(color: PTokens.lineStrong, height: 6),
-                Text(trip.via, style: sans(size: 12, color: PTokens.muted)),
+                Text(between == 0 ? 'Thẳng' : '$between điểm dừng', style: sans(size: 12, color: PTokens.muted)),
               ]),
             ),
           ),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [Text(trip.arr, style: mono(size: 20, weight: FontWeight.w700)), Text(trip.to, style: sans(size: 12, color: PTokens.muted))]),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [Text(ride.off.time, style: mono(size: 20, weight: FontWeight.w700)), Text(ride.off.short, style: sans(size: 12, color: PTokens.muted))]),
         ]),
         const Divider(height: 20, color: Color(0xFFF1F5F9)),
         Row(children: [

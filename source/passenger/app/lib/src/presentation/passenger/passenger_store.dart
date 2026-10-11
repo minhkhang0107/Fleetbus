@@ -155,7 +155,8 @@ class Trip {
     final dep = DateTime.parse(j['departure_time']).toUtc().add(const Duration(hours: 7));
     final arr = DateTime.parse(j['arrival_time']).toUtc().add(const Duration(hours: 7));
     final minutes = (j['duration_minutes'] as num?)?.toInt() ?? arr.difference(dep).inMinutes;
-    final raw = (j['stops'] as List? ?? []).cast<Map<String, dynamic>>()..sort((a, b) => (a['order'] as num).compareTo(b['order'] as num));
+    // Stops the company hid are not offered; the others keep their order.
+    final raw = (j['stops'] as List? ?? []).cast<Map<String, dynamic>>().where((s) => s['hidden'] != true).toList()..sort((a, b) => (a['order'] as num).compareTo(b['order'] as num));
     final n = raw.length;
     final stops = [
       for (var i = 0; i < n; i++)
@@ -163,7 +164,10 @@ class Trip {
           raw[i]['stop_id'],
           raw[i]['name'],
           raw[i]['city'] ?? '',
-          _hhmm(dep.add(Duration(minutes: n > 1 ? (minutes * i / (n - 1)).round() : 0))),
+          // The server's planned time (set by the company or estimated along the road); an even split otherwise.
+          DateTime.tryParse('${raw[i]['planned_time']}') != null
+              ? _hhmm(DateTime.parse('${raw[i]['planned_time']}').toUtc().add(const Duration(hours: 7)))
+              : _hhmm(dep.add(Duration(minutes: n > 1 ? (minutes * i / (n - 1)).round() : 0))),
           pickup: raw[i]['pickup_allowed'] == true,
           dropoff: raw[i]['dropoff_allowed'] == true,
           station: raw[i]['kind'] != 'ROADSIDE',
@@ -674,11 +678,27 @@ class PassengerStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Where this passenger gets on and off a trip: the station picked on the home screen when the trip stops
+  /// there, else the first pickup in the origin city and the first drop-off in the destination city.
+  ({Stop on, Stop off}) rideFor(Trip t) {
+    final stops = t.stops;
+    Stop pick(bool Function(Stop) allowed, String city, String station, Stop fallback, {int after = -1}) {
+      final ok = [for (var i = after + 1; i < stops.length; i++) if (allowed(stops[i])) stops[i]];
+      return ok.where((s) => s.name == station).firstOrNull ?? ok.where((s) => s.city == city).firstOrNull ?? (ok.isEmpty ? fallback : ok.first);
+    }
+    final hasPlaces = places.containsKey(origin) && places.containsKey(dest);
+    final on = pick((s) => s.pickup, hasPlaces ? originPlace.city : '', hasPlaces ? originPlace.station : '', stops.first);
+    final offCandidates = stops.indexOf(on);
+    final lastDrop = stops.lastWhere((s) => s.dropoff, orElse: () => stops.last);
+    final off = pick((s) => s.dropoff, hasPlaces ? destPlace.city : '', hasPlaces ? destPlace.station : '', lastDrop, after: offCandidates);
+    return (on: on, off: off);
+  }
+
   void chooseTrip(Trip t) {
     trip = t;
-    pickup = t.stops.firstWhere((s) => s.pickup, orElse: () => t.stops.first).id;
-    final inDest = t.stops.where((s) => s.dropoff && s.city == destPlace.city).toList();
-    dropoff = (inDest.isNotEmpty ? inDest.first : t.stops.lastWhere((s) => s.dropoff, orElse: () => t.stops.last)).id;
+    final ride = rideFor(t);
+    pickup = ride.on.id;
+    dropoff = ride.off.id;
     homePickup = null;
     homeDropoff = null;
     seats.clear();

@@ -147,7 +147,9 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
     sendSuccess(res, {
       routes: routes.map(r => {
         const effective = routeServiceConfig(config, r.route_id);
-        const stops = searchService.routeStops(r.route_id, req.operatorId).map(({ stop_id, name, kind, order, pickup_allowed, dropoff_allowed, hidden, offset_minutes, time_source }) => ({ stop_id, name, kind, order, pickup_allowed, dropoff_allowed, hidden, offset_minutes, time_source }));
+        const base = searchService.templateForRoute(r.route_id, req.operatorId)?.stops || [];
+        // base_* are the route's own stop data, what a checkbox goes back to when the company clears its setting.
+        const stops = searchService.routeStops(r.route_id, req.operatorId).map(({ stop_id, name, kind, order, pickup_allowed, dropoff_allowed, hidden, offset_minutes, time_source }, i) => ({ stop_id, name, kind, order, pickup_allowed, dropoff_allowed, base_pickup: base[i]?.pickup_allowed !== false, base_dropoff: base[i]?.dropoff_allowed !== false, hidden, offset_minutes, time_source }));
         return { route_id: r.route_id, name: r.name, own: snapshot(config.route_configs?.[r.route_id] || {}), stop_style: effective.stop_style, pickup_modes: effective.pickup_modes, dropoff_modes: effective.dropoff_modes, stops };
       })
     });

@@ -346,6 +346,26 @@ void main() {
     store.dispose();
   });
 
+  test('stops: the server\'s planned times, hidden stops left out, and the ride preset from the home-screen stations', () async {
+    final store = await storeWithServer();
+    final t = Trip.fromJson({
+      ...trip,
+      'stops': [
+        {...stops[0], 'planned_time': '2026-08-28T00:00:00.000Z'},
+        {'stop_id': 'stp_rs_pv', 'name': 'Nút giao Pháp Vân', 'city': 'Hà Nội', 'order': 2, 'pickup_allowed': false, 'dropoff_allowed': false, 'kind': 'ROADSIDE', 'hidden': true, 'planned_time': '2026-08-28T00:04:00.000Z'},
+        {...stops[1], 'order': 3, 'planned_time': '2026-08-28T01:15:00.000Z'},
+        {...stops[2], 'order': 4, 'planned_time': '2026-08-28T02:09:00.000Z'},
+      ],
+    });
+    expect(t.stops.map((s) => s.id), ['stp_hn_gb', 'stp_nb', 'stp_th_pb'], reason: 'a hidden stop is not offered');
+    expect(t.stops.map((s) => s.time), ['07:00', '08:15', '09:09'], reason: 'times from the server, Vietnam time');
+    store.setPlace(isOrigin: true, code: store.places.keys.firstWhere((k) => store.places[k]!.city == 'Ninh Bình'));
+    final ride = store.rideFor(t);
+    expect((ride.on.id, ride.off.id), ('stp_nb', 'stp_th_pb'), reason: 'gets on at the station picked on the home screen');
+    store.chooseTrip(t);
+    expect((store.pickup, store.dropoff), ('stp_nb', 'stp_th_pb'));
+  });
+
   test('home pickup: the server checks the pinned address, the ride starts at the first stop and the order carries it', () async {
     final store = await storeWithServer();
     expect(store.operator!.homePickup, isTrue);
