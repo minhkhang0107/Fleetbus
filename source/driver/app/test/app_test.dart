@@ -13,6 +13,7 @@ import 'package:app/src/presentation/driver_widgets.dart';
 import 'package:app/src/presentation/main_shell_screen.dart';
 import 'package:app/src/service/driver_api_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -286,6 +287,14 @@ void main() {
     expect(find.text('Bến xe Giáp Bát'), findsOneWidget);
     expect(find.text('↑2 ↓0'), findsOneWidget, reason: 'two passengers wait at the first stop');
     expect(find.text('Xem bản đồ'), findsOneWidget);
+    await tester.tap(find.text('Xem bản đồ'));
+    await tester.pump();
+    // Reaching the next stop rebuilds the map on the new frame, with a fresh controller.
+    store.stopIndex = 1;
+    await tester.pumpWidget(DriverScope(store: store, child: MaterialApp(home: Scaffold(body: SingleChildScrollView(child: DriverRouteMap(store: store))))));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(find.byType(FlutterMap), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     store.dispose();
   });
