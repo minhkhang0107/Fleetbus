@@ -4,7 +4,7 @@
 |---|---|
 | Nguồn | `docs/specs/intercity_pickup_dropoff_spec_v1_source.md` (bản gốc tiếng Anh, giữ nguyên văn) |
 | Phạm vi | App hành khách, app tài xế, web điều hành, API server |
-| Trạng thái | Đã rà soát, đang triển khai — xem mục 14 "Trạng thái triển khai" |
+| Trạng thái | Đã triển khai MVP (2026-10-11) — xem mục 14 "Trạng thái triển khai" |
 | Ngày | 2026-10-10 |
 
 Tài liệu này là bản spec gốc **sau khi đối chiếu với sản phẩm đang có**. Chỗ nào spec gốc không hợp với sản phẩm hoặc với thực tế xe khách liên tỉnh ở Việt Nam thì đã được điều chỉnh, kèm lý do ở mục 2. Khi hai bản khác nhau, **bản này là bản được thực hiện**.
@@ -160,23 +160,25 @@ Như spec gốc §13, cộng thêm các phần đã có (A1, A2). Để sau: t�
 
 ## 14. Trạng thái triển khai
 
-Cập nhật khi xong từng phần; xem bảng chi tiết ở cuối đợt triển khai.
+Cập nhật 2026-10-11. Kiểm chứng bằng test tự động (`npm test`: 361 test; app tài xế 19, app hành khách 27) và chạy thử trên tablet tài xế, server thật, web điều hành.
 
-| Tiêu chí nghiệm thu (spec gốc §14) | Trạng thái |
-|---|---|
-| 1. Bật đón tận nhà / điểm cố định độc lập | Đang làm |
-| 2. Không đặt được đón ngoài vùng phục vụ | Đang làm |
-| 3. Không đặt được điểm không thuộc chuyến | Đã có |
-| 4. Không bán quá chỗ khi đặt đồng thời | Đã có |
-| 5. Vé đã xác nhận nằm đúng danh sách của tài xế | Đã có; vé giữ qua tổng đài đang làm |
-| 6. Tài xế thấy số khách theo điểm đón | Đã có; thêm số đã loại và đón tận nhà đang làm |
-| 7. Chỉ người có quyền thấy xe | Đang làm (link chia sẻ có mã) |
-| 8. Vị trí mới hiện lên không cần tải lại màn | Đã có (polling) |
-| 9. Phân biệt tín hiệu cũ với trực tiếp | Đã có |
-| 10. Từ chối lên xe trùng và chuyển trạng thái sai | Lên xe trùng: đã có; trạng thái: đang làm |
-| 11. Mất mạng không ghi đè dữ liệu mới bằng dữ liệu cũ | Đang làm |
-| 12. Thay đổi quản trị đúng phạm vi nhà xe | Đã có |
-| 13. Bật/tắt lớp bản đồ độc lập | Web điều hành: đã có |
-| 14. Danh sách thay thế khi bản đồ lỗi | Web điều hành: đã có; app tài xế: đang làm |
-| 15. Không lộ thông tin khách cho người không có quyền | Đã có; địa chỉ nhà: đang làm |
-| 16. Ghi nhật ký các chuyển trạng thái quan trọng | Một phần; đang làm |
+| Tiêu chí nghiệm thu (spec gốc §14) | Trạng thái | Kiểm chứng |
+|---|---|---|
+| 1. Bật đón tận nhà / điểm cố định độc lập | Xong | `test/server/service_areas.test.js`; màn "Cấu hình đón trả" trên web |
+| 2. Không đặt được đón ngoài vùng phục vụ | Xong | `service_areas.test.js`, `home_booking.test.js` (422 `OUTSIDE_SERVICE_AREA`) |
+| 3. Không đặt được điểm không thuộc chuyến | Xong (có từ trước) | test kho ghế |
+| 4. Không bán quá chỗ khi đặt đồng thời | Xong (có từ trước) | `spec_conformance_inventory.test.js` |
+| 5. Vé đã xác nhận nằm đúng danh sách của tài xế | Xong, kể cả vé giữ qua tổng đài và đón tận nhà | `ops_fixes.test.js`, `home_booking.test.js`; tablet tài xế hiện "Đón tận nhà 05:45–06:30: địa chỉ · ghi chú" |
+| 6. Tài xế thấy số khách theo điểm đón | Xong (đón, đã lên, đã loại, đón tận nhà, trả) | `trip_operations.test.js` |
+| 7. Chỉ người có quyền thấy xe | Xong | `tracking_privacy.test.js`, `tracking_route.test.js` |
+| 8. Vị trí mới hiện lên không cần tải lại màn | Xong (polling) | web điều hành, app hành khách, trang `/t/` |
+| 9. Phân biệt tín hiệu cũ với trực tiếp | Xong (`freshness`: LIVE/STALE/OFFLINE/NO_SIGNAL) | `tracking_privacy.test.js` |
+| 10. Từ chối lên xe trùng và chuyển trạng thái sai | Xong (`ALREADY_BOARDED`, `STOP_OUT_OF_ORDER`, xuất bến cần kiểm tra xe, kết thúc giữa đường cần lý do) | `trip_operations.test.js` |
+| 11. Mất mạng không ghi đè dữ liệu mới bằng dữ liệu cũ | Xong (số thứ tự GPS, bản tin quá 120 s chỉ lưu lịch sử) | `tracking_privacy.test.js`; app tài xế gửi `seq` |
+| 12. Thay đổi quản trị đúng phạm vi nhà xe | Xong | `service_areas.test.js`, `platform_admin.test.js` |
+| 13. Bật/tắt lớp bản đồ độc lập | Xong trên web điều hành | ảnh chụp màn "Bản đồ xe" |
+| 14. Danh sách thay thế khi bản đồ lỗi | Xong (web điều hành, app tài xế) | `app_test.dart` (tài xế) |
+| 15. Không lộ thông tin khách cho người không có quyền | Xong (số điện thoại che, địa chỉ nhà chỉ chủ vé và tài xế chuyến thấy, link chia sẻ không có tên/số) | `tracking_privacy.test.js` |
+| 16. Ghi nhật ký các chuyển trạng thái quan trọng | Xong (nhật ký chuyến: xuất bến, tới trạm, bỏ qua trạm, lên xe, vắng mặt, xuống xe, kết thúc; nhật ký thao tác quản trị) | `trip_operations.test.js`; web "Nhật ký chuyến" |
+
+Chưa làm (để sau, đúng phạm vi §13): tối ưu lộ trình đón nhiều nhà và xe trung chuyển riêng; thao tác "Không vào được địa chỉ" của tài xế (A9); thông báo đổi tài xế/đổi xe đã có từ trước nhưng thông báo "đổi điểm đón" chưa có; trạng thái trạm `APPROACHING` mới dùng cho thông báo, chưa hiện trong danh sách trạm; lưu trữ PostgreSQL và xóa dữ liệu theo thời hạn A10.
