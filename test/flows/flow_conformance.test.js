@@ -365,7 +365,7 @@ describe('Cross-app flows (FLOW-01 to FLOW-07)', () => {
       assert.strictEqual(ping.status, 200, JSON.stringify(ping.body));
 
       const tracking = (await api(`/api/v1/trips/${TRIP}/tracking`)).body.data;
-      assert.strictEqual(tracking.signal_status, 'LIVE');
+      assert.strictEqual(tracking.signal_status, undefined);
       const plate = services.driverService.activeTrips.get(TRIP).vehicle_plate;
       const radar = (await api('/api/v1/ops/fleet/live-positions', { token: admin })).body.data.vehicles;
       const bus = radar.find((v) => v.plate_number === plate);

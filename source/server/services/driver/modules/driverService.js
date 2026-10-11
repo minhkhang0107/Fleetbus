@@ -528,13 +528,18 @@ export class DriverCockpitService {
   }
 
   /**
-   * DRI-006: Ingest GPS Telemetry (3s frequency / offline buffer support)
+   * DRI-006: Ingest GPS telemetry (spec 6.1, 6.4). A ping older than the last applied one (by seq, else by device time)
+   * is ignored; one recorded over 120 s ago is kept as history only; one less accurate than 200 m is refused.
    */
-  recordTelemetry(tripId, { lat, lng, speed_kmh, bearing_deg, is_offline = false, mockNow = Date.now() }) {
+  recordTelemetry(tripId, { lat, lng, speed_kmh, bearing_deg, seq, recorded_at, accuracy_m, is_offline = false, mockNow = Date.now() }) {
     const trip = this.activeTrips.get(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
     if (trip.status !== 'IN_TRANSIT') {
       return { success: false, error: 'Chuyến xe chưa chạy hoặc đã kết thúc', code: 'TRIP_NOT_ACTIVE' };
+    }
+
+    if (accuracy_m !== undefined && parseFloat(accuracy_m) > 200) {
+      return { success: false, error: 'Độ chính xác GPS quá thấp', code: 'LOW_ACCURACY' };
     }
 
     const latNum = parseFloat(lat);
@@ -547,6 +552,26 @@ export class DriverCockpitService {
       return { success: false, error: 'Tọa độ hoặc tốc độ không hợp lệ', code: 'INVALID_TELEMETRY' };
     }
 
+    const seqNum = seq === undefined || seq === null ? undefined : Number(seq);
+    if (seqNum !== undefined && (!Number.isInteger(seqNum) || seqNum < 0)) {
+      return { success: false, error: 'Số thứ tự bản tin GPS không hợp lệ', code: 'INVALID_TELEMETRY' };
+    }
+    let at = mockNow;
+    if (recorded_at !== undefined && recorded_at !== null) {
+      at = typeof recorded_at === 'string' ? Date.parse(recorded_at) : Number(recorded_at);
+      if (!Number.isFinite(at)) return { success: false, error: 'Thời điểm ghi vị trí không hợp lệ', code: 'INVALID_TELEMETRY' };
+      // A device clock ahead of the server must not lock out the next pings.
+      at = Math.min(at, mockNow);
+    }
+    seq = seqNum;
+
+    if (seq !== undefined && trip.last_seq !== undefined && seq <= trip.last_seq) {
+      return { success: true, accepted: false, reason: 'STALE' };
+    }
+    if (seq === undefined && trip.last_telemetry_at && at < trip.last_telemetry_at) {
+      return { success: true, accepted: false, reason: 'STALE' };
+    }
+
     const ping = {
       trip_id: tripId,
       vehicle_plate: trip.vehicle_plate,
@@ -554,13 +579,25 @@ export class DriverCockpitService {
       lng: lngNum,
       speed_kmh: speedNum,
       bearing_deg: parseInt(bearing_deg, 10) || 0,
-      timestamp: new Date(mockNow).toISOString()
+      timestamp: new Date(at).toISOString(),
+      seq,
+      accuracy_m: accuracy_m !== undefined ? parseFloat(accuracy_m) : undefined,
+      recorded_at: new Date(at).toISOString()
     };
+
+    if (!trip.telemetry_history) trip.telemetry_history = [];
+    trip.telemetry_history.push(ping);
+    if (trip.telemetry_history.length > 500) trip.telemetry_history.shift();
+
+    if (mockNow - at > 120000) {
+      return { success: true, accepted: false, reason: 'TOO_OLD' };
+    }
 
     trip.current_lat = ping.lat;
     trip.current_lng = ping.lng;
     trip.current_speed_kmh = ping.speed_kmh;
-    trip.last_telemetry_at = Math.max(trip.last_telemetry_at || 0, mockNow);
+    trip.last_telemetry_at = at;
+    if (seq !== undefined) trip.last_seq = seq;
 
     if (is_offline) {
       this.offlineQueue.push(ping);
@@ -572,6 +609,7 @@ export class DriverCockpitService {
 
     return {
       success: true,
+      accepted: true,
       buffered_offline_count: this.offlineQueue.length,
       data: ping
     };
@@ -1119,12 +1157,13 @@ export class DriverCockpitService {
       const lng = parseFloat(item.lng);
       const speed = item.speed_kmh === undefined ? 0 : parseFloat(item.speed_kmh);
       // A ping without a timestamp keeps the order it has in the buffer
-      const at = item.timestamp ? Date.parse(item.timestamp) : mockNow + index;
+      const at = item.recorded_at ? Date.parse(item.recorded_at) : (item.timestamp ? Date.parse(item.timestamp) : mockNow + index);
       const valid = trip
         && Number.isFinite(lat) && lat >= -90 && lat <= 90
         && Number.isFinite(lng) && lng >= -180 && lng <= 180
         && Number.isFinite(speed) && speed >= 0
-        && Number.isFinite(at);
+        && Number.isFinite(at)
+        && (item.accuracy_m === undefined || parseFloat(item.accuracy_m) <= 200);
       if (!valid) {
         invalidSkipped += 1;
         return;
@@ -1133,7 +1172,7 @@ export class DriverCockpitService {
         tripId,
         trip,
         at,
-        hasTimestamp: Boolean(item.timestamp),
+        hasTimestamp: Boolean(item.timestamp) || Boolean(item.recorded_at),
         data: {
           trip_id: tripId,
           vehicle_plate: trip.vehicle_plate || item.vehicle_plate,
@@ -1141,7 +1180,10 @@ export class DriverCockpitService {
           lng,
           speed_kmh: speed,
           bearing_deg: parseInt(item.bearing_deg, 10) || 0,
-          timestamp: new Date(at).toISOString()
+          timestamp: new Date(at).toISOString(),
+          seq: item.seq !== undefined ? parseInt(item.seq, 10) : undefined,
+          accuracy_m: item.accuracy_m !== undefined ? parseFloat(item.accuracy_m) : undefined,
+          recorded_at: new Date(at).toISOString()
         }
       });
     });
@@ -1165,11 +1207,27 @@ export class DriverCockpitService {
       processedKeys.add(key);
       replayed += 1;
 
+      if (ping.data.seq !== undefined && ping.trip.last_seq !== undefined && ping.data.seq <= ping.trip.last_seq) {
+        continue;
+      }
+      if (ping.data.seq === undefined && ping.trip.last_telemetry_at && ping.at < ping.trip.last_telemetry_at) {
+        continue;
+      }
+
+      if (!ping.trip.telemetry_history) ping.trip.telemetry_history = [];
+      ping.trip.telemetry_history.push(ping.data);
+      if (ping.trip.telemetry_history.length > 500) ping.trip.telemetry_history.shift();
+
+      if (mockNow - ping.at > 120000) {
+        continue; // TOO_OLD
+      }
+
       if (ping.at >= (ping.trip.last_telemetry_at || 0)) {
         ping.trip.current_lat = ping.data.lat;
         ping.trip.current_lng = ping.data.lng;
         ping.trip.current_speed_kmh = ping.data.speed_kmh;
         ping.trip.last_telemetry_at = ping.at;
+        if (ping.data.seq !== undefined) ping.trip.last_seq = ping.data.seq;
         positionUpdates += 1;
         lastApplied.set(ping.tripId, ping.data);
       }

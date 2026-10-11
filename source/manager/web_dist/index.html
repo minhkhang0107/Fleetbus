@@ -231,7 +231,10 @@ async function api(path, { method = 'GET', body, idempotent = false } = {}) {
 // Public passenger endpoints scoped by company (trip route, stops, bus) for the trip map.
 async function publicApi(path) {
   const code = state.platformCode || state.operator?.code;
-  try { const res = await fetch(path, { headers: code ? { 'X-Operator-Code': code } : {} }); const json = await res.json(); return res.ok ? json.data : null; } catch (_) { return null; }
+  // The staff token lets the office see the bus; anonymous callers only get the road and stops.
+  const headers = { Authorization: `Bearer ${state.token}` };
+  if (code) headers['X-Operator-Code'] = code;
+  try { const res = await fetch(path, { headers }); const json = await res.json(); return res.ok ? json.data : null; } catch (_) { return null; }
 }
 
 const STATUS = {

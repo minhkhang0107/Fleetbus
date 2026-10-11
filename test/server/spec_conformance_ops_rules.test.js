@@ -111,7 +111,7 @@ describe('Spec conformance: no-show, replay and manager figures', () => {
 
     const newer = { trip_id: trip, lat: 20.5, lng: 105.9, speed_kmh: 60, timestamp: new Date(t2).toISOString() };
     const older = { trip_id: trip, lat: 20.9, lng: 105.8, speed_kmh: 50, timestamp: new Date(t1).toISOString() };
-    const result = driver.replayOfflineBuffer([newer, older, { ...newer }, { trip_id: trip, lat: 'x', lng: 105.9 }]);
+    const result = driver.replayOfflineBuffer([newer, older, { ...newer }, { trip_id: trip, lat: 'x', lng: 105.9 }], t2);
 
     assert.strictEqual(result.replayed_count, 2);
     assert.strictEqual(result.position_updates, 2);

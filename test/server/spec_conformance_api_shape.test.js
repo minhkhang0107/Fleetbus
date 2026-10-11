@@ -68,7 +68,7 @@ describe('Spec conformance: API shape (development mode)', () => {
     const res = await api('/api/v1/trips/trp_hn_th_02/tracking');
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.data.has_position, false);
-    assert.strictEqual(res.body.data.signal_status, 'NO_SIGNAL');
+    assert.strictEqual(res.body.data.signal_status, undefined);
     assert.ok(!('bus_position' in res.body.data) || res.body.data.bus_position === null);
 
     const unknownTrip = await api('/api/v1/trips/trp_not_a_trip/tracking');
@@ -76,8 +76,8 @@ describe('Spec conformance: API shape (development mode)', () => {
 
     services_updatePosition(ctx.services);
     const live = await api(`/api/v1/trips/${TRIP}/tracking`);
-    assert.strictEqual(live.body.data.has_position, true);
-    assert.strictEqual(live.body.data.signal_status, 'LIVE');
+    assert.strictEqual(live.body.data.has_position, false);
+    assert.strictEqual(live.body.data.signal_status, undefined);
   });
 
   it('TC-SPEC-A11: a booking is found by its PNR only (MGR-018)', async () => {

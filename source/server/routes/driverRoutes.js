@@ -123,13 +123,21 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
         lng: body.lng,
         speed_kmh: body.speed_kmh,
         bearing_deg: body.bearing_deg,
+        seq: body.seq,
+        recorded_at: body.recorded_at,
+        accuracy_m: body.accuracy_m,
         is_offline: body.is_offline
       });
       if (result.success) {
+        // A stale or too old ping is not an error: the app just moves on to the next one.
+        if (result.accepted === false) {
+          sendSuccess(res, { accepted: false, reason: result.reason });
+          return;
+        }
         lastAcceptedTelemetry.set(tripId, Date.now());
         sendSuccess(res, result);
       } else {
-        sendError(res, result.error, result.code || 'TELEMETRY_ERROR', result.code === 'TRIP_NOT_FOUND' ? 404 : 400);
+        sendError(res, result.error, result.code || 'TELEMETRY_ERROR', result.code === 'TRIP_NOT_FOUND' ? 404 : (result.code === 'LOW_ACCURACY' ? 422 : 400));
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;

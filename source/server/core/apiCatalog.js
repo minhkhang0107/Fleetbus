@@ -73,5 +73,8 @@ export const API_CATALOG = [
   { method: 'GET', path: '/api/v1/ops/audit-logs', screen: 'MGR-028', summary: 'Audit log' },
   { method: 'POST', path: '/api/v1/webhooks/vietqr/ipn', screen: 'PAX-014', summary: 'Bank transfer notification' },
   { method: 'GET', path: '/health', screen: '', summary: 'Liveness and service status' },
-  { method: 'GET', path: '/api/v1/openapi.json', screen: '', summary: 'Machine-readable API description' }
+  { method: 'GET', path: '/api/v1/openapi.json', screen: '', summary: 'Machine-readable API description' },
+  { method: 'POST', path: '/api/v1/passenger/tickets/{ticketId}/share', screen: 'PAX-018', summary: 'Share ticket tracking' },
+  { method: 'GET', path: '/api/v1/service-config', screen: 'PAX-001', summary: 'Service config' },
+  { method: 'POST', path: '/api/v1/service-areas/check', screen: 'PAX-005', summary: 'Check service area' }
 ];

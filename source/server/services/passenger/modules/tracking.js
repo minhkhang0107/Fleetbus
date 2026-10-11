@@ -19,7 +19,7 @@ export class PassengerTrackingService {
   /**
    * PAX-018: Ingest Driver GPS telemetry ping & get Live Bus Radar Snapshot
    */
-  updateBusPosition(tripId, { lat, lng, speed_kmh, bearing_deg, plate_number, is_at_rest_stop, rest_stop_name = null, estimated_rest_minutes = null, mockNow = Date.now() }) {
+  updateBusPosition(tripId, { lat, lng, speed_kmh, bearing_deg, plate_number, is_at_rest_stop, rest_stop_name = null, estimated_rest_minutes = null, seq, recorded_at, accuracy_m, mockNow = Date.now() }) {
     // BR-TRACK-004: the rest stop is detected from the pings (still for over 5 minutes inside a geofence) unless told
     let isRestStop = Boolean(is_at_rest_stop);
     if (is_at_rest_stop === undefined) {
@@ -37,7 +37,9 @@ export class PassengerTrackingService {
       lng: parseFloat(lng),
       speed_kmh: parseFloat(speed_kmh) || 0,
       bearing_deg: parseInt(bearing_deg, 10) || 0,
-      timestamp: new Date(mockNow).toISOString(),
+      timestamp: recorded_at ? new Date(recorded_at).toISOString() : new Date(mockNow).toISOString(),
+      seq: seq !== undefined ? parseInt(seq, 10) : undefined,
+      accuracy_m: accuracy_m !== undefined ? parseFloat(accuracy_m) : undefined,
       status: isRestStop ? 'REST_STOP' : (speed_kmh > 5 ? 'IN_TRANSIT' : 'STOPPED'),
       is_at_rest_stop: isRestStop,
       rest_stop_name: rest_stop_name || (isRestStop ? 'Trạm dừng chân Ninh Bình' : null),
@@ -154,7 +156,7 @@ export class PassengerTrackingService {
   /**
    * Route-aware Live Radar HUD with stop coordinates, road shape, and along-road ETA.
    */
-  getTripRadar(tripId, { pickupStopId = null, dropoffStopId = null, boarded = false, stops = [], mockNow = Date.now(), view = null } = {}) {
+  getTripRadar(tripId, { pickupStopId = null, dropoffStopId = null, boarded = false, stops = [], mockNow = Date.now(), view = null, canSeeBus = false, tripStatus = null, isStaff = false } = {}) {
     const effectiveView = view || (pickupStopId || dropoffStopId || boarded ? 'TICKET' : 'PUBLIC');
     const busPos = this.busPositions.get(tripId);
     const shape = routeShape(tripId);
@@ -287,6 +289,48 @@ export class PassengerTrackingService {
     data.distance_basis = distanceBasis;
     data.has_passed_target = hasPassedTarget;
     data.view = effectiveView;
+
+    // Freshness
+    if (data.has_position && data.bus_position) {
+      const state = data.signal_status || 'NO_SIGNAL';
+      const freshness = {
+        position_at: data.bus_position.timestamp,
+        eta_computed_at: new Date(mockNow).toISOString(),
+        age_seconds: data.telemetry_age_seconds || 0,
+        state,
+        eta_basis: distanceBasis
+      };
+      if (state !== 'LIVE') {
+        freshness.warning = 'Vị trí có thể đã cũ, giờ đến chỉ là ước tính';
+      }
+      data.freshness = freshness;
+    } else {
+      data.freshness = { position_at: null, eta_computed_at: new Date(mockNow).toISOString(), age_seconds: null, state: 'NO_SIGNAL', eta_basis: distanceBasis, warning: 'Chưa nhận được vị trí của xe' };
+    }
+
+    // Privacy
+    const isEnded = tripStatus === 'COMPLETED' || tripStatus === 'CANCELLED';
+    if (!isStaff && (isEnded || !canSeeBus)) {
+      data.bus_position = null;
+      data.has_position = false;
+      delete data.distance_meters;
+      delete data.eta_minutes;
+      delete data.is_arriving_soon;
+      delete data.is_at_station;
+      delete data.has_passed_target;
+      delete data.hud_status_text;
+      delete data.signal_status;
+      delete data.telemetry_age_seconds;
+      delete data.stale_warning;
+      delete data.is_stale;
+      delete data.freshness;
+      delete data.distance_basis;
+
+      data.position_hidden = true;
+      if (isEnded) {
+        data.tracking_ended = true;
+      }
+    }
 
     return {
       success: true,

@@ -25,7 +25,8 @@ import { handleWebhookRoutes } from './routes/webhookRoutes.js';
 import { handlePlatformRoutes } from './routes/platformRoutes.js';
 import { handleServiceConfigRoutes } from './routes/serviceConfigRoutes.js';
 import { renderOnboardingPage, renderOnboardingNotFound } from './web/onboarding.js';
-import { findOperatorByCode } from './core/operators.js';
+import { renderTripSharePage } from './web/tripShare.js';
+import { findOperatorByCode, findOperatorById } from './core/operators.js';
 import { FleetBusEventBridge } from './core/fleetBusEventBridge.js';
 import { getWebhookSecret, getAuthMode, isProduction } from './config.js';
 import { resolveAccess, authenticate, IdempotencyStore, resolveOperator } from './core/gateway.js';
@@ -160,6 +161,33 @@ export function createFleetBusServer(customServices = {}) {
       const host = req.headers.host || `localhost:${process.env.PORT || 3000}`;
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(renderOnboardingPage(op, `http://${host}/o/${op.code}`));
+      return;
+    }
+
+    const trackingShare = req.method === 'GET' && pathname.match(/^\/t\/([A-Za-z0-9_-]{24})\/?$/);
+    if (trackingShare) {
+      const token = trackingShare[1];
+      let ticketFound = null;
+      for (const tkt of services.paymentService.tickets.values()) {
+        if (tkt.share_token === token && tkt.status !== 'CANCELLED' && services.paymentService.shareLinkValid(tkt)) {
+          ticketFound = tkt;
+          break;
+        }
+      }
+      if (!ticketFound) {
+        res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<h1>404 Không tìm thấy</h1><p>Link theo dõi không hợp lệ hoặc đã hết hạn.</p>');
+        return;
+      }
+      const op = findOperatorById(ticketFound.operator_id);
+      if (!op || op.active === false) {
+        res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<h1>404 Lỗi nhà xe</h1><p>Nhà xe không tồn tại.</p>');
+        return;
+      }
+      
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(renderTripSharePage(token, ticketFound.trip_id, op.code));
       return;
     }
 

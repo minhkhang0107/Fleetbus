@@ -187,7 +187,8 @@ export class PassengerPaymentService {
         dropoff_stop_id: order.dropoff_stop_id,
         status: 'ACTIVE', // ACTIVE | BOARDED | CANCELLED
         created_at: new Date(mockNow).toISOString(),
-        boarded_at: null
+        boarded_at: null,
+        share_token: createShareToken()
       };
 
       this.tickets.set(ticketId, ticket);
@@ -585,5 +586,36 @@ export class PassengerPaymentService {
         cancelled_at: cancelledAt
       }
     };
+  }
+
+  /**
+   * Link relatives open to follow the bus (spec adjustment A3). It lasts until 6 h after the later of the departure and
+   * the moment it was shared, and stops showing the bus once the trip ends.
+   */
+  createShareLink(ticketId, mockNow = Date.now()) {
+    const ticket = this.tickets.get(ticketId);
+    if (!ticket) {
+      return { success: false, error: 'Không tìm thấy vé', code: 'TICKET_NOT_FOUND' };
+    }
+    if (ticket.status === 'CANCELLED') {
+      return { success: false, error: 'Vé đã hủy', code: 'TICKET_CANCELLED' };
+    }
+    const departure = new Date(ticket.departure_time).getTime();
+    const expiresAt = new Date(Math.max(Number.isFinite(departure) ? departure : 0, mockNow) + 6 * 60 * 60 * 1000).toISOString();
+    ticket.share_expires_at = expiresAt;
+
+    return {
+      success: true,
+      data: {
+        share_token: ticket.share_token,
+        share_url: `/t/${ticket.share_token}`,
+        expires_at: expiresAt
+      }
+    };
+  }
+
+  /** Whether the share link of a ticket was issued and has not expired. */
+  shareLinkValid(ticket, mockNow = Date.now()) {
+    return Boolean(ticket?.share_expires_at) && new Date(ticket.share_expires_at).getTime() > mockNow;
   }
 }

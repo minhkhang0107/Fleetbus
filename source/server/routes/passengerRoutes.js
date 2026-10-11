@@ -6,6 +6,7 @@
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
 import { publicOperatorProfile, DEFAULT_OPERATOR_ID } from '../core/operators.js';
 import { tripVisibleTo } from '../core/tenancy.js';
+import { verifyToken } from '../core/tokens.js';
 
 // With authentication enforced, a ticket or order may only be used by its owner (or its holder, where allowed).
 function forbidTicket(req, res, paymentService, ticketId, { ownerOnly = false } = {}) {
@@ -326,6 +327,20 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // POST /api/v1/passenger/tickets/:ticketId/share (PAX-018)
+  if (pathname.startsWith('/api/v1/passenger/tickets/') && pathname.endsWith('/share') && req.method === 'POST') {
+    const parts = pathname.split('/');
+    const ticketId = parts[5];
+    if (forbidTicket(req, res, paymentService, ticketId, { ownerOnly: true })) return true;
+    const result = paymentService.createShareLink(ticketId);
+    if (result.success) {
+      sendSuccess(res, result.data);
+    } else {
+      sendError(res, result.error, result.code, 400);
+    }
+    return true;
+  }
+
   // POST /api/v1/passenger/payments/:orderId/verify-status (PAX-013 / REV-02)
   if (pathname.startsWith('/api/v1/passenger/payments/') && pathname.endsWith('/verify-status') && req.method === 'POST') {
     const parts = pathname.split('/');
@@ -370,21 +385,51 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     }
     const url = new URL(req.url, 'http://x');
     const ticketId = url.searchParams.get('ticket_id');
+    const shareToken = url.searchParams.get('share');
     let pickupStopId = null;
     let dropoffStopId = null;
     let boarded = false;
     let view = 'PUBLIC';
+    let canSeeBus = false;
 
-    if (ticketId && paymentService.tickets) {
+    let isStaff = false;
+    let callerPhone = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const tokenResult = verifyToken(authHeader.slice(7));
+      if (tokenResult.valid) {
+        if (tokenResult.payload.kind === 'staff' && (tokenResult.payload.operator_id === req.operatorId || tokenResult.payload.role === 'PLATFORM_ADMIN')) {
+          isStaff = true;
+          canSeeBus = true;
+          view = 'STAFF';
+        }
+        if (tokenResult.payload.kind === 'passenger') {
+          callerPhone = tokenResult.payload.phone;
+        }
+      }
+    }
+
+    if (shareToken && paymentService.tickets) {
+      const ticket = Array.from(paymentService.tickets.values()).find(t => t.share_token === shareToken && t.trip_id === tripId && t.status !== 'CANCELLED');
+      if (ticket && paymentService.shareLinkValid(ticket)) {
+        pickupStopId = ticket.pickup_stop_id || null;
+        dropoffStopId = ticket.dropoff_stop_id || null;
+        boarded = ticket.status === 'BOARDED';
+        view = 'TICKET';
+        canSeeBus = true;
+      }
+    } else if (ticketId && paymentService.tickets) {
       const ticket = paymentService.tickets.get(ticketId);
       if (ticket && ticket.trip_id === tripId && ticket.status !== 'CANCELLED') {
-        if (!tripVisibleTo(services, ticket.trip_id, req.operatorId)) {
-           // Ignore ticket if operator differs
-        } else {
-          pickupStopId = ticket.pickup_stop_id || null;
-          dropoffStopId = ticket.dropoff_stop_id || null;
-          boarded = ticket.status === 'BOARDED';
-          view = 'TICKET';
+        if (tripVisibleTo(services, ticket.trip_id, req.operatorId)) {
+          const access = callerPhone ? paymentService.getTicketAccess(ticketId, callerPhone) : 'NONE';
+          if (access !== 'NONE') {
+            pickupStopId = ticket.pickup_stop_id || null;
+            dropoffStopId = ticket.dropoff_stop_id || null;
+            boarded = ticket.status === 'BOARDED';
+            view = 'TICKET';
+            canSeeBus = true;
+          }
         }
       }
     }
@@ -399,7 +444,11 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       dropoffStopId,
       boarded,
       stops,
-      view
+      view,
+      canSeeBus,
+      // The live status is the driver's (or the office's) trip, not the search catalog.
+      tripStatus: services.driverService?.activeTrips?.get(tripId)?.status || services.managerService?.findTrip?.(tripId)?.status || null,
+      isStaff
     });
     sendSuccess(res, tracking.data || tracking);
     return true;

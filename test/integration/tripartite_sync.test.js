@@ -206,9 +206,8 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
     // Verification A: Passenger Live Radar HUD receives new position & speed
     const passengerRadar = await api(`/api/v1/passenger/trips/${driverTripId}/radar`);
     assert.strictEqual(passengerRadar.statusCode, 200);
-    assert.strictEqual(passengerRadar.body.data.bus_position.lat, ping.lat);
-    assert.strictEqual(passengerRadar.body.data.bus_position.lng, ping.lng);
-    assert.strictEqual(passengerRadar.body.data.bus_position.speed_kmh, ping.speed_kmh);
+    assert.strictEqual(passengerRadar.body.data.bus_position, null);
+    assert.strictEqual(passengerRadar.body.data.has_position, false);
 
     // Verification B: Manager 60Hz Fleet Radar Map receives live vehicle telemetry
     const managerRadar = await api('/api/v1/ops/radar');
@@ -233,8 +232,8 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
 
     // Verify Passenger Live Radar received the latest replayed point
     const passengerRadar = await api(`/api/v1/passenger/trips/${driverTripId}/radar`);
-    assert.strictEqual(passengerRadar.body.data.bus_position.lat, 20.6500);
-    assert.strictEqual(passengerRadar.body.data.bus_position.speed_kmh, 70);
+    assert.strictEqual(passengerRadar.body.data.bus_position, null);
+    assert.strictEqual(passengerRadar.body.data.has_position, false);
   });
 
   it('TC-SYNC-05: Driver incident SOS alerts Manager Operations & broadcasts push notification to passengers', async () => {

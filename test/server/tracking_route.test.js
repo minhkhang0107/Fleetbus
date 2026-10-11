@@ -1,6 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import http from 'http';
+import { signToken, TOKEN_PREFIXES } from '../../source/server/core/tokens.js';
 import {
   STOP_COORDS,
   ROUTE_SHAPES,
@@ -87,7 +88,7 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
       });
 
       const res = trackingService.getTripRadar('trp_hn_th_01', {
-        pickupStopId: 'stp_nb',
+        canSeeBus: true, pickupStopId: 'stp_nb',
         stops
       });
 
@@ -117,7 +118,7 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
       });
 
       const res = trackingService.getTripRadar('trp_hn_th_01', {
-        dropoffStopId: 'stp_th_pb',
+        canSeeBus: true, dropoffStopId: 'stp_th_pb',
         boarded: true,
         stops
       });
@@ -141,7 +142,7 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
         plate_number: '29B-882.19'
       });
       const arrivingRes = trackingService.getTripRadar('trp_hn_th_01', {
-        dropoffStopId: 'stp_th_pb',
+        canSeeBus: true, dropoffStopId: 'stp_th_pb',
         boarded: true,
         stops
       });
@@ -159,14 +160,14 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
 
       assert.strictEqual(res.success, true);
       assert.strictEqual(res.data.has_position, false);
-      assert.strictEqual(res.data.signal_status, 'NO_SIGNAL');
+      assert.strictEqual(res.data.signal_status, undefined);
       assert.ok(Array.isArray(res.data.stops), 'Stops should be an array');
       assert.ok(res.data.stops.length > 0, 'Stops array should not be empty');
       assert.ok(res.data.stops.every(s => typeof s.lat === 'number' && typeof s.lng === 'number'), 'Stops must have coordinates');
       assert.ok(Array.isArray(res.data.route_shape), 'Route shape should be present');
       assert.strictEqual(res.data.target_stop.stop_id, 'stp_hn_gb', 'Target should fall back to first stop');
-      assert.strictEqual(res.data.distance_basis, 'STRAIGHT_LINE');
-      assert.strictEqual(res.data.has_passed_target, false);
+      assert.strictEqual(res.data.distance_basis, undefined);
+      assert.strictEqual(res.data.has_passed_target, undefined);
       assert.strictEqual(res.data.view, 'PUBLIC');
     });
 
@@ -181,7 +182,7 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
       });
 
       const res = trackingService.getTripRadar('trp_no_shape', {
-        pickupStopId: 'stp_hn_gb'
+        canSeeBus: true, pickupStopId: 'stp_hn_gb'
       });
 
       assert.strictEqual(res.success, true);
@@ -203,7 +204,7 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
       });
 
       const res = trackingService.getTripRadar('trp_hn_th_01', {
-        pickupStopId: 'stp_hn_gb',
+        canSeeBus: true, pickupStopId: 'stp_hn_gb',
         boarded: false,
         stops,
         view: 'TICKET'
@@ -232,7 +233,7 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
       });
 
       const res = trackingService.getTripRadar('trp_hn_th_01', {
-        dropoffStopId: 'stp_nb',
+        canSeeBus: true, dropoffStopId: 'stp_nb',
         boarded: true,
         stops,
         view: 'TICKET'
@@ -267,11 +268,8 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
       assert.strictEqual(res.data.view, 'PUBLIC');
       assert.strictEqual(res.data.target_stop.stop_id, 'stp_nb');
       assert.strictEqual(res.data.target_stop.kind, 'PICKUP');
-      assert.strictEqual(res.data.has_passed_target, false);
-      assert.ok(
-        res.data.hud_status_text.startsWith('Xe đang đến Bến xe Ninh Bình'),
-        `HUD text should start with "Xe đang đến Bến xe Ninh Bình": got "${res.data.hud_status_text}"`
-      );
+      assert.strictEqual(res.data.has_passed_target, undefined);
+      assert.strictEqual(res.data.hud_status_text, undefined);
     });
   });
 
@@ -302,10 +300,12 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
       });
     });
 
-    function makeRequest(path) {
+    const passengerAuth = (phone) => ({ Authorization: `Bearer ${signToken({ sub: `u_${phone}`, phone, kind: 'passenger', operator_id: 'op_saomai' }, { prefix: TOKEN_PREFIXES.passenger, ttlSeconds: 600 })}` });
+
+    function makeRequest(path, headers = {}) {
       return new Promise((resolve, reject) => {
         const url = `${baseUrl}${path}`;
-        const req = http.request(url, { method: 'GET' }, (res) => {
+        const req = http.request(url, { method: 'GET', headers }, (res) => {
           let rawData = '';
           res.on('data', chunk => { rawData += chunk; });
           res.on('end', () => {
@@ -363,7 +363,7 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
       assert.strictEqual(res.body.data.view, 'PUBLIC');
       assert.strictEqual(res.body.data.target_stop.stop_id, 'stp_nb');
       assert.strictEqual(res.body.data.target_stop.kind, 'PICKUP');
-      assert.ok(res.body.data.hud_status_text.startsWith('Xe đang đến Bến xe Ninh Bình'));
+      assert.strictEqual(res.body.data.hud_status_text, undefined);
     });
 
     it('TC-ROUTE-03: With a BOARDED ticket_id, radar targets the drop-off stop and does not leak identity', async () => {
@@ -377,8 +377,9 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
         passenger_name: 'Nguyen Van A',
         passenger_phone: '0988776655'
       });
+      // Only the ticket's owner (or holder) sees the bus through ticket_id.
 
-      const res = await makeRequest(`/api/v1/trips/trp_hn_th_01/tracking?ticket_id=${ticketId}`);
+      const res = await makeRequest(`/api/v1/trips/trp_hn_th_01/tracking?ticket_id=${ticketId}`, passengerAuth('0988776655'));
       assert.strictEqual(res.statusCode, 200);
       assert.strictEqual(res.body.status, 'success');
       assert.strictEqual(res.body.data.view, 'TICKET');
@@ -413,7 +414,7 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
         plate_number: '29B-882.19'
       });
 
-      const res = await makeRequest(`/api/v1/trips/trp_hn_th_01/tracking?ticket_id=${ticketId}`);
+      const res = await makeRequest(`/api/v1/trips/trp_hn_th_01/tracking?ticket_id=${ticketId}`, passengerAuth('0912345678'));
       assert.strictEqual(res.statusCode, 200);
       assert.strictEqual(res.body.status, 'success');
       assert.strictEqual(res.body.data.view, 'TICKET');
@@ -424,6 +425,15 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
       assert.strictEqual(res.body.data.distance_meters, 0);
       assert.strictEqual(res.body.data.eta_minutes, 0);
       assert.strictEqual(res.body.data.hud_status_text, 'Xe đã qua Bến xe Giáp Bát');
+    });
+
+    it('TC-ROUTE-05: The same ticket_id without the owner token gets the public view without the bus', async () => {
+      const res = await makeRequest('/api/v1/trips/trp_hn_th_01/tracking?ticket_id=tkt_test_boarded_01');
+      assert.strictEqual(res.statusCode, 200);
+      assert.strictEqual(res.body.data.view, 'PUBLIC');
+      assert.strictEqual(res.body.data.bus_position, null);
+      assert.strictEqual(res.body.data.position_hidden, true);
+      assert.ok(Array.isArray(res.body.data.stops));
     });
   });
 });

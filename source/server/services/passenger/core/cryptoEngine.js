@@ -128,7 +128,7 @@ export function verifyTicketPin(ticketId, pin, secretKey, version = 1) {
  * Opaque token for a share link: the link never carries the ticket id or the PIN.
  */
 export function createShareToken() {
-  return crypto.randomBytes(16).toString('base64url');
+  return crypto.randomBytes(18).toString('base64url');
 }
 
 /**
