@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import 'passenger_cancel_refund_screen.dart';
@@ -121,6 +122,27 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
     if (sent != null && mounted) showToast(context, 'Đã gửi vé tới ${maskPhone(sent)}');
   }
 
+  /// Relatives open the link in a browser and see the bus coming, without the passenger's details.
+  Future<void> _shareTracking(PassengerStore store) async {
+    final r = await store.shareTracking(widget.ticket);
+    if (!mounted) return;
+    if (!r.ok) {
+      showToast(context, r.error!);
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: r.value!));
+    if (!mounted) return;
+    await showAppSheet<void>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('Link theo dõi xe', style: sans(size: 18, weight: FontWeight.w700)),
+          gap(8),
+          Text('Đã sao chép. Gửi link này qua Zalo hoặc tin nhắn; người nhận mở bằng trình duyệt để xem xe đang ở đâu. Link hết hạn sau chuyến đi.', style: sans(size: 14, color: PTokens.muted, height: 1.5)),
+          gap(12),
+          SelectableText(r.value!, style: mono(size: 14)),
+          gap(14),
+          PrimaryButton(label: 'Xong', onPressed: () => Navigator.of(ctx).pop()),
+        ]));
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = PassengerScope.of(context);
@@ -204,6 +226,14 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
               Expanded(child: KeyValue('Đón', '${t.pickup} · ${t.departure}')),
               Expanded(child: KeyValue('Ngày', t.date)),
             ]),
+            if (t.homePickup != null) ...[
+              gap(12),
+              Align(alignment: Alignment.centerLeft, child: KeyValue('Đón tận nhà${t.pickupWindow != null ? ' · ${t.pickupWindow}' : ''}', t.homePickup!)),
+            ],
+            if (t.homeDropoff != null) ...[
+              gap(12),
+              Align(alignment: Alignment.centerLeft, child: KeyValue('Trả tận nhà', t.homeDropoff!)),
+            ],
             gap(12),
             Align(alignment: Alignment.centerLeft, child: KeyValue('Hành khách', t.name)),
           ]),
@@ -224,6 +254,7 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
             Expanded(child: LinkButton(label: _showPin ? 'Ẩn mã PIN' : 'Hiện mã PIN dự phòng', onPressed: t.pin == null ? null : () => setState(() => _showPin = !_showPin))),
             Expanded(child: LinkButton(label: 'Đổi mã QR', onPressed: () => _reissue(store))),
           ]),
+          LinkButton(label: 'Gửi link theo dõi xe cho người thân', onPressed: () => _shareTracking(store)),
           LinkButton(label: 'Hủy vé', color: PTokens.danger, onPressed: () => confirmCancelTicket(context, t)),
         ],
       ]),

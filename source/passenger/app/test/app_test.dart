@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:app/main.dart';
+import 'package:app/src/presentation/passenger/passenger_home_address_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_store.dart';
 import 'package:app/src/presentation/passenger/passenger_payment_processing_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_checkout_screen.dart';
@@ -73,7 +74,7 @@ void main() {
       if (path.endsWith('/app/config')) {
         final code = req.url.queryParameters['operator'] ?? '';
         if (code == 'SAOMAI') {
-          data = {'operator': {'operator_id': 'op1', 'code': 'SAOMAI', 'name': 'Nhà xe Sao Mai', 'short_name': 'Sao Mai', 'hotline': '1900 6868', 'primary_color': '#E11D48'}};
+          data = {'operator': {'operator_id': 'op1', 'code': 'SAOMAI', 'name': 'Nhà xe Sao Mai', 'short_name': 'Sao Mai', 'hotline': '1900 6868', 'primary_color': '#E11D48', 'pickup_modes': ['FIXED_STOP', 'HOME_PICKUP'], 'dropoff_modes': ['FIXED_LOCATION']}};
         } else if (code == 'XUYENVIET') {
           data = {'operator': {'operator_id': 'op2', 'code': 'XUYENVIET', 'name': 'Xuyên Việt Lines', 'short_name': 'Xuyên Việt', 'hotline': '1900 2468', 'primary_color': '#2563EB'}};
         } else {
@@ -102,6 +103,23 @@ void main() {
       if (path.endsWith('/otp/verify')) {
         data = {'token': 'tok', 'user': {'full_name': 'Hành khách BusGo', 'operator': {'code': req.headers['x-operator-code'] ?? 'SAOMAI'}}};
       }
+      if (path.endsWith('/service-config')) {
+        data = {
+          'pickup_modes': ['FIXED_STOP', 'HOME_PICKUP'],
+          'dropoff_modes': ['FIXED_LOCATION'],
+          'service_areas': [
+            {'area_id': 'sa_hn', 'name': 'Nội thành Hà Nội', 'kind': 'PICKUP', 'polygon': [[21.075, 105.755], [21.075, 105.885], [20.945, 105.885], [20.945, 105.755]], 'fee_vnd': 50000, 'lead_time_minutes': 120, 'service_hours': {'from': '04:30', 'to': '22:00'}},
+          ],
+        };
+      }
+      if (path.endsWith('/service-areas/check')) {
+        final body = jsonDecode(req.body) as Map<String, dynamic>;
+        if ((body['lat'] as num) > 21.075) {
+          return http.Response(jsonEncode({'status': 'error', 'code': 'OUTSIDE_SERVICE_AREA', 'message': 'Địa chỉ nằm ngoài vùng phục vụ'}), 422, headers: {'content-type': 'application/json; charset=utf-8'});
+        }
+        data = {'serviceable': true, 'area_id': 'sa_hn', 'area_name': 'Nội thành Hà Nội', 'fee_vnd': 50000};
+      }
+      if (path.endsWith('/tickets/tkt_BG1_A02/share')) data = {'share_token': 'abc', 'share_url': '/t/abc'};
       if (path.endsWith('/trips/search')) list = [trip];
       if (path.endsWith('/seat-map')) {
         data = {
@@ -178,6 +196,50 @@ void main() {
     expect(bodyOf('/seats/hold'), {'seatCodes': ['A02'], 'pickupStopId': 'stp_hn_gb', 'dropoffStopId': 'stp_th_pb'});
     expect(store.holdPhase, 'hold');
     store.stopHold();
+  });
+
+  test('home pickup: the server checks the pinned address, the ride starts at the first stop and the order carries it', () async {
+    final store = await storeWithServer();
+    expect(store.operator!.homePickup, isTrue);
+    expect(store.operator!.homeDropoff, isFalse);
+    await store.verifyOtp('0987654321', '123456');
+    await store.loadTrips();
+    store.chooseTrip(store.trips.single);
+    await Future<void>.delayed(Duration.zero);
+    expect(store.serviceAreas.single.feeVnd, 50000);
+    store.setPickup('stp_nb');
+
+    expect(await store.setHomeAddress(pickupSide: true, address: '  ', lat: 21.0, lng: 105.8), 'Nhập địa chỉ để tài xế tìm được bạn');
+    expect(await store.setHomeAddress(pickupSide: true, address: 'Sóc Sơn', lat: 21.25, lng: 105.85), 'Địa chỉ nằm ngoài vùng phục vụ');
+    expect(store.homePickup, isNull);
+
+    expect(await store.setHomeAddress(pickupSide: true, address: '12 ngõ 34 Giải Phóng', lat: 20.99, lng: 105.84, note: 'cổng xanh'), isNull);
+    expect(bodyOf('/service-areas/check'), {'kind': 'PICKUP', 'lat': 20.99, 'lng': 105.84, 'trip_id': 'trp_hn_th_01'});
+    expect(store.pickup, 'stp_hn_gb', reason: 'a home pickup rides from the first stop');
+    expect(store.homeFees, 50000);
+
+    await store.loadSeatMap();
+    store.toggleSeat('A02');
+    await store.holdSeats();
+    expect(await store.createOrder('Nguyễn An', '0987654321'), isNull);
+    expect(bodyOf('/bookings/create')['homePickup'], {'address': '12 ngõ 34 Giải Phóng', 'lat': 20.99, 'lng': 105.84, 'note': 'cổng xanh'});
+    expect(bodyOf('/bookings/create').containsKey('homeDropoff'), isFalse);
+
+    store.setPickup('stp_nb');
+    expect(store.homePickup, isNull, reason: 'choosing a fixed stop drops the home address');
+  });
+
+  test('a ticket shows its home pickup and window, and a tracking link is made absolute', () async {
+    final store = await storeWithServer();
+    final t = Ticket.fromJson({
+      ...ticket,
+      'home_pickup': {'address': '12 ngõ 34 Giải Phóng', 'window_from': '2026-08-27T22:00:00Z', 'window_to': '2026-08-27T22:40:00Z'},
+    });
+    expect(t.homePickup, '12 ngõ 34 Giải Phóng');
+    expect(t.pickupWindow, '05:00–05:40');
+    expect(t.homeDropoff, isNull);
+    final link = await store.shareTracking(t);
+    expect(link.value, 'http://test/t/abc');
   });
 
   test('no ticket before the bank confirms; after it the wallet ticket becomes the receipt', () async {
@@ -356,6 +418,7 @@ void main() {
         PassengerScope(store: store, child: const PassengerMainShell(initialTab: 3)),
         PassengerScope(store: store, child: const PassengerSearchResultsScreen()),
         PassengerScope(store: store, child: const PassengerTripDetailScreen()),
+        PassengerScope(store: store, child: const PassengerHomeAddressScreen(pickupSide: true)),
         PassengerScope(store: store, child: const PassengerSeatMapScreen()),
         PassengerScope(store: store, child: const PassengerCheckoutScreen()),
         PassengerScope(store: store, child: const PassengerPaymentProcessingScreen(name: 'Nguyễn An', phone: '0987654321')),

@@ -14,12 +14,19 @@ class OperatorInfo {
     required this.shortName,
     required this.hotline,
     required this.primaryColor,
+    this.pickupModes = const ['FIXED_STOP'],
+    this.dropoffModes = const ['FIXED_LOCATION'],
   });
   final String code;
   final String name;
   final String shortName;
   final String hotline;
   final String primaryColor;
+  final List<String> pickupModes;
+  final List<String> dropoffModes;
+
+  bool get homePickup => pickupModes.contains('HOME_PICKUP');
+  bool get homeDropoff => dropoffModes.contains('HOME_DROPOFF');
 
   factory OperatorInfo.fromJson(Map<String, dynamic> j) => OperatorInfo(
         code: j['code'] ?? '',
@@ -27,7 +34,46 @@ class OperatorInfo {
         shortName: j['short_name'] ?? '',
         hotline: j['hotline'] ?? '',
         primaryColor: j['primary_color'] ?? '',
+        pickupModes: [for (final m in (j['pickup_modes'] as List? ?? const ['FIXED_STOP'])) '$m'],
+        dropoffModes: [for (final m in (j['dropoff_modes'] as List? ?? const ['FIXED_LOCATION'])) '$m'],
       );
+}
+
+/// A home service area drawn by the bus company (spec 3.3).
+class ServiceArea {
+  const ServiceArea({required this.id, required this.name, required this.kind, required this.polygon, required this.feeVnd, required this.leadMinutes, required this.from, required this.to});
+  final String id;
+  final String name;
+  final String kind; // PICKUP | DROPOFF
+  final List<({double lat, double lng})> polygon;
+  final int feeVnd;
+  final int leadMinutes;
+  final String from;
+  final String to;
+
+  factory ServiceArea.fromJson(Map<String, dynamic> j) => ServiceArea(
+        id: '${j['area_id']}',
+        name: '${j['name'] ?? ''}',
+        kind: '${j['kind']}',
+        polygon: [for (final p in (j['polygon'] as List? ?? const [])) (lat: (p[0] as num).toDouble(), lng: (p[1] as num).toDouble())],
+        feeVnd: (j['fee_vnd'] as num? ?? 0).toInt(),
+        leadMinutes: (j['lead_time_minutes'] as num? ?? 0).toInt(),
+        from: '${j['service_hours']?['from'] ?? ''}',
+        to: '${j['service_hours']?['to'] ?? ''}',
+      );
+}
+
+/// A home address the server accepted for pickup or drop-off, with its fee.
+class HomeAddress {
+  const HomeAddress({required this.address, required this.lat, required this.lng, required this.feeVnd, required this.areaName, this.note = ''});
+  final String address;
+  final double lat;
+  final double lng;
+  final int feeVnd;
+  final String areaName;
+  final String note;
+
+  Map<String, dynamic> toJson() => {'address': address, 'lat': lat, 'lng': lng, if (note.isNotEmpty) 'note': note};
 }
 
 class Place {
@@ -150,6 +196,9 @@ class Ticket {
     required this.name,
     required this.status,
     this.plate = '',
+    this.homePickup,
+    this.homeDropoff,
+    this.pickupWindow,
   });
   final String id;
   final String pnr;
@@ -162,6 +211,11 @@ class Ticket {
   final String dropoff;
   final int paid;
   final String name;
+  /// Home pickup / drop-off address (spec 3.1); the ticket still rides from [pickup] to [dropoff].
+  final String? homePickup;
+  final String? homeDropoff;
+  /// "05:00–05:40": when the pickup run reaches a home pickup.
+  final String? pickupWindow;
   String plate;
   TicketStatus status;
   int delay = 0;
@@ -195,8 +249,19 @@ class Ticket {
       paid: (j['fare_vnd'] as num?)?.toInt() ?? 0,
       name: j['passenger_name'] ?? '',
       status: status,
+      homePickup: j['home_pickup']?['address'],
+      homeDropoff: j['home_dropoff']?['address'],
+      pickupWindow: _window(j['home_pickup']),
     )..refund = (j['refund_amount_vnd'] as num?)?.toInt();
   }
+}
+
+String? _window(dynamic home) {
+  final from = DateTime.tryParse('${home?['window_from'] ?? ''}');
+  final to = DateTime.tryParse('${home?['window_to'] ?? ''}');
+  if (from == null || to == null) return null;
+  final vn = (DateTime d) => d.toUtc().add(const Duration(hours: 7));
+  return '${_hhmm(vn(from))}–${_hhmm(vn(to))}';
 }
 
 class AppNotice {
@@ -340,6 +405,10 @@ class PassengerStore extends ChangeNotifier {
   Trip? trip;
   String pickup = '';
   String dropoff = '';
+  HomeAddress? homePickup;
+  HomeAddress? homeDropoff;
+  List<ServiceArea> serviceAreas = [];
+  int get homeFees => (homePickup?.feeVnd ?? 0) + (homeDropoff?.feeVnd ?? 0);
   int deck = 1;
   List<Seat> seatMap = [];
   bool loadingSeats = false;
@@ -577,16 +646,56 @@ class PassengerStore extends ChangeNotifier {
     pickup = t.stops.firstWhere((s) => s.pickup, orElse: () => t.stops.first).id;
     final inDest = t.stops.where((s) => s.dropoff && s.city == destPlace.city).toList();
     dropoff = (inDest.isNotEmpty ? inDest.first : t.stops.lastWhere((s) => s.dropoff, orElse: () => t.stops.last)).id;
+    homePickup = null;
+    homeDropoff = null;
     seats.clear();
     seatMap = [];
     deck = 1;
+    notifyListeners();
+    if ((operator?.homePickup ?? false) || (operator?.homeDropoff ?? false)) loadServiceAreas();
+  }
+
+  /// Home service areas of the company, drawn on the address map.
+  Future<void> loadServiceAreas() async {
+    final r = await _call(() => api.getServiceConfig());
+    if (!r.ok) return;
+    serviceAreas = [for (final a in (r.value!['service_areas'] as List? ?? const [])) ServiceArea.fromJson(a as Map<String, dynamic>)];
+    notifyListeners();
+  }
+
+  /// Checks a home address with the server for this trip; returns an error to show, or null once it is set.
+  /// A home pickup rides from the first stop, a home drop-off from the last one (spec adjustment A4).
+  Future<String?> setHomeAddress({required bool pickupSide, required String address, required double lat, required double lng, String note = ''}) async {
+    if (address.trim().isEmpty) return 'Nhập địa chỉ để tài xế tìm được bạn';
+    final r = await _call(() => api.checkServiceArea(kind: pickupSide ? 'PICKUP' : 'DROPOFF', lat: lat, lng: lng, tripId: trip?.id));
+    if (!r.ok) return r.error;
+    final home = HomeAddress(address: address.trim(), lat: lat, lng: lng, feeVnd: (r.value!['fee_vnd'] as num? ?? 0).toInt(), areaName: '${r.value!['area_name'] ?? ''}', note: note.trim());
+    final list = stops();
+    if (pickupSide) {
+      homePickup = home;
+      setPickup(list.firstWhere((s) => s.pickup, orElse: () => list.first).id, keepHome: true);
+    } else {
+      homeDropoff = home;
+      setDropoff(list.lastWhere((s) => s.dropoff, orElse: () => list.last).id, keepHome: true);
+    }
+    notifyListeners();
+    return null;
+  }
+
+  void clearHomeAddress({required bool pickupSide}) {
+    if (pickupSide) {
+      homePickup = null;
+    } else {
+      homeDropoff = null;
+    }
     notifyListeners();
   }
 
   List<Stop> stops() => trip?.stops ?? const [];
   Stop stop(String id) => stops().firstWhere((s) => s.id == id, orElse: () => stops().first);
 
-  void setPickup(String id) {
+  void setPickup(String id, {bool keepHome = false}) {
+    if (!keepHome) homePickup = null;
     pickup = id;
     final list = stops();
     final p = list.indexWhere((s) => s.id == id);
@@ -596,7 +705,8 @@ class PassengerStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setDropoff(String id) {
+  void setDropoff(String id, {bool keepHome = false}) {
+    if (!keepHome) homeDropoff = null;
     dropoff = id;
     notifyListeners();
   }
@@ -692,6 +802,8 @@ class PassengerStore extends ChangeNotifier {
           voucherCode: voucher,
           pickupStop: pickup,
           dropoffStop: dropoff,
+          homePickup: homePickup?.toJson(),
+          homeDropoff: homeDropoff?.toJson(),
           insuranceSelected: insured,
         ));
     if (!r.ok) return r.error;
@@ -707,6 +819,14 @@ class PassengerStore extends ChangeNotifier {
     final expires = DateTime.tryParse('${pay['expires_at']}');
     _startCountdown('pay', expires == null ? 600 : expires.difference(DateTime.now()).inSeconds.clamp(60, 1800));
     return null;
+  }
+
+  /// A link relatives open in a browser to follow the bus of this ticket (spec adjustment A3).
+  Future<ApiResult<String>> shareTracking(Ticket t) async {
+    final r = await _call(() => api.shareTicketTracking(t.id));
+    if (!r.ok) return ApiResult(null, r.error, r.code);
+    final path = '${r.value!['share_url'] ?? ''}';
+    return ApiResult(path.startsWith('http') ? path : '${api.baseUrl}$path');
   }
 
   /// PAX-013 / PAX-014: asks the server; the ticket exists only once the bank confirmed (BR-PAY-004).

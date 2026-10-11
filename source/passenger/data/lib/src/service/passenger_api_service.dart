@@ -203,6 +203,21 @@ class PassengerApiClientService {
    * PAX-011 / PAX-012 / PAX-013: Create the booking and its VietQR payment order.
    * The server prices the order; [holdId] must be the live hold of the same passenger on exactly [seatCodes].
    */
+  /// Pickup / drop-off modes and home service areas of the bus company (spec 3).
+  Future<Map<String, dynamic>> getServiceConfig() {
+    return _get('/api/v1/service-config');
+  }
+
+  /// Whether an address can be served at home: kind is PICKUP or DROPOFF; with a trip, its departure decides lead time and hours.
+  Future<Map<String, dynamic>> checkServiceArea({required String kind, required double lat, required double lng, String? tripId}) {
+    return _post('/api/v1/service-areas/check', body: {'kind': kind, 'lat': lat, 'lng': lng, if (tripId != null) 'trip_id': tripId});
+  }
+
+  /// A link the ticket owner sends to relatives so they can follow the bus without the app.
+  Future<Map<String, dynamic>> shareTicketTracking(String ticketId) {
+    return _post('/api/v1/passenger/tickets/$ticketId/share');
+  }
+
   Future<Map<String, dynamic>> createBookingOrder({
     required String tripId,
     required String holdId,
@@ -212,6 +227,8 @@ class PassengerApiClientService {
     String? voucherCode,
     String? pickupStop,
     String? dropoffStop,
+    Map<String, dynamic>? homePickup,
+    Map<String, dynamic>? homeDropoff,
     bool insuranceSelected = false,
     String? idempotencyKey,
   }) {
@@ -226,6 +243,8 @@ class PassengerApiClientService {
         'voucherCode': voucherCode,
         'pickupStop': pickupStop,
         'dropoffStop': dropoffStop,
+        if (homePickup != null) 'homePickup': homePickup,
+        if (homeDropoff != null) 'homeDropoff': homeDropoff,
         'insuranceSelected': insuranceSelected,
       },
       idempotent: true,
