@@ -245,6 +245,21 @@ class ManagerApiService {
     );
   }
 
+  // MGR-017: buses and drivers the office may give a trip, each with the reason it cannot when it cannot
+  Future<Map<String, dynamic>> getAssignOptions(String tripId) {
+    return _get('/ops/trips/$tripId/assign-options');
+  }
+
+  // MGR-017: give a trip its bus and driver; scope SCHEDULE makes them the default of the schedule's later runs
+  Future<Map<String, dynamic>> assignTrip(String tripId, {required String vehicleId, required String driverId, String scope = 'TRIP', String? idempotencyKey}) {
+    return _post(
+      '/ops/trips/$tripId/assign',
+      body: {'vehicleId': vehicleId, 'driverId': driverId, 'scope': scope},
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
   // MGR-025: Operations alerts feed
   Future<Map<String, dynamic>> getAlerts() {
     return _get('/ops/alerts');
