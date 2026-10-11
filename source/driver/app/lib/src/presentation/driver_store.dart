@@ -222,6 +222,7 @@ class DriverStore extends ChangeNotifier {
   Timer? _clockTimer;
   Timer? _driveTimer;
   Timer? _telemetryTimer;
+  int _seq = 0;
 
   DriverStop get stop => stops.isEmpty ? const DriverStop('', '', '--:--') : stops[stopIndex];
   bool get lastStop => stops.isNotEmpty && stopIndex == stops.length - 1;
@@ -445,7 +446,12 @@ class DriverStore extends ChangeNotifier {
         _lng -= 0.001;
       }
     }
-    await _call(() => api.sendTelemetry(tripId!, lat: _lat, lng: _lng, speedKmh: speed.toDouble(), bearingDeg: _bearing));
+    // The server ignores a ping older than the last one it applied (spec 6.4): the sequence is the device time in ms,
+    // so it keeps growing across app restarts.
+    final at = DateTime.now();
+    _seq = at.millisecondsSinceEpoch > _seq ? at.millisecondsSinceEpoch : _seq + 1;
+    final seq = _seq;
+    await _call(() => api.sendTelemetry(tripId!, lat: _lat, lng: _lng, speedKmh: speed.toDouble(), bearingDeg: _bearing, seq: seq, recordedAt: at));
   }
 
   // ---------- Stops (DRI-008) ----------

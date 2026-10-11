@@ -146,6 +146,10 @@ void main() {
       expect(telemBody['lat'], isA<double>());
       expect(telemBody['lng'], isA<double>());
       expect(telemBody['bearing_deg'], isA<double>());
+      expect(DateTime.tryParse(telemBody['recorded_at'] as String), isNotNull);
+      await store.sendTelemetry();
+      final nextBody = jsonDecode(sent.lastWhere((r) => r.url.path.contains('/telemetry')).body) as Map<String, dynamic>;
+      expect(nextBody['seq'] as int, greaterThan(telemBody['seq'] as int), reason: 'each ping has a higher sequence');
 
       store.dispose();
     });

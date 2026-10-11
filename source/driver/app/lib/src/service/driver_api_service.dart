@@ -141,12 +141,18 @@ class DriverApiClientService {
     required double lng,
     required double speedKmh,
     required double bearingDeg,
+    int? seq,
+    DateTime? recordedAt,
+    double? accuracyM,
   }) {
     return _post('/api/v1/driver/trips/$tripId/telemetry', body: {
       'lat': lat,
       'lng': lng,
       'speed_kmh': speedKmh,
       'bearing_deg': bearingDeg,
+      if (seq != null) 'seq': seq,
+      if (recordedAt != null) 'recorded_at': recordedAt.toUtc().toIso8601String(),
+      if (accuracyM != null) 'accuracy_m': accuracyM,
     });
   }
 
