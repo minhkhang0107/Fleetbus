@@ -47,6 +47,10 @@ class PassengerRouteMap extends StatefulWidget {
 }
 
 class PassengerRouteMapState extends State<PassengerRouteMap> {
+  // One tile provider for the map's life: the radar rebuilds on every position update, and a new provider per build
+  // disposes the previous one (and its HTTP client) before slow tiles arrive (seen on the driver tablet).
+  late final TileProvider _tiles = widget.tileProvider ?? NetworkTileProvider(abortObsoleteRequests: false);
+
   late final MapController _mapController;
   bool _mapReady = false;
   bool _fitted = false;
@@ -370,7 +374,7 @@ class PassengerRouteMapState extends State<PassengerRouteMap> {
                 userAgentPackageName: 'vn.busgo.passenger',
                 // Keep requests that the first camera jump makes obsolete: aborting them left the
                 // whole-route tiles stuck on the ROD2 tablet until the user moved the map.
-                tileProvider: widget.tileProvider ?? NetworkTileProvider(abortObsoleteRequests: false),
+                tileProvider: _tiles,
               ),
             PolylineLayer(polylines: polylines),
             MarkerLayer(markers: markers),

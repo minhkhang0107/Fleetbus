@@ -20,6 +20,8 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
   final _address = TextEditingController();
   final _note = TextEditingController();
   final _map = MapController();
+  // One tile provider for the screen's life (a new one per rebuild cancels slow tile loads).
+  final _tiles = NetworkTileProvider(abortObsoleteRequests: false);
   bool _mapReady = false;
   bool _fitted = false;
   LatLng? _pin;
@@ -105,7 +107,7 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
             }),
           ),
           children: [
-            if (passengerMapTiles) TileLayer(urlTemplate: passengerMapTileUrl, subdomains: const ['a', 'b', 'c'], userAgentPackageName: 'vn.busgo.passenger', tileProvider: NetworkTileProvider(abortObsoleteRequests: false)),
+            if (passengerMapTiles) TileLayer(urlTemplate: passengerMapTileUrl, subdomains: const ['a', 'b', 'c'], userAgentPackageName: 'vn.busgo.passenger', tileProvider: _tiles),
             PolygonLayer(polygons: [
               for (final a in areas) Polygon(points: [for (final p in a.polygon) LatLng(p.lat, p.lng)], color: PTokens.primary.withValues(alpha: 0.12), borderColor: PTokens.primary, borderStrokeWidth: 2),
             ]),
