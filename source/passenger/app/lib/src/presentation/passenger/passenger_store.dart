@@ -229,6 +229,7 @@ class Ticket {
     this.homePickup,
     this.homeDropoff,
     this.pickupWindow,
+    this.pickupNotice,
   });
   final String id;
   final String pnr;
@@ -246,6 +247,8 @@ class Ticket {
   final String? homeDropoff;
   /// "05:00–05:40": when the pickup run reaches a home pickup.
   final String? pickupWindow;
+  /// Set when the driver reported the home address unreachable: why, and where to meet.
+  final String? pickupNotice;
   String plate;
   TicketStatus status;
   int delay = 0;
@@ -282,6 +285,9 @@ class Ticket {
       homePickup: j['home_pickup']?['address'],
       homeDropoff: j['home_dropoff']?['address'],
       pickupWindow: _window(j['home_pickup']),
+      pickupNotice: j['home_pickup']?['inaccessible_at'] == null
+          ? null
+          : 'Xe không vào được địa chỉ (${j['home_pickup']['inaccessible_reason'] ?? ''})${j['home_pickup']['meeting_point'] != null ? '. Hẹn ở ${j['home_pickup']['meeting_point']}' : '. Tài xế sẽ gọi cho bạn'}',
     )..refund = (j['refund_amount_vnd'] as num?)?.toInt();
   }
 }

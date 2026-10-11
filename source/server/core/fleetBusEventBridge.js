@@ -486,6 +486,33 @@ export class FleetBusEventBridge extends EventEmitter {
       }
     });
 
+    // Spec A9: a home pickup the bus cannot reach. The passenger is told once, the ticket keeps the note, and the
+    // office gets an alert to arrange the pickup (call the passenger, send a smaller vehicle).
+    this.on('HOME_PICKUP_INACCESSIBLE', ({ tripId, ticketId, seatCode, phone, address, reason, meetingPoint, vehiclePlate, now = Date.now() }) => {
+      const operatorId = operatorOfTrip(this.services, tripId);
+      const ticket = paymentService?.tickets?.get(ticketId);
+      if (ticket?.home_pickup) ticket.home_pickup = { ...ticket.home_pickup, inaccessible_at: new Date(now).toISOString(), inaccessible_reason: reason, meeting_point: meetingPoint };
+      trackingService?.sendNotificationOnce?.(`${ticketId}:HOME_PICKUP_INACCESSIBLE`, phone || ticket?.passenger_phone, {
+        operatorId,
+        title: 'Xe không vào được địa chỉ đón',
+        body: meetingPoint
+          ? `Tài xế xe ${vehiclePlate} không vào được ${address} (${reason}). Mời bạn ra ${meetingPoint}; tài xế sẽ gọi cho bạn.`
+          : `Tài xế xe ${vehiclePlate} không vào được ${address} (${reason}). Tài xế hoặc nhà xe sẽ gọi để hẹn điểm đón.`,
+        type: 'HOME_PICKUP_INACCESSIBLE',
+        payload: { trip_id: tripId, ticket_id: ticketId, meeting_point: meetingPoint }
+      });
+      managerService?.alerts?.unshift?.({
+        alert_id: `alt_inacc_${ticketId}`,
+        vehicle_plate: vehiclePlate,
+        type: 'HOME_PICKUP_INACCESSIBLE',
+        severity: 'AMBER',
+        message: `Ghế ${seatCode}: xe không vào được ${address} (${reason})${meetingPoint ? `, hẹn khách ở ${meetingPoint}` : ''}`,
+        created_at: new Date(now).toISOString(),
+        operator_id: operatorId,
+        trip_id: tripId
+      });
+    });
+
     // MGR-017: the office gave a trip its bus and driver. The driver trip follows; passengers who already have a
     // ticket are told once per new pair when the bus or the driver changed (spec 9).
     this.on('TRIP_ASSIGNED', ({ tripId, vehiclePlate, vehicleModel, capacity, driverId, driverName, previous }) => {

@@ -1243,6 +1243,27 @@ export class DriverCockpitService {
   }
 
   /**
+   * Spec A9: the driver cannot reach a home pickup address (narrow lane, truck ban). The passenger is told why
+   * and, when the driver gives one, where to meet; the office gets an alert to arrange it. Recorded once.
+   */
+  reportInaccessibleAddress(tripId, ticketId, { reason, meetingPoint = null } = {}, mockNow = Date.now()) {
+    const trip = this.activeTrips.get(tripId);
+    if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+    const item = trip.manifest.find(m => m.ticket_id === ticketId);
+    if (!item) return { success: false, error: 'Không tìm thấy vé trong danh sách', code: 'TICKET_NOT_FOUND' };
+    if (!item.home_pickup) return { success: false, error: 'Vé này không đón tận nhà', code: 'NOT_HOME_PICKUP' };
+    if (item.boarding_status === 'BOARDED') return { success: false, error: 'Khách đã lên xe', code: 'ALREADY_BOARDED' };
+    const text = typeof reason === 'string' ? reason.trim() : '';
+    if (text.length < 5 || text.length > 200) return { success: false, error: 'Ghi lý do không vào được (5-200 ký tự)', code: 'VALIDATION_ERROR' };
+    const meet = typeof meetingPoint === 'string' && meetingPoint.trim() ? meetingPoint.trim().slice(0, 200) : null;
+    if (item.home_pickup.inaccessible_at) return { success: true, data: this._publicPassenger(item) };
+    item.home_pickup = { ...item.home_pickup, inaccessible_at: new Date(mockNow).toISOString(), inaccessible_reason: text, meeting_point: meet };
+    this._event(trip, 'HOME_ADDRESS_INACCESSIBLE', { ticket_id: ticketId, seat_code: item.seat_code, reason: text, meeting_point: meet }, mockNow);
+    this.eventBridge?.emit?.('HOME_PICKUP_INACCESSIBLE', { tripId, ticketId, seatCode: item.seat_code, phone: item.passenger_phone || null, address: item.home_pickup.address, reason: text, meetingPoint: meet, vehiclePlate: trip.vehicle_plate, now: mockNow });
+    return { success: true, data: this._publicPassenger(item) };
+  }
+
+  /**
    * DRI-019: Report Incident / SOS / Delay
    */
   /**

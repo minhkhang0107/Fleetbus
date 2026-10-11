@@ -4,6 +4,7 @@
  */
 
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { isProduction } from '../config.js';
 
 
 // An unpaid COD ticket is a 409 that tells the app which fare to collect (DRI-010, DRI-012).
@@ -213,7 +214,8 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     parseJsonBody(req).then(body => {
       const tId = ticketId || body.ticketId || body.ticket_id;
       const result = driverService.markNoShow(tripId, tId, body.reason, {
-        mockNow: body.now || Date.now(),
+        // The grace period runs on the server clock; a client time is honoured in tests only.
+        mockNow: (!isProduction() && body.now) || Date.now(),
         passengerRequestedCancel: Boolean(body.passenger_requested_cancel)
       });
       if (result.success) {
@@ -221,6 +223,17 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
       } else {
         sendError(res, result.error, result.code, ['TRIP_NOT_FOUND', 'TICKET_NOT_FOUND'].includes(result.code) ? 404 : 400);
       }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/driver/trips/:tripId/tickets/:ticketId/inaccessible (spec A9: home address not reachable)
+  const inaccessible = pathname.match(/^\/api\/v1\/driver\/trips\/([^/]+)\/tickets\/([^/]+)\/inaccessible$/);
+  if (inaccessible && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const result = driverService.reportInaccessibleAddress(inaccessible[1], inaccessible[2], { reason: body.reason, meetingPoint: body.meeting_point ?? body.meetingPoint });
+      if (result.success) sendSuccess(res, result.data);
+      else sendError(res, result.error, result.code, ['TRIP_NOT_FOUND', 'TICKET_NOT_FOUND'].includes(result.code) ? 404 : (result.code === 'VALIDATION_ERROR' ? 400 : 409));
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }

@@ -181,4 +181,6 @@ Cập nhật 2026-10-11. Kiểm chứng bằng test tự động (`npm test`: 36
 | 15. Không lộ thông tin khách cho người không có quyền | Xong (số điện thoại che, địa chỉ nhà chỉ chủ vé và tài xế chuyến thấy, link chia sẻ không có tên/số) | `tracking_privacy.test.js` |
 | 16. Ghi nhật ký các chuyển trạng thái quan trọng | Xong (nhật ký chuyến: xuất bến, tới trạm, bỏ qua trạm, lên xe, vắng mặt, xuống xe, kết thúc; nhật ký thao tác quản trị) | `trip_operations.test.js`; web "Nhật ký chuyến" |
 
-Chưa làm (để sau, đúng phạm vi §13): tối ưu lộ trình đón nhiều nhà và xe trung chuyển riêng; thao tác "Không vào được địa chỉ" của tài xế (A9); thông báo đổi tài xế/đổi xe đã có từ trước nhưng thông báo "đổi điểm đón" chưa có; trạng thái trạm `APPROACHING` mới dùng cho thông báo, chưa hiện trong danh sách trạm; lưu trữ PostgreSQL và xóa dữ liệu theo thời hạn A10.
+Đã làm thêm: thao tác "Không vào được địa chỉ" của tài xế (A9: báo khách kèm điểm hẹn, cảnh báo điều hành, ghi nhật ký chuyến); gán xe và tài xế cho chuyến theo ngày; giờ từng điểm dừng do nhà xe nhập hoặc ước tính theo lộ trình.
+
+Chưa làm (để sau, đúng phạm vi §13): tối ưu lộ trình đón nhiều nhà và xe trung chuyển riêng; thông báo đổi tài xế/đổi xe đã có từ trước nhưng thông báo "đổi điểm đón" chưa có; trạng thái trạm `APPROACHING` mới dùng cho thông báo, chưa hiện trong danh sách trạm; lưu trữ PostgreSQL và xóa dữ liệu theo thời hạn A10.

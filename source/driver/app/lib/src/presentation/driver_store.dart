@@ -45,6 +45,8 @@ class Passenger {
     this.pickupWindow,
     this.homeLat,
     this.homeLng,
+    this.inaccessible = false,
+    this.meetingPoint,
   });
   final String ticketId;
   final String seat;
@@ -67,6 +69,9 @@ class Passenger {
   /// Pinned position of the home pickup, drawn on the driver map.
   final double? homeLat;
   final double? homeLng;
+  /// The driver reported the home address unreachable (spec A9), with the meeting point given, if any.
+  final bool inaccessible;
+  final String? meetingPoint;
   bool get codDue => cod > 0 && !paid;
 
   factory Passenger.fromJson(Map<String, dynamic> j) {
@@ -98,6 +103,8 @@ class Passenger {
       pickupWindow: _window(j['home_pickup']),
       homeLat: (j['home_pickup']?['lat'] as num?)?.toDouble(),
       homeLng: (j['home_pickup']?['lng'] as num?)?.toDouble(),
+      inaccessible: j['home_pickup']?['inaccessible_at'] != null,
+      meetingPoint: j['home_pickup']?['meeting_point'],
     );
   }
 }
@@ -537,6 +544,10 @@ class DriverStore extends ChangeNotifier {
     if (r.error == null) await refreshTrip();
     return (error: r.error, code: r.code, data: r.data);
   }
+
+  /// Spec A9: the bus cannot reach this home pickup; the manifest reloads to show it.
+  Future<String?> reportInaccessible(Passenger p, String reason, String meetingPoint) =>
+      _act('Không vào được địa chỉ ghế ${p.seat}', () => api.reportInaccessible(tripId!, p.ticketId, reason: reason, meetingPoint: meetingPoint));
 
   Future<String?> markNoShow(Passenger p) => _act('Vắng mặt ghế ${p.seat}', () => api.markNoShow(tripId!, p.ticketId));
 

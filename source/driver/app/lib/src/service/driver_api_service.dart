@@ -237,6 +237,15 @@ class DriverApiClientService {
   /**
    * DRI-011: Mark a passenger as no-show (10 minutes after departure, or when the passenger asked to cancel)
    */
+  /// Spec A9: the bus cannot reach this home pickup address; the passenger and the office are told.
+  Future<Map<String, dynamic>> reportInaccessible(String tripId, String ticketId, {required String reason, String? meetingPoint}) {
+    return _post(
+      '/api/v1/driver/trips/$tripId/tickets/$ticketId/inaccessible',
+      body: {'reason': reason, if (meetingPoint != null && meetingPoint.isNotEmpty) 'meeting_point': meetingPoint},
+      idempotent: true,
+    );
+  }
+
   Future<Map<String, dynamic>> markNoShow(String tripId, String ticketId, {
     String? reason,
     bool passengerRequestedCancel = false,

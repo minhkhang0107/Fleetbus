@@ -30,6 +30,38 @@ class DriverManifestScreen extends StatelessWidget {
     if (context.mounted) Navigator.of(context).pop();
   }
 
+  /// Spec A9: the bus cannot reach a home pickup. A quick reason, an optional meeting point; the passenger and
+  /// the office are told by the server.
+  Future<void> _inaccessible(BuildContext context, DriverStore store, Passenger p) async {
+    const reasons = ['Ngõ quá hẹp, xe không vào được', 'Đường cấm xe khách giờ này', 'Không tìm thấy địa chỉ'];
+    var reason = reasons.first;
+    final meet = TextEditingController();
+    final sent = await showDriverSheet<bool>(context, builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setSheet) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Không vào được địa chỉ ghế ${p.seat}', style: dsans(size: 18, weight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Text(p.homePickup ?? '', style: dsans(size: 15, color: DTokens.sub)),
+            const SizedBox(height: 12),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final r in reasons)
+                ChoiceChip(label: Text(r), selected: reason == r, onSelected: (_) => setSheet(() => reason = r)),
+            ]),
+            const SizedBox(height: 12),
+            TextField(controller: meet, style: dsans(size: 16), decoration: const InputDecoration(labelText: 'Hẹn khách ở đâu? (không bắt buộc)', hintText: 'VD: đầu ngõ, cổng chợ')),
+            const SizedBox(height: 8),
+            Text('Khách nhận thông báo; điều hành nhận cảnh báo để sắp xếp.', style: dsans(size: 13, color: DTokens.muted)),
+            const SizedBox(height: 14),
+            SheetActions(
+              primary: BigButton(label: 'Báo khách và điều hành', color: DTokens.warn, foreground: const Color(0xFF1C1917), onPressed: () => Navigator.of(ctx).pop(true)),
+              secondary: BigButton(label: 'Thôi', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop(false)),
+            ),
+          ]),
+        ));
+    if (sent != true || !context.mounted) return;
+    final error = await store.reportInaccessible(p, reason, meet.text.trim());
+    if (context.mounted) dToast(context, error ?? 'Đã báo khách ghế ${p.seat}');
+  }
+
   Future<void> _noShow(BuildContext context, DriverStore store, Passenger p) async {
     final yes = await showDriverSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('Đánh dấu ghế ${p.seat} vắng mặt?', style: dsans(size: 18, weight: FontWeight.w700)),
@@ -63,6 +95,7 @@ class DriverManifestScreen extends StatelessWidget {
           },
           onCod: () => showCodSheet(context, p),
           onNoShow: () => _noShow(context, store, p),
+          onInaccessible: () => _inaccessible(context, store, p),
         );
     final drops = store.dropOffPassengers;
     final allHandled = list.every((p) => p.status != PaxStatus.waiting);
@@ -158,13 +191,14 @@ class DriverManifestScreen extends StatelessWidget {
 }
 
 class _PassengerRow extends StatelessWidget {
-  const _PassengerRow({required this.p, required this.noShowOpen, required this.opensAt, required this.onBoard, required this.onCod, required this.onNoShow});
+  const _PassengerRow({required this.p, required this.noShowOpen, required this.opensAt, required this.onBoard, required this.onCod, required this.onNoShow, required this.onInaccessible});
   final Passenger p;
   final bool noShowOpen;
   final String opensAt;
   final VoidCallback onBoard;
   final VoidCallback onCod;
   final VoidCallback onNoShow;
+  final VoidCallback onInaccessible;
 
   @override
   Widget build(BuildContext context) {
@@ -202,6 +236,8 @@ class _PassengerRow extends StatelessWidget {
                     padding: const EdgeInsets.only(top: 4),
                     child: Text('Đón tận nhà${p.pickupWindow != null ? ' ${p.pickupWindow}' : ''}: ${p.homePickup}${p.homeNote.isNotEmpty ? ' · ${p.homeNote}' : ''}', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.warnInk)),
                   ),
+                if (p.homePickup != null && p.inaccessible)
+                  Text('Đã báo không vào được${p.meetingPoint != null ? ' · hẹn ở ${p.meetingPoint}' : ''}', style: dsans(size: 13, color: DTokens.sub)),
               ]),
             ),
             pill,
@@ -217,6 +253,11 @@ class _PassengerRow extends StatelessWidget {
               const SizedBox(width: 8),
               noShowButton,
             ]),
+            if (p.homePickup != null && !p.inaccessible)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(onPressed: onInaccessible, style: TextButton.styleFrom(minimumSize: const Size(48, 44)), child: Text('Không vào được địa chỉ', style: dsans(size: 14, weight: FontWeight.w600, color: DTokens.warn))),
+              ),
           ],
         ]),
       ),

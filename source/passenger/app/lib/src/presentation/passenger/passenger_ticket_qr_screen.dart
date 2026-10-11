@@ -230,6 +230,15 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
               gap(12),
               Align(alignment: Alignment.centerLeft, child: KeyValue('Đón tận nhà${t.pickupWindow != null ? ' · ${t.pickupWindow}' : ''}', t.homePickup!)),
             ],
+            if (t.pickupNotice != null) ...[
+              gap(12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: PTokens.warnSoft, borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+                child: Semantics(liveRegion: true, child: Text(t.pickupNotice!, style: sans(size: 14, weight: FontWeight.w600, color: PTokens.warnInk))),
+              ),
+            ],
             if (t.homeDropoff != null) ...[
               gap(12),
               Align(alignment: Alignment.centerLeft, child: KeyValue('Trả tận nhà', t.homeDropoff!)),

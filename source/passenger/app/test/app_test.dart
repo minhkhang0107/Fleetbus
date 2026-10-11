@@ -407,6 +407,9 @@ void main() {
     expect(t.homePickup, '12 ngõ 34 Giải Phóng');
     expect(t.pickupWindow, '05:00–05:40');
     expect(t.homeDropoff, isNull);
+    expect(t.pickupNotice, isNull);
+    final moved = Ticket.fromJson({...ticket, 'home_pickup': {'address': '12 ngõ 34 Giải Phóng', 'inaccessible_at': '2026-08-27T22:50:00Z', 'inaccessible_reason': 'Ngõ quá hẹp', 'meeting_point': 'đầu ngõ 34'}});
+    expect(moved.pickupNotice, 'Xe không vào được địa chỉ (Ngõ quá hẹp). Hẹn ở đầu ngõ 34');
     final link = await store.shareTracking(t);
     expect(link.value, 'http://test/t/abc');
   });
