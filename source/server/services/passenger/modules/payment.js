@@ -3,6 +3,7 @@
  * Implements PAX-013 (VietQR Payment), PAX-014/015 (Verification & Success), PAX-016 (My Tickets), PAX-017 (Boarding QR).
  */
 
+import { DEMO_DATE, vnDate } from '../../../core/serviceDate.js';
 import {
   generateVietQRPayload,
   generateBoardingQR,
@@ -11,7 +12,7 @@ import {
   createShareToken
 } from '../core/cryptoEngine.js';
 import { validateVietnamPhone, calculateRefundAmount } from '../core/formatters.js';
-import { getTicketSecret } from '../../../config.js';
+import { getTicketSecret, isProduction } from '../../../config.js';
 import { findOperatorById, DEFAULT_OPERATOR_ID } from '../../../core/operators.js';
 
 // PAX-025: a delay longer than this waives the cancellation fee
@@ -286,7 +287,7 @@ export class PassengerPaymentService {
    * PAX-016: Get passenger ticket wallet with tab filters (UPCOMING, COMPLETED, CANCELLED).
    * The phone must be a complete, valid number and is matched exactly.
    */
-  getTicketsByPhone(phone, filter = 'UPCOMING', operatorId = DEFAULT_OPERATOR_ID) {
+  getTicketsByPhone(phone, filter = 'UPCOMING', operatorId = DEFAULT_OPERATOR_ID, now = Date.now()) {
     const phoneCheck = validateVietnamPhone(phone);
     if (!phoneCheck.isValid) {
       return { success: false, error: phoneCheck.message, code: 'INVALID_PHONE' };
@@ -312,7 +313,13 @@ export class PassengerPaymentService {
       return { success: false, error: 'Tab vé không hợp lệ (UPCOMING, HISTORY hoặc CANCELLED)', code: 'INVALID_TAB' };
     }
     const isCancelled = (t) => t.status === 'CANCELLED';
-    const isHistory = (t) => !isCancelled(t) && (t.status === 'NO_SHOW' || Boolean(t.trip_completed));
+    // A trip whose day is over is history even if nobody closed it (outside production the demo day stays upcoming).
+    const today = vnDate(now);
+    const dayOver = (t) => {
+      const day = t.departure_time ? vnDate(Date.parse(t.departure_time)) : null;
+      return Boolean(day) && day < today && (isProduction() || day !== DEMO_DATE);
+    };
+    const isHistory = (t) => !isCancelled(t) && (t.status === 'NO_SHOW' || Boolean(t.trip_completed) || dayOver(t));
     const filtered = userTickets.filter(t => {
       if (tab === 'CANCELLED') return isCancelled(t);
       if (tab === 'HISTORY') return isHistory(t);

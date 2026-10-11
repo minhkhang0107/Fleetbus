@@ -81,4 +81,13 @@ describe('A day\'s run is operated: ops trip, driver trip and manifest set up fr
     const pos = await request('/api/v1/ops/pos/orders', { method: 'POST', token: cashier, body: { tripId: runId, passengerName: 'Khách quầy', phone: '0905556677', seatCodes: ['B02'], pickupStopId: 'stp_hn_gb', dropoffStopId: 'stp_nb' } });
     assert.ok([200, 201].includes(pos.status), JSON.stringify(pos.body));
   });
+
+  it('a ticket whose day is over moves to history; the demo day stays upcoming outside production', () => {
+    const tickets = services.paymentService;
+    const [ticket] = [...tickets.tickets.values()].filter(t => t.trip_id === runId);
+    const after = Date.parse(`${addDays(day, 1)}T08:00:00+07:00`);
+    assert.ok(tickets.getTicketsByPhone('0904445566', 'UPCOMING').data.some(t => t.ticket_id === ticket.ticket_id));
+    assert.ok(!tickets.getTicketsByPhone('0904445566', 'UPCOMING', 'op_saomai', after).data.some(t => t.ticket_id === ticket.ticket_id));
+    assert.ok(tickets.getTicketsByPhone('0904445566', 'HISTORY', 'op_saomai', after).data.some(t => t.ticket_id === ticket.ticket_id));
+  });
 });
