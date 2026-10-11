@@ -448,6 +448,7 @@ export class DriverCockpitService {
         const day = t.planned_departure_time ? vnDate(Date.parse(t.planned_departure_time)) : null;
         return !day || day === today || (!isProduction() && day === DEMO_DATE);
       })
+      .sort((a, b) => Date.parse(a.planned_departure_time || 0) - Date.parse(b.planned_departure_time || 0))
       .map(t => this._publicTrip(t));
     return {
       success: true,
