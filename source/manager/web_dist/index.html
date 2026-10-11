@@ -343,16 +343,17 @@ async function openTrip(tripId) {
   const [trip, inv, track, ops] = await Promise.all([api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/seat-inventory`), publicApi(`/api/v1/trips/${encodeURIComponent(tripId)}/tracking`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/operations`)]);
   const opsData = ops.ok ? ops.data : null;
   if (!trip.ok) { $('#tripDetail').innerHTML = `<div class="error">${esc(trip.message)}</div>`; return; }
-  const t = trip.data; const s = inv.ok ? inv.data.summary || {} : {};
+  // The board row has the route and driver names the trip record lacks.
+  const t = { ...(boardTrips.find(b => b.trip_id === tripId) || {}), ...trip.data }; const s = inv.ok ? inv.data.summary || {} : {};
   const stops = track?.stops || [];
   $('#tripDetail').innerHTML = `
-    <div class="row"><div class="grow"><div style="font-weight:700;font-size:16px">${esc(t.route_name || t.route_id || '')}</div>
+    <div class="row"><div class="grow"><div style="font-weight:700;font-size:16px">${esc(boardTrips.find(b => b.trip_id === tripId)?.route_name || t.route_name || t.route_id || '')}</div>
       <div class="muted mono">${esc(t.trip_id)} · ${esc(t.vehicle_plate)} · ${esc(hhmm(t.departure_time))} ${esc(dmy(t.departure_time))}</div></div>${pill(t.status)}</div>
     <div class="stat">
       <div><b>${esc(t.booked_seats ?? s.booked ?? 0)}</b><span>Đã bán</span></div>
       <div><b>${esc(t.held_seats ?? s.hotline_hold ?? 0)}</b><span>Đang giữ</span></div>
-      <div><b>${esc(t.boarded_passengers ?? 0)}</b><span>Đã lên xe</span></div>
-      <div><b>${esc(t.on_board ?? '—')}</b><span>Còn trên xe</span></div>
+      <div><b>${esc(opsData ? opsData.stops.reduce((n, st) => n + st.counts.boarded, 0) : (t.boarded_passengers ?? 0))}</b><span>Đã lên xe</span></div>
+      <div><b>${esc(opsData?.on_board_count ?? t.on_board_count ?? '—')}</b><span>Còn trên xe</span></div>
     </div>
     <div id="tripMap" class="map"></div>
     <div class="muted" id="tripTrack" style="margin-top:6px"></div>
