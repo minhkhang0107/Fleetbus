@@ -7,7 +7,7 @@ import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.j
 import { publicOperatorProfile, DEFAULT_OPERATOR_ID } from '../core/operators.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { verifyToken } from '../core/tokens.js';
-import { resolveHomeBooking } from '../core/serviceAreas.js';
+import { publicRouteService, resolveHomeBooking, routeServiceConfig } from '../core/serviceAreas.js';
 import { isProduction } from '../config.js';
 import { checkBookableDeparture, checkTravelDate, serviceCalendar } from '../core/serviceDate.js';
 
@@ -140,8 +140,9 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     }
     const found = searchService.searchTrips({ originCity: origin, destinationCity: dest, vehicleType, timeSlot, date, operatorId: req.operatorId });
     // Runs of the day that already left are not sold.
-    const trips = date ? (found.data || []).filter(t => checkBookableDeparture(t.departure_time, Date.now(), { production: isProduction() }).ok) : found;
-    sendSuccess(res, trips.data || trips);
+    const listed = date ? (found.data || []).filter(t => checkBookableDeparture(t.departure_time, Date.now(), { production: isProduction() }).ok) : (found.data || []);
+    // Each trip says how its route offers pickup / drop-off (stop style and modes, set per company and route).
+    sendSuccess(res, listed.map(t => ({ ...t, service: publicRouteService(req.operator?.service_config, t.route_id) })));
     return true;
   }
 
@@ -251,7 +252,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       // Seed trips are dated 2026-08-28: outside production a departure already past is a demo trip, so the lead time
       // is measured as if booked the day before.
       const departureMs = new Date(tripDetail.departure_time).getTime();
-      const home = resolveHomeBooking(req.operator?.service_config, {
+      const home = resolveHomeBooking(routeServiceConfig(req.operator?.service_config, tripDetail.route_id), {
         stops: tripDetail.stops || [],
         departureTime: tripDetail.departure_time,
         pickupStopId: holdCheck.data.pickup_stop_id,
@@ -623,7 +624,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     }
     const detail = searchService.getTripDetail(tripId, req.operatorId);
     if (detail.success) {
-      sendSuccess(res, detail.data);
+      sendSuccess(res, { ...detail.data, service: publicRouteService(req.operator?.service_config, detail.data.route_id) });
     } else {
       sendError(res, detail.error, detail.code, 404);
     }

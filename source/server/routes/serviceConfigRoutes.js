@@ -5,7 +5,7 @@
 import crypto from 'crypto';
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
 import { defaultServiceConfig } from '../core/operators.js';
-import { checkHomeService, publicServiceConfig, validateArea, validateModes } from '../core/serviceAreas.js';
+import { STOP_STYLES, checkHomeService, publicServiceConfig, routeServiceConfig, validateArea, validateModes, validateRouteSettings } from '../core/serviceAreas.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { isProduction } from '../config.js';
 
@@ -60,18 +60,22 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
         return;
       }
       let departureTime = null;
+      let config = configOf(req);
       if (body.trip_id) {
         if (!tripVisibleTo(services, body.trip_id, req.operatorId)) {
           sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
           return;
         }
-        departureTime = searchService.getTripDetail(body.trip_id, req.operatorId)?.data?.departure_time || null;
+        const trip = searchService.getTripDetail(body.trip_id, req.operatorId)?.data;
+        departureTime = trip?.departure_time || null;
+        // The trip's route may offer other modes than the company default.
+        config = routeServiceConfig(config, trip?.route_id);
       }
       // Seed trips are dated 2026-08-28: outside production a past departure is checked as if booked the day before
       // (same rule as the order).
       const departureMs = departureTime ? new Date(departureTime).getTime() : NaN;
       const now = !isProduction() && departureMs < Date.now() ? departureMs - 24 * 3600000 : Date.now();
-      const result = checkHomeService(configOf(req), { kind, lat: Number(body.lat), lng: Number(body.lng), departureTime, now });
+      const result = checkHomeService(config, { kind, lat: Number(body.lat), lng: Number(body.lng), departureTime, now });
       if (!result.ok) {
         sendError(res, result.message, result.code, result.code === 'VALIDATION_ERROR' ? 400 : 422);
         return;
@@ -95,8 +99,13 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
         pickup_modes: body.pickup_modes ?? config.pickup_modes,
         dropoff_modes: body.dropoff_modes ?? config.dropoff_modes,
         allow_home_to_home: body.allow_home_to_home ?? config.allow_home_to_home,
-        approaching_threshold_minutes: body.approaching_threshold_minutes ?? config.approaching_threshold_minutes
+        approaching_threshold_minutes: body.approaching_threshold_minutes ?? config.approaching_threshold_minutes,
+        stop_style: body.stop_style ?? config.stop_style ?? 'STATIONS'
       };
+      if (!STOP_STYLES.includes(next.stop_style)) {
+        sendError(res, 'Kiểu điểm đón phải là ROUTE_LINE hoặc STATIONS', 'VALIDATION_ERROR', 400);
+        return;
+      }
       const error = validateModes(next);
       if (error) {
         sendError(res, error, 'VALIDATION_ERROR', 400);
@@ -126,6 +135,50 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
       configOf(req).service_areas.push(created);
       audit(req, managerService, { action: 'SERVICE_AREA_CREATE', resource: created.area_id, after: snapshot(created) });
       sendSuccess(res, snapshot(created), 201);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/ops/service-config/routes: every route of the company with its own and effective settings.
+  if (pathname === '/api/v1/ops/service-config/routes' && req.method === 'GET') {
+    const config = configOf(req);
+    const routes = managerService.getRoutes(req.operatorId).data;
+    sendSuccess(res, {
+      routes: routes.map(r => {
+        const effective = routeServiceConfig(config, r.route_id);
+        return { route_id: r.route_id, name: r.name, own: snapshot(config.route_configs?.[r.route_id] || {}), stop_style: effective.stop_style, pickup_modes: effective.pickup_modes, dropoff_modes: effective.dropoff_modes };
+      })
+    });
+    return true;
+  }
+
+  // PUT /api/v1/ops/service-config/routes/:routeId: a route's own stop style and modes (null = use the company's).
+  const routeMatch = pathname.match(/^\/api\/v1\/ops\/service-config\/routes\/([^/]+)$/);
+  if (routeMatch && req.method === 'PUT') {
+    parseJsonBody(req).then(body => {
+      const routeId = routeMatch[1];
+      if (!managerService.routes.some(r => r.route_id === routeId && r.operator_id === req.operatorId)) {
+        sendError(res, 'Không tìm thấy tuyến', 'ROUTE_NOT_FOUND', 404);
+        return;
+      }
+      const error = validateRouteSettings(body);
+      if (error) {
+        sendError(res, error, 'VALIDATION_ERROR', 400);
+        return;
+      }
+      const config = configOf(req);
+      if (!config.route_configs) config.route_configs = {};
+      const before = snapshot(config.route_configs[routeId] || {});
+      const own = { ...before };
+      for (const [key, value] of Object.entries(body)) {
+        if (value === null) delete own[key];
+        else own[key] = Array.isArray(value) ? [...new Set(value)] : value;
+      }
+      if (Object.keys(own).length) config.route_configs[routeId] = own;
+      else delete config.route_configs[routeId];
+      audit(req, managerService, { action: 'ROUTE_SERVICE_UPDATE', resource: routeId, before, after: snapshot(own) });
+      const effective = routeServiceConfig(config, routeId);
+      sendSuccess(res, { route_id: routeId, own, stop_style: effective.stop_style, pickup_modes: effective.pickup_modes, dropoff_modes: effective.dropoff_modes });
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }

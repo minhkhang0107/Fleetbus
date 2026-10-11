@@ -9,6 +9,38 @@
 export const PICKUP_MODES = ['FIXED_STOP', 'HOME_PICKUP'];
 export const DROPOFF_MODES = ['FIXED_LOCATION', 'HOME_DROPOFF'];
 export const AREA_KINDS = ['PICKUP', 'DROPOFF'];
+// How the passenger picks fixed stops: ROUTE_LINE draws the route like a bus line with every pickup / drop-off
+// point; STATIONS lists the bus stations only.
+export const STOP_STYLES = ['ROUTE_LINE', 'STATIONS'];
+const ROUTE_FIELDS = ['stop_style', 'pickup_modes', 'dropoff_modes'];
+
+/** The company's config as it applies to one route: the route's own settings over the company defaults. */
+export function routeServiceConfig(config, routeId) {
+  const own = (routeId && config?.route_configs?.[routeId]) || {};
+  return {
+    ...config,
+    pickup_modes: own.pickup_modes ?? config?.pickup_modes ?? ['FIXED_STOP'],
+    dropoff_modes: own.dropoff_modes ?? config?.dropoff_modes ?? ['FIXED_LOCATION'],
+    stop_style: own.stop_style ?? config?.stop_style ?? 'STATIONS'
+  };
+}
+
+/** What the passenger app needs to offer on a trip of this route. */
+export function publicRouteService(config, routeId) {
+  const c = routeServiceConfig(config, routeId);
+  return { route_id: routeId || null, stop_style: c.stop_style, pickup_modes: [...c.pickup_modes], dropoff_modes: [...c.dropoff_modes], allow_home_to_home: Boolean(c.allow_home_to_home) };
+}
+
+/** Error message for an invalid route setting, or null. A null field clears the route's own value. */
+export function validateRouteSettings(settings) {
+  if (!settings || typeof settings !== 'object') return 'Thiếu cấu hình tuyến';
+  const unknown = Object.keys(settings).filter(k => !ROUTE_FIELDS.includes(k));
+  if (unknown.length) return `Không có trường ${unknown.join(', ')}`;
+  if (settings.stop_style != null && !STOP_STYLES.includes(settings.stop_style)) return 'Kiểu điểm đón phải là ROUTE_LINE hoặc STATIONS';
+  if (settings.pickup_modes != null && (!Array.isArray(settings.pickup_modes) || !settings.pickup_modes.length || !settings.pickup_modes.every(m => PICKUP_MODES.includes(m)))) return 'Cần ít nhất một hình thức đón hợp lệ';
+  if (settings.dropoff_modes != null && (!Array.isArray(settings.dropoff_modes) || !settings.dropoff_modes.length || !settings.dropoff_modes.every(m => DROPOFF_MODES.includes(m)))) return 'Cần ít nhất một hình thức trả hợp lệ';
+  return null;
+}
 
 const HOURS_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const VN_OFFSET_MS = 7 * 3600 * 1000;
@@ -106,6 +138,7 @@ export function publicServiceConfig(config) {
     pickup_modes: [...(config?.pickup_modes || [])],
     dropoff_modes: [...(config?.dropoff_modes || [])],
     allow_home_to_home: Boolean(config?.allow_home_to_home),
+    stop_style: config?.stop_style || 'STATIONS',
     service_areas: (config?.service_areas || []).filter(a => a.active !== false).map(({ area_id, name, kind, polygon, fee_vnd, lead_time_minutes, service_hours }) => ({ area_id, name, kind, polygon, fee_vnd, lead_time_minutes, service_hours }))
   };
 }

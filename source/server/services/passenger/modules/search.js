@@ -93,7 +93,7 @@ export const MOCK_TRIPS_DATABASE = [
   {
     trip_id: 'trp_hn_th_01',
     operator_id: 'op_saomai',
-    route_id: 'rot_hn_th',
+    route_id: 'rt_hn_th',
     route_name: 'Hà Nội — Thanh Hóa (Cao tốc)',
     vehicle_type: 'VIP_CABIN',
     vehicle_title: 'Cabin Cung Điện VIP 22 Phòng',
@@ -117,7 +117,7 @@ export const MOCK_TRIPS_DATABASE = [
   {
     trip_id: 'trp_hn_th_02',
     operator_id: 'op_saomai',
-    route_id: 'rot_hn_th',
+    route_id: 'rt_hn_th',
     route_name: 'Hà Nội — Thanh Hóa (Cao tốc)',
     vehicle_type: 'SLEEPER_34',
     vehicle_title: 'Giường Nằm Cao Cấp 34 Chỗ',
@@ -139,7 +139,7 @@ export const MOCK_TRIPS_DATABASE = [
   {
     trip_id: 'trp_hn_th_03',
     operator_id: 'op_saomai',
-    route_id: 'rot_hn_th',
+    route_id: 'rt_hn_th',
     route_name: 'Hà Nội — Sầm Sơn VIP Limousine',
     vehicle_type: 'VIP_CABIN',
     vehicle_title: 'Cabin Cung Điện VIP 22 Phòng',
@@ -160,7 +160,7 @@ export const MOCK_TRIPS_DATABASE = [
   {
     trip_id: 'trp_xv_hn_th_01',
     operator_id: 'op_xuyenviet',
-    route_id: 'rot_xv_hn_th',
+    route_id: 'rt_xv_hn_th',
     route_name: 'Hà Nội — Thanh Hóa (Xuyên Việt)',
     vehicle_type: 'VIP_CABIN',
     vehicle_title: 'Limousine Xuyên Việt 22 Phòng',
@@ -180,6 +180,12 @@ export const MOCK_TRIPS_DATABASE = [
     ]
   }
 ];
+
+// A stop is a bus station (bến xe) or a roadside point (điểm dọc đường); the passenger app draws a route line
+// of every stop, or lists the stations only, depending on the route's stop_style.
+for (const trip of MOCK_TRIPS_DATABASE) {
+  for (const stop of trip.stops) stop.kind = stop.kind || (stop.name.startsWith('Bến xe') ? 'STATION' : 'ROADSIDE');
+}
 
 // Schedules: the seed trips, each repeated every day at the same time.
 const SCHEDULE_TEMPLATES = new Map(MOCK_TRIPS_DATABASE.map(t => [t.trip_id, t]));

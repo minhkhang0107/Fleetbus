@@ -150,6 +150,40 @@ describe('Pickup / drop-off modes and service areas', () => {
       assert.deepStrictEqual(update.after.pickup_modes, ['FIXED_STOP', 'HOME_PICKUP']);
     });
 
+    it('each route has a stop style and modes: the company default, or its own (null goes back to the default)', async () => {
+      const sm = await request('/api/v1/trips/search?origin=Hà Nội&destination=Thanh Hóa', { code: 'SAOMAI' });
+      const trip = sm.body.data.find(t => t.trip_id === 'trp_hn_th_01');
+      assert.strictEqual(trip.route_id, 'rt_hn_th', 'catalog and ops share route ids');
+      assert.deepStrictEqual(trip.service, { route_id: 'rt_hn_th', stop_style: 'ROUTE_LINE', pickup_modes: ['FIXED_STOP', 'HOME_PICKUP'], dropoff_modes: ['FIXED_LOCATION', 'HOME_DROPOFF'], allow_home_to_home: true });
+      assert.ok(trip.stops.every(s => ['STATION', 'ROADSIDE'].includes(s.kind)));
+      const xv = await request('/api/v1/trips/trp_xv_hn_th_01', { code: 'XUYENVIET' });
+      assert.strictEqual(xv.body.data.service.stop_style, 'STATIONS');
+
+      const list = await request('/api/v1/ops/service-config/routes', { token: saomaiDispatcher });
+      assert.ok(list.body.data.routes.some(r => r.route_id === 'rt_hn_th' && r.stop_style === 'ROUTE_LINE'));
+      assert.ok(list.body.data.routes.every(r => r.route_id !== 'rt_xv_hn_th'), 'only the company\'s routes');
+
+      const own = await request('/api/v1/ops/service-config/routes/rt_hn_th', { method: 'PUT', token: saomaiDispatcher, body: { stop_style: 'STATIONS', pickup_modes: ['FIXED_STOP'] } });
+      assert.strictEqual(own.status, 200, JSON.stringify(own.body));
+      const detail = await request('/api/v1/trips/trp_hn_th_01', { code: 'SAOMAI' });
+      assert.strictEqual(detail.body.data.service.stop_style, 'STATIONS');
+      assert.deepStrictEqual(detail.body.data.service.pickup_modes, ['FIXED_STOP']);
+      assert.deepStrictEqual(detail.body.data.service.dropoff_modes, ['FIXED_LOCATION', 'HOME_DROPOFF'], 'not set on the route: the company value');
+      const check = await request('/api/v1/service-areas/check', { method: 'POST', code: 'SAOMAI', body: { kind: 'PICKUP', ...GIAP_BAT, trip_id: 'trp_hn_th_01' } });
+      assert.strictEqual(check.body.code, 'MODE_DISABLED', 'the route no longer picks up at home');
+      const elsewhere = await request('/api/v1/service-areas/check', { method: 'POST', code: 'SAOMAI', body: { kind: 'PICKUP', ...GIAP_BAT } });
+      assert.strictEqual(elsewhere.status, 200, 'the company default is unchanged');
+
+      const back = await request('/api/v1/ops/service-config/routes/rt_hn_th', { method: 'PUT', token: saomaiDispatcher, body: { stop_style: null, pickup_modes: null } });
+      assert.deepStrictEqual(back.body.data.own, {});
+      assert.strictEqual((await request('/api/v1/trips/trp_hn_th_01', { code: 'SAOMAI' })).body.data.service.stop_style, 'ROUTE_LINE');
+
+      assert.strictEqual((await request('/api/v1/ops/service-config/routes/rt_xv_hn_th', { method: 'PUT', token: saomaiDispatcher, body: { stop_style: 'STATIONS' } })).status, 404);
+      assert.strictEqual((await request('/api/v1/ops/service-config/routes/rt_hn_th', { method: 'PUT', token: saomaiDispatcher, body: { stop_style: 'METRO' } })).status, 400);
+      assert.strictEqual((await request('/api/v1/ops/service-config/routes/rt_hn_th', { method: 'PUT', token: saomaiDispatcher, body: { fee: 1 } })).status, 400);
+      assert.ok(services.managerService.auditLog.some(a => a.action === 'ROUTE_SERVICE_UPDATE' && a.resource === 'rt_hn_th'));
+    });
+
     it('refuses invalid changes and other roles', async () => {
       const bad = await request('/api/v1/ops/service-areas', { method: 'POST', token: saomaiDispatcher, body: { ...AREA, polygon: [[21, 105]] } });
       assert.strictEqual(bad.status, 400);
