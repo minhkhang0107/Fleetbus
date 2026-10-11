@@ -75,7 +75,7 @@ export class PassengerPaymentService {
   /**
    * PAX-013: Create Payment Order & VietQR Transfer Details
    */
-  createPaymentOrder({ holdId, trip, seatCodes, payer, passengers, amountVnd, pickupStop, dropoffStop, pickupStopId = null, dropoffStopId = null, mockNow = Date.now() }) {
+  createPaymentOrder({ holdId, trip, seatCodes, payer, passengers, amountVnd, pickupStop, dropoffStop, pickupStopId = null, dropoffStopId = null, homePickup = null, homeDropoff = null, mockNow = Date.now() }) {
     const orderId = `ord_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
     const operatorId = trip.operator_id || DEFAULT_OPERATOR_ID;
     const operator = findOperatorById(operatorId);
@@ -109,6 +109,8 @@ export class PassengerPaymentService {
       dropoff_stop: dropoffStop,
       pickup_stop_id: pickupStopId,
       dropoff_stop_id: dropoffStopId,
+      home_pickup: homePickup,
+      home_dropoff: homeDropoff,
       payer,
       passengers,
       amount_vnd: amountVnd,
@@ -185,6 +187,8 @@ export class PassengerPaymentService {
         dropoff_stop: order.dropoff_stop,
         pickup_stop_id: order.pickup_stop_id,
         dropoff_stop_id: order.dropoff_stop_id,
+        home_pickup: order.home_pickup || null,
+        home_dropoff: order.home_dropoff || null,
         status: 'ACTIVE', // ACTIVE | BOARDED | CANCELLED
         created_at: new Date(mockNow).toISOString(),
         boarded_at: null,

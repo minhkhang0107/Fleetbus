@@ -94,6 +94,9 @@ export class FleetBusEventBridge extends EventEmitter {
                 dropoff_stop: tkt.dropoff_stop,
                 pickup_stop_id: tkt.pickup_stop_id,
                 dropoff_stop_id: tkt.dropoff_stop_id,
+                // Only the driver of this trip sees the home address (spec 11).
+                home_pickup: tkt.home_pickup || null,
+                home_dropoff: tkt.home_dropoff || null,
                 boarding_status: 'NOT_BOARDED',
                 payment_method: 'PREPAID',
                 cod_amount_vnd: 0,

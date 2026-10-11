@@ -109,3 +109,61 @@ export function publicServiceConfig(config) {
     service_areas: (config?.service_areas || []).filter(a => a.active !== false).map(({ area_id, name, kind, polygon, fee_vnd, lead_time_minutes, service_hours }) => ({ area_id, name, kind, polygon, fee_vnd, lead_time_minutes, service_hours }))
   };
 }
+
+// A home pickup run reaches the passenger 75 to 30 minutes before the departure (spec adjustment A4).
+const PICKUP_WINDOW_START_MIN = 75;
+const PICKUP_WINDOW_END_MIN = 30;
+
+function homeInput(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  return {
+    address: typeof raw.address === 'string' ? raw.address.trim() : '',
+    lat: Number(raw.lat),
+    lng: Number(raw.lng),
+    note: typeof raw.note === 'string' ? raw.note.trim().slice(0, 200) : ''
+  };
+}
+
+/**
+ * Checks the home pickup / drop-off of a booking and returns the snapshots stored on the order and its tickets.
+ * A home pickup rides from the trip's first pickup stop, a home drop-off to its last drop-off stop: the seat segment
+ * stays a stop-to-stop one. The fee is charged once per order and side.
+ */
+export function resolveHomeBooking(config, { stops = [], departureTime, pickupStopId, dropoffStopId, homePickup, homeDropoff, now = Date.now() }) {
+  const pickup = homeInput(homePickup);
+  const dropoff = homeInput(homeDropoff);
+  if (!pickup && !dropoff) return { ok: true, home_pickup: null, home_dropoff: null, fee_vnd: 0 };
+  if (pickup && dropoff && !config?.allow_home_to_home) {
+    return { ok: false, code: 'HOME_TO_HOME_DISABLED', message: 'Nhà xe chưa nhận vừa đón vừa trả tận nhà trên cùng một vé' };
+  }
+
+  const result = { ok: true, home_pickup: null, home_dropoff: null, fee_vnd: 0 };
+  const sides = [
+    ['PICKUP', pickup, stops.find(s => s.pickup_allowed !== false), pickupStopId, 'home_pickup'],
+    ['DROPOFF', dropoff, [...stops].reverse().find(s => s.dropoff_allowed !== false), dropoffStopId, 'home_dropoff']
+  ];
+  for (const [kind, home, anchor, chosenStopId, key] of sides) {
+    if (!home) continue;
+    if (!home.address) return { ok: false, code: 'VALIDATION_ERROR', message: 'Cần địa chỉ để tài xế tìm được bạn' };
+    if (anchor && chosenStopId && chosenStopId !== anchor.stop_id) {
+      return {
+        ok: false,
+        code: 'HOME_STOP_MISMATCH',
+        message: kind === 'PICKUP' ? `Đón tận nhà đi từ điểm đầu tuyến (${anchor.name})` : `Trả tận nhà đi đến điểm cuối tuyến (${anchor.name})`
+      };
+    }
+    const check = checkHomeService(config, { kind, lat: home.lat, lng: home.lng, departureTime, now });
+    if (!check.ok) return check;
+    const snapshot = { ...home, area_id: check.area.area_id, area_name: check.area.name, fee_vnd: check.fee_vnd, anchor_stop_id: anchor?.stop_id || chosenStopId || null };
+    if (kind === 'PICKUP') {
+      const departure = new Date(departureTime).getTime();
+      if (Number.isFinite(departure)) {
+        snapshot.window_from = new Date(departure - PICKUP_WINDOW_START_MIN * 60000).toISOString();
+        snapshot.window_to = new Date(departure - PICKUP_WINDOW_END_MIN * 60000).toISOString();
+      }
+    }
+    result[key] = snapshot;
+    result.fee_vnd += check.fee_vnd;
+  }
+  return result;
+}

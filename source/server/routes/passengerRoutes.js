@@ -7,6 +7,8 @@ import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.j
 import { publicOperatorProfile, DEFAULT_OPERATOR_ID } from '../core/operators.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { verifyToken } from '../core/tokens.js';
+import { resolveHomeBooking } from '../core/serviceAreas.js';
+import { isProduction } from '../config.js';
 
 // With authentication enforced, a ticket or order may only be used by its owner (or its holder, where allowed).
 function forbidTicket(req, res, paymentService, ticketId, { ownerOnly = false } = {}) {
@@ -218,6 +220,24 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         return;
       }
 
+      // Home pickup / drop-off (spec 3.1): checked against the company's areas, fee added to the order.
+      // Seed trips are dated 2026-08-28: outside production a departure already past is a demo trip, so the lead time
+      // is measured as if booked the day before.
+      const departureMs = new Date(tripDetail.departure_time).getTime();
+      const home = resolveHomeBooking(req.operator?.service_config, {
+        stops: tripDetail.stops || [],
+        departureTime: tripDetail.departure_time,
+        pickupStopId: holdCheck.data.pickup_stop_id,
+        dropoffStopId: holdCheck.data.dropoff_stop_id,
+        homePickup: body.homePickup,
+        homeDropoff: body.homeDropoff,
+        now: !isProduction() && departureMs < Date.now() ? departureMs - 24 * 3600000 : Date.now()
+      });
+      if (!home.ok) {
+        sendError(res, home.message, home.code, home.code === 'VALIDATION_ERROR' ? 400 : 422);
+        return;
+      }
+
       const orderReview = checkoutService.computeOrderReview({
         trip: tripDetail,
         seats: holdCheck.data.seats,
@@ -225,6 +245,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         voucherCode: body.voucherCode,
         insuranceSelected: Boolean(body.insuranceSelected)
       });
+      const totalVnd = orderReview.total_payment_vnd + home.fee_vnd;
 
       const paymentOrderResult = paymentService.createPaymentOrder({
         holdId: body.holdId,
@@ -232,7 +253,9 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         seatCodes,
         payer: checkoutValidation.data.payer,
         passengers: checkoutValidation.data.passengers,
-        amountVnd: orderReview.total_payment_vnd,
+        amountVnd: totalVnd,
+        homePickup: home.home_pickup,
+        homeDropoff: home.home_dropoff,
         // The segment is the one of the hold; names come from the trip stops (a client name is only for old callers)
         pickupStopId: holdCheck.data.pickup_stop_id,
         dropoffStopId: holdCheck.data.dropoff_stop_id,
@@ -244,7 +267,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       seatMapService.extendHold(tripId, body.holdId, new Date(paymentOrderResult.data.expires_at).getTime());
 
       sendSuccess(res, {
-        order: orderReview.data,
+        order: { ...orderReview.data, home_service_fee_vnd: home.fee_vnd, total_payment_vnd: totalVnd },
         payment: paymentOrderResult.data
       }, 201);
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
