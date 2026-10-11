@@ -113,6 +113,8 @@ describe('Pickup / drop-off modes and service areas', () => {
       assert.strictEqual(out.body.code, 'OUTSIDE_SERVICE_AREA');
       const disabled = await request('/api/v1/service-areas/check', { method: 'POST', code: 'XUYENVIET', body: { kind: 'PICKUP', ...GIAP_BAT } });
       assert.strictEqual(disabled.body.code, 'MODE_DISABLED');
+      const demoTrip = await request('/api/v1/service-areas/check', { method: 'POST', code: 'SAOMAI', body: { kind: 'PICKUP', ...GIAP_BAT, trip_id: 'trp_hn_th_01' } });
+      assert.strictEqual(demoTrip.status, 200, 'outside production a past seed trip is checked as if booked the day before');
       const foreignTrip = await request('/api/v1/service-areas/check', { method: 'POST', code: 'XUYENVIET', body: { kind: 'PICKUP', ...GIAP_BAT, trip_id: 'trp_hn_th_01' } });
       assert.strictEqual(foreignTrip.status, 404);
     });

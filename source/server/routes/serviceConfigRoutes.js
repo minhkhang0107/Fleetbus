@@ -7,6 +7,7 @@ import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.j
 import { defaultServiceConfig } from '../core/operators.js';
 import { checkHomeService, publicServiceConfig, validateArea, validateModes } from '../core/serviceAreas.js';
 import { tripVisibleTo } from '../core/tenancy.js';
+import { isProduction } from '../config.js';
 
 const AREA_RE = /^\/api\/v1\/ops\/service-areas\/([^/]+)$/;
 const AREA_ACTIVE_RE = /^\/api\/v1\/ops\/service-areas\/([^/]+)\/(activate|deactivate)$/;
@@ -66,7 +67,11 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
         }
         departureTime = searchService.getTripDetail(body.trip_id, req.operatorId)?.data?.departure_time || null;
       }
-      const result = checkHomeService(configOf(req), { kind, lat: Number(body.lat), lng: Number(body.lng), departureTime });
+      // Seed trips are dated 2026-08-28: outside production a past departure is checked as if booked the day before
+      // (same rule as the order).
+      const departureMs = departureTime ? new Date(departureTime).getTime() : NaN;
+      const now = !isProduction() && departureMs < Date.now() ? departureMs - 24 * 3600000 : Date.now();
+      const result = checkHomeService(configOf(req), { kind, lat: Number(body.lat), lng: Number(body.lng), departureTime, now });
       if (!result.ok) {
         sendError(res, result.message, result.code, result.code === 'VALIDATION_ERROR' ? 400 : 422);
         return;
