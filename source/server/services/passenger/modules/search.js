@@ -3,6 +3,8 @@
  * Implements PAX-004 (Home), PAX-005 (Location Picker), PAX-006 (Search Results), PAX-007 (Trip Detail).
  */
 
+import { effectiveStops } from '../../../core/routeStops.js';
+import { findOperatorById } from '../../../core/operators.js';
 import { DEMO_DATE, addDays, parseRunId, runId, serviceCalendar, vnDate } from '../../../core/serviceDate.js';
 import { stopCoords, routeShape } from '../../../core/geo.js';
 
@@ -279,8 +281,9 @@ export class PassengerSearchService {
       if (operatorId && trip.operator_id !== operatorId) return false;
 
       // Must have a pickup stop in origin city and dropoff stop in destination city with order pickup < dropoff
-      const pickupStop = trip.stops.find(s => this._normalizeVietnamese(s.city) === normOrigin && s.pickup_allowed);
-      const dropoffStop = trip.stops.find(s => this._normalizeVietnamese(s.city) === normDest && s.dropoff_allowed);
+      const stops = this._stopsOf(trip);
+      const pickupStop = stops.find(s => this._normalizeVietnamese(s.city) === normOrigin && s.pickup_allowed);
+      const dropoffStop = stops.find(s => this._normalizeVietnamese(s.city) === normDest && s.dropoff_allowed);
 
       if (!pickupStop || !dropoffStop) return false;
       if (pickupStop.order >= dropoffStop.order) return false;
@@ -328,7 +331,7 @@ export class PassengerSearchService {
       return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
     }
 
-    const stops = (trip.stops || []).map(s => {
+    const stops = this._stopsOf(trip).map(s => {
       const coords = stopCoords(s.stop_id);
       if (coords) {
         return { ...s, lat: coords.lat, lng: coords.lng };
@@ -345,6 +348,23 @@ export class PassengerSearchService {
         route_shape: routeShape(trip.schedule_id || trip.trip_id) || null
       }
     };
+  }
+
+  /** A schedule of the route (its stops are the route's stops), or null. */
+  templateForRoute(routeId, operatorId = null) {
+    return [...SCHEDULE_TEMPLATES.values()].find(t => t.route_id === routeId && (!operatorId || t.operator_id === operatorId)) || null;
+  }
+
+  /** The route's stops with the company's settings applied, for the office. */
+  routeStops(routeId, operatorId = null) {
+    const template = this.templateForRoute(routeId, operatorId);
+    return template ? this._stopsOf(template) : [];
+  }
+
+  /** The stops of a trip as its company set them for the route (times, allowed, hidden). */
+  _stopsOf(trip) {
+    const settings = findOperatorById(trip.operator_id)?.service_config?.route_configs?.[trip.route_id];
+    return effectiveStops(trip, settings);
   }
 
   _normalizeVietnamese(str) {

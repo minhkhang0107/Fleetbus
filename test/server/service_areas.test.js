@@ -184,6 +184,42 @@ describe('Pickup / drop-off modes and service areas', () => {
       assert.ok(services.managerService.auditLog.some(a => a.action === 'ROUTE_SERVICE_UPDATE' && a.resource === 'rt_hn_th'));
     });
 
+    it('the company sets each stop of a route: arrival time, pickup / drop-off, hidden; the app, holds and orders follow', async () => {
+      const list = (await request('/api/v1/ops/service-config/routes', { token: saomaiDispatcher })).body.data.routes;
+      const route = list.find(r => r.route_id === 'rt_hn_th');
+      assert.strictEqual(route.stops.length, 8);
+      assert.strictEqual(route.stops[0].offset_minutes, 0);
+      assert.ok(route.stops.every((s, i) => i === 0 || s.offset_minutes >= route.stops[i - 1].offset_minutes), 'estimated times follow the road');
+      assert.strictEqual(route.stops[3].time_source, 'ESTIMATED');
+
+      const put = await request('/api/v1/ops/service-config/routes/rt_hn_th', { method: 'PUT', token: saomaiDispatcher, body: { stops: { stp_rs_phap_van: { hidden: true }, stp_nb: { offset_minutes: 75 }, stp_rs_phu_ly: { dropoff: false } } } });
+      assert.strictEqual(put.status, 200, JSON.stringify(put.body));
+      const trip = (await request('/api/v1/trips/trp_hn_th_01', { code: 'SAOMAI' })).body.data;
+      const by = Object.fromEntries(trip.stops.map(s => [s.stop_id, s]));
+      assert.strictEqual(trip.stops.length, 8, 'a hidden stop stays in the list: seat segments count stops');
+      assert.deepStrictEqual([by.stp_rs_phap_van.hidden, by.stp_rs_phap_van.pickup_allowed, by.stp_rs_phap_van.dropoff_allowed], [true, false, false]);
+      assert.strictEqual(by.stp_nb.offset_minutes, 75);
+      assert.strictEqual(by.stp_nb.time_source, 'OPERATOR');
+      assert.strictEqual(by.stp_nb.planned_time, new Date(Date.parse('2026-08-28T07:00:00+07:00') + 75 * 60000).toISOString());
+      assert.strictEqual(by.stp_rs_phu_ly.dropoff_allowed, false);
+
+      const otp = await request('/api/v1/auth/passenger/otp/request', { method: 'POST', code: 'SAOMAI', body: { phone: '0907778899' } });
+      const pax = (await request('/api/v1/auth/passenger/otp/verify', { method: 'POST', code: 'SAOMAI', body: { phone: '0907778899', otp: otp.body.data.mock_otp } })).body.data.token;
+      const hidden = await fetch(`${baseUrl}/api/v1/trips/trp_hn_th_01/seats/hold`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Operator-Code': 'SAOMAI', Authorization: `Bearer ${pax}`, 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ seatCodes: ['B09'], pickupStopId: 'stp_rs_phap_van', dropoffStopId: 'stp_th_pb' }) });
+      assert.strictEqual(hidden.status, 400, 'no pickup at a hidden stop');
+      assert.strictEqual((await hidden.json()).code, 'STOP_NOT_ALLOWED');
+
+      const backwards = await request('/api/v1/ops/service-config/routes/rt_hn_th', { method: 'PUT', token: saomaiDispatcher, body: { stops: { stp_th_pb: { offset_minutes: 60 } } } });
+      assert.strictEqual(backwards.status, 400, 'times must not go backwards along the route');
+      assert.strictEqual((await request('/api/v1/ops/service-config/routes/rt_hn_th', { method: 'PUT', token: saomaiDispatcher, body: { stops: { stp_hn_gb: { hidden: true } } } })).status, 400);
+      assert.strictEqual((await request('/api/v1/ops/service-config/routes/rt_hn_th', { method: 'PUT', token: saomaiDispatcher, body: { stops: { stp_nowhere: { hidden: true } } } })).status, 400);
+
+      const cleared = await request('/api/v1/ops/service-config/routes/rt_hn_th', { method: 'PUT', token: saomaiDispatcher, body: { stops: { stp_rs_phap_van: null, stp_nb: { offset_minutes: null }, stp_rs_phu_ly: null } } });
+      assert.strictEqual(cleared.body.data.own.stops, undefined);
+      const again = (await request('/api/v1/trips/trp_hn_th_01', { code: 'SAOMAI' })).body.data.stops.find(s => s.stop_id === 'stp_rs_phap_van');
+      assert.strictEqual(again.hidden, false);
+    });
+
     it('refuses invalid changes and other roles', async () => {
       const bad = await request('/api/v1/ops/service-areas', { method: 'POST', token: saomaiDispatcher, body: { ...AREA, polygon: [[21, 105]] } });
       assert.strictEqual(bad.status, 400);

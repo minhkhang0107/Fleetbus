@@ -7,6 +7,7 @@ import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.j
 import { defaultServiceConfig } from '../core/operators.js';
 import { STOP_STYLES, checkHomeService, publicServiceConfig, routeServiceConfig, validateArea, validateModes, validateRouteSettings } from '../core/serviceAreas.js';
 import { tripVisibleTo } from '../core/tenancy.js';
+import { validateRouteStops } from '../core/routeStops.js';
 import { isProduction } from '../config.js';
 
 const AREA_RE = /^\/api\/v1\/ops\/service-areas\/([^/]+)$/;
@@ -146,7 +147,8 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
     sendSuccess(res, {
       routes: routes.map(r => {
         const effective = routeServiceConfig(config, r.route_id);
-        return { route_id: r.route_id, name: r.name, own: snapshot(config.route_configs?.[r.route_id] || {}), stop_style: effective.stop_style, pickup_modes: effective.pickup_modes, dropoff_modes: effective.dropoff_modes };
+        const stops = searchService.routeStops(r.route_id, req.operatorId).map(({ stop_id, name, kind, order, pickup_allowed, dropoff_allowed, hidden, offset_minutes, time_source }) => ({ stop_id, name, kind, order, pickup_allowed, dropoff_allowed, hidden, offset_minutes, time_source }));
+        return { route_id: r.route_id, name: r.name, own: snapshot(config.route_configs?.[r.route_id] || {}), stop_style: effective.stop_style, pickup_modes: effective.pickup_modes, dropoff_modes: effective.dropoff_modes, stops };
       })
     });
     return true;
@@ -171,8 +173,26 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
       const before = snapshot(config.route_configs[routeId] || {});
       const own = { ...before };
       for (const [key, value] of Object.entries(body)) {
+        if (key === 'stops') continue;
         if (value === null) delete own[key];
         else own[key] = Array.isArray(value) ? [...new Set(value)] : value;
+      }
+      // Stop settings merge per stop and per field; null clears (back to the route's own stop data).
+      if (body.stops !== undefined) {
+        const stops = structuredClone(own.stops || {});
+        for (const [stopId, set] of Object.entries(body.stops || {})) {
+          if (set === null) { delete stops[stopId]; continue; }
+          const merged = { ...(stops[stopId] || {}) };
+          for (const [k, v] of Object.entries(set || {})) { if (v === null) delete merged[k]; else merged[k] = v; }
+          if (Object.keys(merged).length) stops[stopId] = merged; else delete stops[stopId];
+        }
+        const template = searchService.templateForRoute(routeId, req.operatorId);
+        const stopError = validateRouteStops(stops, template?.stops || []);
+        if (stopError) {
+          sendError(res, stopError, 'VALIDATION_ERROR', 400);
+          return;
+        }
+        if (Object.keys(stops).length) own.stops = stops; else delete own.stops;
       }
       if (Object.keys(own).length) config.route_configs[routeId] = own;
       else delete config.route_configs[routeId];

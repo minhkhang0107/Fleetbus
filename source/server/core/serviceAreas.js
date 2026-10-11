@@ -12,7 +12,7 @@ export const AREA_KINDS = ['PICKUP', 'DROPOFF'];
 // How the passenger picks fixed stops: ROUTE_LINE draws the route like a bus line with every pickup / drop-off
 // point; STATIONS lists the bus stations only.
 export const STOP_STYLES = ['ROUTE_LINE', 'STATIONS'];
-const ROUTE_FIELDS = ['stop_style', 'pickup_modes', 'dropoff_modes'];
+const ROUTE_FIELDS = ['stop_style', 'pickup_modes', 'dropoff_modes', 'stops'];
 
 /** The company's config as it applies to one route: the route's own settings over the company defaults. */
 export function routeServiceConfig(config, routeId) {
@@ -36,6 +36,7 @@ export function validateRouteSettings(settings) {
   if (!settings || typeof settings !== 'object') return 'Thiếu cấu hình tuyến';
   const unknown = Object.keys(settings).filter(k => !ROUTE_FIELDS.includes(k));
   if (unknown.length) return `Không có trường ${unknown.join(', ')}`;
+  if (settings.stops != null && (typeof settings.stops !== 'object' || Array.isArray(settings.stops))) return 'Cấu hình điểm dừng không hợp lệ';
   if (settings.stop_style != null && !STOP_STYLES.includes(settings.stop_style)) return 'Kiểu điểm đón phải là ROUTE_LINE hoặc STATIONS';
   if (settings.pickup_modes != null && (!Array.isArray(settings.pickup_modes) || !settings.pickup_modes.length || !settings.pickup_modes.every(m => PICKUP_MODES.includes(m)))) return 'Cần ít nhất một hình thức đón hợp lệ';
   if (settings.dropoff_modes != null && (!Array.isArray(settings.dropoff_modes) || !settings.dropoff_modes.length || !settings.dropoff_modes.every(m => DROPOFF_MODES.includes(m)))) return 'Cần ít nhất một hình thức trả hợp lệ';
