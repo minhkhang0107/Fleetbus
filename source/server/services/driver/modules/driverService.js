@@ -173,9 +173,12 @@ export class DriverCockpitService {
       stops: [
         { stop_id: 'stp_hn_gb', name: 'Bến xe Giáp Bát', city: 'Hà Nội', order: 1, expected_board: 0, expected_alight: 0, status: 'PENDING' },
         { stop_id: 'stp_hn_nuoc_ngam', name: 'Bến xe Nước Ngầm', city: 'Hà Nội', order: 2, expected_board: 0, expected_alight: 0, status: 'PENDING' },
-        { stop_id: 'stp_nb', name: 'Bến xe Ninh Bình', city: 'Ninh Bình', order: 3, expected_board: 0, expected_alight: 0, status: 'PENDING' },
-        { stop_id: 'stp_th_pb', name: 'Bến xe Phía Bắc Thanh Hóa', city: 'Thanh Hóa', order: 4, expected_board: 0, expected_alight: 0, status: 'PENDING' },
-        { stop_id: 'stp_th_sam_son', name: 'Bến xe Sầm Sơn', city: 'Thanh Hóa', order: 5, expected_board: 0, expected_alight: 0, status: 'PENDING' }
+        { stop_id: 'stp_rs_phap_van', name: 'Nút giao Pháp Vân', city: 'Hà Nội', order: 3, kind: 'ROADSIDE', expected_board: 0, expected_alight: 0, status: 'PENDING' },
+        { stop_id: 'stp_rs_phu_ly', name: 'Nút giao Phủ Lý (cao tốc)', city: 'Hà Nam', order: 4, kind: 'ROADSIDE', expected_board: 0, expected_alight: 0, status: 'PENDING' },
+        { stop_id: 'stp_nb', name: 'Bến xe Ninh Bình', city: 'Ninh Bình', order: 5, expected_board: 0, expected_alight: 0, status: 'PENDING' },
+        { stop_id: 'stp_rs_bim_son', name: 'Ngã ba Bỉm Sơn', city: 'Thanh Hóa', order: 6, kind: 'ROADSIDE', expected_board: 0, expected_alight: 0, status: 'PENDING' },
+        { stop_id: 'stp_th_pb', name: 'Bến xe Phía Bắc Thanh Hóa', city: 'Thanh Hóa', order: 7, expected_board: 0, expected_alight: 0, status: 'PENDING' },
+        { stop_id: 'stp_th_sam_son', name: 'Bến xe Sầm Sơn', city: 'Thanh Hóa', order: 8, expected_board: 0, expected_alight: 0, status: 'PENDING' }
       ],
       // Starts empty: its tickets are sold in the passenger app and arrive through the event bridge,
       // so the driver manifest and the passenger seat map stay the same seats.

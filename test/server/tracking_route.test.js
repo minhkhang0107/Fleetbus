@@ -266,7 +266,7 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
 
       assert.strictEqual(res.success, true);
       assert.strictEqual(res.data.view, 'PUBLIC');
-      assert.strictEqual(res.data.target_stop.stop_id, 'stp_nb');
+      assert.strictEqual(res.data.target_stop.stop_id, 'stp_rs_phap_van', 'the roadside point after Nước Ngầm');
       assert.strictEqual(res.data.target_stop.kind, 'PICKUP');
       assert.strictEqual(res.data.has_passed_target, undefined);
       assert.strictEqual(res.data.hud_status_text, undefined);
@@ -361,7 +361,7 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
       assert.strictEqual(res.statusCode, 200);
       assert.strictEqual(res.body.status, 'success');
       assert.strictEqual(res.body.data.view, 'PUBLIC');
-      assert.strictEqual(res.body.data.target_stop.stop_id, 'stp_nb');
+      assert.strictEqual(res.body.data.target_stop.stop_id, 'stp_rs_phap_van', 'the roadside point after Nước Ngầm');
       assert.strictEqual(res.body.data.target_stop.kind, 'PICKUP');
       assert.strictEqual(res.body.data.hud_status_text, undefined);
     });

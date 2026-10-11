@@ -314,6 +314,38 @@ void main() {
     store.dispose();
   });
 
+  testWidgets('a STATIONS route lists its bus stations only, without the roadside points', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    tester.view.physicalSize = const Size(400, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+    late PassengerStore store;
+    await tester.runAsync(() async {
+      store = await storeWithServer();
+    });
+    store.chooseTrip(Trip.fromJson({
+      ...trip,
+      'service': {'stop_style': 'STATIONS', 'pickup_modes': ['FIXED_STOP'], 'dropoff_modes': ['FIXED_LOCATION']},
+      'stops': [
+        ...stops.take(1),
+        {'stop_id': 'stp_rs_pv', 'name': 'Nút giao Pháp Vân', 'city': 'Hà Nội', 'order': 2, 'pickup_allowed': true, 'dropoff_allowed': false, 'kind': 'ROADSIDE'},
+        ...[for (final s in stops.skip(1)) {...s, 'order': (s['order'] as int) + 1}],
+      ],
+    }));
+    await tester.pumpWidget(PassengerScope(store: store, child: const MaterialApp(home: PassengerTripDetailScreen())));
+    await tester.pump();
+    expect(find.text('Bạn lên xe ở bến nào?'), findsOneWidget);
+    expect(find.text('Lộ trình và điểm đón trả'), findsNothing);
+    expect(find.text('Nút giao Pháp Vân'), findsNothing, reason: 'roadside points are not offered on a stations-only route');
+    expect(find.text('Đón tận nhà'), findsNothing, reason: 'the route does not pick up at home');
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
   test('home pickup: the server checks the pinned address, the ride starts at the first stop and the order carries it', () async {
     final store = await storeWithServer();
     expect(store.operator!.homePickup, isTrue);

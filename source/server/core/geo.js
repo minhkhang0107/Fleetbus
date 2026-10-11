@@ -9,6 +9,10 @@ export const STOP_COORDS = {
   stp_hn_my_dinh: { lat: 21.0285, lng: 105.7787 },
   stp_hn_nuoc_ngam: { lat: 20.9655, lng: 105.8426 },
   stp_hn_pv: { lat: 20.9506, lng: 105.8487 },
+  // Roadside points on the Hà Nội — Thanh Hóa expressway (on the road shape).
+  stp_rs_phap_van: { lat: 20.95701, lng: 105.85006 },
+  stp_rs_phu_ly: { lat: 20.55864, lng: 105.94895 },
+  stp_rs_bim_son: { lat: 20.08493, lng: 105.85744 },
   stp_nb: { lat: 20.2531, lng: 105.9748 },
   stp_th_pb: { lat: 19.8200, lng: 105.7700 },
   stp_th_sam_son: { lat: 19.7445, lng: 105.9000 },

@@ -1,6 +1,7 @@
 /**
  * Spec conformance: seat inventory by segment (BR-SEAT-001, OQ-028).
- * Trip trp_hn_th_01 stops: stp_hn_gb (0), stp_hn_nuoc_ngam (1), stp_nb (2), stp_th_pb (3), stp_th_sam_son (4).
+ * Trip trp_hn_th_01 stops: stp_hn_gb (0), stp_hn_nuoc_ngam (1), stp_rs_phap_van (2), stp_rs_phu_ly (3), stp_nb (4),
+ * stp_rs_bim_son (5), stp_th_pb (6), stp_th_sam_son (7): seven segments.
  * Segments 0 to 3: gb to nuoc_ngam, nuoc_ngam to nb, nb to th_pb, th_pb to sam_son.
  * Pickup is allowed at gb, nuoc_ngam, nb; drop-off at nb, th_pb, sam_son. The tests use the stops GB, NB and PB.
  */
@@ -86,7 +87,7 @@ describe('Spec conformance: seat inventory by segment', () => {
     const tickets = await buy(a, ['A09'], GB, NB);
     assert.strictEqual(tickets[0].pickup_stop_id, GB);
     assert.strictEqual(tickets[0].dropoff_stop_id, NB);
-    assert.deepStrictEqual(await segmentStates('A09'), ['BOOKED', 'BOOKED', 'AVAILABLE', 'AVAILABLE']);
+    assert.deepStrictEqual(await segmentStates('A09'), ['BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'AVAILABLE', 'AVAILABLE', 'AVAILABLE']);
     assert.strictEqual((await seatRow('A09')).state, 'PARTIALLY_BOOKED');
 
     const whole = await hold(b, ['A09']);
@@ -96,7 +97,7 @@ describe('Spec conformance: seat inventory by segment', () => {
     assert.strictEqual(overlap.status, 409);
     const next = await hold(b, ['A09'], NB, PB);
     assert.strictEqual(next.status, 200, JSON.stringify(next.body));
-    assert.deepStrictEqual(await segmentStates('A09'), ['BOOKED', 'BOOKED', 'HELD', 'AVAILABLE']);
+    assert.deepStrictEqual(await segmentStates('A09'), ['BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'HELD', 'HELD', 'AVAILABLE']);
   });
 
   it('TC-SEG-02: the app seat map answers for the segment asked (PAX-009)', async () => {
@@ -123,21 +124,21 @@ describe('Spec conformance: seat inventory by segment', () => {
     const [t1] = await buy(a, ['A07'], GB, NB);
     const b = await passenger();
     await buy(b, ['A07'], NB, PB);
-    assert.deepStrictEqual(await segmentStates('A07'), ['BOOKED', 'BOOKED', 'BOOKED', 'AVAILABLE']);
+    assert.deepStrictEqual(await segmentStates('A07'), ['BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'AVAILABLE']);
     const cancel = await api(`/api/v1/passenger/tickets/${t1.ticket_id}/cancel`, { method: 'POST', token: a.token, body: {} });
     assert.strictEqual(cancel.status, 200);
-    assert.deepStrictEqual(await segmentStates('A07'), ['AVAILABLE', 'AVAILABLE', 'BOOKED', 'AVAILABLE']);
+    assert.deepStrictEqual(await segmentStates('A07'), ['AVAILABLE', 'AVAILABLE', 'AVAILABLE', 'AVAILABLE', 'BOOKED', 'BOOKED', 'AVAILABLE']);
   });
 
   it('TC-SEG-05: the counter and the hotline sell and hold by segment too (MGR-020)', async () => {
     const pos = (seatCodes, pickupStopId, dropoffStopId) => api('/api/v1/ops/pos/orders', { method: 'POST', token: cashier, body: { tripId: TRIP, passengerName: 'Khach Quay', phone: '0933555777', seatCodes, pickupStopId, dropoffStopId } });
     assert.strictEqual((await pos(['B07'], GB, NB)).status, 201);
-    assert.deepStrictEqual(await segmentStates('B07'), ['BOOKED', 'BOOKED', 'AVAILABLE', 'AVAILABLE']);
+    assert.deepStrictEqual(await segmentStates('B07'), ['BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'AVAILABLE', 'AVAILABLE', 'AVAILABLE']);
     assert.strictEqual((await pos(['B07'], GB, PB)).status, 409);
     assert.strictEqual((await pos(['B07'], NB, PB)).status, 201);
     const rsv = await api('/api/v1/ops/pos/hotline-hold', { method: 'POST', token: cashier, body: { tripId: TRIP, passengerName: 'Khach Goi', phone: '0933555888', seatCodes: ['B10'], holdPolicy: 'CUSTOM_EXPIRY_MINUTES', customExpiryMinutes: 30, pickupStopId: NB, dropoffStopId: PB } });
     assert.strictEqual(rsv.status, 201, JSON.stringify(rsv.body));
-    assert.deepStrictEqual(await segmentStates('B10'), ['AVAILABLE', 'AVAILABLE', 'HOTLINE_HOLD', 'AVAILABLE']);
+    assert.deepStrictEqual(await segmentStates('B10'), ['AVAILABLE', 'AVAILABLE', 'AVAILABLE', 'AVAILABLE', 'HOTLINE_HOLD', 'HOTLINE_HOLD', 'AVAILABLE']);
   });
 
   describe('on the road', () => {
@@ -150,12 +151,12 @@ describe('Spec conformance: seat inventory by segment', () => {
     it('TC-SEG-06: a no-show frees the seat from the stop the bus has reached, not the part already driven (DRI-011, OQ-028)', async () => {
       const a = await passenger();
       const [ticket] = await buy(a, ['A06'], GB, PB);
-      assert.deepStrictEqual(await segmentStates('A06'), ['BOOKED', 'BOOKED', 'BOOKED', 'AVAILABLE']);
+      assert.deepStrictEqual(await segmentStates('A06'), ['BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'AVAILABLE']);
       assert.strictEqual((await arrive(GB)).status, 200);
       assert.strictEqual((await arrive(NB)).status, 200);
       const res = await api(`/api/v1/driver/trips/${TRIP}/tickets/${ticket.ticket_id}/no-show`, { method: 'POST', token: driver, body: { reason: 'Không đến' } });
       assert.strictEqual(res.status, 200, JSON.stringify(res.body));
-      assert.deepStrictEqual(await segmentStates('A06'), ['BOOKED', 'BOOKED', 'AVAILABLE', 'AVAILABLE']);
+      assert.deepStrictEqual(await segmentStates('A06'), ['BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'AVAILABLE', 'AVAILABLE', 'AVAILABLE']);
       const b = await passenger();
       assert.strictEqual((await hold(b, ['A06'], NB, PB)).status, 200, 'the seat can be sold again for the rest of the trip');
       assert.strictEqual((await hold(await passenger(), ['A06'], GB, NB)).status, 409, 'the part already driven stays booked');
@@ -168,7 +169,7 @@ describe('Spec conformance: seat inventory by segment', () => {
       const hail = await api(`/api/v1/driver/trips/${TRIP}/onboard-hail`, { method: 'POST', token: driver, body: { seat_code: 'B05', dropoff_stop_id: PB } });
       assert.strictEqual(hail.status, 201, JSON.stringify(hail.body));
       assert.strictEqual(hail.body.data.pickup_stop_id, NB);
-      assert.deepStrictEqual(await segmentStates('B05'), ['BOOKED', 'BOOKED', 'BOOKED', 'AVAILABLE']);
+      assert.deepStrictEqual(await segmentStates('B05'), ['BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'AVAILABLE']);
 
       const taken = await api(`/api/v1/driver/trips/${TRIP}/onboard-hail`, { method: 'POST', token: driver, body: { seat_code: 'B05', dropoff_stop_id: PB } });
       assert.strictEqual(taken.status, 409);
