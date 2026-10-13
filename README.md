@@ -113,6 +113,23 @@ data/                         (0700, đã bỏ khỏi git)
 
 ---
 
+### Gửi tin cho khách ngoài app: push và SMS (D144, D145)
+
+| Biến môi trường | Ý nghĩa |
+|---|---|
+| `FLEETBUS_FCM_SERVICE_ACCOUNT` | Đường dẫn khóa service account Firebase (dự án `busgo-fleetbus`). Có thì server gửi push thẳng qua Firebase Cloud Messaging. Khóa dev đặt ở `~/.config/fleetbus/fcm-service-account.json` (0600), **không đưa vào repo** |
+| `FLEETBUS_PUSH_WEBHOOK_URL` | Thay cho FCM: server POST `{to, text, title, type, link}` tới địa chỉ này |
+| `FLEETBUS_SMS_WEBHOOK_URL` | Cổng SMS / Zalo ZNS cho khách không có app hoặc chưa bật push |
+| `FLEETBUS_PUBLIC_URL` | Địa chỉ công khai của server, dùng trong link theo dõi `/t/<mã>` gửi khách |
+
+Không cấu hình gì thì tin chỉ được ghi lại (xem ở web điều hành, mục "Tin đã gửi khách ngoài app"). Ví dụ chạy dev có push:
+
+```bash
+FLEETBUS_FCM_SERVICE_ACCOUNT=~/.config/fleetbus/fcm-service-account.json npm start
+```
+
+App khách bật Firebase khi có `source/passenger/app/android/app/google-services.json` (đủ 4 bản dev, qa, stg, production). App tài xế gửi GPS thật khi build với `--dart-define=FLEETBUS_DEVICE_GPS=true`; không có cờ này thì xe chạy giả lập để demo.
+
 ## 6. Tài Liệu Kỹ Thuật Tham Khảo
 
 - 📖 [Tài Liệu Chi Tiết Trạng Thái Hệ Thống (STATE.md)](STATE.md)

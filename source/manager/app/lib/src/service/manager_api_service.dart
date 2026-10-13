@@ -80,6 +80,11 @@ class ManagerApiService {
   }
 
   // MGR-002: Executive Operations KPIs
+  /// D144: messages sent to passengers outside the app (push, SMS), newest first.
+  Future<Map<String, dynamic>> getMessages({String? tripId}) {
+    return _get('/ops/messages', query: tripId == null ? null : {'trip_id': tripId});
+  }
+
   Future<Map<String, dynamic>> getKpis() {
     return _get('/ops/dashboard/kpis');
   }

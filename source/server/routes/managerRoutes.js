@@ -10,6 +10,7 @@ import { ADMIN_ROLE } from '../core/gateway.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { parseServiceDate } from '../core/serviceDate.js';
 import { isProduction } from '../config.js';
+import { resolveHomeBooking, routeServiceConfig } from '../core/serviceAreas.js';
 
 // Seat conflicts and reservation mismatches are conflicts (409); a missing trip or reservation is 404.
 function inventoryErrorStatus(code) {
@@ -39,6 +40,30 @@ const FLEET_PATHS = ['/api/v1/ops/fleet', '/api/v1/ops/fleet/vehicles', '/api/v1
 const CREW_PATHS = ['/api/v1/ops/crew', '/api/v1/ops/crew/drivers', '/api/v1/ops/drivers'];
 const TRIP_DETAIL_RE = /^\/api\/v1\/ops\/trips\/([^/]+)(?:\/master)?$/;
 const SEAT_INVENTORY_RE = /^\/api\/v1\/ops\/trips\/([^/]+)\/(?:seat-inventory|seat-matrix)$/;
+
+/**
+ * D144: a home address taken on the phone, checked like an app booking (service area, lead time, fee). The office
+ * took it, so it is confirmed at once; the passenger rides from the trip's first stop.
+ */
+function officeHome(req, services, tripId, body) {
+  const raw = body.homePickup || body.home_pickup;
+  if (!raw) return { ok: true, home: null, fee: 0, pickupStopId: null };
+  const detail = services.searchService.getTripDetail(tripId, req.operatorId);
+  if (!detail?.success) return { ok: false, code: 'TRIP_NOT_FOUND', message: 'Chuyến xe không tồn tại' };
+  const trip = detail.data;
+  const departureMs = Date.parse(trip.departure_time);
+  const r = resolveHomeBooking(routeServiceConfig(req.operator?.service_config, trip.route_id), {
+    stops: trip.stops || [],
+    departureTime: trip.departure_time,
+    pickupStopId: null,
+    dropoffStopId: null,
+    homePickup: raw,
+    now: !isProduction() && departureMs < Date.now() ? departureMs - 24 * 3600000 : Date.now()
+  });
+  if (!r.ok) return r;
+  const home = { ...r.home_pickup, status: 'CONFIRMED', reviewed_by: req.identity?.sub || null, source: 'OFFICE' };
+  return { ok: true, home, fee: r.fee_vnd, pickupStopId: home.anchor_stop_id };
+}
 
 export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   const { managerService } = services;
@@ -111,6 +136,11 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   // POST /api/v1/ops/pos/bookings or /api/v1/ops/pos/orders (MGR-019, MGR-020)
   if ((pathname === '/api/v1/ops/pos/bookings' || pathname === '/api/v1/ops/pos/orders') && req.method === 'POST') {
     parseJsonBody(req).then(body => {
+      const home = officeHome(req, services, body.tripId || body.trip_id, body);
+      if (!home.ok) {
+        sendError(res, home.message, home.code, home.code === 'VALIDATION_ERROR' ? 400 : 422);
+        return;
+      }
       const result = managerService.createPosBooking({
         tripId: body.tripId || body.trip_id,
         passengerName: body.passengerName || body.passenger_name,
@@ -119,8 +149,10 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         paymentMethod: body.paymentMethod || body.payment_method || 'CASH_POS',
         agentStaffId: body.agentStaffId || 'stf_pos_01',
         reservationId: body.reservationId || body.reservation_id || null,
-        pickupStopId: body.pickupStopId || body.pickup_stop_id || null,
+        pickupStopId: home.pickupStopId || body.pickupStopId || body.pickup_stop_id || null,
         dropoffStopId: body.dropoffStopId || body.dropoff_stop_id || null,
+        homePickup: home.home,
+        homeFeeVnd: home.fee,
         mockNow: body.now || Date.now(),
         operatorId: req.operatorId
       });
@@ -135,9 +167,21 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/ops/messages?trip_id= (D144): what went out to passengers by push or SMS, newest first
+  if (pathname === '/api/v1/ops/messages' && req.method === 'GET') {
+    const tripId = parsedUrl.searchParams.get('trip_id');
+    sendSuccess(res, { messages: services.messenger.list(req.operatorId, { tripId }), sms_provider: Boolean(services.messenger.smsUrl), push_provider: services.messenger.pushReady });
+    return true;
+  }
+
   // POST /api/v1/ops/pos/hotline-hold (MGR-020 / REV-06)
   if (pathname === '/api/v1/ops/pos/hotline-hold' && req.method === 'POST') {
     parseJsonBody(req).then(body => {
+      const home = officeHome(req, services, body.tripId || body.trip_id, body);
+      if (!home.ok) {
+        sendError(res, home.message, home.code, home.code === 'VALIDATION_ERROR' ? 400 : 422);
+        return;
+      }
       const result = managerService.createHotlineHold({
         tripId: body.tripId || body.trip_id,
         passengerName: body.passengerName || body.passenger_name,
@@ -148,9 +192,12 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         customExpiryMinutes: body.customExpiryMinutes || body.custom_expiry_minutes || 60,
         notes: body.notes || '',
         agentStaffId: body.agentStaffId || 'stf_hotline_01',
-        pickupStopId: body.pickupStopId || body.pickup_stop_id || null,
+        pickupStopId: home.pickupStopId || body.pickupStopId || body.pickup_stop_id || null,
         dropoffStopId: body.dropoffStopId || body.dropoff_stop_id || null,
-        mockNow: body.now || Date.now()
+        homePickup: home.home,
+        homeFeeVnd: home.fee,
+        mockNow: body.now || Date.now(),
+        operatorId: req.operatorId
       });
 
       if (result.success) {

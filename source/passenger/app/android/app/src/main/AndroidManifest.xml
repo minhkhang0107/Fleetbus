@@ -28,6 +28,13 @@
         android:usesCleartextTraffic="true"
         android:hardwareAccelerated="true">
 
+        <!-- Push (D145): the BusGo mark in the status bar, tinted with the brand colour. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_busgo" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/busgo_accent" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

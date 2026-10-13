@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/widgets.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../service/driver_api_service.dart';
 import 'driver_route.dart';
@@ -12,6 +14,59 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// The server owns the trip: after every action the store reads the trip again and takes the manifest,
 /// the cash, the debt receipts and the stop states from it. Only the speed and the clock between two
 /// stops are local, until the GPS plugin is wired; the position sent to the server follows them.
+
+/// D144: one home passenger in the run, as the server orders and times it.
+class HomeRunStop {
+  const HomeRunStop(
+      {required this.ticketId,
+      required this.position,
+      this.appointment,
+      this.arrivedAt,
+      this.missableAt,
+      this.missed = false,
+      this.readyStatus,
+      this.readyMinutes,
+      this.waiting = true});
+  final String ticketId;
+  final int position;
+
+  /// "18:20": the time given to the passenger.
+  final String? appointment;
+  final DateTime? arrivedAt;
+
+  /// When the driver may go on without the passenger.
+  final DateTime? missableAt;
+  final bool missed;
+
+  /// READY or NEED_TIME, with the minutes asked.
+  final String? readyStatus;
+  final int? readyMinutes;
+  final bool waiting;
+
+  static String? _clock(Object? iso) {
+    final t = DateTime.tryParse('${iso ?? ''}')?.toUtc().add(const Duration(hours: 7));
+    return t == null ? null : '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  }
+
+  factory HomeRunStop.fromJson(Map<String, dynamic> j) => HomeRunStop(
+        ticketId: '${j['ticket_id']}',
+        position: (j['position'] as num?)?.toInt() ?? 0,
+        appointment: _clock(j['appointment_at']),
+        arrivedAt: DateTime.tryParse('${j['arrived_at'] ?? ''}'),
+        missableAt: DateTime.tryParse('${j['missable_at'] ?? ''}'),
+        missed: j['missed_at'] != null,
+        readyStatus: j['ready']?['status'] as String?,
+        readyMinutes: (j['ready']?['minutes'] as num?)?.toInt(),
+        waiting: j['waiting'] != false,
+      );
+
+  /// "Sẵn sàng" / "Cần 5 phút" / null when the passenger has not answered.
+  String? get readyLabel => readyStatus == 'READY'
+      ? 'Sẵn sàng'
+      : readyStatus == 'NEED_TIME'
+          ? 'Cần $readyMinutes phút'
+          : null;
+}
 
 class DriverStop {
   const DriverStop(this.id, this.name, this.time, {this.arrived = false, this.lat, this.lng});
@@ -48,6 +103,7 @@ class Passenger {
     this.homeLng,
     this.inaccessible = false,
     this.meetingPoint,
+    this.homeMissed = false,
   });
   final String ticketId;
   final String seat;
@@ -61,17 +117,24 @@ class Passenger {
   final PaxStatus status;
   final int? boardedAt;
   final bool hail;
+
   /// Home pickup / drop-off address (spec 3.1); the passenger still rides from [from] to [to].
   final String? homePickup;
   final String? homeDropoff;
   final String homeNote;
+
   /// "05:00–05:40": the window promised to a home pickup.
   final String? pickupWindow;
+
   /// Pinned position of the home pickup, drawn on the driver map.
   final double? homeLat;
   final double? homeLng;
+
   /// The driver reported the home address unreachable (spec A9), with the meeting point given, if any.
   final bool inaccessible;
+
+  /// D144: the bus waited at the door and went on; the passenger boards at the first stop.
+  final bool homeMissed;
   final String? meetingPoint;
   bool get codDue => cod > 0 && !paid;
 
@@ -106,6 +169,7 @@ class Passenger {
       homeLng: (j['home_pickup']?['lng'] as num?)?.toDouble(),
       inaccessible: j['home_pickup']?['inaccessible_at'] != null,
       meetingPoint: j['home_pickup']?['meeting_point'],
+      homeMissed: j['home_pickup']?['missed_at'] != null,
     );
   }
 }
@@ -174,10 +238,25 @@ class DriverStore extends ChangeNotifier {
   static const debtLimit = 1000000;
   static const noShowGrace = 10;
   static const minutesBetweenStops = 45;
+
   /// Simulated drive duration between two stops (demo speed-up; a real GPS replaces it).
   static const driveSeconds = 30;
-  static const checkKeys = ['tires_checked', 'brakes_fluid_checked', 'ac_cleanliness_checked', 'first_aid_extinguisher_checked', 'fuel_level_sufficient', 'gps_telemetry_beacon_active'];
-  static const checks = ['Lốp và áp suất lốp', 'Phanh và dầu phanh', 'Điều hòa, vệ sinh khoang', 'Bình chữa cháy, túi cứu thương', 'Nhiên liệu đủ cho chuyến', 'Định vị GPS đang hoạt động'];
+  static const checkKeys = [
+    'tires_checked',
+    'brakes_fluid_checked',
+    'ac_cleanliness_checked',
+    'first_aid_extinguisher_checked',
+    'fuel_level_sufficient',
+    'gps_telemetry_beacon_active'
+  ];
+  static const checks = [
+    'Lốp và áp suất lốp',
+    'Phanh và dầu phanh',
+    'Điều hòa, vệ sinh khoang',
+    'Bình chữa cháy, túi cứu thương',
+    'Nhiên liệu đủ cho chuyến',
+    'Định vị GPS đang hoạt động'
+  ];
 
   // Session and shift
   String operatorCode = '';
@@ -185,11 +264,12 @@ class DriverStore extends ChangeNotifier {
   String operatorHotline = '';
   String driverName = '';
   String staffId = '';
-  
+
   static Future<String> savedOperatorCode() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('driver_operator_code') ?? '';
   }
+
   bool get loggedIn => api.authToken != null;
   List<ShiftTrip> shift = [];
   bool loading = false;
@@ -214,12 +294,19 @@ class DriverStore extends ChangeNotifier {
   // Local to the cab
   final List<bool> checked = List.filled(6, false);
   int clock = toMinutes('06:40');
+
   /// The trip runs today: the cab clock is the real time. Otherwise (a demo trip on another day) the clock
   /// is simulated, one minute every 3 seconds, and moved to each stop's planned time.
   bool realClock = false;
+
   /// D143: the driver set off to collect the home pickups; the bus position goes to the server from then on.
   bool homeRunStarted = false;
+
+  /// D144: the home pickups in the order the bus collects them, with times and answers.
+  List<HomeRunStop> homeRun = [];
+  int homeWaitMinutes = 5;
   int _homeSpeed = 0;
+
   /// Simulated clock only: when this session saw each passenger board, on the cab clock.
   final Map<String, int> _boardedOnClock = {};
   bool atStop = false;
@@ -242,12 +329,57 @@ class DriverStore extends ChangeNotifier {
 
   DriverStop get stop => stops.isEmpty ? const DriverStop('', '', '--:--') : stops[stopIndex];
   bool get lastStop => stops.isNotEmpty && stopIndex == stops.length - 1;
-  int get speed => moving ? 62 : (_homeSpeed);
+  int get speed => deviceGps && _gpsSpeedKmh != null ? _gpsSpeedKmh!.round() : (moving ? 62 : _homeSpeed);
+
+  /// D145: the bus position comes from the phone's GPS (production builds: --dart-define=FLEETBUS_DEVICE_GPS=true).
+  /// Without it the app drives the bus along the route on its own, for demos and tests.
+  static const deviceGps = bool.fromEnvironment('FLEETBUS_DEVICE_GPS');
+  StreamSubscription<Position>? _gps;
+  double? _gpsSpeedKmh;
+  double? _gpsAccuracy;
+
+  /// Starts reading the GPS, with the Android foreground notification that keeps it alive with the screen off.
+  void _startGps() {
+    if (!deviceGps || _gps != null) return;
+    final LocationSettings settings = defaultTargetPlatform == TargetPlatform.iOS
+        ? AppleSettings(
+            accuracy: LocationAccuracy.bestForNavigation,
+            distanceFilter: 10,
+            allowBackgroundLocationUpdates: true,
+            showBackgroundLocationIndicator: true,
+            pauseLocationUpdatesAutomatically: false)
+        : AndroidSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 10,
+            intervalDuration: const Duration(seconds: 5),
+            foregroundNotificationConfig: ForegroundNotificationConfig(
+              notificationTitle: 'BusGo Driver đang gửi vị trí xe',
+              notificationText: 'Khách và điều hành đang theo dõi chuyến $depTime',
+              enableWakeLock: true,
+              setOngoing: true,
+            ),
+          );
+    _gps = Geolocator.getPositionStream(locationSettings: settings).listen((p) {
+      _lat = p.latitude;
+      _lng = p.longitude;
+      if (p.heading >= 0) _bearing = p.heading;
+      _gpsSpeedKmh = p.speed < 0 ? 0 : p.speed * 3.6;
+      _gpsAccuracy = p.accuracy;
+      notifyListeners();
+    }, onError: (_) {});
+  }
+
+  void _stopGps() {
+    _gps?.cancel();
+    _gps = null;
+  }
+
   double get lat => _lat;
   double get lng => _lng;
   double get bearing => _bearing;
   RoutePath? get road => _road;
   List<Passenger> get atStopPassengers => manifest.where((p) => p.from == stop.id && !p.hail).toList();
+
   /// Passengers on board who get off at the current stop, so the crew can open the hold for them.
   List<Passenger> get dropOffPassengers => manifest.where((p) => p.to == stop.id && p.status == PaxStatus.boarded).toList();
   int get boardedCount => manifest.where((p) => p.status == PaxStatus.boarded).length;
@@ -287,18 +419,18 @@ class DriverStore extends ChangeNotifier {
       final json = await api.login(staff.trim(), pin);
       final error = _error(json);
       if (error != null) return error;
-      
+
       final d = json['data']['driver'] as Map<String, dynamic>;
       final op = json['data']['operator'] as Map<String, dynamic>?;
-      
+
       driverName = d['full_name'] ?? '';
       staffId = d['staff_id'] ?? staff.trim();
-      
+
       if (op != null) {
         operatorCode = op['code'] ?? api.operatorCode ?? '';
         operatorName = op['name'] ?? '';
         operatorHotline = op['hotline'] ?? '';
-        
+
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('driver_operator_code', operatorCode);
       }
@@ -335,7 +467,8 @@ class DriverStore extends ChangeNotifier {
       ..sort((a, b) => '${a['planned_departure_time']}'.compareTo('${b['planned_departure_time']}'));
     shift = [
       for (final t in trips)
-        ShiftTrip(t['trip_id'], _depOf(t), routeLabel(t['route_name'] ?? ''), t['vehicle_plate'] ?? '', (t['manifest'] as List? ?? []).length, t['status'] ?? ''),
+        ShiftTrip(
+            t['trip_id'], _depOf(t), routeLabel(t['route_name'] ?? ''), t['vehicle_plate'] ?? '', (t['manifest'] as List? ?? []).length, t['status'] ?? ''),
     ];
     final live = trips.where((t) => t['status'] != 'CANCELLED').toList();
     final current = live.where((t) => t['status'] != 'COMPLETED').firstOrNull ?? live.lastOrNull;
@@ -399,7 +532,10 @@ class DriverStore extends ChangeNotifier {
       _road = null;
     }
     if (fresh) _boardedOnClock.clear();
-    final waiting = {for (final p in manifest) if (p.status == PaxStatus.waiting) p.ticketId};
+    final waiting = {
+      for (final p in manifest)
+        if (p.status == PaxStatus.waiting) p.ticketId
+    };
     manifest = (t['manifest'] as List? ?? []).cast<Map<String, dynamic>>().map(Passenger.fromJson).toList();
     for (final p in manifest) {
       if (p.status == PaxStatus.boarded && waiting.contains(p.ticketId)) _boardedOnClock.putIfAbsent(p.ticketId, () => clock);
@@ -407,8 +543,13 @@ class DriverStore extends ChangeNotifier {
     stopIndex = ((t['current_stop_index'] as num?)?.toInt() ?? 0).clamp(0, stops.isEmpty ? 0 : stops.length - 1);
     codCash = (t['total_cod_collected_vnd'] as num?)?.toInt() ?? 0;
     hailCash = (t['total_hail_collected_vnd'] as num?)?.toInt() ?? 0;
-    debts = [for (final d in (t['debts'] as List? ?? []).cast<Map<String, dynamic>>()) (code: '${d['receipt_code']}', amount: (d['amount_vnd'] as num).toInt())];
+    debts = [
+      for (final d in (t['debts'] as List? ?? []).cast<Map<String, dynamic>>()) (code: '${d['receipt_code']}', amount: (d['amount_vnd'] as num).toInt())
+    ];
     homeRunStarted = t['home_run_started_at'] != null;
+    final run = t['home_run'] as Map<String, dynamic>?;
+    homeRun = [for (final s in (run?['stops'] as List? ?? []).cast<Map<String, dynamic>>()) HomeRunStop.fromJson(s)];
+    homeWaitMinutes = (run?['wait_minutes'] as num?)?.toInt() ?? 5;
     trip = switch (t['status']) { 'IN_TRANSIT' => TripState.inTransit, 'COMPLETED' => TripState.completed, _ => TripState.readyCheck };
     if (t['current_lat'] is num) _lat = (t['current_lat'] as num).toDouble();
     if (t['current_lng'] is num) _lng = (t['current_lng'] as num).toDouble();
@@ -423,6 +564,7 @@ class DriverStore extends ChangeNotifier {
         _startTimers();
       } else if (homeRunStarted && trip != TripState.completed) {
         _telemetryTimer ??= Timer.periodic(const Duration(seconds: 5), (_) => sendTelemetry());
+        _startGps();
       }
     }
   }
@@ -475,8 +617,52 @@ class DriverStore extends ChangeNotifier {
   }
 
   /// Home pickups still to collect before departure: confirmed, reachable, not on board yet.
-  List<Passenger> get homePickupsWaiting =>
-      manifest.where((p) => p.homePickup != null && !p.inaccessible && p.status == PaxStatus.waiting).toList();
+  List<Passenger> get homePickupsWaiting {
+    final waiting = manifest.where((p) => p.homePickup != null && !p.inaccessible && !p.homeMissed && p.status == PaxStatus.waiting).toList();
+    // In the run's order (D144); an address the server has not placed yet goes last.
+    waiting.sort((a, b) => _homeRank(a).compareTo(_homeRank(b)));
+    return waiting;
+  }
+
+  /// Every home pickup of the trip in the run's order (on board, missed and unreachable ones included).
+  List<Passenger> get homePickupsInOrder {
+    final all = manifest.where((p) => p.homePickup != null).toList();
+    all.sort((a, b) => _homeRank(a).compareTo(_homeRank(b)));
+    return all;
+  }
+
+  int _homeRank(Passenger p) {
+    final i = homeRun.indexWhere((s) => s.ticketId == p.ticketId);
+    return i < 0 ? 999 : i;
+  }
+
+  HomeRunStop? homeStopOf(Passenger p) => homeRun.where((s) => s.ticketId == p.ticketId).firstOrNull;
+
+  /// D144: moves a home pickup earlier (-1) or later (+1) in the run.
+  Future<String?> moveHome(Passenger p, int delta) async {
+    final order = homePickupsInOrder.map((x) => x.ticketId).toList();
+    final i = order.indexOf(p.ticketId);
+    final j = i + delta;
+    if (i < 0 || j < 0 || j >= order.length) return null;
+    order.insert(j, order.removeAt(i));
+    final r = await _call(() => api.setHomeOrder(tripId!, order));
+    if (r.error != null) return r.error;
+    await refreshTrip();
+    return null;
+  }
+
+  /// D144: the bus is at the passenger's door; the wait starts and the passenger is told.
+  Future<String?> homeArrived(Passenger p) => _act('Tới nhà khách ghế ${p.seat}', () => api.homeArrived(tripId!, p.ticketId));
+
+  /// D144: the passenger did not come out in time; the bus goes on, the passenger is sent to the first stop.
+  Future<String?> homeMissed(Passenger p) => _act('Khách ghế ${p.seat} không ra', () => api.homeMissed(tripId!, p.ticketId));
+
+  /// D144: the passenger's number, for a call while the bus is stopped. The server logs every request.
+  Future<({String? phone, String? error})> contactOf(Passenger p) async {
+    final r = await _call(() => api.passengerContact(tripId!, p.ticketId));
+    if (r.error != null) return (phone: null, error: r.error);
+    return (phone: '${r.data!['phone']}', error: null);
+  }
 
   /// The window the home pickups were promised, earliest start to latest end ("05:45–06:30").
   String? get homeWindow {
@@ -492,6 +678,7 @@ class DriverStore extends ChangeNotifier {
     if (r.error != null) return r.error;
     homeRunStarted = true;
     _telemetryTimer ??= Timer.periodic(const Duration(seconds: 5), (_) => sendTelemetry());
+    _startGps();
     await refreshTrip();
     unawaited(sendTelemetry());
     notifyListeners();
@@ -526,14 +713,15 @@ class DriverStore extends ChangeNotifier {
     });
     // FLOW-06: the position goes to the server while the trip runs.
     _telemetryTimer ??= Timer.periodic(const Duration(seconds: 5), (_) => sendTelemetry());
+    _startGps();
   }
 
   Future<void> sendTelemetry() async {
     final beforeDeparture = trip != TripState.inTransit;
     if (tripId == null || trip == TripState.completed || (beforeDeparture && !homeRunStarted)) return;
     _lastPing = DateTime.now();
-    if (beforeDeparture) _driveToNextHome();
-    if (moving) {
+    if (!deviceGps && beforeDeparture) _driveToNextHome();
+    if (!deviceGps && moving) {
       if (_leg != null) {
         final elapsed = DateTime.now().difference(_leg!.startedAt).inMilliseconds / 1000.0;
         final fraction = (elapsed / driveSeconds).clamp(0.0, 1.0);
@@ -551,7 +739,8 @@ class DriverStore extends ChangeNotifier {
     final at = DateTime.now();
     _seq = at.millisecondsSinceEpoch > _seq ? at.millisecondsSinceEpoch : _seq + 1;
     final seq = _seq;
-    await _call(() => api.sendTelemetry(tripId!, lat: _lat, lng: _lng, speedKmh: speed.toDouble(), bearingDeg: _bearing, seq: seq, recordedAt: at));
+    await _call(() =>
+        api.sendTelemetry(tripId!, lat: _lat, lng: _lng, speedKmh: speed.toDouble(), bearingDeg: _bearing, seq: seq, recordedAt: at, accuracyM: _gpsAccuracy));
   }
 
   // ---------- Stops (DRI-008) ----------
@@ -705,6 +894,7 @@ class DriverStore extends ChangeNotifier {
   }
 
   void _stopTimers() {
+    _stopGps();
     _clockTimer?.cancel();
     _driveTimer?.cancel();
     _telemetryTimer?.cancel();

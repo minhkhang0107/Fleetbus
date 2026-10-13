@@ -244,6 +244,30 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // D144: the home run. POST .../home-order {ticket_ids}; .../tickets/:id/home-arrived; .../tickets/:id/home-missed;
+  // .../tickets/:id/contact (the passenger's number for a call, logged).
+  const homeOrderMatch = pathname.match(/^\/api\/v1\/driver\/trips\/([^/]+)\/home-order$/);
+  if (homeOrderMatch && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const result = driverService.setHomeOrder(homeOrderMatch[1], body.ticket_ids ?? body.ticketIds);
+      if (result.success) sendSuccess(res, result.data);
+      else sendError(res, result.error, result.code, result.code === 'TRIP_NOT_FOUND' ? 404 : 400);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+  const homeTicket = pathname.match(/^\/api\/v1\/driver\/trips\/([^/]+)\/tickets\/([^/]+)\/(home-arrived|home-missed|contact)$/);
+  if (homeTicket && req.method === 'POST') {
+    const [, tripId, ticketId, action] = homeTicket;
+    const result = action === 'home-arrived'
+      ? driverService.homeArrived(tripId, ticketId)
+      : action === 'home-missed'
+        ? driverService.homeMissed(tripId, ticketId)
+        : driverService.passengerContact(tripId, ticketId);
+    if (result.success) sendSuccess(res, result.data);
+    else sendError(res, result.error, result.code, ['TRIP_NOT_FOUND', 'TICKET_NOT_FOUND'].includes(result.code) ? 404 : 409, result.missable_at ? { missable_at: result.missable_at } : null);
+    return true;
+  }
+
   // POST /api/v1/driver/trips/:tripId/tickets/:ticketId/inaccessible (spec A9: home address not reachable)
   const inaccessible = pathname.match(/^\/api\/v1\/driver\/trips\/([^/]+)\/tickets\/([^/]+)\/inaccessible$/);
   if (inaccessible && req.method === 'POST') {

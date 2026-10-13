@@ -54,12 +54,8 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
     final store = DriverScope.of(context);
     final subtitle = store.operatorName.isNotEmpty ? store.operatorName : 'Ứng dụng cho tài xế và phụ xe';
     return Row(children: [
-      Container(
-        width: large ? 72 : 48,
-        height: large ? 72 : 48,
-        decoration: BoxDecoration(color: DTokens.primary, borderRadius: BorderRadius.circular(large ? 18 : 12)),
-        child: Icon(Icons.directions_bus_outlined, color: Colors.white, size: large ? 40 : 26),
-      ),
+      // D146: the BusGo Driver logo (tools/brand).
+      Image.asset('assets/brand/logo.png', width: large ? 72 : 48, height: large ? 72 : 48),
       SizedBox(width: large ? 16 : 12),
       Flexible(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'passenger_permissions.dart';
 import 'passenger_route_map.dart' show passengerMapTiles, passengerMapTileUrl;
 import 'passenger_store.dart';
 import 'passenger_widgets.dart';
@@ -58,6 +59,22 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
       final camera = CameraFit.bounds(bounds: LatLngBounds.fromPoints(points), padding: const EdgeInsets.all(24), maxZoom: 15).fit(_map.camera);
       _map.move(camera.center, camera.zoom.floorToDouble());
     });
+  }
+
+  bool _locating = false;
+
+  Future<void> _useMyLocation() async {
+    setState(() => _locating = true);
+    final pos = await myLocation(context);
+    if (!mounted) return;
+    setState(() {
+      _locating = false;
+      if (pos != null) {
+        _pin = LatLng(pos.lat, pos.lng);
+        _error = null;
+      }
+    });
+    if (pos != null && _mapReady) _map.move(LatLng(pos.lat, pos.lng), 16);
   }
 
   Future<void> _confirm() async {
@@ -123,6 +140,16 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
         map,
         gap(8),
         Text('Chạm lên bản đồ để ghim chỗ $verb. Vùng tô xanh là nơi nhà xe phục vụ.', style: sans(size: 13, color: PTokens.muted, height: 1.4)),
+        gap(8),
+        // D145: the system asks for location only when the passenger taps this.
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: _locating ? null : _useMyLocation,
+            icon: _locating ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.my_location, size: 18),
+            label: const Text('Dùng vị trí của tôi'),
+          ),
+        ),
       ], right: [
         if (!pWide(context)) gap(12),
         for (final a in areas) ...[

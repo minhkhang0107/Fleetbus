@@ -17,6 +17,16 @@ const HOME_ROAD_FACTOR = 1.3;
 const HOME_MIN_SPEED_KMH = 20;
 /** Within this distance of the address, the bus is at the passenger's door. */
 const HOME_AT_DOOR_METERS = 300;
+/**
+ * Speed for an ETA: over a long way the bus averages its road speed whatever it does this minute (parked at a stop,
+ * slowed in a town), so the minutes do not jump between pings; close by, its own speed.
+ */
+const ROAD_SPEED_KMH = 45;
+function etaSpeed(meters, speedKmh) {
+  const speed = Number(speedKmh) || 0;
+  return meters > 5000 ? Math.max(speed, ROAD_SPEED_KMH) : (speed || ROAD_SPEED_KMH);
+}
+
 /** Along the route, a stop this far behind the bus counts as passed. */
 const PASSED_METERS = 200;
 
@@ -109,7 +119,7 @@ export class PassengerTrackingService {
     }
 
     const distanceMeters = calculateHaversineDistance(busPos.lat, busPos.lng, pickupLat, pickupLng);
-    const etaMinutes = calculateETA(distanceMeters, busPos.speed_kmh || 45);
+    const etaMinutes = calculateETA(distanceMeters, etaSpeed(distanceMeters, busPos.speed_kmh));
     const isArrivingSoon = distanceMeters <= 1000; // < 1 km
     const isAtStation = distanceMeters <= 100; // < 100 m
 
@@ -292,7 +302,7 @@ export class PassengerTrackingService {
           hasPassedTarget = false;
           const roadDist = Math.max(0, signedDist);
           data.distance_meters = roadDist;
-          data.eta_minutes = calculateETA(roadDist, data.bus_position.speed_kmh || 45);
+          data.eta_minutes = calculateETA(roadDist, etaSpeed(roadDist, data.bus_position.speed_kmh));
           data.is_arriving_soon = roadDist <= 1000;
           data.is_at_station = roadDist <= 100;
           data.hud_status_text = this._buildHudStatusText(
@@ -432,7 +442,7 @@ export class PassengerTrackingService {
   /**
    * PAX-020: Send & retrieve Push Notifications
    */
-  sendNotification(phone, { title, body, type = 'GENERAL', payload = {}, operatorId = DEFAULT_OPERATOR_ID }) {
+  sendNotification(phone, { title, body, type = 'GENERAL', payload = {}, operatorId = DEFAULT_OPERATOR_ID, link = null }) {
     const normalized = phone.replace(/[\s\-\.]/g, '');
     const userNotifs = this.notifications.get(normalized) || [];
 
@@ -449,6 +459,8 @@ export class PassengerTrackingService {
 
     userNotifs.unshift(notif);
     this.notifications.set(normalized, userNotifs);
+    // D144: the moments that make someone go out to the bus also leave by push or SMS.
+    this.messenger?.dispatch?.({ operatorId, phone: normalized, title, body, type, payload, link });
 
     return { success: true, data: notif };
   }

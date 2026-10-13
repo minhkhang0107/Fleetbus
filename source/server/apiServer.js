@@ -14,6 +14,8 @@ import { PassengerSeatMapService } from './services/passenger/modules/seatMap.js
 import { PassengerCheckoutService } from './services/passenger/modules/checkout.js';
 import { PassengerPaymentService } from './services/passenger/modules/payment.js';
 import { PassengerTrackingService } from './services/passenger/modules/tracking.js';
+import { Messenger } from './core/messaging.js';
+import { findShareHolder } from './core/homeTracking.js';
 import { DriverCockpitService } from './services/driver/modules/driverService.js';
 import { ManagerOperationsService } from './services/manager/modules/managerService.js';
 
@@ -71,6 +73,7 @@ export function createFleetBusServer(customServices = {}) {
     checkoutService: customServices.checkoutService || new PassengerCheckoutService(),
     paymentService: customServices.paymentService || new PassengerPaymentService(),
     trackingService: customServices.trackingService || new PassengerTrackingService(),
+    messenger: customServices.messenger || new Messenger(),
     driverService: customServices.driverService || new DriverCockpitService(),
     managerService: customServices.managerService || new ManagerOperationsService(),
     tenantDbs: customServices.tenantDbs || openTenantDbs(customServices.dataDir !== undefined ? customServices.dataDir : defaultDataDir(), customServices.env),
@@ -82,6 +85,9 @@ export function createFleetBusServer(customServices = {}) {
   };
 
   eventBridge.bindServices(services);
+
+  // Notices that must reach a closed app or a phone without the app go out by push or SMS (D144).
+  services.trackingService.messenger = services.messenger;
 
   const idempotency = new IdempotencyStore();
 
@@ -234,13 +240,9 @@ export function createFleetBusServer(customServices = {}) {
     const trackingShare = req.method === 'GET' && pathname.match(/^\/t\/([A-Za-z0-9_-]{24})\/?$/);
     if (trackingShare) {
       const token = trackingShare[1];
-      let ticketFound = null;
-      for (const tkt of services.paymentService.tickets.values()) {
-        if (tkt.share_token === token && tkt.status !== 'CANCELLED' && services.paymentService.shareLinkValid(tkt)) {
-          ticketFound = tkt;
-          break;
-        }
-      }
+      // An app ticket shared by its owner, or a phone booking's SMS link (D144).
+      const holder = findShareHolder(services, token);
+      const ticketFound = holder ? { trip_id: holder.tripId, operator_id: holder.operatorId } : null;
       if (!ticketFound) {
         res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end('<h1>404 Không tìm thấy</h1><p>Link theo dõi không hợp lệ hoặc đã hết hạn.</p>');

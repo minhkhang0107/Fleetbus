@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:app/src/presentation/passenger/passenger_live_radar_screen.dart';
+import 'package:app/src/presentation/passenger/passenger_onboarding_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_route_map.dart';
 import 'package:app/src/presentation/passenger/passenger_store.dart';
 import 'package:app/src/presentation/passenger/passenger_wallet_screen.dart';
@@ -12,8 +13,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:app/src/presentation/passenger/passenger_permissions.dart';
+
+import 'fake_permissions.dart';
 
 void main() {
+  setUp(() => passengerPermissions = FakePassengerPermissions());
   passengerMapTiles = false;
 
   testWidgets('pump PassengerRouteMap with a 3-point route, 2 stops, bus, target', (tester) async {
@@ -391,6 +397,75 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('a home passenger sees their place in the run and their appointment, and answers ready (D144)', (tester) async {
+    final sentBodies = <Map<String, dynamic>>[];
+    final client = MockClient((req) async {
+      if (req.url.path.endsWith('/pickup-ready')) {
+        sentBodies.add(jsonDecode(req.body) as Map<String, dynamic>);
+        return http.Response(jsonEncode({'status': 'success', 'data': {'ready': {'status': 'NEED_TIME', 'minutes': 2}, 'wait_minutes': 5}}), 200, headers: {'content-type': 'application/json; charset=utf-8'});
+      }
+      return http.Response(
+        jsonEncode({'status': 'success', 'data': {
+          'signal_status': 'LIVE',
+          'has_position': true,
+          'view': 'TICKET',
+          'bus_position': {'lat': 21.02, 'lng': 105.85, 'speed_kmh': 25},
+          'target_stop': {'stop_id': null, 'name': '88 Láng Hạ, Đống Đa', 'lat': 21.0136, 'lng': 105.815, 'kind': 'HOME_PICKUP'},
+          'eta_minutes': 14,
+          'distance_meters': 6200,
+          'appointment_at': '2026-08-27T22:55:00.000Z',
+          'expected_at': '2026-08-27T23:03:00.000Z',
+          'late_minutes': 8,
+          'home_queue': {'position': 2, 'ahead': 1, 'total': 3},
+          'home_wait_minutes': 5,
+        }}),
+        200,
+        headers: {'content-type': 'application/json; charset=utf-8'},
+      );
+    });
+    final store = PassengerStore(api: PassengerApiClientService(baseUrl: 'http://test', client: client));
+    final ticket = Ticket.fromJson({
+      'ticket_id': 'tkt_05', 'pnr': 'BG-0005', 'trip_id': 'trp_01', 'route_name': 'Hà Nội — Thanh Hóa',
+      'departure_time': '2026-08-28T07:00:00+07:00', 'seat_code': 'A02', 'fare_vnd': 220000, 'passenger_name': 'Khách B',
+      'pickup_stop': 'Bến xe Mỹ Đình', 'dropoff_stop': 'Bến xe Phía Bắc', 'status': 'ACTIVE',
+    });
+    await tester.pumpWidget(MaterialApp(home: PassengerScope(store: store, child: PassengerLiveRadarScreen(ticket: ticket))));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Xe đang đón khách khác trước bạn'), findsOneWidget);
+    expect(find.text('Bạn là điểm đón thứ 2/3 · Đón tại 88 Láng Hạ, Đống Đa'), findsOneWidget);
+    expect(find.text('~06:03'), findsOneWidget);
+    expect(find.text('Trễ khoảng 8 phút so với giờ hẹn 05:55'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('+2 phút'));
+    await tester.tap(find.text('+2 phút'));
+    await tester.pump();
+    await tester.pump();
+    expect(sentBodies, [{'status': 'NEED_2'}]);
+    expect(find.textContaining('Bạn đã báo: cần thêm 2 phút.'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 4));
+  });
+
+  test('a new "bus is coming" notice becomes an alert; the first load and other types do not (D144)', () async {
+    var round = 0;
+    final client = MockClient((req) async {
+      final list = [
+        {'id': 'n1', 'title': 'Thanh toán thành công', 'body': 'x', 'type': 'PAYMENT_SUCCESS', 'is_read': false, 'created_at': '2026-08-27T21:00:00Z', 'payload': {}},
+        if (round > 0) {'id': 'n2', 'title': 'Xe sắp tới đón bạn', 'body': 'Bạn là điểm đón tiếp theo', 'type': 'PICKUP_APPROACHING', 'is_read': false, 'created_at': '2026-08-27T22:50:00Z', 'payload': {'ticket_id': 'tkt_05'}},
+      ];
+      return http.Response(jsonEncode({'status': 'success', 'data': list}), 200, headers: {'content-type': 'application/json; charset=utf-8'});
+    });
+    final store = PassengerStore(api: PassengerApiClientService(baseUrl: 'http://test', client: client));
+    store.api.authToken = 'tok';
+    await store.loadNotices();
+    expect(store.pendingAlert, isNull, reason: 'what is there at start is not news');
+    round = 1;
+    await store.loadNotices();
+    expect(store.pendingAlert?.title, 'Xe sắp tới đón bạn');
+    expect(store.pendingAlert?.ticketId, 'tkt_05');
+  });
+
   test('loadTracking parses full tracking payload and sends ticket_id query', () async {
     http.Request? capturedRequest;
     final client = MockClient((req) async {
@@ -578,5 +653,50 @@ void main() {
     expect(find.text('Xe đã qua Giáp Bát'), findsOneWidget);
     expect(find.text('Đến điểm đón'), findsNothing);
     expect(find.text('Cách điểm đón'), findsNothing);
+  });
+
+  testWidgets('notifications are asked once, with the reason, before the system dialog (D145)', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final fake = FakePassengerPermissions(notifications: false);
+    passengerPermissions = fake;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => Scaffold(body: TextButton(onPressed: () => offerNotifications(context, reason: 'Để biết khi xe sắp tới.'), child: const Text('go'))))));
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    expect(find.text('Bật thông báo để không lỡ xe'), findsOneWidget);
+    expect(find.text('Để biết khi xe sắp tới.'), findsOneWidget);
+    expect(fake.asked, isEmpty, reason: 'the system dialog comes only after the passenger agrees');
+    await tester.tap(find.text('Để sau'));
+    await tester.pumpAndSettle();
+    expect(fake.asked, isEmpty);
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    expect(find.text('Bật thông báo để không lỡ xe'), findsNothing, reason: 'asked once, not every time');
+  });
+
+  testWidgets('without a chosen company every launch shows the feature pages; with one it goes straight in (D146)', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = PassengerStore(api: PassengerApiClientService(baseUrl: 'http://test', client: MockClient((_) async => http.Response('{}', 404))));
+    Future<void> launch() async {
+      await tester.pumpWidget(PassengerScope(store: store, child: MaterialApp(key: UniqueKey(), home: PassengerLaunchScreen(restore: () async {}))));
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+    }
+
+    await launch();
+    expect(find.text('Đặt vé trong một phút'), findsOneWidget);
+    await tester.tap(find.text('Tiếp'));
+    await tester.pumpAndSettle();
+    expect(find.text('Đón tận nhà, biết lượt của mình'), findsOneWidget);
+    await tester.tap(find.text('Bỏ qua'));
+    await tester.pumpAndSettle();
+    expect(find.text('Ứng dụng đặt vé của nhà xe'), findsOneWidget, reason: 'the welcome screen, to choose the company');
+
+    await launch();
+    expect(find.text('Đặt vé trong một phút'), findsOneWidget, reason: 'still no company: the pages again');
+
+    store.operator = OperatorInfo.fromJson({'operator_id': 'op_saomai', 'code': 'SAOMAI', 'name': 'Nhà xe Sao Mai', 'hotline': '1900 6868'});
+    await launch();
+    expect(find.text('Đặt vé trong một phút'), findsNothing);
+    expect(find.text('Nhà xe Sao Mai'), findsOneWidget);
   });
 }

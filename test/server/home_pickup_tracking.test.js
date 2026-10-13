@@ -84,7 +84,7 @@ describe('Following the bus that comes to pick me up (D143)', () => {
     assert.ok(d.distance_meters > 4000 && d.distance_meters < 6000, `${d.distance_meters}`);
     assert.ok(d.eta_minutes > 10);
     assert.ok(Date.parse(d.expected_at) > Date.now());
-    assert.match(d.hud_status_text, /^Xe đang trên đường đón bạn/);
+    assert.match(d.hud_status_text, /^Bạn là điểm đón tiếp theo/);
     assert.strictEqual(d.bus_location, null, 'off the route, no stop names are made up');
     assert.strictEqual(sent('PICKUP_APPROACHING').length, 0);
 

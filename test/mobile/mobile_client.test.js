@@ -51,7 +51,8 @@ describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
     const content = fs.readFileSync(mainDartPath, 'utf8');
 
     assert.ok(content.includes('BusGoPassengerApp'), 'Must instantiate BusGoPassengerApp');
-    assert.ok(content.includes('PassengerSplashScreen'), 'Must launch PassengerSplashScreen');
+    // D146: the launch screen (brand, then the feature pages once, then the welcome screen).
+    assert.ok(content.includes('PassengerLaunchScreen'), 'Must launch PassengerLaunchScreen');
   });
 
   it('TC-MOB-04: Flutter AppColors must define BusGo Passenger design tokens matching DESIGN.md', () => {

@@ -4,6 +4,7 @@
  */
 
 import { homeConfirmed } from '../../../core/serviceAreas.js';
+import { homeAppointments, homeOrder, homeQueue, homeWaitMinutes, isWaitingHome, missableAt } from '../../../core/homeRun.js';
 import crypto from 'crypto';
 import {
   generateBoardingQR,
@@ -348,6 +349,7 @@ export class DriverCockpitService {
       on_board_count: trip.boarded_count - (trip.alighted_count || 0),
       stops,
       route_shape: routeShape(trip.trip_id) || null,
+      home_run: this._homeRunView(trip),
       manifest: (trip.manifest || []).map(p => this._publicPassenger(p))
     };
   }
@@ -365,7 +367,19 @@ export class DriverCockpitService {
         lifecycle_status: pub.lifecycle_status,
         on_board_count: pub.on_board_count,
         stops: pub.stops.map(({ stop_id, name, order, time, lifecycle_status, counts, arrived_at, skipped_at }) => ({ stop_id, name, order, time, lifecycle_status, counts, arrived_at: arrived_at || null, skipped_at: skipped_at || null })),
-        home_pickups: trip.manifest.filter(p => homeConfirmed(p.home_pickup) && p.boarding_status !== 'CANCELLED').map(p => ({ ticket_id: p.ticket_id, seat_code: p.seat_code, boarding_status: p.boarding_status, address: p.home_pickup.address, window_from: p.home_pickup.window_from || null, window_to: p.home_pickup.window_to || null })),
+        home_pickups: (() => {
+          // D144: in collection order, with each passenger's time, answer and what happened at the door.
+          const run = this._homeRunView(trip);
+          const at = Object.fromEntries((run?.stops || []).map(s => [s.ticket_id, s]));
+          const ordered = [...(run?.stops || []).map(s => trip.manifest.find(p => p.ticket_id === s.ticket_id)), ...trip.manifest.filter(p => homeConfirmed(p.home_pickup) && !at[p.ticket_id])];
+          return ordered.filter(p => p && homeConfirmed(p.home_pickup) && p.boarding_status !== 'CANCELLED').map(p => ({
+            ticket_id: p.ticket_id, seat_code: p.seat_code, boarding_status: p.boarding_status, address: p.home_pickup.address,
+            window_from: p.home_pickup.window_from || null, window_to: p.home_pickup.window_to || null,
+            position: at[p.ticket_id]?.position || null, appointment_at: at[p.ticket_id]?.appointment_at || null,
+            ready: p.pickup_ready || null, arrived_at: p.home_pickup.arrived_at || null, missed_at: p.home_pickup.missed_at || null,
+            inaccessible_at: p.home_pickup.inaccessible_at || null, source: p.source || null
+          }));
+        })(),
         events: [...(trip.events || [])].reverse()
       }
     };
@@ -931,8 +945,136 @@ export class DriverCockpitService {
 
   /** Confirmed home pickups of the trip still to collect (not boarded, not refused, address reachable). */
   homePickupsWaiting(trip) {
-    return (trip?.manifest || []).filter(p => homeConfirmed(p.home_pickup) && !p.home_pickup.inaccessible_at
-      && !['BOARDED', 'NO_SHOW', 'CANCELLED'].includes(p.boarding_status));
+    return homeQueue(trip);
+  }
+
+  /** The company settings of a trip (wait at a door, threshold). */
+  _configOf(trip) {
+    return findOperatorById(trip?.operator_id)?.service_config || {};
+  }
+
+  /** The home run as the driver sees it (D144): order, each passenger's appointment and the wait at a door. */
+  _homeRunView(trip) {
+    const order = homeOrder(trip);
+    if (order.length === 0) return null;
+    const config = this._configOf(trip);
+    const appointments = homeAppointments(trip);
+    return {
+      started_at: trip.home_run_started_at || null,
+      wait_minutes: homeWaitMinutes(config),
+      stops: order.map((p, i) => ({
+        ticket_id: p.ticket_id,
+        position: i + 1,
+        appointment_at: appointments[p.ticket_id] || null,
+        arrived_at: p.home_pickup.arrived_at || null,
+        missable_at: missableAt(p, config),
+        missed_at: p.home_pickup.missed_at || null,
+        ready: p.pickup_ready || null,
+        waiting: isWaitingHome(p)
+      }))
+    };
+  }
+
+  _homePassenger(tripId, ticketId) {
+    const trip = this.activeTrips.get(tripId);
+    if (!trip) return { error: { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' } };
+    const p = (trip.manifest || []).find(m => m.ticket_id === ticketId);
+    if (!p) return { error: { success: false, error: 'Không tìm thấy vé trong danh sách khách', code: 'TICKET_NOT_FOUND' } };
+    if (!homeConfirmed(p.home_pickup)) return { error: { success: false, error: 'Vé này không đón tận nhà', code: 'NOT_HOME_PICKUP' } };
+    return { trip, p };
+  }
+
+  /** D144: the driver's order for the home pickups (ticket ids, first to last); unknown or missing ids are refused. */
+  setHomeOrder(tripId, ticketIds, mockNow = Date.now()) {
+    const trip = this.activeTrips.get(tripId);
+    if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+    const homes = homeOrder(trip).map(p => p.ticket_id);
+    if (!Array.isArray(ticketIds) || ticketIds.length !== homes.length || new Set(ticketIds).size !== homes.length || !ticketIds.every(id => homes.includes(id))) {
+      return { success: false, error: 'Thứ tự đón phải gồm đúng các khách đón tận nhà của chuyến', code: 'VALIDATION_ERROR' };
+    }
+    trip.home_order = [...ticketIds];
+    this._event(trip, 'HOME_ORDER_SET', { ticket_ids: [...ticketIds] }, mockNow);
+    // A new order on the road moves the times given to the passengers: each one whose time moved is told.
+    if (trip.home_run_started_at) {
+      const before = trip.home_appointments || {};
+      const after = homeAppointments(trip, { fresh: true });
+      trip.home_appointments = after;
+      const queue = homeQueue(trip);
+      const moved = queue.filter(p => before[p.ticket_id] && after[p.ticket_id] && Math.abs(Date.parse(after[p.ticket_id]) - Date.parse(before[p.ticket_id])) >= 5 * 60000);
+      if (moved.length) {
+        this.eventBridge?.emit?.('HOME_APPOINTMENT_CHANGED', {
+          tripId, vehiclePlate: trip.vehicle_plate,
+          passengers: moved.map(p => ({ ticket_id: p.ticket_id, phone: p.passenger_phone || null, address: p.home_pickup.address, appointment_at: after[p.ticket_id], position: queue.indexOf(p) + 1 })),
+          now: mockNow
+        });
+      }
+    }
+    return { success: true, data: this._homeRunView(trip) };
+  }
+
+  /** D144: the bus is at the passenger's door. The wait starts; the passenger is told how long the bus waits. */
+  homeArrived(tripId, ticketId, mockNow = Date.now()) {
+    const { trip, p, error } = this._homePassenger(tripId, ticketId);
+    if (error) return error;
+    if (!isWaitingHome(p)) return { success: false, error: 'Khách này không còn chờ đón tận nhà', code: 'HOME_PICKUP_CLOSED' };
+    if (!p.home_pickup.arrived_at) {
+      p.home_pickup = { ...p.home_pickup, arrived_at: new Date(mockNow).toISOString() };
+      this._event(trip, 'HOME_ARRIVED', { ticket_id: ticketId, seat_code: p.seat_code }, mockNow);
+      this.eventBridge?.emit?.('HOME_PICKUP_DOOR', {
+        tripId, ticketId, seatCode: p.seat_code, phone: p.passenger_phone || null, address: p.home_pickup.address,
+        vehiclePlate: trip.vehicle_plate, waitMinutes: homeWaitMinutes(this._configOf(trip)), now: mockNow
+      });
+    }
+    return { success: true, data: this._homeRunView(trip) };
+  }
+
+  /**
+   * D144: the passenger did not come out within the company's wait. The driver goes on; the ticket stays valid and
+   * the passenger is told to board at the first stop before departure.
+   */
+  homeMissed(tripId, ticketId, mockNow = Date.now()) {
+    const { trip, p, error } = this._homePassenger(tripId, ticketId);
+    if (error) return error;
+    if (!isWaitingHome(p)) return { success: false, error: 'Khách này không còn chờ đón tận nhà', code: 'HOME_PICKUP_CLOSED' };
+    const config = this._configOf(trip);
+    const until = missableAt(p, config);
+    if (!until) return { success: false, error: 'Bấm "Đã tới" khi xe tới nhà khách trước', code: 'HOME_NOT_ARRIVED' };
+    if (mockNow < Date.parse(until)) {
+      return { success: false, error: `Chờ khách đủ ${homeWaitMinutes(config)} phút (tới ${new Date(Date.parse(until) + 7 * 3600000).toISOString().slice(11, 16)})`, code: 'HOME_WAIT_NOT_OVER', missable_at: until };
+    }
+    p.home_pickup = { ...p.home_pickup, missed_at: new Date(mockNow).toISOString() };
+    this._event(trip, 'HOME_MISSED', { ticket_id: ticketId, seat_code: p.seat_code }, mockNow);
+    const first = trip.stops?.find(s => s.stop_id === p.pickup_stop_id) || trip.stops?.[0];
+    this.eventBridge?.emit?.('HOME_PICKUP_MISSED', {
+      tripId, ticketId, seatCode: p.seat_code, phone: p.passenger_phone || null, address: p.home_pickup.address,
+      stopName: first?.name || 'bến đầu', departure: trip.planned_departure_time, vehiclePlate: trip.vehicle_plate,
+      waitMinutes: homeWaitMinutes(config), now: mockNow
+    });
+    return { success: true, data: this._homeRunView(trip) };
+  }
+
+  /** D144: the passenger's answer before the bus comes ("ready", "2 more minutes", "5 more minutes"). */
+  setPickupReady(tripId, ticketId, status, mockNow = Date.now()) {
+    const { trip, p, error } = this._homePassenger(tripId, ticketId);
+    if (error) return error;
+    if (!isWaitingHome(p)) return { success: false, error: 'Xe không còn đón bạn tại nhà cho vé này', code: 'HOME_PICKUP_CLOSED' };
+    const minutes = { READY: 0, NEED_2: 2, NEED_5: 5 }[status];
+    if (minutes === undefined) return { success: false, error: 'Trạng thái phải là READY, NEED_2 hoặc NEED_5', code: 'VALIDATION_ERROR' };
+    p.pickup_ready = { status: minutes === 0 ? 'READY' : 'NEED_TIME', minutes, at: new Date(mockNow).toISOString() };
+    this._event(trip, 'PICKUP_READY', { ticket_id: ticketId, seat_code: p.seat_code, status: p.pickup_ready.status, minutes }, mockNow);
+    return { success: true, data: { ticket_id: ticketId, ready: p.pickup_ready, wait_minutes: homeWaitMinutes(this._configOf(trip)) } };
+  }
+
+  /** D144: the passenger's number for a call by the trip's own driver; every reveal is in the trip log. */
+  passengerContact(tripId, ticketId, mockNow = Date.now()) {
+    const trip = this.activeTrips.get(tripId);
+    if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+    if (['COMPLETED', 'CANCELLED'].includes(trip.status)) return { success: false, error: 'Chuyến xe đã kết thúc', code: 'TRIP_NOT_ACTIVE' };
+    const p = (trip.manifest || []).find(m => m.ticket_id === ticketId);
+    const phone = p?.passenger_phone || p?.phone || null;
+    if (!p || !phone) return { success: false, error: 'Không có số điện thoại của khách', code: 'TICKET_NOT_FOUND' };
+    this._event(trip, 'PASSENGER_CALLED', { ticket_id: ticketId, seat_code: p.seat_code }, mockNow);
+    return { success: true, data: { ticket_id: ticketId, phone } };
   }
 
   /**
@@ -950,11 +1092,16 @@ export class DriverCockpitService {
     if (waiting.length === 0) {
       return { success: false, error: 'Chuyến này không còn khách đón tận nhà', code: 'NO_HOME_PICKUPS' };
     }
+    // Times given to the passengers are frozen when the bus sets off, with the order it follows.
+    const appointments = homeAppointments(trip);
+    trip.home_order = homeOrder(trip).map(p => p.ticket_id);
+    trip.home_appointments = appointments;
     trip.home_run_started_at = new Date(mockNow).toISOString();
+    this._event(trip, 'HOME_RUN_STARTED', { ticket_ids: waiting.map(p => p.ticket_id) }, mockNow);
     this.eventBridge?.emit?.('HOME_RUN_STARTED', {
       tripId,
       vehiclePlate: trip.vehicle_plate,
-      passengers: waiting.map(p => ({ ticket_id: p.ticket_id, seat_code: p.seat_code, phone: p.passenger_phone || null, address: p.home_pickup.address })),
+      passengers: homeQueue(trip).map((p, i) => ({ ticket_id: p.ticket_id, seat_code: p.seat_code, phone: p.passenger_phone || null, address: p.home_pickup.address, position: i + 1, appointment_at: appointments[p.ticket_id] || null })),
       now: mockNow
     });
     return { success: true, data: this._publicTrip(trip) };

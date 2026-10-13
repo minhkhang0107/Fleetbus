@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'passenger_login_screen.dart';
+import 'passenger_onboarding_screen.dart';
 import 'passenger_splash_screen.dart';
 import 'passenger_store.dart';
 import 'passenger_widgets.dart';
@@ -63,6 +64,12 @@ class PassengerProfileScreen extends StatelessWidget {
             ),
             gap(16),
           ],
+          // D146: the feature pages again, any time.
+          GhostButton(
+            label: 'Xem giới thiệu tính năng',
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerOnboardingScreen(replay: true))),
+          ),
+          gap(16),
           GhostButton(
             label: store.loggedIn ? 'Đăng xuất' : 'Đăng nhập',
             onPressed: () {

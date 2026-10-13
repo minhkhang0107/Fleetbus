@@ -1,14 +1,70 @@
 import 'package:flutter/material.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'driver_cod_dialog.dart';
+import 'driver_permissions.dart';
 import 'driver_store.dart';
 import 'driver_widgets.dart';
 
 /// DRI-009 / DRI-010: scan the static boarding QR, or take the backup PIN when the passenger has no
 /// phone at hand. Results show on a sheet; an unpaid COD ticket opens the collection (BR-COD-006).
-/// Camera decoding needs the scanner plugin of the device build (OQ-029); the PIN path works here.
-class DriverQrScannerScreen extends StatelessWidget {
+/// The camera is asked for when the screen opens (D145); refused, the PIN path still boards the passenger.
+class DriverQrScannerScreen extends StatefulWidget {
   const DriverQrScannerScreen({super.key});
+
+  @override
+  State<DriverQrScannerScreen> createState() => _DriverQrScannerScreenState();
+}
+
+class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
+  /// Null while asking, then whether the camera may be used.
+  bool? _camera;
+  bool _busy = false;
+  MobileScannerController? _scanner;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _askCamera());
+  }
+
+  @override
+  void dispose() {
+    _scanner?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _askCamera() async {
+    final ok = await ensureDriverCamera(context);
+    if (!mounted) return;
+    setState(() {
+      _camera = ok;
+      if (ok) _scanner ??= MobileScannerController(detectionSpeed: DetectionSpeed.noDuplicates, formats: const [BarcodeFormat.qrCode]);
+    });
+  }
+
+  /// DRI-009: a QR read by the camera goes to the server; the answer shows on a sheet.
+  Future<void> _onDetect(BarcodeCapture capture) async {
+    final payload = capture.barcodes.map((b) => b.rawValue).whereType<String>().firstOrNull;
+    if (payload == null || _busy) return;
+    setState(() => _busy = true);
+    await _scanner?.stop();
+    if (!mounted) return;
+    final store = DriverScope.read(context);
+    final r = await store.boardWithQr(payload);
+    if (!mounted) return;
+    final seat = r.data?['seat_code'] ?? r.data?['passenger']?['seat_code'];
+    final name = r.data?['passenger_name'] ?? r.data?['passenger']?['passenger_name'];
+    await _result(
+      context,
+      r.error == null,
+      r.error == null ? 'Hợp lệ${seat != null ? ' · Ghế $seat' : ''}' : 'Không cho lên xe',
+      r.error == null ? (name != null ? '$name đã lên xe.' : 'Khách đã lên xe.') : r.error!,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    await _scanner?.start();
+  }
 
   Future<void> _pinEntry(BuildContext context) async {
     final store = DriverScope.read(context);
@@ -83,6 +139,20 @@ class DriverQrScannerScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final camera = _camera == true && _scanner != null
+        ? MobileScanner(controller: _scanner!, onDetect: _onDetect)
+        : Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Text(_camera == null ? 'Đang mở camera…' : 'Camera chưa được bật. Nhập mã PIN của khách, hoặc bật camera.', textAlign: TextAlign.center, style: dsans(size: 15, color: DTokens.sub, height: 1.5)),
+                if (_camera == false) ...[
+                  const SizedBox(height: 12),
+                  TextButton(onPressed: _askCamera, child: Text('Bật camera', style: dsans(size: 15, weight: FontWeight.w600, color: const Color(0xFF93C5FD)))),
+                ],
+              ]),
+            ),
+          );
     final frame = Center(
       child: Container(
         width: 240,
@@ -98,7 +168,7 @@ class DriverQrScannerScreen extends StatelessWidget {
         backgroundColor: Colors.black,
         appBar: const DHeader(title: 'Quét vé lên xe', close: true),
         body: Row(children: [
-          Expanded(child: frame),
+          Expanded(child: Stack(fit: StackFit.expand, children: [camera, if (_camera == true) frame])),
           Container(
             width: 420,
             color: DTokens.bg,
@@ -118,7 +188,8 @@ class DriverQrScannerScreen extends StatelessWidget {
       backgroundColor: Colors.black,
       appBar: const DHeader(title: 'Quét vé lên xe', close: true),
       body: Stack(fit: StackFit.expand, children: [
-        frame,
+        camera,
+        if (_camera == true) frame,
         Positioned(
           bottom: 32,
           left: 16,

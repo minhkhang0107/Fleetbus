@@ -111,3 +111,9 @@ flutter {
 }
 
 dependencies {}
+
+// Push notifications (D145): Firebase is set up only when the project's google-services.json is in this folder,
+// so a build without it still works (the app then simply has no push).
+if (file("google-services.json").exists()) {
+    apply plugin: "com.google.gms.google-services"
+}

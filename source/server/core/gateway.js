@@ -20,6 +20,8 @@ const PUBLIC_RULES = [
   ['POST', /^\/api\/v1\/webhooks\//],
   ['GET', /^\/api\/v1\/(passenger\/)?(stations|trips)(\/search)?$/],
   ['GET', /^\/api\/v1\/routes\/stops\/search$/],
+  // The SMS tracking link page: the token in the path is the credential (D144).
+  ['POST', /^\/api\/v1\/share\/[A-Za-z0-9_-]+\/pickup-ready$/],
   ['GET', /^\/api\/v1\/trips\/run-days$/],
   ['GET', /^\/api\/v1\/(passenger\/)?trips\/[^/]+(\/(seat-map|tracking|tracking\/stream|radar|stops|eta|disruptions|replacement-info))?$/]
 ];
@@ -31,7 +33,7 @@ const PASSENGER_RULES = [
 
 const IDEMPOTENT_RULES = {
   passenger: /\/(seats\/hold|hold-seats|bookings\/create|checkout\/create-order|delegate|qr\/reissue|cancel|home-request\/withdraw|tickets\/[^/]+\/stops)$/,
-  driver: /\/(readiness|start|home-run|arrive|inaccessible|boarding|boarding\/manual|board-qr|payments\/cod-collect|collect-cod|onboard-hail|incidents?|end|no-show|batch-replay)$/,
+  driver: /\/(readiness|start|home-run|home-order|home-arrived|home-missed|arrive|inaccessible|boarding|boarding\/manual|board-qr|payments\/cod-collect|collect-cod|onboard-hail|incidents?|end|no-show|batch-replay)$/,
   staff: /\/(platform\/operators(\/[^/]+\/(activate|deactivate))?|pos\/(orders|bookings|hotline-hold)|refunds\/[^/]+\/process|service-areas(\/[^/]+\/(activate|deactivate))?|promo-banners(\/[^/]+\/(activate|deactivate))?|schedules|trips\/[^/]+\/(assign|cancel|sales)|home-requests\/[^/]+\/[^/]+\/(confirm|reject)|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem)$/
 };
 

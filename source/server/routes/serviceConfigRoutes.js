@@ -135,6 +135,7 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
         dropoff_modes: body.dropoff_modes ?? config.dropoff_modes,
         allow_home_to_home: body.allow_home_to_home ?? config.allow_home_to_home,
         approaching_threshold_minutes: body.approaching_threshold_minutes ?? config.approaching_threshold_minutes,
+        home_wait_minutes: body.home_wait_minutes ?? config.home_wait_minutes ?? 5,
         stop_style: body.stop_style ?? config.stop_style ?? 'STATIONS'
       };
       if (!STOP_STYLES.includes(next.stop_style)) {
@@ -148,6 +149,10 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
       }
       if (!Number.isInteger(next.approaching_threshold_minutes) || next.approaching_threshold_minutes < 1 || next.approaching_threshold_minutes > 120) {
         sendError(res, 'Ngưỡng báo xe sắp tới là 1-120 phút', 'VALIDATION_ERROR', 400);
+        return;
+      }
+      if (!Number.isInteger(next.home_wait_minutes) || next.home_wait_minutes < 1 || next.home_wait_minutes > 30) {
+        sendError(res, 'Thời gian xe chờ khách tại nhà là 1-30 phút', 'VALIDATION_ERROR', 400);
         return;
       }
       const before = snapshot(config);

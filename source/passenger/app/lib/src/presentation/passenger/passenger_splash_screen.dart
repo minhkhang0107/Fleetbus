@@ -60,12 +60,7 @@ class _PassengerSplashScreenState extends State<PassengerSplashScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Container(
-                          width: 72,
-                          height: 72,
-                          decoration: BoxDecoration(color: PTokens.primary, borderRadius: BorderRadius.circular(18)),
-                          child: const Icon(Icons.directions_bus_outlined, color: Colors.white, size: 36),
-                        ),
+                        Image.asset('assets/brand/logo.png', width: 80, height: 80),
                         gap(16),
                         Text(op?.name ?? 'BusGo', style: sans(size: 32, weight: FontWeight.w700), textAlign: TextAlign.center),
                         gap(8),

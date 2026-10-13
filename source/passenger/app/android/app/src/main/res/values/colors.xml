@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- BusGo brand (tools/brand/marks.mjs): launch screen and notification accent. -->
+    <color name="busgo_brand">#1D4ED8</color>
+    <color name="busgo_accent">#2563EB</color>
+</resources>

@@ -64,6 +64,8 @@ export function stateCollections(services, { idempotency } = {}) {
     mapCollection('pnr_index', () => paymentService.pnrIndex, (orderId) => own(paymentService.orders.get(orderId))),
     listCollection('wallet_credits', () => paymentService.walletCredits, own),
     groupedCollection('notifications', () => trackingService.notifications, own),
+    listCollection('message_outbox', () => services.messenger?.outbox || [], own),
+    mapCollection('passenger_devices', () => services.messenger?.devices || new Map(), own),
     setCollection('notification_keys', () => trackingService.sentNotificationKeys, (s) => { trackingService.sentNotificationKeys = s; }, (key) => ticketOwner(key.split(':')[0])),
 
     // Trips on the road

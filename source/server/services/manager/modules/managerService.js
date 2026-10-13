@@ -4,6 +4,7 @@
  */
 
 import crypto from 'crypto';
+import { createShareToken } from '../../passenger/core/cryptoEngine.js';
 import { DEMO_DATE, vnDate } from '../../../core/serviceDate.js';
 import { validateVietnamPhone } from '../../passenger/core/formatters.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
@@ -667,6 +668,8 @@ export class ManagerOperationsService {
     reservationId = null,
     pickupStopId = null,
     dropoffStopId = null,
+    homePickup = null,
+    homeFeeVnd = 0,
     mockNow = Date.now(),
     operatorId = DEFAULT_OPERATOR_ID
   }) {
@@ -681,6 +684,9 @@ export class ManagerOperationsService {
     }
     if (!passengerName || !String(passengerName).trim()) {
       return { success: false, error: 'Thiếu họ tên hành khách', code: 'INVALID_PASSENGER_NAME' };
+    }
+    if (homePickup && !phone) {
+      return { success: false, error: 'Đón tận nhà cần số điện thoại để báo khách khi xe tới', code: 'INVALID_PHONE' };
     }
     if (phone && !validateVietnamPhone(phone).isValid) {
       return { success: false, error: 'Số điện thoại không hợp lệ', code: 'INVALID_PHONE' };
@@ -717,7 +723,7 @@ export class ManagerOperationsService {
 
     const route = this.routes.find(r => r.route_id === trip.route_id);
     const unitPrice = route ? route.base_fare_vnd : 220000;
-    const totalFare = seatCodes.length * unitPrice;
+    const totalFare = seatCodes.length * unitPrice + (homePickup ? homeFeeVnd : 0);
 
     const pnr = `BG-POS${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -735,6 +741,9 @@ export class ManagerOperationsService {
       dropoff_stop_id: resolvedSegment.dropoff_stop_id,
       issued_at: new Date(mockNow).toISOString(),
       channel: 'POS_HOTLINE',
+      // D144: the address the passenger gave on the phone; the office confirmed it by taking it.
+      home_pickup: homePickup || reservation?.home_pickup || null,
+      home_fee_vnd: homePickup ? homeFeeVnd : (reservation?.home_fee_vnd || 0),
       operator_id: operatorId
     };
 
@@ -779,6 +788,8 @@ export class ManagerOperationsService {
     agentStaffId = 'stf_hotline_01',
     pickupStopId = null,
     dropoffStopId = null,
+    homePickup = null,
+    homeFeeVnd = 0,
     mockNow = Date.now(),
     operatorId = DEFAULT_OPERATOR_ID
   }) {
@@ -831,7 +842,10 @@ export class ManagerOperationsService {
     }
 
     let holdUntilMs;
-    if (holdPolicy === 'UNTIL_DEPARTURE_OFFSET') {
+    if (homePickup) {
+      // D144: a home pickup is collected before departure, so its seats are held until the bus leaves.
+      holdUntilMs = Math.max(new Date(trip.departure_time).getTime(), mockNow + 15 * 60 * 1000);
+    } else if (holdPolicy === 'UNTIL_DEPARTURE_OFFSET') {
       const departureTimeMs = new Date(trip.departure_time).getTime();
       holdUntilMs = departureTimeMs - (Number(departureOffsetMinutes) * 60 * 1000);
       // If departure is very close or in the past relative to mockNow, fallback to 15m hold
@@ -861,6 +875,10 @@ export class ManagerOperationsService {
       created_at: new Date(mockNow).toISOString(),
       created_by: agentStaffId,
       notes,
+      home_pickup: homePickup || null,
+      home_fee_vnd: homePickup ? homeFeeVnd : 0,
+      // The SMS link to follow the bus and answer "ready" (D144).
+      share_token: createShareToken(),
       operator_id: operatorId
     };
 

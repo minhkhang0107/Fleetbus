@@ -7,8 +7,42 @@ import EventEmitter from 'events';
 import { operatorOfTrip } from './tenancy.js';
 import { findOperatorById } from './operators.js';
 import { homeConfirmed } from './serviceAreas.js';
+import { homeEta } from './homeRun.js';
+import { publicBaseUrl } from './messaging.js';
+import { createShareToken } from '../services/passenger/core/cryptoEngine.js';
+
+/** "18:35" of an ISO instant, Vietnam time. */
+const vnClock = (iso) => new Date(Date.parse(iso) + 7 * 3600000).toISOString().slice(11, 16);
 import { expireHomeRequests } from './homeReview.js';
 import { DEMO_DATE, addDays, parseRunId, serviceCalendar } from './serviceDate.js';
+
+/** Puts a phone hold on the driver's manifest (paid in cash on board), once per seat; a home address rides with it. */
+function addHotlineToManifest(driverTrip, reservation, farePerSeat) {
+  const feeEach = Math.round((reservation.home_fee_vnd || 0) / reservation.seat_codes.length);
+  for (const seatCode of reservation.seat_codes) {
+    const ticketId = `hl_${reservation.reservation_id}_${seatCode}`;
+    if (driverTrip.manifest.some(m => m.ticket_id === ticketId)) continue;
+    driverTrip.manifest.push({
+      ticket_id: ticketId,
+      pnr: reservation.pnr,
+      passenger_name: reservation.passenger_name,
+      passenger_phone: reservation.phone,
+      seat_code: seatCode,
+      pickup_stop: driverTrip.stops.find(s => s.stop_id === reservation.pickup_stop_id)?.name || driverTrip.stops[0]?.name || null,
+      dropoff_stop: driverTrip.stops.find(s => s.stop_id === reservation.dropoff_stop_id)?.name || driverTrip.stops.at(-1)?.name || null,
+      pickup_stop_id: reservation.pickup_stop_id,
+      dropoff_stop_id: reservation.dropoff_stop_id,
+      home_pickup: homeConfirmed(reservation.home_pickup) ? reservation.home_pickup : null,
+      boarding_status: 'ISSUED',
+      payment_method: 'COD',
+      cod_amount_vnd: farePerSeat + feeEach,
+      source: 'HOTLINE',
+      reservation_id: reservation.reservation_id,
+      boarded_at: null
+    });
+  }
+  driverTrip.booked_passengers_count = driverTrip.manifest.length;
+}
 
 /** Puts issued tickets on the driver's manifest, once each. */
 function addToManifest(driverTrip, tickets) {
@@ -352,6 +386,10 @@ export class FleetBusEventBridge extends EventEmitter {
     // -------------------------------------------------------------------------
     this.on('POS_BOOKING_CREATED', ({ booking, seatCodes }) => {
       const tripId = booking.trip_id;
+      // The ticket names its real stops (not a placeholder), from the catalog trip.
+      const catalogStops = services.searchService?.getTripDetail?.(tripId)?.data?.stops || [];
+      const stopName = (id, fallback) => catalogStops.find(s => s.stop_id === id)?.name || catalogStops.at(fallback)?.name || null;
+      const shareTokens = Object.fromEntries(seatCodes.map(c => [c, createShareToken()]));
 
       // A. Seat Map: Mark seats as BOOKED
       if (seatMapService && typeof seatMapService.confirmBooking === 'function') {
@@ -370,10 +408,11 @@ export class FleetBusEventBridge extends EventEmitter {
               passenger_name: booking.passenger_name,
               passenger_phone: booking.phone,
               seat_code: seatCode,
-              pickup_stop: 'Bến xe trung tâm (POS)',
-              dropoff_stop: 'Bến xe đích (POS)',
+              pickup_stop: stopName(booking.pickup_stop_id, 0),
+              dropoff_stop: stopName(booking.dropoff_stop_id, -1),
               pickup_stop_id: booking.pickup_stop_id,
               dropoff_stop_id: booking.dropoff_stop_id,
+              home_pickup: homeConfirmed(booking.home_pickup) ? booking.home_pickup : null,
               boarding_status: 'NOT_BOARDED',
               payment_method: booking.payment_method || 'CASH_POS',
               cod_amount_vnd: 0,
@@ -404,45 +443,26 @@ export class FleetBusEventBridge extends EventEmitter {
             deck: seatMapService?.getSeatInfo?.(tripId, seatCode)?.deck ?? (seatCode.startsWith('A') ? 1 : 2),
             passenger_name: booking.passenger_name,
             passenger_phone: booking.phone,
-            pickup_stop: 'Bến xe trung tâm',
-            dropoff_stop: 'Bến xe đích',
+            pickup_stop: stopName(booking.pickup_stop_id, 0),
+            dropoff_stop: stopName(booking.dropoff_stop_id, -1),
             pickup_stop_id: booking.pickup_stop_id,
             dropoff_stop_id: booking.dropoff_stop_id,
+            home_pickup: booking.home_pickup || null,
+            share_token: shareTokens[seatCode],
             status: 'ACTIVE',
             created_at: new Date().toISOString(),
             boarded_at: null
           });
         }
       }
+      const firstSeat = seatCodes[0];
+      this._phoneBookingNotice(tripId, { key: booking.pnr, phone: booking.phone, seatCodes, home: booking.home_pickup, pnr: booking.pnr, payOnBoard: false, link: `${publicBaseUrl()}/t/${shareTokens[firstSeat]}`, ticketId: `tkt_pos_${booking.pnr.replace('-', '')}_${firstSeat}` });
     });
 
-    this.on('HOTLINE_HOLD_CREATED', ({ tripId, reservation, farePerSeat, operator }) => {
-      if (driverService && driverService.activeTrips) {
-        const driverTrip = driverService.activeTrips.get(tripId);
-        if (driverTrip) {
-          for (const seatCode of reservation.seat_codes) {
-            const ticketId = `hl_${reservation.reservation_id}_${seatCode}`;
-            driverTrip.manifest.push({
-              ticket_id: ticketId,
-              pnr: reservation.pnr,
-              passenger_name: reservation.passenger_name,
-              passenger_phone: reservation.phone,
-              seat_code: seatCode,
-              pickup_stop: driverTrip.stops.find(s => s.stop_id === reservation.pickup_stop_id)?.name || driverTrip.stops[0]?.name || null,
-              dropoff_stop: driverTrip.stops.find(s => s.stop_id === reservation.dropoff_stop_id)?.name || driverTrip.stops.at(-1)?.name || null,
-              pickup_stop_id: reservation.pickup_stop_id,
-              dropoff_stop_id: reservation.dropoff_stop_id,
-              boarding_status: 'ISSUED',
-              payment_method: 'COD',
-              cod_amount_vnd: farePerSeat,
-              source: 'HOTLINE',
-              reservation_id: reservation.reservation_id,
-              boarded_at: null
-            });
-          }
-          driverTrip.booked_passengers_count = driverTrip.manifest.length;
-        }
-      }
+    this.on('HOTLINE_HOLD_CREATED', ({ tripId, reservation, farePerSeat }) => {
+      const driverTrip = driverService?.activeTrips?.get(tripId);
+      if (driverTrip) addHotlineToManifest(driverTrip, reservation, farePerSeat);
+      this._phoneBookingNotice(tripId, { key: reservation.reservation_id, phone: reservation.phone, seatCodes: reservation.seat_codes, home: reservation.home_pickup, pnr: reservation.pnr, payOnBoard: true, link: reservation.share_token ? `${publicBaseUrl()}/t/${reservation.share_token}` : null, ticketId: `hl_${reservation.reservation_id}_${reservation.seat_codes[0]}` });
     });
 
     this.on('HOTLINE_HOLD_RELEASED', ({ tripId, reservationId }) => {
@@ -503,14 +523,60 @@ export class FleetBusEventBridge extends EventEmitter {
       const operatorId = operatorOfTrip(this.services, tripId);
       for (const p of passengers) {
         if (!p.phone) continue;
+        // D144: each passenger gets their own time and place in the run, and a way to say they are ready.
+        const when = p.appointment_at ? `, giờ hẹn khoảng ${vnClock(p.appointment_at)}` : '';
         trackingService?.sendNotificationOnce?.(`${p.ticket_id}:HOME_RUN_STARTED`, p.phone, {
           operatorId,
           title: 'Tài xế đã lên đường đón bạn',
-          body: `Xe ${vehiclePlate} đang đi đón khách tận nhà. Mở "Theo dõi xe" để xem xe đang ở đâu và khi nào tới ${p.address}.`,
+          body: `Xe ${vehiclePlate} đang đi đón khách tận nhà. Bạn là điểm đón thứ ${p.position}${when} tại ${p.address}. Xem xe đang ở đâu và bấm "Tôi đã sẵn sàng" khi bạn xong.`,
           type: 'HOME_RUN_STARTED',
-          payload: { trip_id: tripId, ticket_id: p.ticket_id, at: new Date(now).toISOString() }
+          payload: { trip_id: tripId, ticket_id: p.ticket_id, at: new Date(now).toISOString(), appointment_at: p.appointment_at || null },
+          link: this.trackingLink(p.ticket_id)
         });
       }
+    });
+
+    // D144: the driver changed the order on the road; a passenger whose time moved hears the new one.
+    this.on('HOME_APPOINTMENT_CHANGED', ({ tripId, vehiclePlate, passengers, now = Date.now() }) => {
+      for (const p of passengers) {
+        if (!p.phone) continue;
+        trackingService?.sendNotification?.(p.phone, {
+          operatorId: operatorOfTrip(this.services, tripId),
+          title: 'Giờ hẹn đón đã đổi',
+          body: `Tài xế xe ${vehiclePlate} đổi thứ tự đón: bạn là điểm đón thứ ${p.position}, giờ hẹn mới khoảng ${vnClock(p.appointment_at)} tại ${p.address}.`,
+          type: 'HOME_APPOINTMENT_CHANGED',
+          payload: { trip_id: tripId, ticket_id: p.ticket_id, appointment_at: p.appointment_at, at: new Date(now).toISOString() },
+          link: this.trackingLink(p.ticket_id)
+        });
+      }
+    });
+
+    // D144: the driver is at the door; the passenger hears how long the bus waits.
+    this.on('HOME_PICKUP_DOOR', ({ tripId, ticketId, seatCode, phone, address, vehiclePlate, waitMinutes, now = Date.now() }) => {
+      if (!phone) return;
+      trackingService?.sendNotificationOnce?.(`${ticketId}:HOME_PICKUP_DOOR`, phone, {
+        operatorId: operatorOfTrip(this.services, tripId),
+        title: 'Xe đang chờ bạn',
+        body: `Xe ${vehiclePlate} đã tới ${address}. Tài xế chờ bạn tối đa ${waitMinutes} phút (tới ${vnClock(new Date(now + waitMinutes * 60000).toISOString())}), ghế ${seatCode}.`,
+        type: 'HOME_PICKUP_DOOR',
+        payload: { trip_id: tripId, ticket_id: ticketId },
+        link: this.trackingLink(ticketId)
+      });
+    });
+
+    // D144: the passenger did not come out; the ticket stays good from the first stop.
+    this.on('HOME_PICKUP_MISSED', ({ tripId, ticketId, seatCode, phone, address, stopName, departure, vehiclePlate, waitMinutes, now = Date.now() }) => {
+      const ticket = paymentService?.tickets?.get(ticketId);
+      if (ticket?.home_pickup) ticket.home_pickup = { ...ticket.home_pickup, missed_at: new Date(now).toISOString() };
+      if (!phone) return;
+      trackingService?.sendNotificationOnce?.(`${ticketId}:HOME_PICKUP_MISSED`, phone, {
+        operatorId: operatorOfTrip(this.services, tripId),
+        title: 'Xe đã đi tiếp',
+        body: `Xe ${vehiclePlate} đã chờ ${waitMinutes} phút tại ${address} nhưng chưa gặp bạn nên phải đi đón khách khác. Vé vẫn giữ: mời bạn ra ${stopName} trước ${departure ? vnClock(departure) : 'giờ xuất bến'} để lên xe, ghế ${seatCode}.`,
+        type: 'HOME_PICKUP_MISSED',
+        payload: { trip_id: tripId, ticket_id: ticketId },
+        link: this.trackingLink(ticketId)
+      });
     });
 
     this.on('HOME_PICKUP_INACCESSIBLE', ({ tripId, ticketId, seatCode, phone, address, reason, meetingPoint, vehiclePlate, now = Date.now() }) => {
@@ -547,6 +613,12 @@ export class FleetBusEventBridge extends EventEmitter {
       // Tickets sold before the office gave the trip a driver must reach that driver too.
       if (driverTrip && paymentService?.tickets) {
         addToManifest(driverTrip, [...paymentService.tickets.values()].filter(t => t.trip_id === tripId && ['ACTIVE', 'BOARDED'].includes(t.status)));
+      }
+      if (driverTrip) {
+        const fare = managerService?.routes?.find(r => r.route_id === managerService.findTrip?.(tripId)?.route_id)?.base_fare_vnd || 220000;
+        for (const r of managerService?.hotlineReservations || []) {
+          if (r.trip_id === tripId && r.hold_status === 'HELD_HOTLINE') addHotlineToManifest(driverTrip, r, fare);
+        }
       }
       const changed = (previous?.vehicle_plate && previous.vehicle_plate !== vehiclePlate) || (previous?.driver_id && previous.driver_id !== driverId);
       if (!changed || !paymentService?.tickets || !trackingService?.sendNotificationOnce) return;
@@ -812,7 +884,8 @@ export class FleetBusEventBridge extends EventEmitter {
   /** Passengers still to be picked up at a stop (home pickups wait at home, not at the stop). */
   _waitingAtStops(trip) {
     // A home request still pending or refused rides from the stop, so that passenger waits there (D130).
-    return (trip?.manifest || []).filter(p => p.passenger_phone && !homeConfirmed(p.home_pickup) && !['BOARDED', 'NO_SHOW', 'CANCELLED'].includes(p.boarding_status));
+    // A missed home pickup boards at the first stop (D144).
+    return (trip?.manifest || []).filter(p => p.passenger_phone && (!homeConfirmed(p.home_pickup) || p.home_pickup.missed_at) && !['BOARDED', 'NO_SHOW', 'CANCELLED'].includes(p.boarding_status));
   }
 
   /**
@@ -856,33 +929,68 @@ export class FleetBusEventBridge extends EventEmitter {
    */
   _notifyHomeApproaching(trip, operatorId, threshold, now) {
     const { driverService, trackingService } = this.services;
+    const pos = trackingService.busPositions?.get(trip.trip_id);
+    if (!pos || now - Date.parse(pos.timestamp) > 60000) return;
     for (const p of driverService.homePickupsWaiting?.(trip) || []) {
-      const home = p.home_pickup;
-      if (!p.passenger_phone || !Number.isFinite(home.lat) || !Number.isFinite(home.lng)) continue;
-      const radar = trackingService.getTripRadar(trip.trip_id, {
-        pickupStopId: p.pickup_stop_id, stops: trip.stops, canSeeBus: true, view: 'TICKET', mockNow: now,
-        homePickup: { lat: home.lat, lng: home.lng, address: home.address, window_from: home.window_from, window_to: home.window_to }
-      }).data;
-      if (!radar?.has_position || radar.freshness?.state !== 'LIVE' || !Number.isFinite(radar.eta_minutes)) continue;
-      const payload = { trip_id: trip.trip_id, ticket_id: p.ticket_id, eta_minutes: radar.eta_minutes };
-      if (radar.is_at_station) {
+      if (!p.passenger_phone) continue;
+      // D144: only the next door hears "approaching"; the ones after it would go out too early.
+      const q = homeEta(trip, p.ticket_id, pos, now);
+      if (!q || q.ahead > 0) continue;
+      const payload = { trip_id: trip.trip_id, ticket_id: p.ticket_id, eta_minutes: q.eta_minutes };
+      const link = this.trackingLink(p.ticket_id);
+      if (q.at_door) {
         trackingService.sendNotificationOnce(`${p.ticket_id}:HOME_PICKUP_ARRIVED`, p.passenger_phone, {
           operatorId,
           title: 'Xe đã tới gần chỗ đón',
-          body: `Xe ${trip.vehicle_plate} đã tới gần ${home.address}. Mời bạn ra xe, ghế ${p.seat_code}.`,
+          body: `Xe ${trip.vehicle_plate} đã tới gần ${p.home_pickup.address}. Mời bạn ra xe, ghế ${p.seat_code}.`,
           type: 'HOME_PICKUP_ARRIVED',
-          payload
+          payload,
+          link
         });
-      } else if (radar.eta_minutes <= threshold) {
+      } else if (q.eta_minutes <= threshold) {
         trackingService.sendNotificationOnce(`${p.ticket_id}:PICKUP_APPROACHING`, p.passenger_phone, {
           operatorId,
           title: 'Xe sắp tới đón bạn',
-          body: `Xe ${trip.vehicle_plate} còn khoảng ${radar.eta_minutes} phút nữa tới ${home.address}. Bạn chuẩn bị ra xe nhé.`,
+          body: `Bạn là điểm đón tiếp theo: xe ${trip.vehicle_plate} còn khoảng ${q.eta_minutes} phút nữa tới ${p.home_pickup.address}. Bạn chuẩn bị ra xe nhé.`,
           type: 'PICKUP_APPROACHING',
-          payload
+          payload,
+          link
         });
       }
     }
+  }
+
+  /**
+   * D144: a booking taken on the phone or at the counter is confirmed by message, with the link to follow the bus
+   * (most of these passengers have no app).
+   */
+  _phoneBookingNotice(tripId, { key, phone, seatCodes, home, pnr, payOnBoard, link, ticketId }) {
+    const { trackingService, searchService } = this.services;
+    if (!phone || !trackingService?.sendNotificationOnce) return;
+    const trip = searchService?.getTripDetail?.(tripId)?.data;
+    const when = trip?.departure_time ? `${vnClock(trip.departure_time)} ngày ${new Date(Date.parse(trip.departure_time) + 7 * 3600000).toISOString().slice(8, 10)}/${new Date(Date.parse(trip.departure_time) + 7 * 3600000).toISOString().slice(5, 7)}` : '';
+    const where = homeConfirmed(home)
+      ? `Đón tận nhà tại ${home.address}${home.window_from ? ` khoảng ${vnClock(home.window_from)}–${vnClock(home.window_to)}` : ''}; tài xế báo giờ cụ thể khi lên đường`
+      : 'Mời bạn có mặt ở điểm đón trước giờ chạy 15 phút';
+    trackingService.sendNotificationOnce(`${key}:PHONE_BOOKING`, phone, {
+      operatorId: operatorOfTrip(this.services, tripId),
+      title: payOnBoard ? 'Nhà xe đã giữ chỗ cho bạn' : 'Nhà xe đã xuất vé cho bạn',
+      body: `Mã ${pnr}, ghế ${seatCodes.join(', ')}, chuyến ${when}${payOnBoard ? ', trả tiền khi lên xe' : ''}. ${where}.`,
+      type: 'PHONE_BOOKING_CONFIRMED',
+      payload: { trip_id: tripId, ticket_id: ticketId },
+      link
+    });
+  }
+
+  /** The tracking link of a ticket or a phone booking, for a message sent outside the app (D144). */
+  trackingLink(manifestId) {
+    const { paymentService, managerService } = this.services;
+    const ticket = paymentService?.tickets?.get(manifestId);
+    let token = ticket?.share_token || null;
+    if (!token && manifestId?.startsWith('hl_')) {
+      token = (managerService?.hotlineReservations || []).find(r => manifestId.startsWith(`hl_${r.reservation_id}_`))?.share_token || null;
+    }
+    return token ? `${publicBaseUrl()}/t/${token}` : null;
   }
 
   /**

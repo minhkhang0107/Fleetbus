@@ -243,6 +243,26 @@ class DriverApiClientService {
     return _post('/api/v1/driver/trips/$tripId/home-run', idempotent: true);
   }
 
+  /// D144: the driver's order for the home pickups, first to last.
+  Future<Map<String, dynamic>> setHomeOrder(String tripId, List<String> ticketIds) {
+    return _post('/api/v1/driver/trips/$tripId/home-order', body: {'ticket_ids': ticketIds}, idempotent: true);
+  }
+
+  /// D144: the bus is at a home passenger's door; the wait starts.
+  Future<Map<String, dynamic>> homeArrived(String tripId, String ticketId) {
+    return _post('/api/v1/driver/trips/$tripId/tickets/$ticketId/home-arrived', idempotent: true);
+  }
+
+  /// D144: the passenger did not come out within the wait; the bus goes on.
+  Future<Map<String, dynamic>> homeMissed(String tripId, String ticketId) {
+    return _post('/api/v1/driver/trips/$tripId/tickets/$ticketId/home-missed', idempotent: true);
+  }
+
+  /// D144: the passenger's number for a call (logged on the trip).
+  Future<Map<String, dynamic>> passengerContact(String tripId, String ticketId) {
+    return _post('/api/v1/driver/trips/$tripId/tickets/$ticketId/contact');
+  }
+
   Future<Map<String, dynamic>> reportInaccessible(String tripId, String ticketId, {required String reason, String? meetingPoint}) {
     return _post(
       '/api/v1/driver/trips/$tripId/tickets/$ticketId/inaccessible',

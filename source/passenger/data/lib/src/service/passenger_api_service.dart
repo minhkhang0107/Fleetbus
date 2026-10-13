@@ -401,6 +401,16 @@ class PassengerApiClientService {
     );
   }
 
+  /// D144: a home passenger answers before the bus comes: READY, NEED_2 or NEED_5.
+  Future<Map<String, dynamic>> sendPickupReady(String ticketId, String status) {
+    return _post('/api/v1/passenger/tickets/$ticketId/pickup-ready', body: {'status': status});
+  }
+
+  /// D144: tells the server this phone runs the app (with a push token once there is one).
+  Future<Map<String, dynamic>> registerDevice({String? token, required String platform}) {
+    return _post('/api/v1/passenger/devices', body: {'platform': platform, if (token != null) 'token': token});
+  }
+
   /**
    * PAX-020: Notifications Center of the signed-in passenger
    */

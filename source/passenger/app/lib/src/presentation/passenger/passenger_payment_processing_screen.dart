@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import 'passenger_permissions.dart';
 import 'passenger_main_shell.dart';
 import 'passenger_store.dart';
 import 'passenger_ticket_qr_screen.dart';
@@ -157,10 +158,27 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
 }
 
 /// PAX-015: success; going back from here never returns to checkout (BR-SUCCESS-001).
-class PassengerBookingSuccessScreen extends StatelessWidget {
+class PassengerBookingSuccessScreen extends StatefulWidget {
   const PassengerBookingSuccessScreen({super.key, required this.ticket, required this.phone});
   final Ticket ticket;
   final String phone;
+
+  @override
+  State<PassengerBookingSuccessScreen> createState() => _PassengerBookingSuccessScreenState();
+}
+
+class _PassengerBookingSuccessScreenState extends State<PassengerBookingSuccessScreen> {
+  Ticket get ticket => widget.ticket;
+  String get phone => widget.phone;
+
+  @override
+  void initState() {
+    super.initState();
+    // D145: right after the booking is when the passenger sees why the app should be able to notify them.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) offerNotifications(context, reason: 'Nhà xe báo cho bạn khi tài xế lên đường, khi xe sắp tới và khi xe đang chờ, kể cả lúc bạn không mở app.');
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

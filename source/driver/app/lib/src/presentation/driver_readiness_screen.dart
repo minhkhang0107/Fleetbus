@@ -4,6 +4,7 @@ import 'driver_cockpit_dashboard.dart';
 import 'driver_home_run_screen.dart';
 import 'driver_incident_dialog.dart';
 import 'driver_manifest_screen.dart';
+import 'driver_permissions.dart';
 import 'driver_store.dart';
 import 'driver_widgets.dart';
 
@@ -13,6 +14,8 @@ class DriverReadinessScreen extends StatelessWidget {
   const DriverReadinessScreen({super.key});
 
   Future<void> _confirmStart(BuildContext context, DriverStore store) async {
+    if (!await ensureDriverLocation(context)) return;
+    if (!context.mounted) return;
     // Passengers may have booked since the shift was loaded: count them from the server, not the login snapshot.
     await store.refreshTrip();
     if (!context.mounted) return;
@@ -45,6 +48,9 @@ class DriverReadinessScreen extends StatelessWidget {
 
   /// D143: home pickups are collected before the checks at the stop; setting off starts sending the bus position.
   Future<void> _homeRun(BuildContext context, DriverStore store) async {
+    // D145: the passengers follow the bus by its position, so the app needs location first.
+    if (!store.homeRunStarted && !await ensureDriverLocation(context)) return;
+    if (!context.mounted) return;
     if (!store.homeRunStarted) {
       final error = await store.startHomeRun();
       if (!context.mounted) return;

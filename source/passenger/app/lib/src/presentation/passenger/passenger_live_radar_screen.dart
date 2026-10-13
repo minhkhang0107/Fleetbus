@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'passenger_permissions.dart';
 import 'passenger_route_map.dart';
 import 'passenger_store.dart';
 import 'passenger_widgets.dart';
@@ -33,6 +34,9 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
     WidgetsBinding.instance.addObserver(this);
     _load();
     _watch();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) offerNotifications(context, reason: 'Để biết khi xe sắp tới và khi xe đang chờ bạn mà không phải mở màn này.');
+    });
   }
 
   @override
@@ -202,25 +206,32 @@ class _Coming extends StatelessWidget {
     final moving = tr?.busLat != null && tr?.etaMinutes != null;
     final place = home ? (tr?.target?.name ?? '') : (tr?.target?.name ?? ticket.pickup);
     final arrived = moving && tr!.atTarget;
+    final waitingAtDoor = arrived && home && tr.doorArrivedAt != null && tr.homeWaitMinutes != null;
+    final position = tr?.queuePosition;
     final headline = !moving
         ? (home ? 'Tài xế chưa lên đường đón bạn' : 'Xe chưa chạy tới điểm đón')
-        : arrived
-            ? (home ? 'Xe đã tới chỗ bạn, mời bạn ra xe' : 'Xe đã tới điểm đón, mời bạn lên xe')
-            : home
-            ? 'Xe đang trên đường tới chỗ bạn'
-            : (tr!.location?.sentence ?? 'Xe đang trên đường tới điểm đón');
+        : waitingAtDoor
+            ? 'Xe đang chờ bạn, tới ${clockOf(tr.doorArrivedAt!.add(Duration(minutes: tr.homeWaitMinutes!)))}'
+            : arrived
+                ? (home ? 'Xe đã tới chỗ bạn, mời bạn ra xe' : 'Xe đã tới điểm đón, mời bạn lên xe')
+                : home
+                    // D144: the bus collects other addresses first; the passenger sees where they are in the run.
+                    ? (position != null && position > 1 ? 'Xe đang đón khách khác trước bạn' : 'Bạn là điểm đón tiếp theo')
+                    : (tr!.location?.sentence ?? 'Xe đang trên đường tới điểm đón');
     final detail = home
-        ? 'Đón tại $place'
+        ? '${moving && position != null && tr!.queueTotal != null ? 'Bạn là điểm đón thứ $position/${tr.queueTotal} · ' : ''}Đón tại $place'
         : (moving ? tr!.location?.stopsLeft : null) ?? 'Điểm đón: ${place.replaceFirst('Bến xe ', '')}';
     final windowText = tr?.windowFrom != null && tr?.windowTo != null ? '${clockOf(tr!.windowFrom!)}–${clockOf(tr.windowTo!)}' : null;
-    final plannedText = windowText ?? (tr?.plannedAt != null ? clockOf(tr!.plannedAt!) : null);
+    final appointment = tr?.appointmentAt != null ? clockOf(tr!.appointmentAt!) : null;
+    final plannedText = appointment ?? windowText ?? (tr?.plannedAt != null ? clockOf(tr!.plannedAt!) : null);
+    final plannedLabel = appointment != null ? 'giờ hẹn' : home ? 'khung' : 'dự kiến';
     final late = tr?.lateMinutes ?? 0;
     // Before the bus moves, the planned time is the figure itself; the chip only compares once there is an estimate.
-    final (chipText, chipKind) = !moving
+    final (chipText, chipKind) = !moving || arrived
         ? (null, PillKind.mute)
         : late >= 5
-            ? ('Trễ khoảng $late phút${plannedText == null ? '' : ' so với ${home ? 'khung' : 'dự kiến'} $plannedText'}', PillKind.warn)
-            : (plannedText == null ? null : 'Đúng ${home ? 'khung đón' : 'giờ dự kiến'} $plannedText', PillKind.ok);
+            ? ('Trễ khoảng $late phút${plannedText == null ? '' : ' so với $plannedLabel $plannedText'}', PillKind.warn)
+            : (plannedText == null ? null : 'Đúng $plannedLabel $plannedText', PillKind.ok);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Text(headline, style: sans(size: 17, weight: FontWeight.w700, color: PTokens.ink)),
       const SizedBox(height: 2),
@@ -230,7 +241,7 @@ class _Coming extends StatelessWidget {
         Expanded(
           child: tr?.expectedAt != null
               ? _Metric('Xe tới lúc', '~${clockOf(tr!.expectedAt!)}')
-              : _Metric(home ? 'Khung đón' : 'Dự kiến đón', plannedText ?? '—'),
+              : _Metric(appointment != null ? 'Giờ hẹn đón' : home ? 'Khung đón' : 'Dự kiến đón', plannedText ?? '—'),
         ),
         Expanded(
           child: _Metric(
@@ -243,7 +254,67 @@ class _Coming extends StatelessWidget {
         const SizedBox(height: 10),
         Align(alignment: Alignment.centerLeft, child: Pill(chipText, chipKind)),
       ],
+      if (home) _ReadyBox(ticket: ticket, tracking: tr),
     ]);
+  }
+}
+
+/// D144: the passenger tells the driver they are ready, or need a couple of minutes, instead of a phone call.
+class _ReadyBox extends StatefulWidget {
+  const _ReadyBox({required this.ticket, required this.tracking});
+  final Ticket ticket;
+  final Tracking? tracking;
+
+  @override
+  State<_ReadyBox> createState() => _ReadyBoxState();
+}
+
+class _ReadyBoxState extends State<_ReadyBox> {
+  String? _sent;
+  bool _busy = false;
+
+  Future<void> _send(String status) async {
+    setState(() => _busy = true);
+    final error = await PassengerScope.read(context).sendPickupReady(widget.ticket, status);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (error == null) _sent = status;
+    });
+    showToast(context, error ?? 'Đã báo tài xế');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tr = widget.tracking;
+    final status = _sent ?? (tr?.readyStatus == 'READY' ? 'READY' : tr?.readyStatus == 'NEED_TIME' ? 'NEED_${tr?.readyMinutes ?? 5}' : null);
+    final wait = tr?.homeWaitMinutes;
+    final said = switch (status) {
+      'READY' => 'Bạn đã báo: sẵn sàng.',
+      'NEED_2' => 'Bạn đã báo: cần thêm 2 phút.',
+      'NEED_5' => 'Bạn đã báo: cần thêm 5 phút.',
+      _ => 'Báo tài xế khi bạn xong, không cần gọi điện.',
+    };
+    Widget choice(String value, String label) => Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 3),
+            child: status == value
+                ? FilledButton(onPressed: _busy ? null : () => _send(value), child: Text(label, textAlign: TextAlign.center))
+                : OutlinedButton(onPressed: _busy ? null : () => _send(value), child: Text(label, textAlign: TextAlign.center)),
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('$said${wait != null ? ' Xe chờ mỗi nhà tối đa $wait phút.' : ''}', style: sans(size: 13, color: PTokens.muted)),
+        const SizedBox(height: 6),
+        Row(children: [
+          choice('READY', 'Sẵn sàng'),
+          choice('NEED_2', '+2 phút'),
+          choice('NEED_5', '+5 phút'),
+        ]),
+      ]),
+    );
   }
 }
 

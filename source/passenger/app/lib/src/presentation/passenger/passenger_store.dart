@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:data/src/service/passenger_api_service.dart';
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -380,12 +381,18 @@ Color? _hexColor(Object? hex) {
 }
 
 class AppNotice {
-  AppNotice(this.title, this.body, this.time, {this.tripId, this.type = ''});
+  AppNotice(this.title, this.body, this.time, {this.tripId, this.type = '', this.id = '', this.ticketId, this.isRead = true});
   final String title;
   final String body;
   final String time;
   final String? tripId;
   final String type;
+  final String id;
+  final String? ticketId;
+  final bool isRead;
+
+  /// D144: the notices that make someone go out to the bus; the app shows them on top of any screen.
+  static const alertTypes = {'HOME_RUN_STARTED', 'PICKUP_APPROACHING', 'PICKUP_ARRIVED', 'HOME_PICKUP_ARRIVED', 'HOME_PICKUP_DOOR', 'HOME_PICKUP_MISSED', 'HOME_PICKUP_INACCESSIBLE'};
 }
 
 enum GpsSignal { live, stale, offline, none }
@@ -472,6 +479,13 @@ class Tracking {
     this.lateMinutes,
     this.location,
     this.atTarget = false,
+    this.appointmentAt,
+    this.queuePosition,
+    this.queueTotal,
+    this.readyStatus,
+    this.readyMinutes,
+    this.homeWaitMinutes,
+    this.doorArrivedAt,
   });
 
   final GpsSignal signal;
@@ -497,6 +511,14 @@ class Tracking {
   final BusLocation? location;
   /// The bus is at the passenger's stop or door.
   final bool atTarget;
+  /// D144, home pickup: the time given to this passenger, their place in the run, their answer, the wait at the door.
+  final DateTime? appointmentAt;
+  final int? queuePosition;
+  final int? queueTotal;
+  final String? readyStatus;
+  final int? readyMinutes;
+  final int? homeWaitMinutes;
+  final DateTime? doorArrivedAt;
 }
 
 /// Result of a call: null message means success.
@@ -791,6 +813,8 @@ class PassengerStore extends ChangeNotifier {
     notifyListeners();
     unawaited(loadTickets());
     unawaited(loadNotices());
+    // D144: the server learns this phone runs the app (a push token joins once push is set up).
+    unawaited(_registerDevice());
     return null;
   }
 
@@ -1364,6 +1388,13 @@ class PassengerStore extends ChangeNotifier {
       expectedAt: vn(d['expected_at']),
       lateMinutes: (d['late_minutes'] as num?)?.toInt(),
       atTarget: d['is_at_station'] == true && !passedTarget,
+      appointmentAt: vn(d['appointment_at']),
+      queuePosition: (d['home_queue']?['position'] as num?)?.toInt(),
+      queueTotal: (d['home_queue']?['total'] as num?)?.toInt(),
+      readyStatus: d['pickup_ready']?['status'] as String?,
+      readyMinutes: (d['pickup_ready']?['minutes'] as num?)?.toInt(),
+      homeWaitMinutes: (d['home_wait_minutes'] as num?)?.toInt(),
+      doorArrivedAt: vn(d['door_arrived_at']),
       location: loc == null
           ? null
           : BusLocation(
@@ -1382,10 +1413,40 @@ class PassengerStore extends ChangeNotifier {
     final list = ((r.value!['value'] ?? r.value) as List).cast<Map<String, dynamic>>();
     notices = [
       for (final n in list)
-        AppNotice(n['title'] ?? '', n['body'] ?? '', _ago(n['created_at']), tripId: n['payload']?['trip_id'], type: n['type'] ?? ''),
+        AppNotice(n['title'] ?? '', n['body'] ?? '', _ago(n['created_at']), tripId: n['payload']?['trip_id'], type: n['type'] ?? '', id: '${n['id'] ?? ''}', ticketId: n['payload']?['ticket_id'] as String?, isRead: n['is_read'] != false),
     ];
     unread = list.any((n) => n['is_read'] == false);
+    // D144: a new "the bus is coming" notice shows on top of the app; the first load only learns what is there.
+    final fresh = notices.where((n) => !n.isRead && !_seenNotices.contains(n.id) && AppNotice.alertTypes.contains(n.type)).toList();
+    if (_noticesLoaded && fresh.isNotEmpty) pendingAlert = fresh.first;
+    _seenNotices.addAll(notices.map((n) => n.id));
+    _noticesLoaded = true;
     notifyListeners();
+  }
+
+  final Set<String> _seenNotices = {};
+  bool _noticesLoaded = false;
+
+  /// The newest "the bus is coming" notice not shown yet (D144); the shell shows it and clears it.
+  AppNotice? pendingAlert;
+
+  /// D145: the phone's push token (Firebase), sent with the device so the server can push instead of texting.
+  String? pushToken;
+
+  Future<void> setPushToken(String? token) async {
+    if (token == null || token == pushToken) return;
+    pushToken = token;
+    if (loggedIn) await _registerDevice();
+  }
+
+  Future<void> _registerDevice() async {
+    await _call(() => api.registerDevice(token: pushToken, platform: defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android'));
+  }
+
+  /// D144: a home passenger answers before the bus comes: READY, NEED_2 or NEED_5.
+  Future<String?> sendPickupReady(Ticket t, String status) async {
+    final r = await _call(() => api.sendPickupReady(t.id, status));
+    return r.ok ? null : r.error;
   }
 
   String _ago(Object? iso) {

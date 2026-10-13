@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'passenger_home_screen.dart';
+import 'passenger_live_radar_screen.dart';
 import 'passenger_notifications_screen.dart';
 import 'passenger_profile_screen.dart';
 import 'passenger_store.dart';
@@ -20,8 +23,84 @@ class PassengerMainShell extends StatefulWidget {
   State<PassengerMainShell> createState() => _PassengerMainShellState();
 }
 
-class _PassengerMainShellState extends State<PassengerMainShell> {
+class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBindingObserver {
   late int _index = widget.initialTab;
+  Timer? _poll;
+  PassengerStore? _store;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _startPolling();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final store = PassengerScope.read(context);
+    if (!identical(store, _store)) {
+      _store?.removeListener(_onStore);
+      _store = store..addListener(_onStore);
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _poll?.cancel();
+    _store?.removeListener(_onStore);
+    super.dispose();
+  }
+
+  /// D144: while the app is open, new notices arrive by themselves every 30 s (none in the background).
+  void _startPolling() {
+    _poll?.cancel();
+    _poll = Timer.periodic(const Duration(seconds: 30), (_) {
+      final store = _store;
+      if (store != null && store.loggedIn) store.loadNotices();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _store?.loadNotices();
+      _startPolling();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _poll?.cancel();
+    }
+  }
+
+  /// D144: "the bus is coming" shows on top of whatever screen is open, with a way to see the bus.
+  void _onStore() {
+    final store = _store;
+    final alert = store?.pendingAlert;
+    if (store == null || alert == null || !mounted) return;
+    store.pendingAlert = null;
+    final ticket = store.tickets.where((t) => t.id == alert.ticketId).firstOrNull;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearMaterialBanners();
+    messenger.showMaterialBanner(MaterialBanner(
+      backgroundColor: PTokens.primarySoft,
+      leading: const Icon(Icons.directions_bus, color: PTokens.primary),
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(alert.title, style: sans(size: 15, weight: FontWeight.w700, color: PTokens.ink)),
+        Text(alert.body, style: sans(size: 13, color: PTokens.ink)),
+      ]),
+      actions: [
+        TextButton(onPressed: messenger.hideCurrentMaterialBanner, child: const Text('Đóng')),
+        if (ticket != null)
+          TextButton(
+            onPressed: () {
+              messenger.hideCurrentMaterialBanner();
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerLiveRadarScreen(ticket: ticket)));
+            },
+            child: const Text('Xem xe'),
+          ),
+      ],
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {

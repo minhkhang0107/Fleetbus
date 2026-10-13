@@ -3,7 +3,7 @@ const SEED_CREATED_AT = '2026-10-01T00:00:00.000Z';
 
 /** Pickup / drop-off offer of a company that only serves its fixed stops (spec 3). */
 export function defaultServiceConfig() {
-  return { pickup_modes: ['FIXED_STOP'], dropoff_modes: ['FIXED_LOCATION'], stop_style: 'STATIONS', route_configs: {}, allow_home_to_home: false, approaching_threshold_minutes: 10, service_areas: [] };
+  return { pickup_modes: ['FIXED_STOP'], dropoff_modes: ['FIXED_LOCATION'], stop_style: 'STATIONS', route_configs: {}, allow_home_to_home: false, approaching_threshold_minutes: 10, home_wait_minutes: 5, service_areas: [] };
 }
 
 export const OPERATORS = [

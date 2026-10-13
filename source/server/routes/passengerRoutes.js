@@ -7,6 +7,7 @@ import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.j
 import { publicOperatorProfile, DEFAULT_OPERATOR_ID } from '../core/operators.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { verifyToken } from '../core/tokens.js';
+import { applyHomeRun, findShareHolder, homeTarget } from '../core/homeTracking.js';
 import { homeConfirmed, publicRouteService, resolveHomeBooking, routeServiceConfig } from '../core/serviceAreas.js';
 import { isProduction } from '../config.js';
 import { addDays, checkBookableDeparture, checkTravelDate, serviceCalendar } from '../core/serviceDate.js';
@@ -119,12 +120,6 @@ function streamTracking(req, res, services, tripId, build) {
  * PAX-018: what the caller may see of the trip's bus, or null when the trip is not theirs to see. A ticket the
  * caller owns (or a share link) shows the bus and the ETA to its own stop; anyone else gets the public view.
  */
-/** The home address the bus collects the passenger at (confirmed, reachable, pinned), or null. */
-function homeTarget(home) {
-  if (!homeConfirmed(home) || home.inaccessible_at || !Number.isFinite(home.lat) || !Number.isFinite(home.lng)) return null;
-  return { lat: home.lat, lng: home.lng, address: home.address, window_from: home.window_from || null, window_to: home.window_to || null };
-}
-
 function trackingFor(req, services, tripId, url) {
   const { searchService, paymentService, trackingService } = services;
   if (!tripVisibleTo(services, tripId, req.operatorId)) return null;
@@ -136,6 +131,7 @@ function trackingFor(req, services, tripId, url) {
   let view = 'PUBLIC';
   let canSeeBus = false;
   let homePickup = null;
+  let manifestId = null;
 
   let isStaff = false;
   let callerPhone = null;
@@ -154,15 +150,17 @@ function trackingFor(req, services, tripId, url) {
     }
   }
 
-  if (shareToken && paymentService.tickets) {
-    const ticket = Array.from(paymentService.tickets.values()).find(t => t.share_token === shareToken && t.trip_id === tripId && t.status !== 'CANCELLED');
-    if (ticket && paymentService.shareLinkValid(ticket)) {
-      pickupStopId = ticket.pickup_stop_id || null;
-      dropoffStopId = ticket.dropoff_stop_id || null;
-      boarded = ticket.status === 'BOARDED';
+  if (shareToken) {
+    // A shared app ticket, or a phone booking's SMS link (D144).
+    const holder = findShareHolder(services, shareToken, tripId);
+    if (holder) {
+      pickupStopId = holder.pickupStopId;
+      dropoffStopId = holder.dropoffStopId;
+      boarded = holder.boarded;
       view = 'TICKET';
       canSeeBus = true;
-      homePickup = homeTarget(ticket.home_pickup);
+      homePickup = homeTarget(holder.home);
+      manifestId = holder.manifestId;
     }
   } else if (ticketId && paymentService.tickets) {
     const ticket = paymentService.tickets.get(ticketId);
@@ -176,6 +174,7 @@ function trackingFor(req, services, tripId, url) {
           view = 'TICKET';
           canSeeBus = true;
           homePickup = homeTarget(ticket.home_pickup);
+          manifestId = ticket.ticket_id;
         }
       }
     }
@@ -198,7 +197,9 @@ function trackingFor(req, services, tripId, url) {
     isStaff,
     homePickup
   });
-  return tracking.data || tracking;
+  const data = tracking.data || tracking;
+  // D144: a home pickup is timed along the run (addresses before theirs, the wait at each door).
+  return manifestId && !boarded ? applyHomeRun(data, services, tripId, manifestId) : data;
 }
 
 export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
@@ -689,6 +690,54 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       return true;
     }
     streamTracking(req, res, services, tripId, () => trackingFor(req, services, tripId, url));
+    return true;
+  }
+
+  // D144: a home passenger answers before the bus comes: READY, NEED_2 or NEED_5 (minutes).
+  // POST /api/v1/passenger/tickets/:ticketId/pickup-ready (owner token) or /api/v1/share/:token/pickup-ready (SMS link)
+  const readyTicket = pathname.match(/^\/api\/v1\/passenger\/tickets\/([^/]+)\/pickup-ready$/);
+  const readyShare = pathname.match(/^\/api\/v1\/share\/([A-Za-z0-9_-]+)\/pickup-ready$/);
+  if ((readyTicket || readyShare) && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      let tripId = null;
+      let manifestId = null;
+      if (readyTicket) {
+        const ticket = paymentService.tickets.get(decodeURIComponent(readyTicket[1]));
+        const phone = req.identity?.phone;
+        if (!ticket || !phone || paymentService.getTicketAccess(ticket.ticket_id, phone) === 'NONE' || !tripVisibleTo(services, ticket.trip_id, req.operatorId)) {
+          sendError(res, 'Không tìm thấy vé', 'TICKET_NOT_FOUND', 404);
+          return;
+        }
+        tripId = ticket.trip_id;
+        manifestId = ticket.ticket_id;
+      } else {
+        const holder = findShareHolder(services, readyShare[1]);
+        if (!holder) {
+          sendError(res, 'Link theo dõi không hợp lệ hoặc đã hết hạn', 'SHARE_NOT_FOUND', 404);
+          return;
+        }
+        tripId = holder.tripId;
+        manifestId = holder.manifestId;
+      }
+      const result = services.driverService.setPickupReady(tripId, manifestId, body.status);
+      if (result.success) sendSuccess(res, result.data);
+      else sendError(res, result.error, result.code, result.code === 'VALIDATION_ERROR' ? 400 : (['TRIP_NOT_FOUND', 'TICKET_NOT_FOUND'].includes(result.code) ? 404 : 409));
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/passenger/devices (D144): the app's phone, with a push token once it has one
+  if (pathname === '/api/v1/passenger/devices' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const phone = req.identity?.phone;
+      if (!phone) {
+        sendError(res, 'Cần đăng nhập', 'UNAUTHORIZED', 401);
+        return;
+      }
+      const token = typeof body.token === 'string' && body.token.length <= 4096 ? body.token : null;
+      const platform = ['android', 'ios', 'web'].includes(body.platform) ? body.platform : null;
+      sendSuccess(res, services.messenger.registerDevice(phone, { token, platform, operatorId: req.operatorId }));
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 

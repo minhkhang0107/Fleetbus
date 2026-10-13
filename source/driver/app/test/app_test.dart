@@ -6,6 +6,7 @@ import 'package:app/src/presentation/driver_home_run_screen.dart';
 import 'package:app/src/presentation/driver_incident_dialog.dart';
 import 'package:app/src/presentation/driver_login_screen.dart';
 import 'package:app/src/presentation/driver_manifest_screen.dart';
+import 'package:app/src/presentation/driver_permissions.dart';
 import 'package:app/src/presentation/driver_qr_scanner_screen.dart';
 import 'package:app/src/presentation/driver_readiness_screen.dart';
 import 'package:app/src/presentation/driver_route_map.dart';
@@ -23,7 +24,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Rules of the driver app state against a fake FleetBus server that keeps the trip like the real one.
 void main() {
   driverMapTiles = false;
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    driverPermissions = FakePermissions(LocationAccess.always);
+  });
   late Map<String, dynamic> trip;
   late List<http.Request> sent;
 
@@ -78,6 +82,27 @@ void main() {
         return ok(ticket);
       }
       if (path.endsWith('/readiness')) return ok({'status': 'READY'});
+      if (path.endsWith('/home-order')) {
+        final ids = (body['ticket_ids'] as List).cast<String>();
+        trip['home_run'] = {
+          'wait_minutes': 5,
+          'stops': [for (var i = 0; i < ids.length; i++) {'ticket_id': ids[i], 'position': i + 1, 'appointment_at': '2026-08-27T22:${(45 + i * 10).toString().padLeft(2, '0')}:00Z', 'waiting': true}],
+        };
+        return ok(trip['home_run']);
+      }
+      if (path.endsWith('/home-arrived') || path.endsWith('/home-missed')) {
+        final id = path.split('/')[path.split('/').length - 2];
+        final stop = ((trip['home_run'] as Map)['stops'] as List).cast<Map<String, dynamic>>().firstWhere((x) => x['ticket_id'] == id);
+        if (path.endsWith('/home-arrived')) {
+          stop['arrived_at'] = DateTime.now().toUtc().toIso8601String();
+          stop['missable_at'] = DateTime.now().toUtc().subtract(const Duration(seconds: 1)).toIso8601String();
+        } else {
+          stop['missed_at'] = DateTime.now().toUtc().toIso8601String();
+          pax(id)['home_pickup'] = {...pax(id)['home_pickup'] as Map, 'missed_at': stop['missed_at']};
+        }
+        return ok(trip['home_run']);
+      }
+      if (path.endsWith('/contact')) return ok({'phone': '0901000003'});
       if (path.endsWith('/home-run')) {
         trip['home_run_started_at'] = '2026-08-27T22:00:00Z';
         return ok(trip);
@@ -388,4 +413,100 @@ void main() {
     expect(pings.last['speed_kmh'], greaterThan(0));
     store.dispose();
   });
+
+  test('the home run follows the server order; the driver reorders, waits at a door, goes on, and calls (D144)', () async {
+    final store = storeWithServer();
+    Map<String, dynamic> home(String id, String seat, double lat) => {'ticket_id': id, 'seat_code': seat, 'passenger_name': 'Khách $seat', 'phone_masked': '090***00$seat', 'pickup_stop_id': 'stp_hn_gb', 'dropoff_stop_id': 'stp_th_pb', 'boarding_status': 'ISSUED', 'payment_method': 'VIETQR', 'cod_amount_vnd': 0, 'home_pickup': {'address': 'Nhà $seat', 'lat': lat, 'lng': 105.85, 'window_from': '2026-08-27T22:45:00Z', 'window_to': '2026-08-27T23:30:00Z'}};
+    trip['manifest'] = <Map<String, dynamic>>[...(trip['manifest'] as List).cast<Map<String, dynamic>>(), home('t_h1', 'B01', 21.02), home('t_h2', 'B02', 21.03)];
+    trip['home_run'] = {
+      'wait_minutes': 5,
+      'stops': [
+        {'ticket_id': 't_h2', 'position': 1, 'appointment_at': '2026-08-27T22:45:00Z', 'waiting': true, 'ready': {'status': 'NEED_TIME', 'minutes': 5}},
+        {'ticket_id': 't_h1', 'position': 2, 'appointment_at': '2026-08-27T22:55:00Z', 'waiting': true},
+      ],
+    };
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    expect(store.homePickupsWaiting.map((p) => p.seat), ['B02', 'B01'], reason: 'the server order, not the manifest order');
+    final first = store.homeStopOf(store.homePickupsWaiting.first)!;
+    expect((first.appointment, first.readyLabel), ('05:45', 'Cần 5 phút'));
+
+    expect(await store.moveHome(store.homePickupsWaiting.last, -1), isNull);
+    final order = sent.lastWhere((r) => r.url.path.endsWith('/home-order'));
+    expect(jsonDecode(order.body), {'ticket_ids': ['t_h1', 't_h2']});
+    expect(order.headers['idempotency-key'], isNotNull);
+    expect(store.homePickupsWaiting.map((p) => p.seat), ['B01', 'B02']);
+
+    final b01 = store.homePickupsWaiting.first;
+    expect(await store.homeArrived(b01), isNull);
+    expect(store.homeStopOf(b01)!.arrivedAt, isNotNull);
+    expect(await store.homeMissed(b01), isNull);
+    expect(store.homePickupsWaiting.map((p) => p.seat), ['B02'], reason: 'a missed passenger boards at the stop');
+
+    final call = await store.contactOf(store.homePickupsWaiting.first);
+    expect(call, (phone: '0901000003', error: null));
+    store.dispose();
+  });
+
+  testWidgets('location is asked with a reason first, then "all the time"; a refusal keeps the bus from leaving (D145)', (tester) async {
+    final fake = FakePermissions(LocationAccess.denied, afterRequest: LocationAccess.whileInUse);
+    driverPermissions = fake;
+    bool? allowed;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => Scaffold(body: TextButton(onPressed: () async => allowed = await ensureDriverLocation(context), child: const Text('go'))))));
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    expect(find.text('Cho phép app biết vị trí xe'), findsOneWidget, reason: 'the reason comes before the system dialog');
+    expect(fake.asked, isEmpty);
+    await tester.tap(find.text('Tiếp tục'));
+    await tester.pumpAndSettle();
+    expect(fake.asked, ['location']);
+    expect(find.text('Chọn "Luôn cho phép"'), findsOneWidget);
+    await tester.tap(find.text('Tiếp tục'));
+    await tester.pumpAndSettle();
+    expect(fake.asked, ['location', 'background']);
+    expect(allowed, isTrue, reason: 'while in use is enough to send the position');
+
+    final refused = FakePermissions(LocationAccess.deniedForever);
+    driverPermissions = refused;
+    allowed = null;
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    expect(find.text('Cần quyền vị trí'), findsOneWidget);
+    await tester.tap(find.text('Mở cài đặt'));
+    await tester.pumpAndSettle();
+    expect(refused.asked, ['settings']);
+    expect(allowed, isFalse);
+  });
+}
+
+class FakePermissions implements DevicePermissions {
+  FakePermissions(this.access, {this.afterRequest, this.cameraOk = false});
+  LocationAccess access;
+  final LocationAccess? afterRequest;
+  final bool cameraOk;
+  final List<String> asked = [];
+
+  @override
+  Future<LocationAccess> location() async => access;
+  @override
+  Future<LocationAccess> requestLocation() async {
+    asked.add('location');
+    return access = afterRequest ?? access;
+  }
+
+  @override
+  Future<LocationAccess> requestBackgroundLocation() async {
+    asked.add('background');
+    return access;
+  }
+
+  @override
+  Future<bool> camera({bool request = false}) async {
+    if (request) asked.add('camera');
+    return cameraOk;
+  }
+
+  @override
+  Future<void> openSettings() async => asked.add('settings');
+  @override
+  Future<void> openLocationSettings() async => asked.add('location-settings');
 }

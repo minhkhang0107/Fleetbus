@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
-import 'src/presentation/passenger/passenger_splash_screen.dart';
+import 'src/presentation/passenger/passenger_onboarding_screen.dart';
+import 'src/presentation/passenger/passenger_push.dart';
 import 'src/presentation/passenger/passenger_store.dart';
 import 'src/presentation/passenger/passenger_widgets.dart';
 
@@ -44,7 +47,8 @@ class _BusGoPassengerAppState extends State<BusGoPassengerApp> {
   @override
   void initState() {
     super.initState();
-    widget.store.restoreOperator();
+    // D145: push through Firebase when the project's files are in the build.
+    unawaited(startPush(widget.store));
     // BR-HOLD-004: when the hold or the payment window runs out, go back to the seat map and say why.
     widget.store.onHoldExpired = () {
       final nav = _navigator.currentState;
@@ -82,7 +86,7 @@ class _BusGoPassengerAppState extends State<BusGoPassengerApp> {
         debugShowCheckedModeBanner: false,
         theme: passengerTheme(),
         builder: phoneColumnBuilder,
-        home: const PassengerSplashScreen(),
+        home: PassengerLaunchScreen(restore: widget.store.restoreOperator),
       ),
     );
   }
