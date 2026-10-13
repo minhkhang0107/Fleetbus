@@ -8,6 +8,7 @@ import { defaultServiceConfig } from '../core/operators.js';
 import { STOP_STYLES, checkHomeService, publicServiceConfig, routeServiceConfig, validateArea, validateModes, validateRouteSettings } from '../core/serviceAreas.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { validateRouteStops } from '../core/routeStops.js';
+import { endpointChoices, publicFixedEndpoints, validateFixedEndpoints } from '../core/fixedEndpoints.js';
 import { isProduction } from '../config.js';
 
 const AREA_RE = /^\/api\/v1\/ops\/service-areas\/([^/]+)$/;
@@ -39,7 +40,8 @@ function areaFields(body, base = {}) {
     polygon: pick('polygon'),
     fee_vnd: pick('fee_vnd'),
     lead_time_minutes: pick('lead_time_minutes'),
-    service_hours: pick('service_hours')
+    service_hours: pick('service_hours'),
+    confirmation: pick('confirmation') ?? 'AUTO'
   };
 }
 
@@ -81,7 +83,8 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
         sendError(res, result.message, result.code, result.code === 'VALIDATION_ERROR' ? 400 : 422);
         return;
       }
-      sendSuccess(res, { serviceable: true, area_id: result.area.area_id, area_name: result.area.name, fee_vnd: result.fee_vnd });
+      // MANUAL: the address is accepted for review only; the app says so before the passenger pays (spec 4.4).
+      sendSuccess(res, { serviceable: true, area_id: result.area.area_id, area_name: result.area.name, fee_vnd: result.fee_vnd, confirmation: result.confirmation });
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
@@ -90,6 +93,37 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
 
   if (pathname === '/api/v1/ops/service-config' && req.method === 'GET') {
     sendSuccess(res, snapshot(configOf(req)));
+    return true;
+  }
+
+  // GET / PUT /api/v1/ops/service-config/endpoints: the fixed origin and destination of the passenger app (D135).
+  if (pathname === '/api/v1/ops/service-config/endpoints' && (req.method === 'GET' || req.method === 'PUT')) {
+    const view = () => ({
+      fixed_endpoints: configOf(req).fixed_endpoints || null,
+      resolved: publicFixedEndpoints(req.operatorId, configOf(req), (a, b) => searchService.servesCities(req.operatorId, a, b)),
+      stations: endpointChoices(req.operatorId)
+    });
+    if (req.method === 'GET') {
+      sendSuccess(res, view());
+      return true;
+    }
+    parseJsonBody(req).then(body => {
+      const value = body.fixed_endpoints === null ? null : {
+        origin_station_id: body.origin_station_id ?? body.fixed_endpoints?.origin_station_id,
+        destination_station_id: body.destination_station_id ?? body.fixed_endpoints?.destination_station_id,
+        allow_swap: body.allow_swap ?? body.fixed_endpoints?.allow_swap ?? true
+      };
+      const error = validateFixedEndpoints(req.operatorId, value);
+      if (error) {
+        sendError(res, error, 'VALIDATION_ERROR', 400);
+        return;
+      }
+      const config = configOf(req);
+      const before = snapshot(config.fixed_endpoints || null);
+      if (value) config.fixed_endpoints = value; else delete config.fixed_endpoints;
+      audit(req, managerService, { action: 'FIXED_ENDPOINTS_UPDATE', resource: req.operator.code, before, after: snapshot(value) });
+      sendSuccess(res, view());
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 

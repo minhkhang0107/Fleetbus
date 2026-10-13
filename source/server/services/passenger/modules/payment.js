@@ -543,7 +543,18 @@ export class PassengerPaymentService {
 
     // PAX-025 (BR-DELAY-001): when the manager declared a delay over 30 minutes the cancellation fee is waived
     const delayMinutes = typeof this.getTripDelayMinutes === 'function' ? this.getTripDelayMinutes(ticket.trip_id) : 0;
-    const refundCalc = delayMinutes > DELAY_WAIVER_AFTER_MINUTES
+    // D130: the company refused the home pickup / drop-off the passenger booked; leaving is free.
+    const homeRefused = [ticket.home_pickup, ticket.home_dropoff].some(h => h?.status === 'REJECTED');
+    const refundCalc = homeRefused
+      ? {
+        percentage: 100,
+        feePercentage: 0,
+        refundAmount: ticket.fare_vnd,
+        feeAmount: 0,
+        tier: 'HOME_SERVICE_REFUSED',
+        message: 'Nhà xe không nhận đón/trả tận nhà: Hoàn 100%, không thu phí hủy'
+      }
+      : delayMinutes > DELAY_WAIVER_AFTER_MINUTES
       ? {
         percentage: 100,
         feePercentage: 0,

@@ -33,7 +33,7 @@ Khi chạy `make build` hoặc `npm run build` ([tools/build_system.js](tools/bu
 1. **Đóng gói phân phối Web độc lập (`web_dist/`)**:
    - `source/passenger/web_dist/index.html` (54.5 KB): Giao diện đặt vé hành khách hoàn chỉnh.
    - `source/driver/web_dist/index.html` (25.7 KB): Giao diện buồng lái tài xế chiến thuật 60Hz.
-   - `source/manager/web_dist/index.html` (33.1 KB): Trung tâm chỉ huy vận hành và radar đoàn xe.
+   - `source/manager/web_dist/index.html`: Trang điều hành thật (gọi API). Build chỉ ghi hash, **không** chép đè bằng bản thiết kế `docs/designs/manager_portal.html`.
    - Máy chủ API Gateway ưu tiên nạp trực tiếp các gói trong `web_dist/` khi truy cập `/passenger`, `/driver`, `/manager`.
 2. **Cấu hình môi trường Android tự động**:
    - Tự động quét và nhận diện Android SDK tại `/home/david/Android/Sdk`.
@@ -89,6 +89,27 @@ Khởi động máy chủ bằng `make start_server` hoặc `npm start`:
 - 🖥️ Trung tâm Điều hành: [http://localhost:3000/manager](http://localhost:3000/manager)
 - 🩺 Kiểm tra sức khỏe hệ thống: [http://localhost:3000/health](http://localhost:3000/health)
 - 📑 Tài liệu OpenAPI Spec: [http://localhost:3000/api/v1/openapi.json](http://localhost:3000/api/v1/openapi.json)
+
+### Lưu trữ và bảo mật dữ liệu (D126, D127)
+
+Mọi dữ liệu nghiệp vụ (nhà xe, nhân viên, tài xế, chuyến, ghế, đơn, vé, ví, thông báo, nhật ký, phiên đăng nhập, bộ đếm đăng nhập sai, idempotency) được lưu vào SQLite (`node:sqlite`, Node ≥ 22.5). Dữ liệu là code (danh mục API, hình học tuyến, trạm dừng nghỉ, luật voucher) vẫn nằm trong code.
+
+```
+data/                         (0700, đã bỏ khỏi git)
+├── .db-key                   khóa gốc khi chạy dev (0600); production dùng FLEETBUS_DB_KEY
+├── .lock                     một server cho một thư mục dữ liệu
+├── platform.sqlite           danh sách nhà xe, bến xe dùng chung, quản trị nền tảng, bộ đếm đăng nhập sai
+├── tenants.json              (không bắt buộc) nhà xe dùng DB riêng: { "op_xuyenviet": { "path": "/mnt/xv/fleetbus.sqlite" } }
+└── tenants/<operator_id>.sqlite   dữ liệu của đúng một nhà xe
+```
+
+- **Tách nhà xe:** mỗi bản ghi vào DB của nhà xe sở hữu; DB ghi chủ của nó lần mở đầu, mở cho nhà xe khác bị từ chối (`TENANT_DB_MISMATCH`).
+- **Mã hóa:** mỗi bản ghi AES-256-GCM, khóa riêng từng DB (HKDF từ khóa gốc theo mã nhà xe). Mã bản ghi lưu dạng HMAC, nên số điện thoại, token không nằm trong file. Sai khóa (`DB_KEY_MISMATCH`) hoặc bản ghi bị sửa (`DB_RECORD_TAMPERED`) thì server không khởi động.
+- **Khóa gốc:** `FLEETBUS_DB_KEY` = 32 byte base64 (`openssl rand -base64 32`). Production bắt buộc. Mất khóa là mất dữ liệu: cất khóa ở nơi khác với bản sao lưu.
+- **Ghi:** thay đổi của một request được ghi (mỗi DB một transaction) trước khi trả lời; ghi lỗi thì client không nhận trả lời và server trả `503 STORAGE_UNAVAILABLE` tới khi khởi động lại.
+- **Nhật ký thao tác:** mỗi nhà xe một chuỗi hash; dòng bị xóa hoặc sửa thì trang "Nhật ký thao tác" báo "Chuỗi nhật ký bị đứt".
+- **Giới hạn:** một tiến trình server cho một thư mục dữ liệu (dữ liệu làm việc nằm trong bộ nhớ, khóa `.lock` chặn server thứ hai). Chạy nhiều máy cần chuyển lớp lưu sang Postgres.
+- **Sao lưu:** dừng server rồi chép thư mục `data/` (hoặc `sqlite3 <file> ".backup ..."` khi đang chạy); sao lưu một nhà xe = chép file của nhà xe đó.
 
 ---
 

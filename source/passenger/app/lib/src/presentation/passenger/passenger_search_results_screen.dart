@@ -71,14 +71,26 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
                   ),
                 )
               : all.isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: AppCard(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('Chưa có chuyến cho tuyến này', style: sans(size: 15, weight: FontWeight.w600)),
-                      gap(6),
-                      Text('Thử Hà Nội → Thanh Hóa hoặc Hà Nội → Ninh Bình, hoặc gọi 1900 6868.', style: sans(size: 14, color: PTokens.muted)),
-                    ]),
+              ? Align(
+                  alignment: Alignment.topCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: AppCard(
+                      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        Text('Không có chuyến ${store.originPlace.city} → ${store.destPlace.city} ngày ${store.travelDate.dayMonth}', style: sans(size: 15, weight: FontWeight.w600)),
+                        gap(6),
+                        // Spec 6.3: point to the next day that has a departure, or say the company does not run this way.
+                        if (store.nextRunDay != null) ...[
+                          Text('Ngày gần nhất có chuyến: ${TravelDate.of(store.nextRunDay!, today: store.calendar.today).long}.', style: sans(size: 14, color: PTokens.muted)),
+                          gap(10),
+                          PrimaryButton(label: 'Xem ngày ${TravelDate.of(store.nextRunDay!).dayMonth}', onPressed: () {
+                            store.setDate(store.nextRunDay!);
+                            store.loadTrips();
+                          }),
+                        ] else
+                          Text('Nhà xe chưa có chuyến chiều này trong ${daysBetween(store.calendar.today, store.calendar.lastDate) + 1} ngày tới. Chọn ngày hoặc chiều khác, hoặc gọi ${store.operator?.hotline ?? 'tổng đài nhà xe'}.', style: sans(size: 14, color: PTokens.muted)),
+                      ]),
+                    ),
                   ),
                 )
               : LayoutBuilder(builder: (context, box) {

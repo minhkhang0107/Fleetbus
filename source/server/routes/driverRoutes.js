@@ -24,6 +24,12 @@ export function isTelemetryRateLimited(tripId, now = Date.now()) {
   return typeof lastTime === 'number' && now - lastTime < 1000;
 }
 
+/** Adds each stop's planned time (and whether the company set it or it is estimated), as the passenger sees it. */
+function withStopTimes(trip, services) {
+  const times = services.searchService?.stopTimes?.(trip.trip_id) || {};
+  return { ...trip, stops: (trip.stops || []).map(s => ({ ...s, planned_time: times[s.stop_id]?.planned_time ?? null, time_source: times[s.stop_id]?.time_source ?? null })) };
+}
+
 export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   const { driverService } = services;
 
@@ -55,7 +61,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     // The token decides who the driver is; the header is only a development fallback
     const driverId = req.identity?.sub || req.headers['x-driver-id'] || 'drv_8821a';
     const result = driverService.getTodayTrips(driverId);
-    sendSuccess(res, result.data);
+    sendSuccess(res, { ...result.data, trips: (result.data.trips || []).map(t => withStopTimes(t, services)) });
     return true;
   }
 
@@ -63,7 +69,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   if (req.method === 'GET' && /^\/api\/v1\/driver\/trips\/[^/]+$/.test(pathname)) {
     const result = driverService.getTrip(pathname.split('/')[5]);
     if (result.success) {
-      sendSuccess(res, result.data);
+      sendSuccess(res, withStopTimes(result.data, services));
     } else {
       sendError(res, result.error, result.code, 404);
     }
@@ -170,6 +176,17 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
         sendBoardingError(res, result);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/driver/trips/:tripId/home-run (DRI-020): set off to collect the home pickups before departure
+  if (req.method === 'POST' && /^\/api\/v1\/driver\/trips\/[^/]+\/home-run$/.test(pathname)) {
+    const result = driverService.startHomeRun(pathname.split('/')[5]);
+    if (result.success) {
+      sendSuccess(res, withStopTimes(result.data, services));
+    } else {
+      sendError(res, result.error, result.code, result.code === 'TRIP_NOT_FOUND' ? 404 : 409);
+    }
     return true;
   }
 

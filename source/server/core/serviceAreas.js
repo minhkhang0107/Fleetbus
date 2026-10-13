@@ -9,10 +9,14 @@
 export const PICKUP_MODES = ['FIXED_STOP', 'HOME_PICKUP'];
 export const DROPOFF_MODES = ['FIXED_LOCATION', 'HOME_DROPOFF'];
 export const AREA_KINDS = ['PICKUP', 'DROPOFF'];
+// AUTO: an address inside the area is confirmed at booking. MANUAL: the office reviews it first (spec 4.2, D130).
+export const CONFIRMATION_MODES = ['AUTO', 'MANUAL'];
+// A home service on a ticket: confirmed, waiting for the office, or refused (the ticket then rides from its stop).
+export const HOME_STATUSES = ['CONFIRMED', 'PENDING_REVIEW', 'REJECTED'];
 // How the passenger picks fixed stops: ROUTE_LINE draws the route like a bus line with every pickup / drop-off
 // point; STATIONS lists the bus stations only.
 export const STOP_STYLES = ['ROUTE_LINE', 'STATIONS'];
-const ROUTE_FIELDS = ['stop_style', 'pickup_modes', 'dropoff_modes', 'stops'];
+const ROUTE_FIELDS = ['stop_style', 'pickup_modes', 'dropoff_modes', 'stops', 'sales_suspended'];
 
 /** The company's config as it applies to one route: the route's own settings over the company defaults. */
 export function routeServiceConfig(config, routeId) {
@@ -21,14 +25,16 @@ export function routeServiceConfig(config, routeId) {
     ...config,
     pickup_modes: own.pickup_modes ?? config?.pickup_modes ?? ['FIXED_STOP'],
     dropoff_modes: own.dropoff_modes ?? config?.dropoff_modes ?? ['FIXED_LOCATION'],
-    stop_style: own.stop_style ?? config?.stop_style ?? 'STATIONS'
+    stop_style: own.stop_style ?? config?.stop_style ?? 'STATIONS',
+    // The office stopped selling the whole route (D132); a route-only setting.
+    sales_suspended: Boolean(own.sales_suspended)
   };
 }
 
 /** What the passenger app needs to offer on a trip of this route. */
 export function publicRouteService(config, routeId) {
   const c = routeServiceConfig(config, routeId);
-  return { route_id: routeId || null, stop_style: c.stop_style, pickup_modes: [...c.pickup_modes], dropoff_modes: [...c.dropoff_modes], allow_home_to_home: Boolean(c.allow_home_to_home) };
+  return { route_id: routeId || null, stop_style: c.stop_style, pickup_modes: [...c.pickup_modes], dropoff_modes: [...c.dropoff_modes], allow_home_to_home: Boolean(c.allow_home_to_home), sales_suspended: c.sales_suspended };
 }
 
 /** Error message for an invalid route setting, or null. A null field clears the route's own value. */
@@ -37,6 +43,7 @@ export function validateRouteSettings(settings) {
   const unknown = Object.keys(settings).filter(k => !ROUTE_FIELDS.includes(k));
   if (unknown.length) return `Không có trường ${unknown.join(', ')}`;
   if (settings.stops != null && (typeof settings.stops !== 'object' || Array.isArray(settings.stops))) return 'Cấu hình điểm dừng không hợp lệ';
+  if (settings.sales_suspended != null && typeof settings.sales_suspended !== 'boolean') return 'Tạm ngừng bán phải là true hoặc false';
   if (settings.stop_style != null && !STOP_STYLES.includes(settings.stop_style)) return 'Kiểu điểm đón phải là ROUTE_LINE hoặc STATIONS';
   if (settings.pickup_modes != null && (!Array.isArray(settings.pickup_modes) || !settings.pickup_modes.length || !settings.pickup_modes.every(m => PICKUP_MODES.includes(m)))) return 'Cần ít nhất một hình thức đón hợp lệ';
   if (settings.dropoff_modes != null && (!Array.isArray(settings.dropoff_modes) || !settings.dropoff_modes.length || !settings.dropoff_modes.every(m => DROPOFF_MODES.includes(m)))) return 'Cần ít nhất một hình thức trả hợp lệ';
@@ -73,6 +80,7 @@ export function validateArea(area) {
   if (!area.polygon.every(pointOk)) return 'Tọa độ vùng phục vụ không hợp lệ';
   if (!Number.isInteger(area.fee_vnd) || area.fee_vnd < 0) return 'Phụ phí phải là số nguyên không âm';
   if (!Number.isInteger(area.lead_time_minutes) || area.lead_time_minutes < 0) return 'Thời gian đặt trước phải là số phút không âm';
+  if (area.confirmation != null && !CONFIRMATION_MODES.includes(area.confirmation)) return 'Cách xác nhận phải là AUTO hoặc MANUAL';
   const hours = area.service_hours || {};
   if (!HOURS_RE.test(hours.from || '') || !HOURS_RE.test(hours.to || '')) return 'Giờ phục vụ có dạng HH:MM';
   return null;
@@ -123,7 +131,7 @@ export function checkHomeService(config, { kind, lat, lng, departureTime = null,
       return { ok: false, code: 'OUTSIDE_SERVICE_HOURS', message: `Ngoài giờ phục vụ ${kind === 'PICKUP' ? 'đón' : 'trả'} tận nhà (${area.service_hours.from}–${area.service_hours.to})` };
     }
   }
-  return { ok: true, area, fee_vnd: area.fee_vnd };
+  return { ok: true, area, fee_vnd: area.fee_vnd, confirmation: area.confirmation || 'AUTO' };
 }
 
 /** Error message for an invalid mode change, or null. */
@@ -140,7 +148,7 @@ export function publicServiceConfig(config) {
     dropoff_modes: [...(config?.dropoff_modes || [])],
     allow_home_to_home: Boolean(config?.allow_home_to_home),
     stop_style: config?.stop_style || 'STATIONS',
-    service_areas: (config?.service_areas || []).filter(a => a.active !== false).map(({ area_id, name, kind, polygon, fee_vnd, lead_time_minutes, service_hours }) => ({ area_id, name, kind, polygon, fee_vnd, lead_time_minutes, service_hours }))
+    service_areas: (config?.service_areas || []).filter(a => a.active !== false).map(({ area_id, name, kind, polygon, fee_vnd, lead_time_minutes, service_hours, confirmation }) => ({ area_id, name, kind, polygon, fee_vnd, lead_time_minutes, service_hours, confirmation: confirmation || 'AUTO' }))
   };
 }
 
@@ -188,7 +196,9 @@ export function resolveHomeBooking(config, { stops = [], departureTime, pickupSt
     }
     const check = checkHomeService(config, { kind, lat: home.lat, lng: home.lng, departureTime, now });
     if (!check.ok) return check;
-    const snapshot = { ...home, area_id: check.area.area_id, area_name: check.area.name, fee_vnd: check.fee_vnd, anchor_stop_id: anchor?.stop_id || chosenStopId || null };
+    // An address in a MANUAL area waits for the office; until then the ticket rides from its stop (spec 4.3).
+    const status = check.confirmation === 'MANUAL' ? 'PENDING_REVIEW' : 'CONFIRMED';
+    const snapshot = { ...home, area_id: check.area.area_id, area_name: check.area.name, fee_vnd: check.fee_vnd, anchor_stop_id: anchor?.stop_id || chosenStopId || null, status };
     if (kind === 'PICKUP') {
       const departure = new Date(departureTime).getTime();
       if (Number.isFinite(departure)) {
@@ -199,5 +209,11 @@ export function resolveHomeBooking(config, { stops = [], departureTime, pickupSt
     result[key] = snapshot;
     result.fee_vnd += check.fee_vnd;
   }
+  result.needs_review = [result.home_pickup, result.home_dropoff].some(h => h?.status === 'PENDING_REVIEW');
   return result;
+}
+
+/** Whether the bus serves this home address: only a confirmed request is an operational stop (spec 7.3). */
+export function homeConfirmed(home) {
+  return Boolean(home) && (home.status || 'CONFIRMED') === 'CONFIRMED';
 }

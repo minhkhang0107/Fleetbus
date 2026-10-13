@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:data/src/service/passenger_api_service.dart';
 import 'package:flutter/widgets.dart';
@@ -45,7 +46,7 @@ class OperatorInfo {
 
 /// A home service area drawn by the bus company (spec 3.3).
 class ServiceArea {
-  const ServiceArea({required this.id, required this.name, required this.kind, required this.polygon, required this.feeVnd, required this.leadMinutes, required this.from, required this.to});
+  const ServiceArea({required this.id, required this.name, required this.kind, required this.polygon, required this.feeVnd, required this.leadMinutes, required this.from, required this.to, this.manual = false});
   final String id;
   final String name;
   final String kind; // PICKUP | DROPOFF
@@ -54,6 +55,8 @@ class ServiceArea {
   final int leadMinutes;
   final String from;
   final String to;
+  /// The company reviews each address of this area first (D130).
+  final bool manual;
 
   factory ServiceArea.fromJson(Map<String, dynamic> j) => ServiceArea(
         id: '${j['area_id']}',
@@ -64,13 +67,16 @@ class ServiceArea {
         leadMinutes: (j['lead_time_minutes'] as num? ?? 0).toInt(),
         from: '${j['service_hours']?['from'] ?? ''}',
         to: '${j['service_hours']?['to'] ?? ''}',
+        manual: j['confirmation'] == 'MANUAL',
       );
 }
 
 /// A home address the server accepted for pickup or drop-off, with its fee.
 class HomeAddress {
-  const HomeAddress({required this.address, required this.lat, required this.lng, required this.feeVnd, required this.areaName, this.note = ''});
+  const HomeAddress({required this.address, required this.lat, required this.lng, required this.feeVnd, required this.areaName, this.note = '', this.needsReview = false});
   final String address;
+  /// The area's company reviews each address first (D130): until then the passenger boards at the stop.
+  final bool needsReview;
   final double lat;
   final double lng;
   final int feeVnd;
@@ -78,6 +84,33 @@ class HomeAddress {
   final String note;
 
   Map<String, dynamic> toJson() => {'address': address, 'lat': lat, 'lng': lng, if (note.isNotEmpty) 'note': note};
+}
+
+/// The company's fixed origin and destination (D135), set on the web portal; null lets passengers pick places.
+class FixedEndpoints {
+  const FixedEndpoints({required this.originCity, required this.originStation, required this.destCity, required this.destStation, required this.forward, required this.reverse, this.allowSwap = true});
+  final String originCity;
+  final String originStation;
+  final String destCity;
+  final String destStation;
+  /// Whether a schedule runs origin -> destination, and the other way.
+  final bool forward;
+  final bool reverse;
+  /// The company runs out and back and lets passengers swap (D136); off for a one-way line.
+  final bool allowSwap;
+
+  static FixedEndpoints? fromJson(dynamic j) {
+    if (j is! Map<String, dynamic> || j['origin'] == null || j['destination'] == null) return null;
+    return FixedEndpoints(
+      originCity: '${j['origin']['city']}',
+      originStation: '${j['origin']['name']}',
+      destCity: '${j['destination']['city']}',
+      destStation: '${j['destination']['name']}',
+      forward: j['forward_available'] != false,
+      reverse: j['reverse_available'] == true,
+      allowSwap: j['allow_swap'] != false,
+    );
+  }
 }
 
 class Place {
@@ -90,7 +123,7 @@ class Place {
 
 
 class Stop {
-  const Stop(this.id, this.name, this.city, this.time, {required this.pickup, required this.dropoff, this.station = true, this.lat, this.lng});
+  const Stop(this.id, this.name, this.city, this.time, {required this.pickup, required this.dropoff, this.station = true, this.lat, this.lng, this.estimated = false});
   final String id;
   final String name;
   final String city;
@@ -101,6 +134,10 @@ class Stop {
   final bool station;
   final double? lat;
   final double? lng;
+  /// The time is the server's estimate along the road, not one the company set (source spec 4.5).
+  final bool estimated;
+  /// "07:40", or "~07:40" when it is an estimate.
+  String get timeLabel => estimated ? '~$time' : time;
   String get note => pickup && dropoff ? 'Đón và trả khách' : (pickup ? 'Điểm đón' : 'Điểm trả');
   String get short => name.replaceFirst('Bến xe ', '').replaceFirst('Phía Bắc Thanh Hóa', 'Phía Bắc TH');
 }
@@ -173,6 +210,8 @@ class Trip {
           station: raw[i]['kind'] != 'ROADSIDE',
           lat: (raw[i]['lat'] as num?)?.toDouble(),
           lng: (raw[i]['lng'] as num?)?.toDouble(),
+          // The departure is exact; any other time without a company value is an estimate.
+          estimated: i > 0 && raw[i]['time_source'] != 'OPERATOR',
         ),
     ];
     final firstPick = stops.firstWhere((s) => s.pickup, orElse: () => stops.first);
@@ -230,6 +269,10 @@ class Ticket {
     this.homeDropoff,
     this.pickupWindow,
     this.pickupNotice,
+    this.homePickupStatus,
+    this.homeDropoffStatus,
+    this.homePickupReason,
+    this.homeDropoffReason,
   });
   final String id;
   final String pnr;
@@ -249,6 +292,15 @@ class Ticket {
   final String? pickupWindow;
   /// Set when the driver reported the home address unreachable: why, and where to meet.
   final String? pickupNotice;
+  /// CONFIRMED, PENDING_REVIEW (the company has not answered), REJECTED or WITHDRAWN (D130).
+  final String? homePickupStatus;
+  final String? homeDropoffStatus;
+  /// Why the company refused it.
+  final String? homePickupReason;
+  final String? homeDropoffReason;
+
+  static const homeStatusLabel = {'CONFIRMED': 'Đã xác nhận', 'PENDING_REVIEW': 'Chờ nhà xe duyệt', 'REJECTED': 'Nhà xe không nhận', 'WITHDRAWN': 'Đã hủy yêu cầu'};
+  bool homeLive(String? status) => status == 'CONFIRMED' || status == 'PENDING_REVIEW';
   String plate;
   TicketStatus status;
   int delay = 0;
@@ -285,6 +337,10 @@ class Ticket {
       homePickup: j['home_pickup']?['address'],
       homeDropoff: j['home_dropoff']?['address'],
       pickupWindow: _window(j['home_pickup']),
+      homePickupStatus: j['home_pickup'] == null ? null : '${j['home_pickup']['status'] ?? 'CONFIRMED'}',
+      homeDropoffStatus: j['home_dropoff'] == null ? null : '${j['home_dropoff']['status'] ?? 'CONFIRMED'}',
+      homePickupReason: j['home_pickup']?['reject_reason'],
+      homeDropoffReason: j['home_dropoff']?['reject_reason'],
       pickupNotice: j['home_pickup']?['inaccessible_at'] == null
           ? null
           : 'Xe không vào được địa chỉ (${j['home_pickup']['inaccessible_reason'] ?? ''})${j['home_pickup']['meeting_point'] != null ? '. Hẹn ở ${j['home_pickup']['meeting_point']}' : '. Tài xế sẽ gọi cho bạn'}',
@@ -298,6 +354,29 @@ String? _window(dynamic home) {
   if (from == null || to == null) return null;
   DateTime vn(DateTime d) => d.toUtc().add(const Duration(hours: 7));
   return '${_hhmm(vn(from))}–${_hhmm(vn(to))}';
+}
+
+/// One slide of the home promotion slider (PAX-004, D124); its HTML page is fetched on open.
+class PromoBanner {
+  const PromoBanner({required this.id, required this.title, this.subtitle = '', this.color, this.imageUrl});
+  final String id;
+  final String title;
+  final String subtitle;
+  final Color? color;
+  final String? imageUrl;
+
+  factory PromoBanner.fromJson(Map<String, dynamic> j) => PromoBanner(
+        id: '${j['banner_id'] ?? ''}',
+        title: '${j['title'] ?? ''}',
+        subtitle: '${j['subtitle'] ?? ''}',
+        color: _hexColor(j['background_color']),
+        imageUrl: (j['image_url'] as String?)?.isNotEmpty == true ? j['image_url'] as String : null,
+      );
+}
+
+Color? _hexColor(Object? hex) {
+  if (hex is! String || !RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(hex)) return null;
+  return Color(0xFF000000 | int.parse(hex.substring(1), radix: 16));
 }
 
 class AppNotice {
@@ -318,12 +397,42 @@ class TrackingTarget {
     required this.lat,
     required this.lng,
     required this.isDropoff,
+    this.isHome = false,
   });
   final String stopId;
   final String name;
   final double lat;
   final double lng;
   final bool isDropoff;
+  /// D143: the bus collects the passenger at their home address.
+  final bool isHome;
+}
+
+/// Where the bus is on its route, as the server names it (D143).
+class BusLocation {
+  const BusLocation({this.atStop, this.lastPassed, this.next, this.stopsBefore});
+  final String? atStop;
+  final String? lastPassed;
+  final String? next;
+  /// Stops the bus still serves before the passenger's own; null when unknown.
+  final int? stopsBefore;
+
+  static String _short(String name) => name.replaceFirst('Bến xe ', '');
+
+  /// "Xe đang ở Phủ Lý" / "Xe vừa qua Phủ Lý, sắp tới Ninh Bình".
+  String get sentence {
+    if (atStop != null) return 'Xe đang ở ${_short(atStop!)}';
+    if (lastPassed != null && next != null) return 'Xe vừa qua ${_short(lastPassed!)}, sắp tới ${_short(next!)}';
+    if (next != null) return 'Xe đang trên đường tới ${_short(next!)}';
+    return 'Xe đang trên đường';
+  }
+
+  /// "Còn 2 trạm nữa tới bạn" / "Trạm kế tiếp là trạm của bạn".
+  String? get stopsLeft => switch (stopsBefore) {
+        null => null,
+        0 => 'Trạm kế tiếp là trạm của bạn',
+        final n => 'Còn $n trạm nữa tới trạm của bạn',
+      };
 }
 
 class TrackingStop {
@@ -356,6 +465,13 @@ class Tracking {
     this.route = const [],
     this.passedTarget = false,
     this.publicView = false,
+    this.plannedAt,
+    this.windowFrom,
+    this.windowTo,
+    this.expectedAt,
+    this.lateMinutes,
+    this.location,
+    this.atTarget = false,
   });
 
   final GpsSignal signal;
@@ -371,6 +487,16 @@ class Tracking {
   final List<(double, double)> route;
   final bool passedTarget;
   final bool publicView;
+  /// When the passenger was told to be ready (the stop time, or the start of the home pickup window), Vietnam time.
+  final DateTime? plannedAt;
+  final DateTime? windowFrom;
+  final DateTime? windowTo;
+  /// When the bus is expected at the passenger, from its live position.
+  final DateTime? expectedAt;
+  final int? lateMinutes;
+  final BusLocation? location;
+  /// The bus is at the passenger's stop or door.
+  final bool atTarget;
 }
 
 /// Result of a call: null message means success.
@@ -384,6 +510,8 @@ class ApiResult<T> {
 
 String _two(int v) => v.toString().padLeft(2, '0');
 String _hhmm(DateTime t) => '${_two(t.hour)}:${_two(t.minute)}';
+/// "08:12" of a Vietnam-time instant.
+String clockOf(DateTime t) => _hhmm(t);
 String routeLabel(String name) => name.replaceAll(RegExp(r'\s*\(.*\)'), '').replaceAll(' — ', ' → ');
 
 String addMinutes(String hhmm, int minutes) {
@@ -468,6 +596,9 @@ class PassengerStore extends ChangeNotifier {
   Timer? _holdTimer;
   VoidCallback? onHoldExpired;
 
+  // Home promotion slider: empty (also on any error) hides it
+  List<PromoBanner> banners = [];
+
   // Wallet and notices
   List<Ticket> tickets = [];
   bool loadingTickets = false;
@@ -477,8 +608,14 @@ class PassengerStore extends ChangeNotifier {
   Place get originPlace => places.isEmpty ? const Place('', '—', '', []) : (places[origin] ?? const Place('', '—', '', []));
   Place get destPlace => places.isEmpty ? const Place('', '—', '', []) : (places[dest] ?? const Place('', '—', '', []));
 
+  /// Fixed origin and destination of the company (D135).
+  FixedEndpoints? fixedEndpoints;
+  bool get fixedRoute => fixedEndpoints != null;
+  /// The company decides on the web portal whether passengers may swap (D136).
+  bool get canSwap => fixedEndpoints?.allowSwap ?? true;
+
   List<List<String>> get recentPairs {
-    if (places.isEmpty) return [];
+    if (places.isEmpty || fixedRoute) return [];
     final hn = places.values.where((p) => p.city == 'Hà Nội').firstOrNull?.code;
     final th = places.values.where((p) => p.city == 'Thanh Hóa').firstOrNull?.code;
     final nb = places.values.where((p) => p.city == 'Ninh Bình').firstOrNull?.code;
@@ -522,13 +659,31 @@ class PassengerStore extends ChangeNotifier {
     api.operatorCode = code;
     operator = OperatorInfo.fromJson(r.value!['operator'] as Map<String, dynamic>);
     calendar = ServiceCalendar.fromJson(r.value!['service_calendar'] as Map<String, dynamic>?);
+    fixedEndpoints = FixedEndpoints.fromJson(r.value!['fixed_endpoints']);
     
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('operator_code', code);
+    _rememberedRides = _readRides(prefs.getString('rides_$code'));
     
     await loadPlaces();
     notifyListeners();
+    unawaited(loadBanners());
+    unawaited(loadRunDays());
     return null;
+  }
+
+  Future<void> loadBanners() async {
+    final r = await _call(api.getPromoBanners);
+    final list = r.ok ? r.value!['banners'] : null;
+    banners = list is List ? [for (final b in list) if (b is Map<String, dynamic> && b['banner_id'] != null) PromoBanner.fromJson(b)] : [];
+    notifyListeners();
+  }
+
+  /// The HTML page of one slide; the error is shown in place of the page.
+  Future<ApiResult<String>> loadBannerPage(String bannerId) async {
+    final r = await _call(() => api.getPromoBanner(bannerId));
+    if (!r.ok) return ApiResult(null, r.error, r.code);
+    return ApiResult('${r.value!['content_html'] ?? ''}');
   }
 
   Future<void> restoreOperator() async {
@@ -542,7 +697,10 @@ class PassengerStore extends ChangeNotifier {
   Future<void> changeOperator() async {
     logout();
     operator = null;
+    fixedEndpoints = null;
     places.clear();
+    banners = [];
+    runDays = null;
     trips.clear();
     tickets.clear();
     notices.clear();
@@ -586,7 +744,16 @@ class PassengerStore extends ChangeNotifier {
         places[code] = Place(code, city, mainStation, alt);
       }
 
-      if (places.isNotEmpty) {
+      final fixed = fixedEndpoints;
+      if (fixed != null) {
+        // The two stations the company set: shown as they are, nothing else to pick.
+        final o = _foldToCode(fixed.originCity);
+        final d = _foldToCode(fixed.destCity);
+        places[o] = Place(o, fixed.originCity, fixed.originStation, const []);
+        places[d] = Place(d, fixed.destCity, fixed.destStation, const []);
+        origin = o;
+        dest = d;
+      } else if (places.isNotEmpty) {
         final hn = places.values.where((p) => p.city == 'Hà Nội').firstOrNull;
         origin = hn?.code ?? places.keys.first;
         
@@ -638,10 +805,12 @@ class PassengerStore extends ChangeNotifier {
 
   // ---------- Search (PAX-004 to PAX-006) ----------
   void swapPlaces() {
+    if (!canSwap) return;
     final o = origin;
     origin = dest;
     dest = o;
     notifyListeners();
+    unawaited(loadRunDays());
   }
 
   void setPlace({required bool isOrigin, required String code}) {
@@ -649,6 +818,35 @@ class PassengerStore extends ChangeNotifier {
       origin = code;
     } else {
       dest = code;
+    }
+    notifyListeners();
+    unawaited(loadRunDays());
+  }
+
+  /// Days with a departure on the chosen route (the company's fixed timetable, D128); null while unknown.
+  Set<String>? runDays;
+
+  bool hasDeparture(String day) => runDays == null || runDays!.contains(day);
+
+  /// The first day from the chosen one on (else the earliest) that has a departure; null when none is known.
+  String? get nextRunDay {
+    final days = (runDays?.toList() ?? [])..sort();
+    if (days.isEmpty) return null;
+    return days.firstWhere((d) => d.compareTo(date) > 0, orElse: () => days.first);
+  }
+
+  Future<void> loadRunDays() async {
+    if (places.isEmpty) return;
+    final from = origin;
+    final to = dest;
+    final r = await _call(() => api.getRunDays(originPlace.city, destPlace.city));
+    if (from != origin || to != dest) return; // the route changed meanwhile
+    final list = r.ok ? r.value!['days'] : null;
+    runDays = list is List ? {for (final d in list) '$d'} : null;
+    // The chosen day has no departure on this route: go to the next day that has one.
+    if (runDays != null && runDays!.isNotEmpty && !runDays!.contains(date)) {
+      final days = runDays!.toList()..sort();
+      _date = days.firstWhere((d) => d.compareTo(date) >= 0, orElse: () => days.first);
     }
     notifyListeners();
   }
@@ -700,11 +898,48 @@ class PassengerStore extends ChangeNotifier {
     return (on: on, off: off);
   }
 
+  /// Where the passenger last got on and off, per direction ("Hà Nội|Thanh Hóa" -> [pickup, dropoff]).
+  Map<String, List<String>> _rememberedRides = {};
+
+  static Map<String, List<String>> _readRides(String? raw) {
+    try {
+      final map = jsonDecode(raw ?? '{}') as Map<String, dynamic>;
+      return {for (final e in map.entries) if (e.value is List && (e.value as List).length == 2) e.key: [for (final v in e.value as List) '$v']};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  String get _rideKey => '${originPlace.city}|${destPlace.city}';
+
+  /// Keeps the stops the passenger chose for this direction, for the next booking.
+  Future<void> rememberRide() async {
+    final code = operator?.code;
+    if (code == null || trip == null) return;
+    _rememberedRides[_rideKey] = [pickup, dropoff];
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('rides_$code', jsonEncode(_rememberedRides));
+    } catch (_) {
+      // Remembering is a convenience only.
+    }
+  }
+
   void chooseTrip(Trip t) {
     trip = t;
     final ride = rideFor(t);
     pickup = ride.on.id;
     dropoff = ride.off.id;
+    // The stops of the last booking in this direction, when this trip serves them in that order.
+    final last = _rememberedRides[_rideKey];
+    if (last != null) {
+      final on = t.stops.indexWhere((s) => s.id == last[0] && s.pickup);
+      final off = t.stops.indexWhere((s) => s.id == last[1] && s.dropoff);
+      if (on >= 0 && off > on) {
+        pickup = last[0];
+        dropoff = last[1];
+      }
+    }
     homePickup = null;
     homeDropoff = null;
     seats.clear();
@@ -728,7 +963,7 @@ class PassengerStore extends ChangeNotifier {
     if (address.trim().isEmpty) return 'Nhập địa chỉ để tài xế tìm được bạn';
     final r = await _call(() => api.checkServiceArea(kind: pickupSide ? 'PICKUP' : 'DROPOFF', lat: lat, lng: lng, tripId: trip?.id));
     if (!r.ok) return r.error;
-    final home = HomeAddress(address: address.trim(), lat: lat, lng: lng, feeVnd: (r.value!['fee_vnd'] as num? ?? 0).toInt(), areaName: '${r.value!['area_name'] ?? ''}', note: note.trim());
+    final home = HomeAddress(address: address.trim(), lat: lat, lng: lng, feeVnd: (r.value!['fee_vnd'] as num? ?? 0).toInt(), areaName: '${r.value!['area_name'] ?? ''}', note: note.trim(), needsReview: r.value!['confirmation'] == 'MANUAL');
     final list = stops();
     if (pickupSide) {
       homePickup = home;
@@ -751,6 +986,22 @@ class PassengerStore extends ChangeNotifier {
   }
 
   List<Stop> stops() => trip?.stops ?? const [];
+
+  /// What a home pickup (or drop-off) costs and needs, shown before the passenger enters an address:
+  /// "Từ 50.000 đ · đặt trước 2 giờ · một số khu cần nhà xe duyệt". Null while the areas are not loaded.
+  String? homeServiceSummary({required bool pickupSide}) {
+    final areas = serviceAreas.where((a) => a.kind == (pickupSide ? 'PICKUP' : 'DROPOFF')).toList();
+    if (areas.isEmpty) return null;
+    final fees = areas.map((a) => a.feeVnd).toList()..sort();
+    final lead = areas.map((a) => a.leadMinutes).reduce((a, b) => a < b ? a : b);
+    final parts = [
+      fees.first == fees.last ? '+${vnd(fees.first)}' : 'Từ +${vnd(fees.first)}',
+      if (pickupSide) 'xe đón 75–30 phút trước giờ chạy',
+      if (lead >= 60) 'đặt trước ${lead ~/ 60} giờ' else if (lead > 0) 'đặt trước $lead phút',
+      if (areas.every((a) => a.manual)) 'nhà xe duyệt địa chỉ' else if (areas.any((a) => a.manual)) 'một số khu cần nhà xe duyệt',
+    ];
+    return parts.join(' · ');
+  }
   Stop stop(String id) => stops().firstWhere((s) => s.id == id, orElse: () => stops().first);
 
   void setPickup(String id, {bool keepHome = false}) {
@@ -1004,7 +1255,19 @@ class PassengerStore extends ChangeNotifier {
   /// Preview of PAX-021 tiers; the server decides the refund.
   ({int percent, String tier}) refundFor(Ticket t) {
     if (t.delay > 30) return (percent: 100, tier: 'Chuyến chậm hơn 30 phút: hoàn 100%, không phí');
+    if (t.homePickupStatus == 'REJECTED' || t.homeDropoffStatus == 'REJECTED') {
+      return (percent: 100, tier: 'Nhà xe không nhận đón/trả tận nhà: hoàn 100% tiền còn lại, không phí');
+    }
     return (percent: -1, tier: 'Mức hoàn tính theo số giờ trước giờ chạy: từ 12 giờ hoàn 100%, 6 đến 12 giờ hoàn 80%, dưới 6 giờ không hoàn.');
+  }
+
+  /// Takes back a home pickup (pickupSide) or drop-off still under review; the fee is refunded (D130).
+  Future<ApiResult<void>> withdrawHome(Ticket t, {required bool pickupSide}) async {
+    final r = await _call(() => api.withdrawHomeRequest(t.id, pickupSide ? 'PICKUP' : 'DROPOFF'));
+    if (!r.ok) return ApiResult(null, r.error, r.code);
+    await loadTickets();
+    await loadNotices();
+    return const ApiResult(null);
   }
 
   Future<ApiResult<int>> cancelTicket(Ticket t) async {
@@ -1020,7 +1283,14 @@ class PassengerStore extends ChangeNotifier {
   Future<Tracking> loadTracking(String tripId, {String? ticketId}) async {
     final r = await _call(() => api.getLiveRadarHUD(tripId, ticketId: ticketId));
     if (!r.ok) return Tracking(GpsSignal.none, text: r.error!);
-    final d = r.value!;
+    return _trackingFrom(r.value!);
+  }
+
+  /// The bus pushed by the server after each of its positions; errors or ends when the connection drops.
+  Stream<Tracking> watchTracking(String tripId, {String? ticketId}) =>
+      api.watchLiveRadarHUD(tripId, ticketId: ticketId).map(_trackingFrom);
+
+  Tracking _trackingFrom(Map<String, dynamic> d) {
     final signal = switch (d['signal_status']) {
       'LIVE' => GpsSignal.live,
       'STALE' => GpsSignal.stale,
@@ -1042,6 +1312,7 @@ class PassengerStore extends ChangeNotifier {
         lat: (rawTarget['lat'] as num).toDouble(),
         lng: (rawTarget['lng'] as num).toDouble(),
         isDropoff: rawTarget['kind'] == 'DROPOFF',
+        isHome: rawTarget['kind'] == 'HOME_PICKUP',
       );
     }
 
@@ -1069,6 +1340,9 @@ class PassengerStore extends ChangeNotifier {
 
     final passedTarget = d['has_passed_target'] == true;
     final publicView = d['view'] == 'PUBLIC';
+    DateTime? vn(Object? iso) => DateTime.tryParse('${iso ?? ''}')?.toUtc().add(const Duration(hours: 7));
+    final window = d['target_window'] as Map<String, dynamic>?;
+    final loc = d['bus_location'] as Map<String, dynamic>?;
 
     return Tracking(
       signal,
@@ -1084,6 +1358,20 @@ class PassengerStore extends ChangeNotifier {
       route: route,
       passedTarget: passedTarget,
       publicView: publicView,
+      plannedAt: vn(d['target_planned_time']),
+      windowFrom: vn(window?['from']),
+      windowTo: vn(window?['to']),
+      expectedAt: vn(d['expected_at']),
+      lateMinutes: (d['late_minutes'] as num?)?.toInt(),
+      atTarget: d['is_at_station'] == true && !passedTarget,
+      location: loc == null
+          ? null
+          : BusLocation(
+              atStop: loc['at_stop'] as String?,
+              lastPassed: loc['last_passed_stop'] as String?,
+              next: loc['next_stop'] as String?,
+              stopsBefore: (loc['stops_before_target'] as num?)?.toInt(),
+            ),
     );
   }
 
@@ -1116,8 +1404,17 @@ class PassengerStore extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _holdTimer?.cancel();
     super.dispose();
+  }
+
+  // Loads started in the background (banners, run days) may answer after the screen is gone.
+  bool _disposed = false;
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
   }
 }
 

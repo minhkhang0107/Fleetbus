@@ -3,6 +3,7 @@
  * Implements MGR-001 through MGR-030 for Fleet Managers, Dispatchers, and Controllers.
  */
 
+import crypto from 'crypto';
 import { DEMO_DATE, vnDate } from '../../../core/serviceDate.js';
 import { validateVietnamPhone } from '../../passenger/core/formatters.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
@@ -20,6 +21,10 @@ const HOTLINE_MAX_SEATS_PER_PHONE = 4;
 // BR-TRACK-002: a vehicle that has been silent for longer than this is STALE, then OFFLINE
 const GPS_STALE_AFTER_MS = 60 * 1000;
 const GPS_OFFLINE_AFTER_MS = 180 * 1000;
+
+function auditHash(body) {
+  return crypto.createHash('sha256').update(JSON.stringify(body)).digest('hex');
+}
 
 export const MOCK_MANAGERS_DB = [
   {
@@ -132,7 +137,9 @@ export class ManagerOperationsService {
    * Entries are frozen and never edited; secrets are never written to it.
    */
   recordAudit({ actor = 'anonymous', role = null, action, resource = null, ip = null, before = null, after = null, now = Date.now(), operator_id = DEFAULT_OPERATOR_ID }) {
-    const entry = Object.freeze({
+    // Each company's entries form a hash chain (D127): removing or inserting an entry breaks it.
+    const prev = this.auditLog.findLast(a => (a.operator_id || DEFAULT_OPERATOR_ID) === operator_id);
+    const body = {
       audit_id: `aud_${now}_${this.auditLog.length + 1}`,
       at: new Date(now).toISOString(),
       actor,
@@ -142,10 +149,26 @@ export class ManagerOperationsService {
       ip,
       before,
       after,
-      operator_id
-    });
+      operator_id,
+      prev_hash: prev?.hash || null
+    };
+    const entry = Object.freeze({ ...body, hash: auditHash(body) });
     this.auditLog.push(entry);
     return entry;
+  }
+
+  /** Walks a company's audit chain; `broken_at` is the first entry that does not follow from the one before. */
+  verifyAuditChain(operatorId = DEFAULT_OPERATOR_ID) {
+    let prevHash = null;
+    let count = 0;
+    for (const entry of this.auditLog) {
+      if ((entry.operator_id || DEFAULT_OPERATOR_ID) !== operatorId) continue;
+      const { hash, ...body } = entry;
+      if (body.prev_hash !== prevHash || auditHash(body) !== hash) return { intact: false, broken_at: entry.audit_id, checked: count };
+      prevHash = hash;
+      count += 1;
+    }
+    return { intact: true, broken_at: null, checked: count };
   }
 
   /**
@@ -651,6 +674,8 @@ export class ManagerOperationsService {
 
     const trip = this.findTrip(tripId);
     if (!trip || trip.operator_id !== operatorId) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+    // A cancelled departure sells nothing, not even at the counter (D131); a closed online sale still does.
+    if (trip.status === 'CANCELLED') return { success: false, error: 'Chuyến đã hủy', code: 'TRIP_CANCELLED' };
     if (!Array.isArray(seatCodes) || seatCodes.length === 0) {
       return { success: false, error: 'Vui lòng chọn ít nhất 1 ghế', code: 'NO_SEAT_SELECTED' };
     }
@@ -761,6 +786,8 @@ export class ManagerOperationsService {
 
     const trip = this.findTrip(tripId);
     if (!trip || trip.operator_id !== operatorId) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+    // A cancelled departure sells nothing, not even at the counter (D131); a closed online sale still does.
+    if (trip.status === 'CANCELLED') return { success: false, error: 'Chuyến đã hủy', code: 'TRIP_CANCELLED' };
     if (!Array.isArray(seatCodes) || seatCodes.length === 0) {
       return { success: false, error: 'Vui lòng chọn ít nhất 1 ghế', code: 'NO_SEAT_SELECTED' };
     }

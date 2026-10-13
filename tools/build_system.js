@@ -138,20 +138,30 @@ async function buildSystem() {
       targetFile: path.join(ROOT_DIR, 'source/driver/web_dist/index.html')
     },
     {
+      // The operations page is the live client of the ops API, edited in place: packaged as is, never
+      // overwritten by its design prototype (docs/designs/manager_portal.html).
       name: 'manager',
-      source: path.join(ROOT_DIR, 'docs/designs/manager_portal.html'),
+      live: true,
       targetDir: path.join(ROOT_DIR, 'source/manager/web_dist'),
       targetFile: path.join(ROOT_DIR, 'source/manager/web_dist/index.html')
     }
   ];
 
   for (const target of webTargets) {
-    if (!fs.existsSync(target.source)) {
-      throw new Error(`Missing source template for ${target.name}: ${target.source}`);
+    let content;
+    if (target.live) {
+      if (!fs.existsSync(target.targetFile)) {
+        throw new Error(`Missing live web app for ${target.name}: ${target.targetFile}`);
+      }
+      content = fs.readFileSync(target.targetFile, 'utf8');
+    } else {
+      if (!fs.existsSync(target.source)) {
+        throw new Error(`Missing source template for ${target.name}: ${target.source}`);
+      }
+      ensureDir(target.targetDir);
+      content = fs.readFileSync(target.source, 'utf8');
+      fs.writeFileSync(target.targetFile, content, 'utf8');
     }
-    ensureDir(target.targetDir);
-    const content = fs.readFileSync(target.source, 'utf8');
-    fs.writeFileSync(target.targetFile, content, 'utf8');
 
     const hash = getSha256(target.targetFile);
     manifest.artifacts[`web_${target.name}`] = {

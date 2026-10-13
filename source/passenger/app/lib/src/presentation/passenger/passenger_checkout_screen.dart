@@ -142,6 +142,18 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
             if (store.insuranceFee > 0) _line('Bảo hiểm', vnd(store.insuranceFee)),
             if (store.homePickup != null) _line('Phụ phí đón tận nhà', vnd(store.homePickup!.feeVnd)),
             if (store.homeDropoff != null) _line('Phụ phí trả tận nhà', vnd(store.homeDropoff!.feeVnd)),
+            // D130: disclosed before the transfer, never shown as confirmed while the company has not answered.
+            if ((store.homePickup?.needsReview ?? false) || (store.homeDropoff?.needsReview ?? false))
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: PTokens.warnSoft, borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+                child: Text(
+                  'Địa chỉ ${(store.homePickup?.needsReview ?? false) ? 'đón' : 'trả'} tận nhà cần nhà xe duyệt sau khi bạn thanh toán. Khi chưa duyệt, bạn ${(store.homePickup?.needsReview ?? false) ? 'lên xe tại ${store.stop(store.pickup).name}' : 'xuống xe tại ${store.stop(store.dropoff).name}'}. Nếu nhà xe không nhận, phụ phí được hoàn và bạn được hủy vé không mất phí.',
+                  style: sans(size: 13, weight: FontWeight.w600, color: PTokens.warnInk, height: 1.4),
+                ),
+              ),
             if (store.discount > 0) _line('Mã ${store.voucher}', '−${vnd(store.discount)}', color: PTokens.success),
             const Divider(height: 20, color: PTokens.line),
             Row(children: [

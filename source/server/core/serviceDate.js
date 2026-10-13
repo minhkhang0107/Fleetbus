@@ -5,7 +5,8 @@
  */
 
 export const TIMEZONE = 'Asia/Ho_Chi_Minh';
-export const BOOKING_WINDOW_DAYS = 30;
+// Passengers book at most two weeks ahead (product owner 2026-10-12, D129).
+export const BOOKING_WINDOW_DAYS = 14;
 // The day the seed trips run on (driver and ops boards use them). Outside production it stays bookable so the
 // live demo keeps working (decision D120).
 export const DEMO_DATE = '2026-08-28';
@@ -42,6 +43,14 @@ export function serviceCalendar(now = Date.now(), { production = false } = {}) {
     last_date: addDays(today, BOOKING_WINDOW_DAYS),
     demo_dates: production ? [] : [DEMO_DATE]
   };
+}
+
+/**
+ * The first travel day a timetable change may touch: the day after the last one on sale. Days already on sale
+ * keep the timetable their tickets were sold under (D129).
+ */
+export function scheduleChangeFrom(now = Date.now()) {
+  return addDays(vnDate(now), BOOKING_WINDOW_DAYS + 1);
 }
 
 /** Whether passengers may search and book this travel date. */

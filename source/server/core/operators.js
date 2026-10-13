@@ -27,9 +27,13 @@ export const OPERATORS = [
       // Its Hà Nội — Thanh Hóa line picks passengers up at stations and points along the road.
       stop_style: 'ROUTE_LINE',
       route_configs: {},
+      // The passenger app searches this line only (D135), out and back (D136); set on the web portal.
+      fixed_endpoints: { origin_station_id: 'stp_hn_gb', destination_station_id: 'stp_th_pb', allow_swap: true },
       approaching_threshold_minutes: 10,
       service_areas: [
         { area_id: 'sa_saomai_hn', name: 'Nội thành Hà Nội', kind: 'PICKUP', polygon: [[21.075, 105.755], [21.075, 105.885], [20.945, 105.885], [20.945, 105.755]], fee_vnd: 50000, lead_time_minutes: 120, service_hours: { from: '04:30', to: '22:00' }, active: true },
+        // Outer districts east of the river: the office checks the lane first (D130).
+        { area_id: 'sa_saomai_hn_east', name: 'Long Biên - Gia Lâm (nhà xe duyệt)', kind: 'PICKUP', polygon: [[21.075, 105.886], [21.075, 106.0], [20.945, 106.0], [20.945, 105.886]], fee_vnd: 80000, lead_time_minutes: 180, service_hours: { from: '04:30', to: '22:00' }, confirmation: 'MANUAL', active: true },
         { area_id: 'sa_saomai_th', name: 'TP Thanh Hóa', kind: 'DROPOFF', polygon: [[19.845, 105.725], [19.845, 105.835], [19.755, 105.835], [19.755, 105.725]], fee_vnd: 30000, lead_time_minutes: 0, service_hours: { from: '00:00', to: '23:59' }, active: true }
       ]
     }

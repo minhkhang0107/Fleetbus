@@ -107,6 +107,19 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
       assert.ok(res.data.eta_minutes > 0);
     });
 
+    it('TC-RADAR-01b: a bus parked at a stop before the pickup says it waits there, not that it is moving', () => {
+      const trackingService = new PassengerTrackingService();
+      const parked = stops.find(s => s.stop_id !== 'stp_nb' && s.order > 1 && stopCoords(s.stop_id));
+      const at = stopCoords(parked.stop_id);
+      trackingService.updateBusPosition('trp_hn_th_01', { lat: at.lat, lng: at.lng, speed_kmh: 0, bearing_deg: 180, plate_number: '29B-882.19' });
+      const res = trackingService.getTripRadar('trp_hn_th_01', { canSeeBus: true, pickupStopId: 'stp_nb', stops });
+      assert.match(res.data.hud_status_text, new RegExp(`^Xe đang dừng ở ${parked.name} \\(tới điểm đón: Cách \\d+ km, ~\\d+ phút\\)$`));
+
+      trackingService.updateBusPosition('trp_hn_th_01', { lat: at.lat, lng: at.lng, speed_kmh: 40, bearing_deg: 180, plate_number: '29B-882.19' });
+      const moving = trackingService.getTripRadar('trp_hn_th_01', { canSeeBus: true, pickupStopId: 'stp_nb', stops });
+      assert.match(moving.data.hud_status_text, /^Xe đang di chuyển/);
+    });
+
     it('TC-RADAR-02: boarded=true with dropoff stp_th_pb gives kind DROPOFF and "điểm trả" wording', () => {
       const trackingService = new PassengerTrackingService();
       trackingService.updateBusPosition('trp_hn_th_01', {
@@ -434,6 +447,63 @@ describe('T1: Route-Aware Passenger Radar & Road Geometry Suite', () => {
       assert.strictEqual(res.body.data.bus_position, null);
       assert.strictEqual(res.body.data.position_hidden, true);
       assert.ok(Array.isArray(res.body.data.stops));
+    });
+
+    /** Opens the stream and resolves with the first [count] tracking events, then closes it. */
+    function readEvents(path, headers, count, onOpen = () => {}) {
+      return new Promise((resolve, reject) => {
+        const events = [];
+        const req = http.request(`${baseUrl}${path}`, { method: 'GET', headers }, (res) => {
+          if (res.statusCode !== 200) {
+            resolve({ statusCode: res.statusCode, events });
+            res.resume();
+            return;
+          }
+          let buffer = '';
+          res.setEncoding('utf8');
+          res.on('data', (chunk) => {
+            buffer += chunk;
+            let end;
+            while ((end = buffer.indexOf('\n\n')) >= 0) {
+              const block = buffer.slice(0, end);
+              buffer = buffer.slice(end + 2);
+              const data = block.split('\n').find(l => l.startsWith('data: '));
+              if (block.includes('event: tracking') && data) events.push(JSON.parse(data.slice(6)));
+              if (events.length === 1) onOpen();
+              if (events.length >= count) {
+                req.destroy();
+                resolve({ statusCode: 200, contentType: res.headers['content-type'], events });
+                return;
+              }
+            }
+          });
+        });
+        req.on('error', (e) => { if (events.length < count) reject(e); });
+        req.end();
+      });
+    }
+
+    it('TC-ROUTE-06: the stream sends the view at once, then pushes the next position without being asked', async () => {
+      const at = stopCoords('stp_nb');
+      const res = await readEvents('/api/v1/trips/trp_hn_th_01/tracking/stream?ticket_id=tkt_test_boarded_01', passengerAuth('0988776655'), 2, () => {
+        serverServices.trackingService.updateBusPosition('trp_hn_th_01', { lat: at.lat, lng: at.lng, speed_kmh: 40, bearing_deg: 180, plate_number: '29B-882.19' });
+      });
+      assert.strictEqual(res.statusCode, 200);
+      assert.match(res.contentType, /^text\/event-stream/);
+      assert.strictEqual(res.events[0].view, 'TICKET');
+      assert.strictEqual(res.events[1].target_stop.kind, 'DROPOFF');
+      assert.ok(Math.abs(res.events[1].bus_position.lat - at.lat) < 1e-9, 'the pushed event carries the new position');
+      // The listener is gone once the client leaves.
+      await new Promise(r => setTimeout(r, 50));
+      assert.strictEqual(serverServices.trackingService.positionEvents.listenerCount('trp_hn_th_01'), 0);
+    });
+
+    it('TC-ROUTE-07: the stream follows the same access rules: no owner token, no bus; unknown trip, 404', async () => {
+      const res = await readEvents('/api/v1/trips/trp_hn_th_01/tracking/stream?ticket_id=tkt_test_boarded_01', {}, 1);
+      assert.strictEqual(res.events[0].view, 'PUBLIC');
+      assert.strictEqual(res.events[0].bus_position, null);
+      const missing = await readEvents('/api/v1/trips/trp_unknown_x/tracking/stream', {}, 1);
+      assert.strictEqual(missing.statusCode, 404);
     });
   });
 });

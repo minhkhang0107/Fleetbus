@@ -10,6 +10,8 @@ import 'package:app/src/presentation/passenger/passenger_seat_map_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_trip_detail_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_search_results_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_main_shell.dart';
+import 'package:app/src/presentation/passenger/passenger_home_screen.dart';
+import 'package:app/src/presentation/passenger/passenger_location_picker_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_login_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_splash_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_ticket_qr_screen.dart';
@@ -63,6 +65,10 @@ void main() {
   late List<http.Request> sent;
   late bool paid;
   late String ticketStatus;
+  // Days the fake server says have a departure on the route; null answers nothing (old servers).
+  List<String>? runDaysAnswer;
+  // The company's fixed origin and destination in the app config (D135); null = passengers pick places.
+  Map<String, dynamic>? fixedEndpointsAnswer;
 
   Future<PassengerStore> storeWithServer({bool selectOp = true}) async {
     sent = [];
@@ -76,7 +82,7 @@ void main() {
       if (path.endsWith('/app/config')) {
         final code = req.url.queryParameters['operator'] ?? '';
         if (code == 'SAOMAI') {
-          data = {'operator': {'operator_id': 'op1', 'code': 'SAOMAI', 'name': 'Nhà xe Sao Mai', 'short_name': 'Sao Mai', 'hotline': '1900 6868', 'primary_color': '#E11D48', 'pickup_modes': ['FIXED_STOP', 'HOME_PICKUP'], 'dropoff_modes': ['FIXED_LOCATION']}, 'service_calendar': {'timezone': 'Asia/Ho_Chi_Minh', 'today': '2026-10-11', 'booking_window_days': 30, 'last_date': '2026-11-10', 'demo_dates': ['2026-08-28']}};
+          data = {'operator': {'operator_id': 'op1', 'code': 'SAOMAI', 'name': 'Nhà xe Sao Mai', 'short_name': 'Sao Mai', 'hotline': '1900 6868', 'primary_color': '#E11D48', 'pickup_modes': ['FIXED_STOP', 'HOME_PICKUP'], 'dropoff_modes': ['FIXED_LOCATION']}, 'service_calendar': {'timezone': 'Asia/Ho_Chi_Minh', 'today': '2026-10-11', 'booking_window_days': 30, 'last_date': '2026-11-10', 'demo_dates': ['2026-08-28']}, 'fixed_endpoints': fixedEndpointsAnswer};
         } else if (code == 'XUYENVIET') {
           data = {'operator': {'operator_id': 'op2', 'code': 'XUYENVIET', 'name': 'Xuyên Việt Lines', 'short_name': 'Xuyên Việt', 'hotline': '1900 2468', 'primary_color': '#2563EB'}};
         } else {
@@ -101,6 +107,7 @@ void main() {
           ];
         }
       }
+      if (path.endsWith('/trips/run-days') && runDaysAnswer != null) data = {'days': runDaysAnswer};
       if (path.endsWith('/otp/request')) data = {'mock_otp': '123456'};
       if (path.endsWith('/otp/verify')) {
         data = {'token': 'tok', 'user': {'full_name': 'Hành khách BusGo', 'operator': {'code': req.headers['x-operator-code'] ?? 'SAOMAI'}}};
@@ -211,8 +218,8 @@ void main() {
     expect(store.date, '2026-10-11');
     expect(store.travelDate.long, 'Chủ Nhật, 11/10/2026');
     expect(store.travelDate.relative, 'Hôm nay');
-    expect(store.bookableDates.length, 32, reason: 'the demo day, then today and the 30 days after it');
-    expect(store.bookableDates.first.id, '2026-08-28');
+    expect(store.bookableDates.length, 31, reason: 'today and the 30 days after it (no demo day, D128)');
+    expect(store.bookableDates.first.id, '2026-10-11', reason: 'the window starts today');
     expect(store.bookableDates.last.id, '2026-11-10');
 
     store.setDate('2026-11-11');
@@ -232,6 +239,43 @@ void main() {
     await store.loadTrips();
     expect(store.trips, isEmpty);
     expect(store.tripsError, 'Ngày đi đã qua', reason: 'a refused day is explained, not shown as "no trips"');
+  });
+
+  testWidgets('a day without a departure is still picked and labelled "không có chuyến", with the next day offered (D137)', (tester) async {
+    runDaysAnswer = ['2026-10-13', '2026-10-15'];
+    addTearDown(() => runDaysAnswer = null);
+    late PassengerStore store;
+    await tester.runAsync(() async {
+      store = await storeWithServer();
+      await store.loadRunDays();
+    });
+    await tester.pumpWidget(PassengerScope(store: store, child: const MaterialApp(home: Scaffold(body: SingleChildScrollView(padding: EdgeInsets.all(16), child: TravelDateField())))));
+    final noTrip = find.textContaining('không có chuyến');
+    expect(noTrip, findsWidgets);
+    await tester.tap(noTrip.first);
+    await tester.pump();
+    expect(store.hasDeparture(store.date), isFalse, reason: 'the chip is not dead: the day is chosen');
+    expect(store.nextRunDay, isNotNull);
+    expect(store.hasDeparture(store.nextRunDay!), isTrue);
+  });
+
+  test('fixed timetable: the app knows which days have a departure on the route (D128)', () async {
+    runDaysAnswer = ['2026-10-13', '2026-10-15'];
+    addTearDown(() => runDaysAnswer = null);
+    final store = await storeWithServer();
+    await store.loadRunDays();
+    final asked = sent.lastWhere((r) => r.url.path.endsWith('/trips/run-days')).url.queryParameters;
+    expect(asked, {'origin': 'Hà Nội', 'destination': 'Thanh Hóa'});
+    expect(store.date, '2026-10-13', reason: 'today has no departure: the next day that has one');
+    expect(store.hasDeparture('2026-10-14'), isFalse);
+    expect(store.hasDeparture('2026-10-15'), isTrue);
+
+    runDaysAnswer = null;
+    store.swapPlaces();
+    await Future<void>.delayed(Duration.zero);
+    expect(store.runDays, isNull, reason: 'no answer for the new route: nothing is greyed');
+    expect(store.hasDeparture('2026-10-14'), isTrue);
+    store.dispose();
   });
 
   test('day labels: weekday, day/month with the year, and today/tomorrow', () {
@@ -301,16 +345,52 @@ void main() {
     expect(find.text('Đón tận nhà'), findsOneWidget, reason: 'the route allows home pickup');
     expect(find.text('Trả tận nhà'), findsNothing, reason: 'the route does not allow home drop-off');
 
+    expect(find.text('Đón trả tận nhà'), findsOneWidget, reason: 'home service comes first, not after the map');
+    expect(find.textContaining('Có mặt ở điểm đón trước 10 phút'), findsOneWidget);
+
+    // Ninh Bình both picks up and drops off, between the current stops: the app asks which.
     await tester.tap(find.bySemanticsLabel(RegExp('^Bến xe Ninh Bình')));
-    await tester.pump();
-    expect(store.pickup, 'stp_nb', reason: 'first tap sets where to get on');
-    await tester.tap(find.bySemanticsLabel(RegExp('^Bến xe Giáp Bát')));
-    await tester.pump();
-    expect(store.dropoff, 'stp_th_pb', reason: 'Giáp Bát is before the pickup and only picks up: it cannot be the drop-off');
-    await tester.tap(find.bySemanticsLabel(RegExp('^Bến xe Phía Bắc Thanh Hóa')));
-    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.text('Lên xe ở đây'), findsOneWidget);
+    await tester.tap(find.text('Lên xe ở đây'));
+    await tester.pumpAndSettle();
     expect((store.pickup, store.dropoff), ('stp_nb', 'stp_th_pb'));
+
+    // Giáp Bát only picks up: one tap moves the boarding point there, no question.
+    await tester.tap(find.bySemanticsLabel(RegExp('^Bến xe Giáp Bát')));
+    await tester.pumpAndSettle();
+    expect((store.pickup, store.dropoff), ('stp_hn_gb', 'stp_th_pb'));
+    expect(find.text('Lên xe ở đây'), findsNothing);
+
+    // Ninh Bình again, now after the boarding point and before the drop-off: choose to get off there.
+    await tester.tap(find.bySemanticsLabel(RegExp('^Bến xe Ninh Bình')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Xuống xe ở đây'));
+    await tester.pumpAndSettle();
+    expect((store.pickup, store.dropoff), ('stp_hn_gb', 'stp_nb'));
     await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  test('estimated stop times carry "~"; the stops of the last booking in a direction are offered again', () async {
+    final t = Trip.fromJson({
+      ...trip,
+      'stops': [
+        {...stops[0], 'time_source': 'OPERATOR'},
+        {...stops[1], 'time_source': 'ESTIMATED'},
+        {...stops[2], 'time_source': 'OPERATOR'},
+      ],
+    });
+    expect([for (final s in t.stops) s.timeLabel.startsWith('~')], [false, true, false]);
+
+    final store = await storeWithServer();
+    await store.loadTrips();
+    store.chooseTrip(store.trips.single);
+    expect((store.pickup, store.dropoff), ('stp_hn_gb', 'stp_th_pb'));
+    store.setPickup('stp_nb');
+    await store.rememberRide();
+    store.chooseTrip(store.trips.single);
+    expect(store.pickup, 'stp_nb', reason: 'remembered for Hà Nội → Thanh Hóa');
     store.dispose();
   });
 
@@ -412,6 +492,62 @@ void main() {
     expect(moved.pickupNotice, 'Xe không vào được địa chỉ (Ngõ quá hẹp). Hẹn ở đầu ngõ 34');
     final link = await store.shareTracking(t);
     expect(link.value, 'http://test/t/abc');
+  });
+
+  testWidgets('fixed origin and destination: shown as set, not picked; swap as the company sets it (D135, D136)', (tester) async {
+    fixedEndpointsAnswer = {
+      'origin': {'station_id': 'stp_hn_gb', 'name': 'Bến xe Giáp Bát', 'city': 'Hà Nội'},
+      'destination': {'station_id': 'stp_th_pb', 'name': 'Bến xe Phía Bắc Thanh Hóa', 'city': 'Thanh Hóa'},
+      'forward_available': true,
+      'reverse_available': false,
+      'allow_swap': false,
+    };
+    final store = await storeWithServer();
+    fixedEndpointsAnswer = null;
+    expect([store.originPlace.city, store.originPlace.station, store.destPlace.city, store.destPlace.station], ['Hà Nội', 'Bến xe Giáp Bát', 'Thanh Hóa', 'Bến xe Phía Bắc Thanh Hóa']);
+    expect(store.recentPairs, isEmpty);
+    expect(store.canSwap, isFalse);
+    store.swapPlaces();
+    expect(store.originPlace.city, 'Hà Nội', reason: 'one-way company: the swap does nothing');
+    await tester.pumpWidget(MaterialApp(home: PassengerScope(store: store, child: const Scaffold(body: PassengerHomeScreen()))));
+    await tester.pump();
+    expect(find.text('Bến xe Giáp Bát'), findsOneWidget);
+    expect(find.text('Tìm lại gần đây'), findsNothing);
+    await tester.tap(find.text('Hà Nội'));
+    await tester.pump();
+    expect(find.byType(PassengerLocationPickerScreen), findsNothing, reason: 'a fixed place opens no picker');
+    await tester.pumpWidget(const SizedBox());
+
+    // Out and back (the default): the passenger swaps to the return direction.
+    fixedEndpointsAnswer = {
+      'origin': {'station_id': 'stp_hn_gb', 'name': 'Bến xe Giáp Bát', 'city': 'Hà Nội'},
+      'destination': {'station_id': 'stp_th_pb', 'name': 'Bến xe Phía Bắc Thanh Hóa', 'city': 'Thanh Hóa'},
+    };
+    final both = await storeWithServer();
+    fixedEndpointsAnswer = null;
+    expect(both.canSwap, isTrue);
+    both.swapPlaces();
+    expect([both.originPlace.city, both.destPlace.station], ['Thanh Hóa', 'Bến xe Giáp Bát']);
+  });
+
+  test('a home pickup the company has not answered is never shown as confirmed (D130)', () {
+    final pending = Ticket.fromJson({...ticket, 'home_pickup': {'address': '8 Ngọc Lâm', 'status': 'PENDING_REVIEW'}});
+    expect(pending.homePickupStatus, 'PENDING_REVIEW');
+    expect(Ticket.homeStatusLabel[pending.homePickupStatus], 'Chờ nhà xe duyệt');
+    final refused = Ticket.fromJson({...ticket, 'home_pickup': {'address': '8 Ngọc Lâm', 'status': 'REJECTED', 'reject_reason': 'Ngõ quá hẹp'}});
+    expect([refused.homePickupStatus, refused.homePickupReason], ['REJECTED', 'Ngõ quá hẹp']);
+    expect(Ticket.fromJson({...ticket, 'home_pickup': {'address': '8 Ngọc Lâm'}}).homePickupStatus, 'CONFIRMED', reason: 'older tickets were confirmed at booking');
+  });
+
+  testWidgets('the ticket says a home pickup is waiting for review and where to board meanwhile', (tester) async {
+    final store = await storeWithServer();
+    final t = Ticket.fromJson({...ticket, 'home_pickup': {'address': '8 Ngọc Lâm', 'status': 'PENDING_REVIEW'}});
+    await tester.pumpWidget(MaterialApp(home: PassengerScope(store: store, child: PassengerTicketQrScreen(ticket: t))));
+    await tester.pump();
+    expect(find.textContaining('Chờ nhà xe duyệt'), findsOneWidget);
+    expect(find.textContaining('Nhà xe chưa xác nhận địa chỉ này'), findsOneWidget);
+    expect(find.text('Hủy yêu cầu đón tận nhà'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
   });
 
   test('no ticket before the bank confirms; after it the wallet ticket becomes the receipt', () async {
@@ -518,7 +654,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Đến điểm đón'), findsOneWidget);
-    expect(find.text('Cách điểm đón'), findsOneWidget);
+    expect(find.text('Dự kiến đón'), findsOneWidget, reason: 'no estimate yet: the planned time');
     expect(find.byType(PassengerRouteMap), findsOneWidget);
 
     // Switch to boarded

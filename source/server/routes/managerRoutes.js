@@ -372,7 +372,8 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   if (pathname === '/api/v1/ops/audit-logs' && req.method === 'GET') {
     sendSuccess(res, {
       total: managerService.auditLog.filter(a => (a.operator_id || DEFAULT_OPERATOR_ID) === req.operatorId).length,
-      audit_logs: [...managerService.auditLog].filter(a => (a.operator_id || DEFAULT_OPERATOR_ID) === req.operatorId).reverse()
+      audit_logs: [...managerService.auditLog].filter(a => (a.operator_id || DEFAULT_OPERATOR_ID) === req.operatorId).reverse(),
+      chain: managerService.verifyAuditChain(req.operatorId)
     });
     return true;
   }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
@@ -213,6 +214,14 @@ class DriverStore extends ChangeNotifier {
   // Local to the cab
   final List<bool> checked = List.filled(6, false);
   int clock = toMinutes('06:40');
+  /// The trip runs today: the cab clock is the real time. Otherwise (a demo trip on another day) the clock
+  /// is simulated, one minute every 3 seconds, and moved to each stop's planned time.
+  bool realClock = false;
+  /// D143: the driver set off to collect the home pickups; the bus position goes to the server from then on.
+  bool homeRunStarted = false;
+  int _homeSpeed = 0;
+  /// Simulated clock only: when this session saw each passenger board, on the cab clock.
+  final Map<String, int> _boardedOnClock = {};
   bool atStop = false;
   bool moving = false;
   final Map<int, int> arrivedAt = {};
@@ -233,7 +242,7 @@ class DriverStore extends ChangeNotifier {
 
   DriverStop get stop => stops.isEmpty ? const DriverStop('', '', '--:--') : stops[stopIndex];
   bool get lastStop => stops.isNotEmpty && stopIndex == stops.length - 1;
-  int get speed => moving ? 62 : 0;
+  int get speed => moving ? 62 : (_homeSpeed);
   double get lat => _lat;
   double get lng => _lng;
   double get bearing => _bearing;
@@ -247,7 +256,8 @@ class DriverStore extends ChangeNotifier {
   bool get readyToStart => checked.every((c) => c);
   String get firstStopName => stops.isEmpty ? '' : stops.first.name;
   int get pickupStopCount => stops.where((s) => manifest.any((p) => p.from == s.id)).length;
-  ShiftTrip? get nextTrip => shift.where((t) => t.id != tripId && t.status != 'COMPLETED').firstOrNull;
+  // A departure the office cancelled (D131) is no longer work: neither the current nor the next trip.
+  ShiftTrip? get nextTrip => shift.where((t) => t.id != tripId && t.status != 'COMPLETED' && t.status != 'CANCELLED').firstOrNull;
   DriverStop stopById(String id) => stops.firstWhere((s) => s.id == id, orElse: () => DriverStop(id, id, '--:--'));
 
   String? _error(Map<String, dynamic> json) => json['status'] == 'success' ? null : '${json['message'] ?? 'Có lỗi, thử lại sau.'}';
@@ -327,10 +337,24 @@ class DriverStore extends ChangeNotifier {
       for (final t in trips)
         ShiftTrip(t['trip_id'], _depOf(t), routeLabel(t['route_name'] ?? ''), t['vehicle_plate'] ?? '', (t['manifest'] as List? ?? []).length, t['status'] ?? ''),
     ];
-    final current = trips.where((t) => t['status'] != 'COMPLETED').firstOrNull ?? trips.lastOrNull;
+    final live = trips.where((t) => t['status'] != 'CANCELLED').toList();
+    final current = live.where((t) => t['status'] != 'COMPLETED').firstOrNull ?? live.lastOrNull;
     if (current != null) _apply(current, fresh: tripId != current['trip_id']);
     notifyListeners();
   }
+
+  /// Planned time at each stop as the company set it (the passenger sees the same), kept across replies
+  /// that do not carry it.
+  final Map<String, String> _plannedTimes = {};
+
+  static DateTime _vnNow() => DateTime.now().toUtc().add(const Duration(hours: 7));
+  static int _realMinutes() {
+    final now = _vnNow();
+    return now.hour * 60 + now.minute;
+  }
+
+  /// When the passenger boarded, on the clock the cab shows; null when unknown.
+  int? boardedTime(Passenger p) => realClock ? p.boardedAt : _boardedOnClock[p.ticketId];
 
   String _depOf(Map<String, dynamic> t) {
     final dep = DateTime.tryParse('${t['planned_departure_time']}')?.toUtc().add(const Duration(hours: 7));
@@ -342,15 +366,23 @@ class DriverStore extends ChangeNotifier {
     route = routeLabel(t['route_name'] ?? '');
     plate = t['vehicle_plate'] ?? '';
     depTime = _depOf(t);
+    final depAt = DateTime.tryParse('${t['planned_departure_time']}')?.toUtc().add(const Duration(hours: 7));
+    final today = _vnNow();
+    realClock = depAt != null && depAt.year == today.year && depAt.month == today.month && depAt.day == today.day;
     fare = (t['base_fare_vnd'] as num?)?.toInt() ?? fare;
     final dep = toMinutes(depTime == '--:--' ? '07:00' : depTime);
     final raw = (t['stops'] as List? ?? []).cast<Map<String, dynamic>>()..sort((a, b) => (a['order'] as num).compareTo(b['order'] as num));
+    if (fresh) _plannedTimes.clear();
+    for (final s in raw) {
+      final at = DateTime.tryParse('${s['planned_time']}')?.toUtc().add(const Duration(hours: 7));
+      if (at != null) _plannedTimes['${s['stop_id']}'] = hhmm(at.hour * 60 + at.minute);
+    }
     stops = [
       for (var i = 0; i < raw.length; i++)
         DriverStop(
           raw[i]['stop_id'],
           raw[i]['name'],
-          hhmm(dep + i * minutesBetweenStops),
+          _plannedTimes['${raw[i]['stop_id']}'] ?? hhmm(dep + i * minutesBetweenStops),
           arrived: raw[i]['status'] == 'ARRIVED',
           lat: (raw[i]['lat'] as num?)?.toDouble(),
           lng: (raw[i]['lng'] as num?)?.toDouble(),
@@ -366,11 +398,17 @@ class DriverStore extends ChangeNotifier {
     } else {
       _road = null;
     }
+    if (fresh) _boardedOnClock.clear();
+    final waiting = {for (final p in manifest) if (p.status == PaxStatus.waiting) p.ticketId};
     manifest = (t['manifest'] as List? ?? []).cast<Map<String, dynamic>>().map(Passenger.fromJson).toList();
+    for (final p in manifest) {
+      if (p.status == PaxStatus.boarded && waiting.contains(p.ticketId)) _boardedOnClock.putIfAbsent(p.ticketId, () => clock);
+    }
     stopIndex = ((t['current_stop_index'] as num?)?.toInt() ?? 0).clamp(0, stops.isEmpty ? 0 : stops.length - 1);
     codCash = (t['total_cod_collected_vnd'] as num?)?.toInt() ?? 0;
     hailCash = (t['total_hail_collected_vnd'] as num?)?.toInt() ?? 0;
     debts = [for (final d in (t['debts'] as List? ?? []).cast<Map<String, dynamic>>()) (code: '${d['receipt_code']}', amount: (d['amount_vnd'] as num).toInt())];
+    homeRunStarted = t['home_run_started_at'] != null;
     trip = switch (t['status']) { 'IN_TRANSIT' => TripState.inTransit, 'COMPLETED' => TripState.completed, _ => TripState.readyCheck };
     if (t['current_lat'] is num) _lat = (t['current_lat'] as num).toDouble();
     if (t['current_lng'] is num) _lng = (t['current_lng'] as num).toDouble();
@@ -379,10 +417,12 @@ class DriverStore extends ChangeNotifier {
       for (var i = 0; i < checkKeys.length; i++) {
         checked[i] = trip != TripState.readyCheck || list[checkKeys[i]] == true && t['status'] == 'READY';
       }
-      clock = dep - 20;
+      clock = realClock ? _realMinutes() : dep - 20;
       if (trip == TripState.inTransit) {
         atStop = stops.isNotEmpty && stops[stopIndex].arrived;
         _startTimers();
+      } else if (homeRunStarted && trip != TripState.completed) {
+        _telemetryTimer ??= Timer.periodic(const Duration(seconds: 5), (_) => sendTelemetry());
       }
     }
   }
@@ -416,7 +456,13 @@ class DriverStore extends ChangeNotifier {
     if (ready.error != null) return ready.error;
     final r = await _call(() => api.startTrip(tripId!));
     if (r.error != null) return r.error;
-    clock = clock < toMinutes(depTime) - 2 ? toMinutes(depTime) - 2 : clock;
+    if (!realClock) clock = clock < toMinutes(depTime) - 2 ? toMinutes(depTime) - 2 : clock;
+    // The home run ends at the first stop, where the trip starts.
+    _homeSpeed = 0;
+    if (stops.isNotEmpty && stops.first.lat != null && stops.first.lng != null) {
+      _lat = stops.first.lat!;
+      _lng = stops.first.lng!;
+    }
     stopIndex = 0;
     moving = false;
     await _call(() => api.arriveAtStop(tripId!, stops.first.id));
@@ -428,9 +474,54 @@ class DriverStore extends ChangeNotifier {
     return null;
   }
 
+  /// Home pickups still to collect before departure: confirmed, reachable, not on board yet.
+  List<Passenger> get homePickupsWaiting =>
+      manifest.where((p) => p.homePickup != null && !p.inaccessible && p.status == PaxStatus.waiting).toList();
+
+  /// The window the home pickups were promised, earliest start to latest end ("05:45–06:30").
+  String? get homeWindow {
+    final windows = homePickupsWaiting.map((p) => p.pickupWindow).whereType<String>().toList()..sort();
+    if (windows.isEmpty) return null;
+    return '${windows.first.split('–').first}–${windows.last.split('–').last}';
+  }
+
+  /// D143: sets off to collect the home pickups. The app sends the bus position from now on, so each passenger
+  /// waiting at home sees the bus coming and is told when it is close.
+  Future<String?> startHomeRun() async {
+    final r = await _call(() => api.startHomeRun(tripId!));
+    if (r.error != null) return r.error;
+    homeRunStarted = true;
+    _telemetryTimer ??= Timer.periodic(const Duration(seconds: 5), (_) => sendTelemetry());
+    await refreshTrip();
+    unawaited(sendTelemetry());
+    notifyListeners();
+    return null;
+  }
+
+  /// Until the GPS plugin is wired, the bus drives to the next home pickup on its own (250 m a ping).
+  void _driveToNextHome() {
+    final next = homePickupsWaiting.where((p) => p.homeLat != null && p.homeLng != null).firstOrNull;
+    if (next == null) {
+      _homeSpeed = 0;
+      return;
+    }
+    final dLat = next.homeLat! - _lat;
+    final dLng = next.homeLng! - _lng;
+    final metres = math.sqrt(math.pow(dLat * 111000, 2) + math.pow(dLng * 104000, 2));
+    if (metres < 60) {
+      _homeSpeed = 0;
+      return;
+    }
+    final step = math.min(1.0, 250 / metres);
+    _lat += dLat * step;
+    _lng += dLng * step;
+    _bearing = (math.atan2(dLng * 104000, dLat * 111000) * 180 / math.pi + 360) % 360;
+    _homeSpeed = 30;
+  }
+
   void _startTimers() {
     _clockTimer ??= Timer.periodic(const Duration(seconds: 3), (_) {
-      clock++;
+      clock = realClock ? _realMinutes() : clock + 1;
       notifyListeners();
     });
     // FLOW-06: the position goes to the server while the trip runs.
@@ -438,8 +529,10 @@ class DriverStore extends ChangeNotifier {
   }
 
   Future<void> sendTelemetry() async {
-    if (tripId == null || trip != TripState.inTransit) return;
+    final beforeDeparture = trip != TripState.inTransit;
+    if (tripId == null || trip == TripState.completed || (beforeDeparture && !homeRunStarted)) return;
     _lastPing = DateTime.now();
+    if (beforeDeparture) _driveToNextHome();
     if (moving) {
       if (_leg != null) {
         final elapsed = DateTime.now().difference(_leg!.startedAt).inMilliseconds / 1000.0;
@@ -468,14 +561,14 @@ class DriverStore extends ChangeNotifier {
     if (error != null && !offline) return error;
     atStop = true;
     moving = false;
-    clock = clock < toMinutes(stop.time) - 2 ? toMinutes(stop.time) - 2 : clock;
+    if (!realClock) clock = clock < toMinutes(stop.time) - 2 ? toMinutes(stop.time) - 2 : clock;
     arrivedAt[stopIndex] = clock;
     notifyListeners();
     return null;
   }
 
   void leaveStop() {
-    clock = clock < toMinutes(stop.time) + 1 ? toMinutes(stop.time) + 1 : clock;
+    if (!realClock) clock = clock < toMinutes(stop.time) + 1 ? toMinutes(stop.time) + 1 : clock;
     atStop = false;
     moving = true;
     stopIndex = (stopIndex + 1).clamp(0, stops.length - 1);

@@ -130,7 +130,7 @@ async function runLiveE2E() {
   const ticketId = settlement.body.data.issued_tickets[0].ticket_id;
   console.log('✅ Wrong amount refused, exact amount settled. Issued Tickets count:', settlement.body.data.issued_tickets.length);
 
-  console.log('\n--- 4. PASSENGER TICKET WALLET & DYNAMIC QR ---');
+  console.log('\n--- 4. PASSENGER TICKET WALLET & BOARDING QR ---');
   const wallet = await request('/api/v1/passenger/tickets', { token: passengerToken });
   expect(wallet.status === 200 && wallet.body.data.some((t) => t.ticket_id === ticketId), 'the wallet must hold the ticket', wallet);
   console.log('✅ Ticket Wallet Active Tickets:', wallet.body.data.length);
@@ -138,7 +138,7 @@ async function runLiveE2E() {
   const qrPass = await request(`/api/v1/tickets/${ticketId}`, { token: passengerToken });
   expect(qrPass.status === 200, 'ticket QR', qrPass);
   const qrString = qrPass.body.data.boarding_qr.qr_code_value;
-  console.log('✅ Dynamic 30s HMAC QR Payload Generated:', qrString, '| Validity: 30s');
+  console.log('✅ Boarding QR (static, versioned, D104):', qrString);
 
   console.log('\n--- 5. DRIVER TACTICAL COCKPIT ---');
   const driverLogin = await request('/api/v1/auth/driver/login', {
@@ -189,9 +189,13 @@ async function runLiveE2E() {
   expect(telemetry.status === 200 && telemetry.body.data.data.speed_kmh === 65.2, 'telemetry', telemetry);
   console.log('✅ Driver Telemetry Streamed: Speed =', telemetry.body.data.data.speed_kmh, 'km/h');
 
-  const tracking = await request(`/api/v1/trips/${driverTripId}/tracking`);
+  // D119: the bus position is for the ticket owner (and the office or a share link); anyone else gets the road only.
+  const anonymous = await request(`/api/v1/trips/${driverTripId}/tracking`);
+  expect(anonymous.status === 200 && anonymous.body.data.position_hidden === true && anonymous.body.data.bus_position === null, 'without a ticket the bus position stays hidden', anonymous);
+  // The owner names the ticket it follows (as the app does); the token proves it is theirs.
+  const tracking = await request(`/api/v1/trips/${driverTripId}/tracking?ticket_id=${ticketId}`, { token: passengerToken });
   expect(tracking.status === 200 && tracking.body.data.has_position === true && tracking.body.data.signal_status === 'LIVE', 'the passenger sees the live bus', tracking);
-  console.log('✅ Passenger tracking shows the live position (signal LIVE)');
+  console.log('✅ Passenger tracking shows the live position (signal LIVE); hidden without a ticket');
 
   console.log('\n--- 6. MANAGER OPERATIONS CONTROL CENTER ---');
   const noCode = await request('/api/v1/auth/staff/login', { method: 'POST', body: { username: 'admin@busgo.vn', password: 'admin123' } });

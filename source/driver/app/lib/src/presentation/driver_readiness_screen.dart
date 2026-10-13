@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'driver_cockpit_dashboard.dart';
+import 'driver_home_run_screen.dart';
 import 'driver_incident_dialog.dart';
 import 'driver_manifest_screen.dart';
 import 'driver_store.dart';
@@ -42,9 +43,50 @@ class DriverReadinessScreen extends StatelessWidget {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverManifestScreen()));
   }
 
+  /// D143: home pickups are collected before the checks at the stop; setting off starts sending the bus position.
+  Future<void> _homeRun(BuildContext context, DriverStore store) async {
+    if (!store.homeRunStarted) {
+      final error = await store.startHomeRun();
+      if (!context.mounted) return;
+      if (error != null) {
+        dToast(context, error);
+        return;
+      }
+    }
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverHomeRunScreen()));
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = DriverScope.of(context);
+    final homes = store.manifest.where((p) => p.homePickup != null).length;
+    final homeWaiting = store.homePickupsWaiting.length;
+    final homePanel = homes == 0
+        ? null
+        : Padding(
+            padding: EdgeInsets.fromLTRB(dWide(context) ? 24 : 16, 16, dWide(context) ? 24 : 16, 0),
+            child: Panel(
+              border: const Color(0xFFA16207),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Text('Đón tận nhà · $homeWaiting/$homes khách chờ', style: dsans(size: 17, weight: FontWeight.w700, color: DTokens.warnInk)),
+                const SizedBox(height: 4),
+                Text(
+                  store.homeRunStarted
+                      ? 'Đang gửi vị trí, khách thấy xe đang tới nhà mình.'
+                      : 'Khung đón ${store.homeWindow ?? ''}. Bấm khi lên đường: khách được báo và theo dõi được xe tới nhà.',
+                  style: dsans(size: 14, color: DTokens.sub, height: 1.4),
+                ),
+                const SizedBox(height: 10),
+                BigButton(
+                  label: store.homeRunStarted ? 'Mở danh sách đón tận nhà' : 'Đi đón khách tận nhà',
+                  icon: Icons.home_outlined,
+                  color: DTokens.warn,
+                  foreground: const Color(0xFF1C1917),
+                  onPressed: () => _homeRun(context, store),
+                ),
+              ]),
+            ),
+          );
     final done = store.checked.where((c) => c).length;
     final color = done == 6 ? const Color(0xFF22C55E) : const Color(0xFFFBBF24);
     final wide = dWide(context);
@@ -78,6 +120,7 @@ class DriverReadinessScreen extends StatelessWidget {
       appBar: DHeader(title: 'Kiểm tra xe', subtitle: '${store.plate} · chuyến ${store.depTime}', trailing: Text('$done/6', style: dmono(size: 16, color: color))),
       body: Column(children: [
         LinearProgressIndicator(value: done / 6, minHeight: 4, color: color, backgroundColor: DTokens.panel),
+        if (homePanel != null) homePanel,
         Expanded(
           child: wide
               // Tablet: the six checks in two columns of large tiles, all visible without scrolling.

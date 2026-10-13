@@ -238,6 +238,11 @@ class DriverApiClientService {
    * DRI-011: Mark a passenger as no-show (10 minutes after departure, or when the passenger asked to cancel)
    */
   /// Spec A9: the bus cannot reach this home pickup address; the passenger and the office are told.
+  /// DRI-020 (D143): set off to collect the home pickups; from then on the bus position goes to the server.
+  Future<Map<String, dynamic>> startHomeRun(String tripId) {
+    return _post('/api/v1/driver/trips/$tripId/home-run', idempotent: true);
+  }
+
   Future<Map<String, dynamic>> reportInaccessible(String tripId, String ticketId, {required String reason, String? meetingPoint}) {
     return _post(
       '/api/v1/driver/trips/$tripId/tickets/$ticketId/inaccessible',

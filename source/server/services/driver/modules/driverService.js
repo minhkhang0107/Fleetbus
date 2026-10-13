@@ -3,6 +3,7 @@
  * Implements DRI-001 through DRI-019 for the commercial driver mobile/tablet platform.
  */
 
+import { homeConfirmed } from '../../../core/serviceAreas.js';
 import crypto from 'crypto';
 import {
   generateBoardingQR,
@@ -324,7 +325,7 @@ export class DriverCockpitService {
       confirmed: pickups.filter(p => p.boarding_status !== 'CANCELLED').length,
       boarded: pickups.filter(p => p.boarding_status === 'BOARDED').length,
       excluded: pickups.filter(p => ['NO_SHOW', 'CANCELLED'].includes(p.boarding_status)).length,
-      home_pickups: pickups.filter(p => p.home_pickup && p.boarding_status !== 'CANCELLED').length,
+      home_pickups: pickups.filter(p => homeConfirmed(p.home_pickup) && p.boarding_status !== 'CANCELLED').length,
       dropoffs: (trip.manifest || []).filter(p => p.dropoff_stop_id === stopId && p.boarding_status === 'BOARDED').length,
       alighted: (trip.manifest || []).filter(p => p.dropoff_stop_id === stopId && p.alighted_at).length
     };
@@ -364,7 +365,7 @@ export class DriverCockpitService {
         lifecycle_status: pub.lifecycle_status,
         on_board_count: pub.on_board_count,
         stops: pub.stops.map(({ stop_id, name, order, time, lifecycle_status, counts, arrived_at, skipped_at }) => ({ stop_id, name, order, time, lifecycle_status, counts, arrived_at: arrived_at || null, skipped_at: skipped_at || null })),
-        home_pickups: trip.manifest.filter(p => p.home_pickup && p.boarding_status !== 'CANCELLED').map(p => ({ ticket_id: p.ticket_id, seat_code: p.seat_code, boarding_status: p.boarding_status, address: p.home_pickup.address, window_from: p.home_pickup.window_from || null, window_to: p.home_pickup.window_to || null })),
+        home_pickups: trip.manifest.filter(p => homeConfirmed(p.home_pickup) && p.boarding_status !== 'CANCELLED').map(p => ({ ticket_id: p.ticket_id, seat_code: p.seat_code, boarding_status: p.boarding_status, address: p.home_pickup.address, window_from: p.home_pickup.window_from || null, window_to: p.home_pickup.window_to || null })),
         events: [...(trip.events || [])].reverse()
       }
     };
@@ -598,6 +599,7 @@ export class DriverCockpitService {
   submitReadinessChecklist(tripId, checklist = {}) {
     const trip = this.activeTrips.get(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+    if (trip.status === 'CANCELLED') return { success: false, error: 'Nhà xe đã hủy chuyến này', code: 'TRIP_CANCELLED' };
 
     const keys = [
       'tires_checked',
@@ -694,7 +696,9 @@ export class DriverCockpitService {
   recordTelemetry(tripId, { lat, lng, speed_kmh, bearing_deg, seq, recorded_at, accuracy_m, is_offline = false, mockNow = Date.now() }) {
     const trip = this.activeTrips.get(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
-    if (trip.status !== 'IN_TRANSIT') {
+    // Before departure the bus already moves while it collects home pickups (D143): its positions count then too.
+    const homeRun = trip.home_run_started_at && !['COMPLETED', 'CANCELLED'].includes(trip.status);
+    if (trip.status !== 'IN_TRANSIT' && !homeRun) {
       return { success: false, error: 'Chuyến xe chưa chạy hoặc đã kết thúc', code: 'TRIP_NOT_ACTIVE' };
     }
 
@@ -923,6 +927,37 @@ export class DriverCockpitService {
   setTicketQrVersion(tripId, ticketId, version) {
     const passenger = this.activeTrips.get(tripId)?.manifest.find(m => m.ticket_id === ticketId);
     if (passenger) passenger.qr_version = version;
+  }
+
+  /** Confirmed home pickups of the trip still to collect (not boarded, not refused, address reachable). */
+  homePickupsWaiting(trip) {
+    return (trip?.manifest || []).filter(p => homeConfirmed(p.home_pickup) && !p.home_pickup.inaccessible_at
+      && !['BOARDED', 'NO_SHOW', 'CANCELLED'].includes(p.boarding_status));
+  }
+
+  /**
+   * D143: the driver sets off to collect the home pickups before departure. From then on the app sends the bus
+   * position, so each passenger waiting at home sees the bus coming. Once is enough: a second call changes nothing.
+   */
+  startHomeRun(tripId, mockNow = Date.now()) {
+    const trip = this.activeTrips.get(tripId);
+    if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+    if (['COMPLETED', 'CANCELLED'].includes(trip.status)) {
+      return { success: false, error: 'Chuyến xe đã kết thúc', code: 'TRIP_NOT_ACTIVE' };
+    }
+    if (trip.home_run_started_at) return { success: true, data: this._publicTrip(trip) };
+    const waiting = this.homePickupsWaiting(trip);
+    if (waiting.length === 0) {
+      return { success: false, error: 'Chuyến này không còn khách đón tận nhà', code: 'NO_HOME_PICKUPS' };
+    }
+    trip.home_run_started_at = new Date(mockNow).toISOString();
+    this.eventBridge?.emit?.('HOME_RUN_STARTED', {
+      tripId,
+      vehiclePlate: trip.vehicle_plate,
+      passengers: waiting.map(p => ({ ticket_id: p.ticket_id, seat_code: p.seat_code, phone: p.passenger_phone || null, address: p.home_pickup.address })),
+      now: mockNow
+    });
+    return { success: true, data: this._publicTrip(trip) };
   }
 
   /**
@@ -1251,7 +1286,7 @@ export class DriverCockpitService {
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
     const item = trip.manifest.find(m => m.ticket_id === ticketId);
     if (!item) return { success: false, error: 'Không tìm thấy vé trong danh sách', code: 'TICKET_NOT_FOUND' };
-    if (!item.home_pickup) return { success: false, error: 'Vé này không đón tận nhà', code: 'NOT_HOME_PICKUP' };
+    if (!homeConfirmed(item.home_pickup)) return { success: false, error: 'Vé này không đón tận nhà', code: 'NOT_HOME_PICKUP' };
     if (item.boarding_status === 'BOARDED') return { success: false, error: 'Khách đã lên xe', code: 'ALREADY_BOARDED' };
     const text = typeof reason === 'string' ? reason.trim() : '';
     if (text.length < 5 || text.length > 200) return { success: false, error: 'Ghi lý do không vào được (5-200 ký tự)', code: 'VALIDATION_ERROR' };

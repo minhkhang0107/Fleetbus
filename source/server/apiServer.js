@@ -24,15 +24,42 @@ import { handleManagerRoutes } from './routes/managerRoutes.js';
 import { handleWebhookRoutes } from './routes/webhookRoutes.js';
 import { handlePlatformRoutes } from './routes/platformRoutes.js';
 import { handleServiceConfigRoutes } from './routes/serviceConfigRoutes.js';
+import { handlePromoBannerRoutes } from './routes/promoBannerRoutes.js';
+import { handleScheduleRoutes } from './routes/scheduleRoutes.js';
+import { handleTripExceptionRoutes } from './routes/tripExceptionRoutes.js';
 import { renderOnboardingPage, renderOnboardingNotFound } from './web/onboarding.js';
 import { renderTripSharePage } from './web/tripShare.js';
 import { findOperatorByCode, findOperatorById } from './core/operators.js';
 import { FleetBusEventBridge } from './core/fleetBusEventBridge.js';
 import { getWebhookSecret, getAuthMode, isProduction } from './config.js';
 import { resolveAccess, authenticate, IdempotencyStore, resolveOperator } from './core/gateway.js';
+import { TenantDatabases } from './core/tenantDb.js';
+import { seedPromoBanners } from './core/promoBanners.js';
+import { loadMasterKey } from './core/dbCrypto.js';
+import { StateStore } from './core/stateStore.js';
+import { knownOperatorIds, stateCollections } from './core/stateCollections.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const IS_MAIN = import.meta.url === `file://${process.argv[1]}`;
+
+/**
+ * Folder of the company databases (D126): FLEETBUS_DATA_DIR, else `data/` when this file is the running
+ * server; imported as a library (tests) the databases stay in memory.
+ */
+function defaultDataDir() {
+  if (process.env.FLEETBUS_DATA_DIR) return path.resolve(process.env.FLEETBUS_DATA_DIR);
+  return IS_MAIN ? path.resolve(__dirname, '../../data') : null;
+}
+
+function seedTenant(db, operatorId) {
+  if (!isProduction()) seedPromoBanners(db, operatorId);
+}
+
+function openTenantDbs(dataDir, env = process.env) {
+  const masterKey = loadMasterKey({ dataDir, production: isProduction(), env });
+  return new TenantDatabases({ dataDir, seed: seedTenant, masterKey });
+}
 
 export function createFleetBusServer(customServices = {}) {
   const eventBridge = customServices.eventBridge || new FleetBusEventBridge();
@@ -46,6 +73,7 @@ export function createFleetBusServer(customServices = {}) {
     trackingService: customServices.trackingService || new PassengerTrackingService(),
     driverService: customServices.driverService || new DriverCockpitService(),
     managerService: customServices.managerService || new ManagerOperationsService(),
+    tenantDbs: customServices.tenantDbs || openTenantDbs(customServices.dataDir !== undefined ? customServices.dataDir : defaultDataDir(), customServices.env),
     eventBridge,
     config: {
       webhookSecret: customServices.webhookSecret !== undefined ? customServices.webhookSecret : getWebhookSecret(),
@@ -57,16 +85,37 @@ export function createFleetBusServer(customServices = {}) {
 
   const idempotency = new IdempotencyStore();
 
+  // Working data lives in the company databases (D127): loaded now, written after every request.
+  const store = new StateStore({ tenantDbs: services.tenantDbs, collections: stateCollections(services, { idempotency }), knownScopes: knownOperatorIds });
+  services.tenantDbs.lock();
+  try {
+    store.boot();
+  } catch (err) {
+    services.tenantDbs.close();
+    throw err;
+  }
+  // A mutation cut short by a stop never finished: its key is free again.
+  for (const [key, entry] of idempotency.entries) if (!entry.done) idempotency.entries.delete(key);
+  services.store = store;
+  for (const operatorId of knownOperatorIds()) {
+    const chain = services.managerService.verifyAuditChain(operatorId);
+    if (!chain.intact) console.error(`[audit] Nhật ký của ${operatorId} bị đứt tại ${chain.broken_at}: có dòng bị xóa hoặc sửa`);
+  }
+
   function dispatchRoutes(req, res, pathname, parsedUrl) {
     try {
       if (handlePassengerRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleDriverRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handleTripExceptionRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleManagerRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleWebhookRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handlePlatformRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleServiceConfigRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handlePromoBannerRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handleScheduleRoutes(req, res, pathname, parsedUrl, services)) return;
     } catch (err) {
-      sendError(res, err.message, 'INTERNAL_SERVER_ERROR', 500);
+      if (err.code === 'TENANT_REQUIRED') sendError(res, err.message, err.code, 400);
+      else sendError(res, err.message, err.code === 'TENANT_DB_MISMATCH' ? err.code : 'INTERNAL_SERVER_ERROR', 500);
       return;
     }
 
@@ -118,6 +167,24 @@ export function createFleetBusServer(customServices = {}) {
     const pathname = parsedUrl.pathname;
 
     setCorsHeaders(res);
+
+    // Storage failed earlier: memory may be ahead of the databases, so answer nothing until a restart.
+    if (store.failed) {
+      sendError(res, 'Hệ thống tạm ngừng do lỗi lưu dữ liệu', 'STORAGE_UNAVAILABLE', 503);
+      return;
+    }
+    // What the request changed is stored before the answer leaves; if storing fails the client gets no answer.
+    const end = res.end.bind(res);
+    res.end = (...args) => {
+      try {
+        store.flush();
+      } catch (err) {
+        console.error(`[storage] ${err.message}`);
+        res.destroy();
+        return res;
+      }
+      return end(...args);
+    };
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -238,6 +305,8 @@ export function createFleetBusServer(customServices = {}) {
     dispatchRoutes(req, res, pathname, parsedUrl);
   });
 
+  server.on('close', () => services.tenantDbs.close());
+
   return { server, services };
 }
 
@@ -245,7 +314,12 @@ export const { server, services } = createFleetBusServer();
 
 const PORT = process.env.PORT || 3000;
 
-if (process.env.NODE_ENV !== 'test' && import.meta.url === `file://${process.argv[1]}`) {
+// Release the data folder on a normal stop (Ctrl+C, service manager); writes are already stored per request.
+if (IS_MAIN) {
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { services.tenantDbs.close(); process.exit(0); });
+}
+
+if (process.env.NODE_ENV !== 'test' && IS_MAIN) {
   server.listen(PORT, () => {
     console.log(`
 ╔════════════════════════════════════════════════════════════════════╗

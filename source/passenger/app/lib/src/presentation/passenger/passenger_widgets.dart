@@ -449,3 +449,66 @@ class LabeledField extends StatelessWidget {
 }
 
 bool validPhone(String raw) => RegExp(r'^0\d{9}$').hasMatch(raw.replaceAll(' ', ''));
+
+/// Material empty state: a tonal circle with the icon, a title, what will show here, and the next step.
+/// Inside a scroll view so a pull still refreshes the list ([onRefresh]).
+class EmptyState extends StatelessWidget {
+  const EmptyState({super.key, required this.icon, required this.title, required this.message, this.actionLabel, this.actionIcon, this.onAction, this.onRefresh});
+  final IconData icon;
+  final String title;
+  final String message;
+  final String? actionLabel;
+  final IconData? actionIcon;
+  final VoidCallback? onAction;
+  final Future<void> Function()? onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = LayoutBuilder(
+      builder: (context, box) => SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: box.maxHeight),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(32, 24, 32, 48),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 360),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Container(
+                    width: 112,
+                    height: 112,
+                    decoration: const BoxDecoration(color: PTokens.primarySoft, shape: BoxShape.circle),
+                    child: Icon(icon, size: 52, color: PTokens.primary),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(title, textAlign: TextAlign.center, style: sans(size: 20, weight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  Text(message, textAlign: TextAlign.center, style: sans(size: 14, color: PTokens.muted, height: 1.5)),
+                  if (actionLabel != null && onAction != null) ...[
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      height: 48,
+                      child: FilledButton.icon(
+                        onPressed: onAction,
+                        icon: Icon(actionIcon ?? Icons.arrow_forward, size: 20),
+                        label: Text(actionLabel!),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: PTokens.primary,
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          shape: const StadiumBorder(),
+                          textStyle: sans(size: 15, weight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                  ],
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    return onRefresh == null ? content : RefreshIndicator(onRefresh: onRefresh!, child: content);
+  }
+}

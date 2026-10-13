@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'passenger_location_picker_screen.dart';
+import 'passenger_promo_screen.dart';
 import 'passenger_search_results_screen.dart';
 import 'passenger_date_picker.dart';
 import 'passenger_store.dart';
@@ -8,6 +9,8 @@ import 'passenger_ticket_qr_screen.dart';
 import 'passenger_widgets.dart';
 
 /// PAX-004: search by route and date only; the seats picked later are the passenger count (D109).
+/// Two zones (D124): booking (search, recent searches, the next trip), then the company's promotion
+/// slider, which is left out when the server has no slide. Side by side on wide screens.
 class PassengerHomeScreen extends StatelessWidget {
   const PassengerHomeScreen({super.key});
 
@@ -40,21 +43,30 @@ class PassengerHomeScreen extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Container(
               decoration: BoxDecoration(border: Border.all(color: PTokens.line), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
-              child: Stack(children: [
-                Column(children: [
-                  _PlaceField(label: 'Điểm đi', place: store.originPlace, isOrigin: true),
+              // Both fields have the same height (one line each), so the swap button centred on the box sits on the
+              // divider between them.
+              child: Stack(alignment: Alignment.centerRight, children: [
+                Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  _PlaceField(label: 'Điểm đi', place: store.originPlace, isOrigin: true, fixed: store.fixedRoute),
                   const Divider(height: 1, color: PTokens.line),
-                  _PlaceField(label: 'Điểm đến', place: store.destPlace, isOrigin: false),
+                  _PlaceField(label: 'Điểm đến', place: store.destPlace, isOrigin: false, fixed: store.fixedRoute),
                 ]),
-                Positioned(
-                  right: 10,
-                  top: 0,
-                  bottom: 0,
-                  child: Center(
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: Tooltip(
+                    message: store.canSwap ? 'Đổi chiều điểm đi và điểm đến' : 'Nhà xe chỉ chạy một chiều',
                     child: Material(
                       color: PTokens.surface,
                       shape: const CircleBorder(side: BorderSide(color: PTokens.line)),
-                      child: IconButton(tooltip: 'Đổi chiều điểm đi và điểm đến', onPressed: store.swapPlaces, icon: const Icon(Icons.swap_vert, color: PTokens.primary)),
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: store.canSwap ? store.swapPlaces : null,
+                        child: SizedBox(
+                          width: 44,
+                          height: 44,
+                          child: Icon(Icons.swap_vert, size: 22, color: store.canSwap ? PTokens.primary : PTokens.line),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -78,15 +90,8 @@ class PassengerHomeScreen extends StatelessWidget {
             ),
           ]),
         ),
-      ], right: [
-        if (upcoming.isNotEmpty) ...[
-          if (!pWide(context)) gap(20),
-          Text('Chuyến sắp đi', style: sans(size: 15, weight: FontWeight.w600)),
-          gap(10),
-          _UpcomingCard(ticket: upcoming.last),
-        ],
         if (recent.isNotEmpty) ...[
-          if (upcoming.isNotEmpty || !pWide(context)) gap(20),
+          gap(20),
           Text('Tìm lại gần đây', style: sans(size: 15, weight: FontWeight.w600)),
           gap(10),
           Wrap(spacing: 8, runSpacing: 8, children: [
@@ -98,31 +103,41 @@ class PassengerHomeScreen extends StatelessWidget {
               ),
           ]),
         ],
+        if (upcoming.isNotEmpty) ...[
+          gap(20),
+          Text('Chuyến sắp đi', style: sans(size: 15, weight: FontWeight.w600)),
+          gap(10),
+          _UpcomingCard(ticket: upcoming.last),
+        ],
+      ], right: [
+        if (store.banners.isNotEmpty) ...[
+          if (!pWide(context)) gap(24),
+          PromoSlider(banners: store.banners),
+        ],
       ]),
     );
   }
 }
 
 class _PlaceField extends StatelessWidget {
-  const _PlaceField({required this.label, required this.place, required this.isOrigin});
+  const _PlaceField({required this.label, required this.place, required this.isOrigin, this.fixed = false});
   final String label;
   final Place place;
   final bool isOrigin;
+  /// The company fixed its origin and destination (D135): shown, not picked.
+  final bool fixed;
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerLocationPickerScreen(isOrigin: isOrigin))),
+      onTap: fixed ? null : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerLocationPickerScreen(isOrigin: isOrigin))),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 64, 10),
-        child: Row(children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(label, style: sans(size: 12, color: PTokens.muted)),
-              const SizedBox(height: 2),
-              Text('${place.city} · ${place.station}', style: sans(size: 15, weight: FontWeight.w600)),
-            ]),
-          ),
+        padding: const EdgeInsets.fromLTRB(12, 10, 68, 10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: sans(size: 12, color: PTokens.muted)),
+          const SizedBox(height: 2),
+          Text(place.city, maxLines: 1, overflow: TextOverflow.ellipsis, style: sans(size: 15, weight: FontWeight.w600)),
+          Text(place.station, maxLines: 1, overflow: TextOverflow.ellipsis, style: sans(size: 13, color: PTokens.muted)),
         ]),
       ),
     );

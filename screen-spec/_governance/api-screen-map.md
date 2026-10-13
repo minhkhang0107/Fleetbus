@@ -23,6 +23,8 @@
 | **PAX-002** | Login | `POST /api/v1/auth/passenger/otp/request` | `POST` | Public | Yes (`Idempotency-Key`) | Request SMS OTP for phone authentication |
 | **PAX-003** | OTP Verification | `POST /api/v1/auth/passenger/otp/verify` | `POST` | Public | Yes (`Idempotency-Key`) | Exchange OTP for JWT Access + Refresh Token |
 | **PAX-004** | Home | `GET /api/v1/passenger/home-feed` | `GET` | Bearer/Public | No | Active ticket banner, popular corridors, announcements |
+| **PAX-004** | Promo slider | `GET /api/v1/passenger/promo-banners`, `GET /api/v1/passenger/promo-banners/{id}` | `GET` | Public | No | Live slides of the chosen company; slider hidden when empty (D124) |
+| **PAX-004** | Travel day | `GET /api/v1/trips/run-days?origin=&destination=` | `GET` | Public | No | Days of the 14-day booking window with a departure (D128, D129) |
 | **PAX-005** | Location Picker | `GET /api/v1/routes/stops/search` | `GET` | Public | No | Search bus stops / provinces / pickup points |
 | **PAX-006** | Search Results | `GET /api/v1/trips/search` | `GET` | Public | No | Query trips by origin, destination, date, vehicle type |
 | **PAX-007** | Trip Detail | `GET /api/v1/trips/{tripId}` | `GET` | Public | No | Retrieve trip metadata, stop timeline, policies, vehicle info |
@@ -118,6 +120,11 @@
 | **MGR-028** | Audit Logs | `GET /api/v1/ops/audit-logs` | `GET` | Bearer (Staff) | No | Immutable system audit log with actor, IP, before/after diff |
 | **MGR-029** | Roles & RBAC | `POST / PUT /api/v1/ops/rbac/roles` | `POST/PUT` | Bearer (Admin) | Yes | Manage staff roles, resource permissions, depot scoping |
 | **MGR-030** | System Settings| `POST / PUT /api/v1/ops/settings` | `POST/PUT` | Bearer (Admin) | Yes | Configure lock TTLs, GPS sampling rates, gateway keys |
+| **MGR-031** | Promo Banners | `GET / POST /api/v1/ops/promo-banners`, `PATCH / DELETE …/{id}`, `POST …/{id}/activate`, `…/deactivate` | `GET/POST/PATCH/DELETE` | Bearer (`FLEET_DIRECTOR`) | Yes (POST, PATCH) | Slides and HTML pages of the passenger home slider, stored in the company database |
+| **MGR-032** | Timetable | `GET / POST /api/v1/ops/schedules`, `PATCH …/{id}`, `DELETE …/{id}/changes` | `GET/POST/PATCH/DELETE` | Bearer (`FLEET_DIRECTOR`, `DISPATCHER`) | Yes (POST, PATCH) | Fixed departures by weekday; changes take effect from the first day not on sale (today + 15); an extra departure (`extra_date`) is on sale at once (D134) |
+| **MGR-033** | Home Requests | `GET /api/v1/ops/home-requests?status=`, `POST …/{orderId}/{PICKUP\|DROPOFF}/confirm`, `…/reject` | `GET/POST` | Bearer (`FLEET_DIRECTOR`, `DISPATCHER`) | Yes (POST) | Review addresses in MANUAL service areas; a refusal refunds the fee (D130) |
+| **MGR-014** | Departure Sale / Cancel | `POST /api/v1/ops/trips/{tripId}/sales`, `POST /api/v1/ops/trips/{tripId}/cancel` | `POST` | Bearer (`FLEET_DIRECTOR`, `DISPATCHER`) | Yes | Stop or resume online sales; cancel a departure with a 100% refund per ticket (D131) |
+| **PAX-017** | Ticket Changes | `POST /api/v1/passenger/tickets/{ticketId}/stops`, `POST …/home-request/withdraw` | `POST` | Bearer (owner) | Yes | Move stops inside the paid segment (D133); withdraw a home request under review (D130) |
 
 ---
 

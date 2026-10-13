@@ -6,7 +6,38 @@
 import EventEmitter from 'events';
 import { operatorOfTrip } from './tenancy.js';
 import { findOperatorById } from './operators.js';
+import { homeConfirmed } from './serviceAreas.js';
+import { expireHomeRequests } from './homeReview.js';
 import { DEMO_DATE, addDays, parseRunId, serviceCalendar } from './serviceDate.js';
+
+/** Puts issued tickets on the driver's manifest, once each. */
+function addToManifest(driverTrip, tickets) {
+  for (const tkt of tickets) {
+    const exists = driverTrip.manifest.some(m => m.ticket_id === tkt.ticket_id || (m.pnr === tkt.pnr && m.seat_code === tkt.seat_code));
+    if (exists) continue;
+    driverTrip.manifest.push({
+      ticket_id: tkt.ticket_id,
+      pnr: tkt.pnr,
+      passenger_name: tkt.passenger_name,
+      passenger_phone: tkt.passenger_phone,
+      seat_code: tkt.seat_code,
+      pickup_stop: tkt.pickup_stop,
+      dropoff_stop: tkt.dropoff_stop,
+      pickup_stop_id: tkt.pickup_stop_id,
+      dropoff_stop_id: tkt.dropoff_stop_id,
+      // Only the driver of this trip sees the home address (spec 11).
+      // A home request still under review (or refused) is not a stop of the bus (spec 7.3): the
+      // passenger boards at the ticket's stop until the office confirms it.
+      home_pickup: homeConfirmed(tkt.home_pickup) ? tkt.home_pickup : null,
+      home_dropoff: homeConfirmed(tkt.home_dropoff) ? tkt.home_dropoff : null,
+      boarding_status: tkt.status === 'BOARDED' ? 'BOARDED' : 'NOT_BOARDED',
+      payment_method: 'PREPAID',
+      cod_amount_vnd: 0,
+      boarded_at: tkt.boarded_at || null
+    });
+  }
+  driverTrip.booked_passengers_count = driverTrip.manifest.length;
+}
 
 export class FleetBusEventBridge extends EventEmitter {
   constructor() {
@@ -90,30 +121,7 @@ export class FleetBusEventBridge extends EventEmitter {
         const driverTrip = driverService.activeTrips.get(tripId);
 
         if (driverTrip) {
-          for (const tkt of tickets) {
-            const exists = driverTrip.manifest.some(m => m.ticket_id === tkt.ticket_id || (m.pnr === tkt.pnr && m.seat_code === tkt.seat_code));
-            if (!exists) {
-              driverTrip.manifest.push({
-                ticket_id: tkt.ticket_id,
-                pnr: tkt.pnr,
-                passenger_name: tkt.passenger_name,
-                passenger_phone: tkt.passenger_phone,
-                seat_code: tkt.seat_code,
-                pickup_stop: tkt.pickup_stop,
-                dropoff_stop: tkt.dropoff_stop,
-                pickup_stop_id: tkt.pickup_stop_id,
-                dropoff_stop_id: tkt.dropoff_stop_id,
-                // Only the driver of this trip sees the home address (spec 11).
-                home_pickup: tkt.home_pickup || null,
-                home_dropoff: tkt.home_dropoff || null,
-                boarding_status: 'NOT_BOARDED',
-                payment_method: 'PREPAID',
-                cod_amount_vnd: 0,
-                boarded_at: null
-              });
-            }
-          }
-          driverTrip.booked_passengers_count = driverTrip.manifest.length;
+          addToManifest(driverTrip, tickets);
         }
       }
 
@@ -244,6 +252,8 @@ export class FleetBusEventBridge extends EventEmitter {
     // 2c. TRIP_STARTED: Driver starts the trip -> Manager trip & vehicle go in transit (DRI-005)
     // -------------------------------------------------------------------------
     this.on('TRIP_STARTED', ({ tripId, vehiclePlate }) => {
+      // Home requests nobody reviewed before the bus left are refused, the fee refunded (D130).
+      expireHomeRequests(this.services, tripId);
       const mgrTrip = managerService?.findTrip?.(tripId);
       if (mgrTrip) mgrTrip.status = 'IN_TRANSIT';
       const vehicle = managerService?.vehicles?.find(v => v.vehicle_id === mgrTrip?.vehicle_id)
@@ -488,6 +498,21 @@ export class FleetBusEventBridge extends EventEmitter {
 
     // Spec A9: a home pickup the bus cannot reach. The passenger is told once, the ticket keeps the note, and the
     // office gets an alert to arrange the pickup (call the passenger, send a smaller vehicle).
+    // D143: the driver set off to collect the home pickups; each passenger waiting at home can now follow the bus.
+    this.on('HOME_RUN_STARTED', ({ tripId, vehiclePlate, passengers, now = Date.now() }) => {
+      const operatorId = operatorOfTrip(this.services, tripId);
+      for (const p of passengers) {
+        if (!p.phone) continue;
+        trackingService?.sendNotificationOnce?.(`${p.ticket_id}:HOME_RUN_STARTED`, p.phone, {
+          operatorId,
+          title: 'Tài xế đã lên đường đón bạn',
+          body: `Xe ${vehiclePlate} đang đi đón khách tận nhà. Mở "Theo dõi xe" để xem xe đang ở đâu và khi nào tới ${p.address}.`,
+          type: 'HOME_RUN_STARTED',
+          payload: { trip_id: tripId, ticket_id: p.ticket_id, at: new Date(now).toISOString() }
+        });
+      }
+    });
+
     this.on('HOME_PICKUP_INACCESSIBLE', ({ tripId, ticketId, seatCode, phone, address, reason, meetingPoint, vehiclePlate, now = Date.now() }) => {
       const operatorId = operatorOfTrip(this.services, tripId);
       const ticket = paymentService?.tickets?.get(ticketId);
@@ -518,7 +543,11 @@ export class FleetBusEventBridge extends EventEmitter {
     this.on('TRIP_ASSIGNED', ({ tripId, vehiclePlate, vehicleModel, capacity, driverId, driverName, previous }) => {
       const detail = services.searchService?.getTripDetail?.(tripId);
       const catalogTrip = detail?.success ? detail.data : null;
-      driverService?.applyAssignment?.(tripId, { driverId, vehiclePlate, vehicleModel, capacity }, catalogTrip, parseRunId(tripId)?.templateId || null);
+      const driverTrip = driverService?.applyAssignment?.(tripId, { driverId, vehiclePlate, vehicleModel, capacity }, catalogTrip, parseRunId(tripId)?.templateId || null);
+      // Tickets sold before the office gave the trip a driver must reach that driver too.
+      if (driverTrip && paymentService?.tickets) {
+        addToManifest(driverTrip, [...paymentService.tickets.values()].filter(t => t.trip_id === tripId && ['ACTIVE', 'BOARDED'].includes(t.status)));
+      }
       const changed = (previous?.vehicle_plate && previous.vehicle_plate !== vehiclePlate) || (previous?.driver_id && previous.driver_id !== driverId);
       if (!changed || !paymentService?.tickets || !trackingService?.sendNotificationOnce) return;
       const at = catalogTrip?.departure_time ? new Date(Date.parse(catalogTrip.departure_time) + 7 * 3600000).toISOString() : null;
@@ -782,7 +811,8 @@ export class FleetBusEventBridge extends EventEmitter {
 
   /** Passengers still to be picked up at a stop (home pickups wait at home, not at the stop). */
   _waitingAtStops(trip) {
-    return (trip?.manifest || []).filter(p => p.passenger_phone && !p.home_pickup && !['BOARDED', 'NO_SHOW', 'CANCELLED'].includes(p.boarding_status));
+    // A home request still pending or refused rides from the stop, so that passenger waits there (D130).
+    return (trip?.manifest || []).filter(p => p.passenger_phone && !homeConfirmed(p.home_pickup) && !['BOARDED', 'NO_SHOW', 'CANCELLED'].includes(p.boarding_status));
   }
 
   /**
@@ -792,9 +822,13 @@ export class FleetBusEventBridge extends EventEmitter {
   _notifyApproaching(tripId, now = Date.now()) {
     const { driverService, trackingService } = this.services;
     const trip = driverService?.activeTrips?.get(tripId);
-    if (!trip || trip.status !== 'IN_TRANSIT' || typeof trackingService?.getTripRadar !== 'function') return;
+    if (!trip || typeof trackingService?.getTripRadar !== 'function') return;
+    const homeRun = Boolean(trip.home_run_started_at) && !['COMPLETED', 'CANCELLED'].includes(trip.status);
+    if (trip.status !== 'IN_TRANSIT' && !homeRun) return;
     const operatorId = operatorOfTrip(this.services, tripId);
     const threshold = findOperatorById(operatorId)?.service_config?.approaching_threshold_minutes ?? 10;
+    this._notifyHomeApproaching(trip, operatorId, threshold, now);
+    if (trip.status !== 'IN_TRANSIT') return;
     const waiting = this._waitingAtStops(trip);
     const byStop = new Map();
     for (const p of waiting) byStop.set(p.pickup_stop_id, [...(byStop.get(p.pickup_stop_id) || []), p]);
@@ -811,6 +845,41 @@ export class FleetBusEventBridge extends EventEmitter {
           body: `Xe ${trip.vehicle_plate} còn khoảng ${radar.eta_minutes} phút nữa tới ${stop.name}. Bạn chuẩn bị ra điểm đón nhé.`,
           type: 'PICKUP_APPROACHING',
           payload: { trip_id: tripId, ticket_id: p.ticket_id, stop_id: stopId, eta_minutes: radar.eta_minutes }
+        });
+      }
+    }
+  }
+
+  /**
+   * D143: each passenger waiting at home hears once when the bus is within the threshold of the address, and once
+   * when it is at the door, from a live position only.
+   */
+  _notifyHomeApproaching(trip, operatorId, threshold, now) {
+    const { driverService, trackingService } = this.services;
+    for (const p of driverService.homePickupsWaiting?.(trip) || []) {
+      const home = p.home_pickup;
+      if (!p.passenger_phone || !Number.isFinite(home.lat) || !Number.isFinite(home.lng)) continue;
+      const radar = trackingService.getTripRadar(trip.trip_id, {
+        pickupStopId: p.pickup_stop_id, stops: trip.stops, canSeeBus: true, view: 'TICKET', mockNow: now,
+        homePickup: { lat: home.lat, lng: home.lng, address: home.address, window_from: home.window_from, window_to: home.window_to }
+      }).data;
+      if (!radar?.has_position || radar.freshness?.state !== 'LIVE' || !Number.isFinite(radar.eta_minutes)) continue;
+      const payload = { trip_id: trip.trip_id, ticket_id: p.ticket_id, eta_minutes: radar.eta_minutes };
+      if (radar.is_at_station) {
+        trackingService.sendNotificationOnce(`${p.ticket_id}:HOME_PICKUP_ARRIVED`, p.passenger_phone, {
+          operatorId,
+          title: 'Xe đã tới gần chỗ đón',
+          body: `Xe ${trip.vehicle_plate} đã tới gần ${home.address}. Mời bạn ra xe, ghế ${p.seat_code}.`,
+          type: 'HOME_PICKUP_ARRIVED',
+          payload
+        });
+      } else if (radar.eta_minutes <= threshold) {
+        trackingService.sendNotificationOnce(`${p.ticket_id}:PICKUP_APPROACHING`, p.passenger_phone, {
+          operatorId,
+          title: 'Xe sắp tới đón bạn',
+          body: `Xe ${trip.vehicle_plate} còn khoảng ${radar.eta_minutes} phút nữa tới ${home.address}. Bạn chuẩn bị ra xe nhé.`,
+          type: 'PICKUP_APPROACHING',
+          payload
         });
       }
     }
@@ -838,9 +907,12 @@ export class FleetBusEventBridge extends EventEmitter {
     if (!searchService?.materializeRun) return [];
     const { today, last_date: last } = serviceCalendar();
     if (date !== DEMO_DATE && (date < addDays(today, -1) || date > last)) return [];
-    return searchService.schedulesOf(operatorId)
+    const scheduled = searchService.schedulesOf(operatorId)
       .map(id => searchService.materializeRun(id, date))
-      .filter(Boolean)
+      .filter(Boolean);
+    // A run already set up on a day its schedule no longer runs still carries its passengers (D128).
+    const kept = searchService.existingRunsOn(date, operatorId).filter(t => !scheduled.includes(t));
+    return [...scheduled, ...kept]
       .map(t => (parseRunId(t.trip_id) ? this.ensureRunOperations(t.trip_id)?.managerTrip?.trip_id : t.trip_id))
       .filter(Boolean);
   }

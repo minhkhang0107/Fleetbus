@@ -59,6 +59,15 @@ class ManagerApiService {
     return _decode(response);
   }
 
+  Future<Map<String, dynamic>> _patch(String path, {Object? body}) async {
+    final response = await _client.patch(Uri.parse('$baseUrl$path'), headers: _headers(), body: body == null ? null : jsonEncode(body));
+    return _decode(response);
+  }
+
+  Future<Map<String, dynamic>> _delete(String path) async {
+    return _decode(await _client.delete(Uri.parse('$baseUrl$path'), headers: _headers()));
+  }
+
   // MGR-001 / MGR-029: RBAC Login. Five wrong passwords lock the account (429 ACCOUNT_LOCKED).
   // The director and the finance controller must also send the 6-digit TOTP code (401 TOTP_REQUIRED without it).
   Future<Map<String, dynamic>> login(String username, String password, {String? totp}) async {
@@ -276,5 +285,77 @@ class ManagerApiService {
   // MGR-028: Audit log (who did what, to what, from where, before and after)
   Future<Map<String, dynamic>> getAuditLogs() {
     return _get('/ops/audit-logs');
+  }
+
+  // MGR-031: Promotion banners of the passenger home slider, with status LIVE / SCHEDULED / ENDED / OFF (director only)
+  Future<Map<String, dynamic>> getPromoBanners() {
+    return _get('/ops/promo-banners');
+  }
+
+  // MGR-031: New banner; `content_html` may not hold scripts, iframes, forms or on... handlers (400 VALIDATION_ERROR)
+  Future<Map<String, dynamic>> createPromoBanner(Map<String, dynamic> banner, {String? idempotencyKey}) {
+    return _post('/ops/promo-banners', body: banner, idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-031: Edit some fields of a banner; fields left out are kept
+  Future<Map<String, dynamic>> updatePromoBanner(String bannerId, Map<String, dynamic> fields) {
+    return _patch('/ops/promo-banners/${Uri.encodeComponent(bannerId)}', body: fields);
+  }
+
+  // MGR-031: Show or hide a banner on the passenger app
+  Future<Map<String, dynamic>> setPromoBannerActive(String bannerId, {required bool active, String? idempotencyKey}) {
+    final id = Uri.encodeComponent(bannerId);
+    if (active) return _post('/ops/promo-banners/$id/activate', idempotent: true, idempotencyKey: idempotencyKey);
+    return _post('/ops/promo-banners/$id/deactivate', idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-031: Delete a banner (kept in the audit log)
+  Future<Map<String, dynamic>> deletePromoBanner(String bannerId) {
+    return _delete('/ops/promo-banners/${Uri.encodeComponent(bannerId)}');
+  }
+
+  // MGR-032: Fixed timetable (schedules) and the routes a new one may run on
+  Future<Map<String, dynamic>> getSchedules() {
+    return _get('/ops/schedules');
+  }
+
+  // MGR-032: New fixed departure: route_id, departure (HH:mm), days_of_week (1 = Monday .. 7), valid_from (from change_from on), valid_to, base_fare_vnd
+  Future<Map<String, dynamic>> createSchedule(Map<String, dynamic> schedule, {String? idempotencyKey}) {
+    return _post('/ops/schedules', body: schedule, idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-032: Change a departure; it starts on the first day not on sale (change_from) or a later effective_from
+  Future<Map<String, dynamic>> updateSchedule(String scheduleId, Map<String, dynamic> fields) {
+    return _patch('/ops/schedules/${Uri.encodeComponent(scheduleId)}', body: fields);
+  }
+
+  // MGR-032: Cancel the changes of a departure that are not on sale yet
+  Future<Map<String, dynamic>> cancelScheduleChanges(String scheduleId) {
+    return _delete('/ops/schedules/${Uri.encodeComponent(scheduleId)}/changes');
+  }
+
+  // MGR-014 (D131): Cancel one day's departure; every ticket is refunded in full and its passenger told
+  Future<Map<String, dynamic>> cancelTrip(String tripId, {required String reason, String? idempotencyKey}) {
+    return _post('/ops/trips/${Uri.encodeComponent(tripId)}/cancel', body: {'reason': reason}, idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-014 (D131): Stop (open: false) or resume (open: true) online sales of a departure
+  Future<Map<String, dynamic>> setTripSales(String tripId, {required bool open, String? reason, String? idempotencyKey}) {
+    return _post('/ops/trips/${Uri.encodeComponent(tripId)}/sales', body: {'open': open, if (reason != null) 'reason': reason}, idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-033 (D130): Home pickup / drop-off requests; status PENDING_REVIEW (default), CONFIRMED, REJECTED, WITHDRAWN or ALL
+  Future<Map<String, dynamic>> getHomeRequests({String status = 'PENDING_REVIEW'}) {
+    return _get('/ops/home-requests', query: {'status': status});
+  }
+
+  // MGR-033 (D130): Confirm a request; side is PICKUP or DROPOFF
+  Future<Map<String, dynamic>> confirmHomeRequest(String orderId, String side, {String? idempotencyKey}) {
+    return _post('/ops/home-requests/${Uri.encodeComponent(orderId)}/$side/confirm', body: {}, idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-033 (D130): Refuse a request with a reason the passenger reads; its fee is refunded
+  Future<Map<String, dynamic>> rejectHomeRequest(String orderId, String side, {required String reason, String? idempotencyKey}) {
+    return _post('/ops/home-requests/${Uri.encodeComponent(orderId)}/$side/reject', body: {'reason': reason}, idempotent: true, idempotencyKey: idempotencyKey);
   }
 }

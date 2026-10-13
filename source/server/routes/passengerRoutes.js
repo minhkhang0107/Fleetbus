@@ -7,9 +7,14 @@ import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.j
 import { publicOperatorProfile, DEFAULT_OPERATOR_ID } from '../core/operators.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { verifyToken } from '../core/tokens.js';
-import { publicRouteService, resolveHomeBooking, routeServiceConfig } from '../core/serviceAreas.js';
+import { homeConfirmed, publicRouteService, resolveHomeBooking, routeServiceConfig } from '../core/serviceAreas.js';
 import { isProduction } from '../config.js';
-import { checkBookableDeparture, checkTravelDate, serviceCalendar } from '../core/serviceDate.js';
+import { addDays, checkBookableDeparture, checkTravelDate, serviceCalendar } from '../core/serviceDate.js';
+import { findLiveBanner, listLiveBanners } from '../core/promoBanners.js';
+import { saleBlock, saleStatus } from '../core/tripSales.js';
+import { withdrawHomeRequest } from '../core/homeReview.js';
+import { changeTicketStops } from '../core/ticketChanges.js';
+import { publicFixedEndpoints } from '../core/fixedEndpoints.js';
 
 // The plate passengers see is the bus the office gave the run; a day's run with no bus yet shows none.
 function withAssignedBus(services, trip) {
@@ -61,6 +66,141 @@ const TRIP_SUB_RE = (sub) => new RegExp(`^/api/v1/${TRIP_PATH}/${sub}$`);
 const TICKET_RE = /^\/api\/v1\/tickets\/([^/]+)$/;
 const WALLET_TICKET_QR_RE = /^\/api\/v1\/passenger\/tickets\/([^/]+)\/qr$/;
 
+/** A pushed update waits this long for more positions of the same burst. */
+const STREAM_COALESCE_MS = 1000;
+/** With no position, the view is pushed again this often: its signal ages (LIVE, then STALE, then OFFLINE). */
+const STREAM_REFRESH_MS = 20000;
+
+/**
+ * Server-sent events: one `tracking` event now, then one after each position of the bus (bursts coalesced)
+ * and every 20 s without one. Ends when the trip has ended or is no longer visible; the client then reconnects
+ * or falls back to asking every 10 s.
+ */
+function streamTracking(req, res, services, tripId, build) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+  let pending = null;
+  let refresh = null;
+  let stopWatching = () => {};
+  const close = () => {
+    clearTimeout(pending);
+    clearInterval(refresh);
+    stopWatching();
+  };
+  const push = () => {
+    pending = null;
+    const tracking = build();
+    if (!tracking) {
+      close();
+      res.end();
+      return;
+    }
+    res.write(`event: tracking\ndata: ${JSON.stringify(tracking)}\n\n`);
+    if (tracking.tracking_ended) {
+      close();
+      res.end();
+    }
+  };
+  res.write('retry: 5000\n\n');
+  push();
+  if (res.writableEnded) return;
+  stopWatching = services.trackingService.watchPositions(tripId, () => {
+    if (!pending) pending = setTimeout(push, STREAM_COALESCE_MS);
+  });
+  refresh = setInterval(push, STREAM_REFRESH_MS);
+  req.on('close', close);
+}
+
+/**
+ * PAX-018: what the caller may see of the trip's bus, or null when the trip is not theirs to see. A ticket the
+ * caller owns (or a share link) shows the bus and the ETA to its own stop; anyone else gets the public view.
+ */
+/** The home address the bus collects the passenger at (confirmed, reachable, pinned), or null. */
+function homeTarget(home) {
+  if (!homeConfirmed(home) || home.inaccessible_at || !Number.isFinite(home.lat) || !Number.isFinite(home.lng)) return null;
+  return { lat: home.lat, lng: home.lng, address: home.address, window_from: home.window_from || null, window_to: home.window_to || null };
+}
+
+function trackingFor(req, services, tripId, url) {
+  const { searchService, paymentService, trackingService } = services;
+  if (!tripVisibleTo(services, tripId, req.operatorId)) return null;
+  const ticketId = url.searchParams.get('ticket_id');
+  const shareToken = url.searchParams.get('share');
+  let pickupStopId = null;
+  let dropoffStopId = null;
+  let boarded = false;
+  let view = 'PUBLIC';
+  let canSeeBus = false;
+  let homePickup = null;
+
+  let isStaff = false;
+  let callerPhone = null;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const tokenResult = verifyToken(authHeader.slice(7));
+    if (tokenResult.valid) {
+      if (tokenResult.payload.kind === 'staff' && (tokenResult.payload.operator_id === req.operatorId || tokenResult.payload.role === 'PLATFORM_ADMIN')) {
+        isStaff = true;
+        canSeeBus = true;
+        view = 'STAFF';
+      }
+      if (tokenResult.payload.kind === 'passenger') {
+        callerPhone = tokenResult.payload.phone;
+      }
+    }
+  }
+
+  if (shareToken && paymentService.tickets) {
+    const ticket = Array.from(paymentService.tickets.values()).find(t => t.share_token === shareToken && t.trip_id === tripId && t.status !== 'CANCELLED');
+    if (ticket && paymentService.shareLinkValid(ticket)) {
+      pickupStopId = ticket.pickup_stop_id || null;
+      dropoffStopId = ticket.dropoff_stop_id || null;
+      boarded = ticket.status === 'BOARDED';
+      view = 'TICKET';
+      canSeeBus = true;
+      homePickup = homeTarget(ticket.home_pickup);
+    }
+  } else if (ticketId && paymentService.tickets) {
+    const ticket = paymentService.tickets.get(ticketId);
+    if (ticket && ticket.trip_id === tripId && ticket.status !== 'CANCELLED') {
+      if (tripVisibleTo(services, ticket.trip_id, req.operatorId)) {
+        const access = callerPhone ? paymentService.getTicketAccess(ticketId, callerPhone) : 'NONE';
+        if (access !== 'NONE') {
+          pickupStopId = ticket.pickup_stop_id || null;
+          dropoffStopId = ticket.dropoff_stop_id || null;
+          boarded = ticket.status === 'BOARDED';
+          view = 'TICKET';
+          canSeeBus = true;
+          homePickup = homeTarget(ticket.home_pickup);
+        }
+      }
+    }
+  }
+
+  const detail = searchService.getTripDetail(tripId, req.operatorId);
+  const stops = (detail && detail.success && detail.data && Array.isArray(detail.data.stops))
+    ? detail.data.stops
+    : [];
+
+  const tracking = trackingService.getTripRadar(tripId, {
+    pickupStopId,
+    dropoffStopId,
+    boarded,
+    stops,
+    view,
+    canSeeBus,
+    // The live status is the driver's (or the office's) trip, not the search catalog.
+    tripStatus: services.driverService?.activeTrips?.get(tripId)?.status || services.managerService?.findTrip?.(tripId)?.status || null,
+    isStaff,
+    homePickup
+  });
+  return tracking.data || tracking;
+}
+
 export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   const { authService, searchService, seatMapService, checkoutService, paymentService, trackingService } = services;
 
@@ -74,6 +214,10 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     }
     // The app takes "today" and the bookable days from here, not from the phone's clock.
     responseData.service_calendar = serviceCalendar(Date.now(), { production: isProduction() });
+    // The company's fixed origin and destination (D135); null lets the passenger pick places.
+    responseData.fixed_endpoints = req.operator
+      ? publicFixedEndpoints(req.operator.operator_id, req.operator.service_config, (a, b) => searchService.servesCities(req.operator.operator_id, a, b))
+      : null;
     sendSuccess(res, responseData);
     return true;
   }
@@ -120,11 +264,46 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/passenger/promo-banners (PAX-004 slider, D124): an empty list hides the slider
+  if (pathname === '/api/v1/passenger/promo-banners' && req.method === 'GET') {
+    sendSuccess(res, { banners: listLiveBanners(services.tenantDbs.forOperator(req.operatorId || DEFAULT_OPERATOR_ID)) });
+    return true;
+  }
+
+  // GET /api/v1/passenger/promo-banners/{id}: the HTML page behind one slide
+  const bannerMatch = pathname.match(/^\/api\/v1\/passenger\/promo-banners\/([^/]+)$/);
+  if (bannerMatch && req.method === 'GET') {
+    const banner = findLiveBanner(services.tenantDbs.forOperator(req.operatorId || DEFAULT_OPERATOR_ID), decodeURIComponent(bannerMatch[1]));
+    if (!banner) {
+      sendError(res, 'Chương trình này không còn', 'BANNER_NOT_FOUND', 404);
+      return true;
+    }
+    sendSuccess(res, banner);
+    return true;
+  }
+
   // GET /api/v1/passenger/stations or /api/v1/routes/stops/search or /api/v1/stations (PAX-005)
   if ((pathname === '/api/v1/passenger/stations' || pathname === '/api/v1/routes/stops/search' || pathname === '/api/v1/stations') && req.method === 'GET') {
     const q = parsedUrl.searchParams.get('q') || '';
     const stations = searchService.searchStations(q, 10, req.operatorId);
     sendSuccess(res, stations);
+    return true;
+  }
+
+  // GET /api/v1/trips/run-days (PAX-004 date picker, D128): the days of the window with a departure on the route
+  if (pathname === '/api/v1/trips/run-days' && req.method === 'GET') {
+    const calendar = serviceCalendar(Date.now(), { production: isProduction() });
+    const window = [];
+    for (let day = calendar.today; day <= calendar.last_date; day = addDays(day, 1)) window.push(day);
+    const days = searchService.runDays({
+      originCity: parsedUrl.searchParams.get('origin') || '',
+      destinationCity: parsedUrl.searchParams.get('destination') || '',
+      operatorId: req.operatorId,
+      days: window,
+      // A suspended route has no day to offer (D132).
+      routeOpen: (routeId) => !routeServiceConfig(req.operator?.service_config, routeId).sales_suspended
+    });
+    sendSuccess(res, { today: calendar.today, last_date: calendar.last_date, days });
     return true;
   }
 
@@ -134,7 +313,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     const dest = parsedUrl.searchParams.get('destination') || parsedUrl.searchParams.get('destinationCity') || 'Thanh Hóa';
     const vehicleType = parsedUrl.searchParams.get('vehicle_type');
     const timeSlot = parsedUrl.searchParams.get('time_slot');
-    // A travel day must be a real YYYY-MM-DD inside the booking window (today .. +30 days, Vietnam time).
+    // A travel day must be a real YYYY-MM-DD inside the booking window (today .. +14 days, Vietnam time).
     const rawDate = parsedUrl.searchParams.get('date');
     let date = null;
     if (rawDate !== null) {
@@ -147,10 +326,12 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     }
     const found = searchService.searchTrips({ originCity: origin, destinationCity: dest, vehicleType, timeSlot, date, operatorId: req.operatorId });
     // Runs of the day that already left are not sold.
-    const listed = date ? (found.data || []).filter(t => checkBookableDeparture(t.departure_time, Date.now(), { production: isProduction() }).ok) : (found.data || []);
+    // Cancelled or closed departures and suspended routes are not shown as bookable (spec 6.4, D131, D132).
+    const onSale = (found.data || []).filter(t => !saleBlock(services, t.trip_id, req.operator?.service_config, t.route_id));
+    const listed = date ? onSale.filter(t => checkBookableDeparture(t.departure_time, Date.now(), { production: isProduction() }).ok) : onSale;
     // Each trip says how its route offers pickup / drop-off (stop style and modes, set per company and route).
     // With stop coordinates and the road shape, so the app can draw the route line without another call.
-    sendSuccess(res, listed.map(t => withAssignedBus(services, { ...(searchService.getTripDetail(t.trip_id, req.operatorId).data || t), service: publicRouteService(req.operator?.service_config, t.route_id) })));
+    sendSuccess(res, listed.map(t => withAssignedBus(services, { ...(searchService.getTripDetail(t.trip_id, req.operatorId).data || t), sale_status: saleStatus(services, t.trip_id), service: publicRouteService(req.operator?.service_config, t.route_id) })));
     return true;
   }
 
@@ -192,6 +373,16 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       const bookable = checkBookableDeparture(searchService.getTripDetail(tripId, req.operatorId).data?.departure_time, Date.now(), { production: isProduction() });
       if (!bookable.ok) {
         sendError(res, bookable.message, bookable.code, 409);
+        return;
+      }
+      const blocked = saleBlock(services, tripId, req.operator?.service_config, searchService.getTripDetail(tripId, req.operatorId).data?.route_id);
+      if (blocked) {
+        sendError(res, blocked.message, blocked.code, 409);
+        return;
+      }
+      // The company stopped this departure on that day (D128): sold tickets stay, no new ones.
+      if (!searchService.isOnSchedule(tripId)) {
+        sendError(res, 'Nhà xe không còn chạy chuyến này vào ngày đã chọn. Chọn chuyến khác.', 'TRIP_NOT_SCHEDULED', 409);
         return;
       }
       const result = seatMapService.holdSeats(tripId, body.seatCodes || [], userId, isProduction() ? undefined : body.now, {
@@ -250,6 +441,13 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         return;
       }
 
+      // Cancelled, closed or suspended since the hold: the hold no longer sells (D131, D132).
+      const blocked = saleBlock(services, tripId, req.operator?.service_config, tripDetail.route_id);
+      if (blocked) {
+        sendError(res, blocked.message, blocked.code, 409);
+        return;
+      }
+
       const holdCheck = seatMapService.validateHold(tripId, body.holdId, userId, seatCodes);
       if (!holdCheck.success) {
         sendError(res, holdCheck.error, holdCheck.code, 409);
@@ -303,7 +501,8 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       seatMapService.extendHold(tripId, body.holdId, new Date(paymentOrderResult.data.expires_at).getTime());
 
       sendSuccess(res, {
-        order: { ...orderReview.data, home_service_fee_vnd: home.fee_vnd, total_payment_vnd: totalVnd },
+        // needs_review: an address the company still has to confirm; the app says so before the transfer (D130).
+        order: { ...orderReview.data, home_service_fee_vnd: home.fee_vnd, total_payment_vnd: totalVnd, home_pickup_status: home.home_pickup?.status || null, home_dropoff_status: home.home_dropoff?.status || null, home_needs_review: Boolean(home.needs_review) },
         payment: paymentOrderResult.data
       }, 201);
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
@@ -418,6 +617,40 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // POST /api/v1/passenger/tickets/:ticketId/home-request/withdraw {side}: take back a home request under review (D130)
+  const withdraw = pathname.match(/^\/api\/v1\/passenger\/tickets\/([^/]+)\/home-request\/withdraw$/);
+  if (withdraw && req.method === 'POST') {
+    const ticketId = withdraw[1];
+    if (forbidTicket(req, res, paymentService, ticketId, { ownerOnly: true })) return true;
+    parseJsonBody(req).then(body => {
+      if (!['PICKUP', 'DROPOFF'].includes(body.side)) {
+        sendError(res, 'side phải là PICKUP hoặc DROPOFF', 'VALIDATION_ERROR', 400);
+        return;
+      }
+      const r = withdrawHomeRequest(services, paymentService.tickets.get(ticketId), body.side);
+      if (r.ok) sendSuccess(res, { ...r.request, refund_id: r.refund?.refund_id || null });
+      else sendError(res, r.message, r.code, r.status);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/passenger/tickets/:ticketId/stops {pickup_stop_id?, dropoff_stop_id?}: change stops inside the paid segment (D133)
+  const stopsChange = pathname.match(/^\/api\/v1\/passenger\/tickets\/([^/]+)\/stops$/);
+  if (stopsChange && req.method === 'POST') {
+    const ticketId = stopsChange[1];
+    if (forbidTicket(req, res, paymentService, ticketId, { ownerOnly: true })) return true;
+    parseJsonBody(req).then(body => {
+      const r = changeTicketStops(services, paymentService.tickets.get(ticketId), {
+        pickupStopId: body.pickup_stop_id || body.pickupStopId || null,
+        dropoffStopId: body.dropoff_stop_id || body.dropoffStopId || null,
+        demo: !isProduction()
+      });
+      if (r.ok) sendSuccess(res, r.ticket);
+      else sendError(res, r.message, r.code, r.status);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
   // POST /api/v1/passenger/tickets/:ticketId/cancel (PAX-021: Cancellation & Refund)
   if (pathname.startsWith('/api/v1/passenger/tickets/') && pathname.endsWith('/cancel') && req.method === 'POST') {
     const parts = pathname.split('/');
@@ -438,78 +671,24 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
   if (req.method === 'GET' && (TRIP_SUB_RE('radar').test(pathname) || TRIP_SUB_RE('tracking').test(pathname))) {
     const parts = pathname.split('/');
     const tripId = parts[pathname.startsWith('/api/v1/passenger/') ? 5 : 4];
-    if (!tripVisibleTo(services, tripId, req.operatorId)) {
+    const tracking = trackingFor(req, services, tripId, new URL(req.url, 'http://x'));
+    if (!tracking) {
       sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
       return true;
     }
+    sendSuccess(res, tracking);
+    return true;
+  }
+
+  // GET /api/v1/trips/:tripId/tracking/stream (PAX-018): the same view, pushed when the bus sends a position
+  if (req.method === 'GET' && TRIP_SUB_RE('tracking/stream').test(pathname)) {
+    const tripId = pathname.match(TRIP_SUB_RE('tracking/stream'))[1];
     const url = new URL(req.url, 'http://x');
-    const ticketId = url.searchParams.get('ticket_id');
-    const shareToken = url.searchParams.get('share');
-    let pickupStopId = null;
-    let dropoffStopId = null;
-    let boarded = false;
-    let view = 'PUBLIC';
-    let canSeeBus = false;
-
-    let isStaff = false;
-    let callerPhone = null;
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const tokenResult = verifyToken(authHeader.slice(7));
-      if (tokenResult.valid) {
-        if (tokenResult.payload.kind === 'staff' && (tokenResult.payload.operator_id === req.operatorId || tokenResult.payload.role === 'PLATFORM_ADMIN')) {
-          isStaff = true;
-          canSeeBus = true;
-          view = 'STAFF';
-        }
-        if (tokenResult.payload.kind === 'passenger') {
-          callerPhone = tokenResult.payload.phone;
-        }
-      }
+    if (!trackingFor(req, services, tripId, url)) {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+      return true;
     }
-
-    if (shareToken && paymentService.tickets) {
-      const ticket = Array.from(paymentService.tickets.values()).find(t => t.share_token === shareToken && t.trip_id === tripId && t.status !== 'CANCELLED');
-      if (ticket && paymentService.shareLinkValid(ticket)) {
-        pickupStopId = ticket.pickup_stop_id || null;
-        dropoffStopId = ticket.dropoff_stop_id || null;
-        boarded = ticket.status === 'BOARDED';
-        view = 'TICKET';
-        canSeeBus = true;
-      }
-    } else if (ticketId && paymentService.tickets) {
-      const ticket = paymentService.tickets.get(ticketId);
-      if (ticket && ticket.trip_id === tripId && ticket.status !== 'CANCELLED') {
-        if (tripVisibleTo(services, ticket.trip_id, req.operatorId)) {
-          const access = callerPhone ? paymentService.getTicketAccess(ticketId, callerPhone) : 'NONE';
-          if (access !== 'NONE') {
-            pickupStopId = ticket.pickup_stop_id || null;
-            dropoffStopId = ticket.dropoff_stop_id || null;
-            boarded = ticket.status === 'BOARDED';
-            view = 'TICKET';
-            canSeeBus = true;
-          }
-        }
-      }
-    }
-
-    const detail = searchService.getTripDetail(tripId, req.operatorId);
-    const stops = (detail && detail.success && detail.data && Array.isArray(detail.data.stops))
-      ? detail.data.stops
-      : [];
-
-    const tracking = trackingService.getTripRadar(tripId, {
-      pickupStopId,
-      dropoffStopId,
-      boarded,
-      stops,
-      view,
-      canSeeBus,
-      // The live status is the driver's (or the office's) trip, not the search catalog.
-      tripStatus: services.driverService?.activeTrips?.get(tripId)?.status || services.managerService?.findTrip?.(tripId)?.status || null,
-      isStaff
-    });
-    sendSuccess(res, tracking.data || tracking);
+    streamTracking(req, res, services, tripId, () => trackingFor(req, services, tripId, url));
     return true;
   }
 

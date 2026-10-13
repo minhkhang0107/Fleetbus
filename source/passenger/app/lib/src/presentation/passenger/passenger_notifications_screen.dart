@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'passenger_cancel_refund_screen.dart';
+import 'passenger_login_screen.dart';
 import 'passenger_store.dart';
 import 'passenger_widgets.dart';
 
@@ -21,7 +22,21 @@ class PassengerNotificationsScreen extends StatelessWidget {
       const Divider(height: 1, color: PTokens.line),
       Expanded(
         child: PMaxWidth(maxWidth: 720, child: notices.isEmpty
-            ? Padding(padding: const EdgeInsets.all(16), child: AppCard(child: Text('Chưa có thông báo', textAlign: TextAlign.center, style: sans(size: 15, weight: FontWeight.w600))))
+            ? (store.userPhone == null
+                ? EmptyState(
+                    icon: Icons.notifications_off_outlined,
+                    title: 'Đăng nhập để nhận thông báo',
+                    message: 'Nhà xe báo cho bạn khi thanh toán xong, xe sắp tới điểm đón, đổi giờ hay đổi xe.',
+                    actionLabel: 'Đăng nhập',
+                    actionIcon: Icons.login,
+                    onAction: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerLoginScreen())),
+                  )
+                : EmptyState(
+                    icon: Icons.notifications_none,
+                    title: 'Chưa có thông báo',
+                    message: 'Khi thanh toán xong, xe sắp tới điểm đón, đổi giờ hay đổi xe, nhà xe sẽ báo cho bạn ở đây.',
+                    onRefresh: store.loadNotices,
+                  ))
             : RefreshIndicator(
           onRefresh: store.loadNotices,
           child: ListView.separated(

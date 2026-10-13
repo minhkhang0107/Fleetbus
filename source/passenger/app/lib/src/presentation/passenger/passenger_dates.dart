@@ -30,34 +30,31 @@ String addDays(String day, int days) {
 
 int daysBetween(String from, String to) => parseDay(to)!.difference(parseDay(from)!).inDays;
 
-/// The days a passenger may book, from the server's calendar.
+/// The days a passenger may book, from the server's calendar: today .. the last bookable day. A company runs a
+/// fixed timetable (D128), so there is no separate "demo" day any more; which of these days have a departure
+/// on the chosen route is the store's `runDays`.
 class ServiceCalendar {
-  const ServiceCalendar({required this.today, required this.lastDate, this.demoDates = const []});
+  const ServiceCalendar({required this.today, required this.lastDate});
   final String today;
   final String lastDate;
-  /// Seed days kept bookable outside production (the trips the driver and ops boards run).
-  final List<String> demoDates;
 
-  /// Without the server's answer: today from the phone, 30 days ahead (the server still decides).
+  /// Without the server's answer: today from the phone, 14 days ahead (the server still decides).
   factory ServiceCalendar.fallback([DateTime? now]) {
     final today = vnDay(now ?? DateTime.now());
-    return ServiceCalendar(today: today, lastDate: addDays(today, 30));
+    return ServiceCalendar(today: today, lastDate: addDays(today, 14));
   }
 
   factory ServiceCalendar.fromJson(Map<String, dynamic>? j) {
     final today = parseDay('${j?['today']}') == null ? null : '${j!['today']}';
     final last = parseDay('${j?['last_date']}') == null ? null : '${j!['last_date']}';
     if (today == null || last == null) return ServiceCalendar.fallback();
-    return ServiceCalendar(today: today, lastDate: last, demoDates: [for (final d in (j!['demo_dates'] as List? ?? const [])) if (parseDay('$d') != null) '$d']);
+    return ServiceCalendar(today: today, lastDate: last);
   }
 
-  /// Every bookable day in order: demo days first, then today .. last day.
-  List<String> get days => [
-        ...demoDates.where((d) => d.compareTo(today) < 0),
-        for (var i = 0; i <= daysBetween(today, lastDate); i++) addDays(today, i),
-      ];
+  /// Every bookable day in order.
+  List<String> get days => [for (var i = 0; i <= daysBetween(today, lastDate); i++) addDays(today, i)];
 
-  bool allows(String day) => parseDay(day) != null && (demoDates.contains(day) || (day.compareTo(today) >= 0 && day.compareTo(lastDate) <= 0));
+  bool allows(String day) => parseDay(day) != null && day.compareTo(today) >= 0 && day.compareTo(lastDate) <= 0;
 }
 
 /// Labels of a travel day.

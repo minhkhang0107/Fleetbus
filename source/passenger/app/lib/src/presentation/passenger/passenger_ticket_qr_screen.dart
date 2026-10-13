@@ -58,6 +58,13 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
     super.dispose();
   }
 
+  Future<void> _withdraw(PassengerStore store, {required bool pickupSide}) async {
+    final t = widget.ticket;
+    final r = await store.withdrawHome(t, pickupSide: pickupSide);
+    if (!mounted) return;
+    showToast(context, r.ok ? 'Đã hủy yêu cầu. Phụ phí sẽ được hoàn; bạn ${pickupSide ? 'lên xe tại ${t.pickup}' : 'xuống xe tại ${t.dropoff}'}' : r.error!);
+  }
+
   Future<void> _reissue(PassengerStore store) async {
     final t = widget.ticket;
     final yes = await showAppSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -228,7 +235,15 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
             ]),
             if (t.homePickup != null) ...[
               gap(12),
-              Align(alignment: Alignment.centerLeft, child: KeyValue('Đón tận nhà${t.pickupWindow != null ? ' · ${t.pickupWindow}' : ''}', t.homePickup!)),
+              _HomeService(
+                pickupSide: true,
+                address: t.homePickup!,
+                status: t.homePickupStatus,
+                reason: t.homePickupReason,
+                window: t.pickupWindow,
+                stop: t.pickup,
+                onWithdraw: usable && t.homePickupStatus == 'PENDING_REVIEW' ? () => _withdraw(store, pickupSide: true) : null,
+              ),
             ],
             if (t.pickupNotice != null) ...[
               gap(12),
@@ -241,7 +256,14 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
             ],
             if (t.homeDropoff != null) ...[
               gap(12),
-              Align(alignment: Alignment.centerLeft, child: KeyValue('Trả tận nhà', t.homeDropoff!)),
+              _HomeService(
+                pickupSide: false,
+                address: t.homeDropoff!,
+                status: t.homeDropoffStatus,
+                reason: t.homeDropoffReason,
+                stop: t.dropoff,
+                onWithdraw: usable && t.homeDropoffStatus == 'PENDING_REVIEW' ? () => _withdraw(store, pickupSide: false) : null,
+              ),
             ],
             gap(12),
             Align(alignment: Alignment.centerLeft, child: KeyValue('Hành khách', t.name)),
@@ -268,5 +290,46 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
         ],
       ]),
     );
+  }
+}
+
+/// A home pickup or drop-off on the ticket with the company's answer (D130): a request under review is never
+/// shown as confirmed, and a refused one says where the bus serves the passenger instead.
+class _HomeService extends StatelessWidget {
+  const _HomeService({required this.pickupSide, required this.address, required this.status, required this.stop, this.reason, this.window, this.onWithdraw});
+  final bool pickupSide;
+  final String address;
+  final String? status;
+  final String? reason;
+  final String? window;
+  final String stop;
+  final VoidCallback? onWithdraw;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = pickupSide ? 'Đón tận nhà' : 'Trả tận nhà';
+    final state = Ticket.homeStatusLabel[status] ?? '';
+    if (status == 'REJECTED' || status == 'WITHDRAWN') {
+      final where = pickupSide ? 'Bạn lên xe tại $stop.' : 'Bạn xuống xe tại $stop.';
+      final text = status == 'REJECTED'
+          ? '$label: $state${reason != null ? ' ($reason)' : ''}. $where Phụ phí được hoàn; bạn có thể hủy vé được hoàn đủ tiền trước giờ xuất bến.'
+          : '$label: $state. $where Phụ phí được hoàn.';
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: PTokens.warnSoft, borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+        child: Semantics(liveRegion: true, child: Text(text, style: sans(size: 14, weight: FontWeight.w600, color: PTokens.warnInk))),
+      );
+    }
+    final pending = status == 'PENDING_REVIEW';
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      KeyValue('$label · $state${!pending && window != null ? ' · $window' : ''}', address),
+      if (pending) ...[
+        gap(6),
+        Text('Nhà xe chưa xác nhận địa chỉ này. Khi chưa xác nhận, ${pickupSide ? 'bạn lên xe tại $stop' : 'bạn xuống xe tại $stop'}. Bạn sẽ nhận thông báo khi nhà xe trả lời.',
+            style: sans(size: 13, color: PTokens.muted, height: 1.4)),
+        if (onWithdraw != null) LinkButton(label: 'Hủy yêu cầu ${pickupSide ? 'đón' : 'trả'} tận nhà', color: PTokens.danger, onPressed: onWithdraw),
+      ],
+    ]);
   }
 }

@@ -73,6 +73,31 @@ class PassengerApiClientService {
     return _decode(await _client.get(uri, headers: _headers()));
   }
 
+  /// A GET answered with server-sent events: the data of each `tracking` event, until the connection drops.
+  Stream<Map<String, dynamic>> _stream(String path, {Map<String, String>? query}) async* {
+    final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
+    final request = http.Request('GET', uri)
+      ..headers.addAll(_headers())
+      ..headers['Accept'] = 'text/event-stream';
+    final response = await _client.send(request);
+    if (response.statusCode != 200 || !(response.headers['content-type'] ?? '').startsWith('text/event-stream')) {
+      throw http.ClientException('Stream refused (${response.statusCode})', uri);
+    }
+    var event = '';
+    final data = StringBuffer();
+    await for (final line in response.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+      if (line.isEmpty) {
+        if (event == 'tracking' && data.isNotEmpty) yield jsonDecode(data.toString()) as Map<String, dynamic>;
+        event = '';
+        data.clear();
+      } else if (line.startsWith('event:')) {
+        event = line.substring(6).trim();
+      } else if (line.startsWith('data:')) {
+        data.write(line.substring(5).trimLeft());
+      }
+    }
+  }
+
   Future<Map<String, dynamic>> _post(
     String path, {
     Object? body,
@@ -123,6 +148,27 @@ class PassengerApiClientService {
    */
   Future<Map<String, dynamic>> getHomeFeed() {
     return _get('/api/v1/passenger/home-feed');
+  }
+
+  /**
+   * PAX-004: Days of the booking window with a departure from [origin] to [destination] (D128)
+   */
+  Future<Map<String, dynamic>> getRunDays(String origin, String destination) {
+    return _get('/api/v1/trips/run-days', query: {'origin': origin, 'destination': destination});
+  }
+
+  /**
+   * PAX-004: Promotion slides of the operator; an empty list hides the slider (D124)
+   */
+  Future<Map<String, dynamic>> getPromoBanners() {
+    return _get('/api/v1/passenger/promo-banners');
+  }
+
+  /**
+   * PAX-004: HTML page behind one promotion slide
+   */
+  Future<Map<String, dynamic>> getPromoBanner(String bannerId) {
+    return _get('/api/v1/passenger/promo-banners/${Uri.encodeComponent(bannerId)}');
   }
 
   /**
@@ -344,6 +390,18 @@ class PassengerApiClientService {
   }
 
   /**
+   * PAX-018: the same view as [getLiveRadarHUD], pushed by the server as server-sent events: one now, one
+   * after each position of the bus, and one every 20 s without. The stream ends (or errors) when the
+   * connection drops; the caller then reconnects or asks with [getLiveRadarHUD].
+   */
+  Stream<Map<String, dynamic>> watchLiveRadarHUD(String tripId, {String? ticketId}) {
+    return _stream(
+      '/api/v1/trips/$tripId/tracking/stream',
+      query: ticketId == null ? null : {'ticket_id': ticketId},
+    );
+  }
+
+  /**
    * PAX-020: Notifications Center of the signed-in passenger
    */
   Future<Map<String, dynamic>> getNotifications() {
@@ -358,6 +416,35 @@ class PassengerApiClientService {
     return _post(
       '/api/v1/passenger/tickets/$ticketId/cancel',
       body: <String, dynamic>{},
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  /**
+   * PAX-017 (D133): Move the pickup or drop-off of a ticket to another stop inside the paid segment
+   * (a later pickup or an earlier drop-off), up to 30 minutes before the departure.
+   */
+  Future<Map<String, dynamic>> changeTicketStops(String ticketId, {String? pickupStopId, String? dropoffStopId, String? idempotencyKey}) {
+    return _post(
+      '/api/v1/passenger/tickets/$ticketId/stops',
+      body: <String, dynamic>{
+        if (pickupStopId != null) 'pickup_stop_id': pickupStopId,
+        if (dropoffStopId != null) 'dropoff_stop_id': dropoffStopId,
+      },
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  /**
+   * PAX-017 (D130): Take back a home pickup (side PICKUP) or drop-off (DROPOFF) the company has not reviewed
+   * yet; its fee is refunded and the ticket keeps its stop.
+   */
+  Future<Map<String, dynamic>> withdrawHomeRequest(String ticketId, String side, {String? idempotencyKey}) {
+    return _post(
+      '/api/v1/passenger/tickets/$ticketId/home-request/withdraw',
+      body: <String, dynamic>{'side': side},
       idempotent: true,
       idempotencyKey: idempotencyKey,
     );

@@ -37,9 +37,17 @@ export function stopCoords(stopId) {
 /**
  * Returns the [lat, lng] array of road geometry points for tripId or null if not found.
  */
+// A schedule the company added drives the road of the schedule it was made from (D128).
+const SHAPE_ALIASES = new Map();
+export function aliasShape(scheduleId, sourceId) {
+  if (sourceId && sourceId !== scheduleId) SHAPE_ALIASES.set(scheduleId, sourceId);
+}
+
 export function routeShape(tripId) {
   // A day's run (`trp_hn_th_01_20261015`) drives the road of its schedule.
-  return ROUTE_SHAPES[tripId] || ROUTE_SHAPES[String(tripId).replace(/_\d{8}$/, '')] || null;
+  const id = String(tripId);
+  const schedule = id.replace(/_\d{8}$/, '');
+  return ROUTE_SHAPES[id] || ROUTE_SHAPES[schedule] || ROUTE_SHAPES[SHAPE_ALIASES.get(schedule)] || null;
 }
 
 /**

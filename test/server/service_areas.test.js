@@ -96,7 +96,7 @@ describe('Pickup / drop-off modes and service areas', () => {
       const sm = await request('/api/v1/service-config', { code: 'SAOMAI' });
       assert.strictEqual(sm.status, 200);
       assert.deepStrictEqual(sm.body.data.pickup_modes, ['FIXED_STOP', 'HOME_PICKUP']);
-      assert.strictEqual(sm.body.data.service_areas.length, 2);
+      assert.deepStrictEqual(sm.body.data.service_areas.map(a => [a.area_id, a.confirmation]), [['sa_saomai_hn', 'AUTO'], ['sa_saomai_hn_east', 'MANUAL'], ['sa_saomai_th', 'AUTO']]);
       const xv = await request('/api/v1/service-config', { code: 'XUYENVIET' });
       assert.deepStrictEqual(xv.body.data.pickup_modes, ['FIXED_STOP']);
       assert.strictEqual(xv.body.data.service_areas.length, 0);
@@ -107,7 +107,7 @@ describe('Pickup / drop-off modes and service areas', () => {
     it('checks an address over HTTP', async () => {
       const ok = await request('/api/v1/service-areas/check', { method: 'POST', code: 'SAOMAI', body: { kind: 'DROPOFF', lat: 19.8, lng: 105.78 } });
       assert.strictEqual(ok.status, 200);
-      assert.deepStrictEqual({ ...ok.body.data }, { serviceable: true, area_id: 'sa_saomai_th', area_name: 'TP Thanh Hóa', fee_vnd: 30000 });
+      assert.deepStrictEqual({ ...ok.body.data }, { serviceable: true, area_id: 'sa_saomai_th', area_name: 'TP Thanh Hóa', fee_vnd: 30000, confirmation: 'AUTO' });
       const out = await request('/api/v1/service-areas/check', { method: 'POST', code: 'SAOMAI', body: { kind: 'PICKUP', ...HAI_PHONG } });
       assert.strictEqual(out.status, 422);
       assert.strictEqual(out.body.code, 'OUTSIDE_SERVICE_AREA');
@@ -154,7 +154,7 @@ describe('Pickup / drop-off modes and service areas', () => {
       const sm = await request('/api/v1/trips/search?origin=Hà Nội&destination=Thanh Hóa', { code: 'SAOMAI' });
       const trip = sm.body.data.find(t => t.trip_id === 'trp_hn_th_01');
       assert.strictEqual(trip.route_id, 'rt_hn_th', 'catalog and ops share route ids');
-      assert.deepStrictEqual(trip.service, { route_id: 'rt_hn_th', stop_style: 'ROUTE_LINE', pickup_modes: ['FIXED_STOP', 'HOME_PICKUP'], dropoff_modes: ['FIXED_LOCATION', 'HOME_DROPOFF'], allow_home_to_home: true });
+      assert.deepStrictEqual(trip.service, { route_id: 'rt_hn_th', stop_style: 'ROUTE_LINE', pickup_modes: ['FIXED_STOP', 'HOME_PICKUP'], dropoff_modes: ['FIXED_LOCATION', 'HOME_DROPOFF'], allow_home_to_home: true, sales_suspended: false });
       assert.ok(trip.stops.every(s => ['STATION', 'ROADSIDE'].includes(s.kind)));
       const xv = await request('/api/v1/trips/trp_xv_hn_th_01', { code: 'XUYENVIET' });
       assert.strictEqual(xv.body.data.service.stop_style, 'STATIONS');

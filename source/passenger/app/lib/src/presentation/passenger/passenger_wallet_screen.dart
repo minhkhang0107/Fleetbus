@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'passenger_cancel_refund_screen.dart';
 import 'passenger_live_radar_screen.dart';
+import 'passenger_login_screen.dart';
+import 'passenger_main_shell.dart';
 import 'passenger_store.dart';
 import 'passenger_ticket_qr_screen.dart';
 import 'passenger_widgets.dart';
@@ -16,6 +20,37 @@ class PassengerWalletScreen extends StatefulWidget {
 
 class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
   bool _history = false;
+
+  /// What the passenger sees with no ticket: sign in first, else how to get one (or what history keeps).
+  Widget _empty(BuildContext context, PassengerStore store) {
+    if (store.userPhone == null) {
+      return EmptyState(
+        icon: Icons.lock_person_outlined,
+        title: 'Đăng nhập để xem vé',
+        message: 'Vé đã đặt, mã QR lên xe và vé đã hủy được lưu theo số điện thoại của bạn.',
+        actionLabel: 'Đăng nhập',
+        actionIcon: Icons.login,
+        onAction: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerLoginScreen())),
+      );
+    }
+    if (_history) {
+      return EmptyState(
+        icon: Icons.history,
+        title: 'Chưa có chuyến đã đi',
+        message: 'Chuyến đã đi, vé đã hủy và tiền hoàn sẽ được lưu ở đây.',
+        onRefresh: store.loadTickets,
+      );
+    }
+    return EmptyState(
+      icon: Icons.confirmation_number_outlined,
+      title: 'Chưa có chuyến sắp đi',
+      message: 'Vé bạn đặt sẽ hiện ở đây cùng mã QR lên xe và vị trí xe trên đường.',
+      actionLabel: 'Đặt vé',
+      actionIcon: Icons.search,
+      onAction: () => PassengerMainShell.openTab(context, 0),
+      onRefresh: store.loadTickets,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,10 +85,7 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
         child: store.loadingTickets && list.isEmpty
             ? const Center(child: CircularProgressIndicator())
             : list.isEmpty
-            ? Padding(
-                padding: const EdgeInsets.all(16),
-                child: AppCard(child: Text(_history ? 'Chưa có vé nào trong lịch sử' : 'Chưa có chuyến sắp đi', textAlign: TextAlign.center, style: sans(size: 15, weight: FontWeight.w600))),
-              )
+            ? _empty(context, store)
             : RefreshIndicator(
                 onRefresh: store.loadTickets,
                 child: pWide(context)
@@ -142,7 +174,8 @@ class TicketCard extends StatelessWidget {
               Text(t.route, style: sans(size: 15, weight: FontWeight.w600)),
             ]),
             gap(6),
-            Text(active ? '${t.date} · Ghế ${t.seat} · Đón tại ${t.pickup}' : '${t.date} · Ghế ${t.seat}${t.refund != null ? ' · hoàn ${vnd(t.refund!)}' : ''}', style: sans(size: 13, color: PTokens.muted)),
+            Text(active ? '${t.date} · Ghế ${t.seat} · ${_pickupLine(t)}' : '${t.date} · Ghế ${t.seat}${t.refund != null ? ' · hoàn ${vnd(t.refund!)}' : ''}', style: sans(size: 13, color: PTokens.muted)),
+            if (t.status == TicketStatus.active) _BusComing(ticket: t),
             if (active) ...[
               gap(10),
               Row(children: [
@@ -163,3 +196,82 @@ class TicketCard extends StatelessWidget {
     );
   }
 }
+
+/// D143: on the ticket itself, how far the bus is and when it will be there, once it is on its way.
+class _BusComing extends StatefulWidget {
+  const _BusComing({required this.ticket});
+  final Ticket ticket;
+
+  @override
+  State<_BusComing> createState() => _BusComingState();
+}
+
+class _BusComingState extends State<_BusComing> {
+  Tracking? _tracking;
+  Timer? _poll;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    _poll = Timer.periodic(const Duration(seconds: 30), (_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final t = await PassengerScope.read(context).loadTracking(widget.ticket.tripId, ticketId: widget.ticket.id);
+    if (mounted) setState(() => _tracking = t);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tr = _tracking;
+    if (tr == null || tr.busLat == null || tr.etaMinutes == null || tr.passedTarget || tr.publicView) return const SizedBox.shrink();
+    final home = tr.target?.isHome == true;
+    final at = tr.expectedAt == null ? '' : ' · tới lúc ~${clockOf(tr.expectedAt!)}';
+    final where = tr.atTarget
+        ? (tr.target?.name ?? '')
+        : home
+            ? 'Xe đang trên đường tới chỗ bạn'
+            : (tr.location?.sentence ?? 'Xe đang trên đường tới điểm đón');
+    final late = (tr.lateMinutes ?? 0) >= 5 ? ' · trễ ~${tr.lateMinutes} phút' : '';
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Material(
+        color: PTokens.primarySoft,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerLiveRadarScreen(ticket: widget.ticket))),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(children: [
+              const Icon(Icons.directions_bus, size: 20, color: PTokens.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(
+                    tr.atTarget ? (home ? 'Xe đã tới, mời bạn ra xe' : 'Xe đã tới điểm đón') : 'Xe còn ${tr.etaMinutes} phút$at',
+                    style: sans(size: 14, weight: FontWeight.w700, color: PTokens.ink),
+                  ),
+                  Text('$where$late', style: sans(size: 12, color: PTokens.muted)),
+                ]),
+              ),
+              const Icon(Icons.chevron_right, size: 18, color: PTokens.muted),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A confirmed home pickup is collected at the address, not at the ticket's stop (D143).
+String _pickupLine(Ticket t) => t.homePickup != null && (t.homePickupStatus ?? 'CONFIRMED') == 'CONFIRMED'
+    ? 'Đón tận nhà: ${t.homePickup}'
+    : 'Đón tại ${t.pickup}';

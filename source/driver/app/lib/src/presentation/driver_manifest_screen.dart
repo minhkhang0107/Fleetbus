@@ -32,7 +32,7 @@ class DriverManifestScreen extends StatelessWidget {
 
   /// Spec A9: the bus cannot reach a home pickup. A quick reason, an optional meeting point; the passenger and
   /// the office are told by the server.
-  Future<void> _inaccessible(BuildContext context, DriverStore store, Passenger p) async {
+  static Future<void> reportInaccessible(BuildContext context, DriverStore store, Passenger p) async {
     const reasons = ['Ngõ quá hẹp, xe không vào được', 'Đường cấm xe khách giờ này', 'Không tìm thấy địa chỉ'];
     var reason = reasons.first;
     final meet = TextEditingController();
@@ -85,7 +85,7 @@ class DriverManifestScreen extends StatelessWidget {
     final list = store.atStopPassengers;
     final boarded = list.where((p) => p.status == PaxStatus.boarded).length;
     final opensAt = hhmm(store.noShowFrom());
-    Widget row(Passenger p) => _PassengerRow(
+    Widget row(Passenger p) => PassengerRow(
           p: p,
           noShowOpen: store.noShowOpen,
           opensAt: opensAt,
@@ -95,7 +95,7 @@ class DriverManifestScreen extends StatelessWidget {
           },
           onCod: () => showCodSheet(context, p),
           onNoShow: () => _noShow(context, store, p),
-          onInaccessible: () => _inaccessible(context, store, p),
+          onInaccessible: () => reportInaccessible(context, store, p),
         );
     final drops = store.dropOffPassengers;
     final allHandled = list.every((p) => p.status != PaxStatus.waiting);
@@ -190,8 +190,8 @@ class DriverManifestScreen extends StatelessWidget {
   }
 }
 
-class _PassengerRow extends StatelessWidget {
-  const _PassengerRow({required this.p, required this.noShowOpen, required this.opensAt, required this.onBoard, required this.onCod, required this.onNoShow, required this.onInaccessible});
+class PassengerRow extends StatelessWidget {
+  const PassengerRow({required this.p, required this.noShowOpen, required this.opensAt, required this.onBoard, required this.onCod, required this.onNoShow, required this.onInaccessible});
   final Passenger p;
   final bool noShowOpen;
   final String opensAt;
@@ -202,8 +202,9 @@ class _PassengerRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final boardedAt = DriverScope.of(context).boardedTime(p);
     final (pill, border) = switch (p.status) {
-      PaxStatus.boarded => (StatusPill('Đã lên ${hhmm(p.boardedAt ?? 0)}', DPill.ok), const Color(0xFF166534)),
+      PaxStatus.boarded => (StatusPill(boardedAt == null ? 'Đã lên' : 'Đã lên ${hhmm(boardedAt)}', DPill.ok), const Color(0xFF166534)),
       PaxStatus.noShow => (const StatusPill('Vắng mặt', DPill.mute), DTokens.line),
       PaxStatus.waiting => p.codDue ? (const StatusPill('Chờ thu COD', DPill.warn), const Color(0xFFA16207)) : (const StatusPill('Chưa lên', DPill.mute), DTokens.line),
     };

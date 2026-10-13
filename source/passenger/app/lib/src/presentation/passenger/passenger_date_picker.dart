@@ -50,19 +50,21 @@ class TravelDateField extends StatelessWidget {
       ),
       gap(8),
       Wrap(spacing: 8, runSpacing: 8, children: [
-        for (final day in quick) _QuickChip(day: TravelDate.of(day, today: cal.today), selected: store.date == day, onTap: () => store.setDate(day)),
-        for (final day in cal.demoDates) _QuickChip(day: TravelDate.of(day, today: cal.today), label: 'Ngày chạy thử ${TravelDate.of(day).dayMonth}', selected: store.date == day, onTap: () => store.setDate(day)),
+        for (final day in quick)
+          _QuickChip(day: TravelDate.of(day, today: cal.today), selected: store.date == day, runs: store.hasDeparture(day), onTap: () => store.setDate(day)),
       ]),
     ]);
   }
 }
 
 class _QuickChip extends StatelessWidget {
-  const _QuickChip({required this.day, required this.selected, required this.onTap, this.label});
+  const _QuickChip({required this.day, required this.selected, required this.runs, required this.onTap});
   final TravelDate day;
   final bool selected;
+  /// False when the route has no departure that day: still tappable (a dead chip looks broken), labelled
+  /// "không có chuyến" and the search then says so.
+  final bool runs;
   final VoidCallback onTap;
-  final String? label;
 
   @override
   Widget build(BuildContext context) {
@@ -80,7 +82,10 @@ class _QuickChip extends StatelessWidget {
             borderRadius: BorderRadius.circular(999),
             border: Border.all(color: selected ? PTokens.primary : PTokens.line),
           ),
-          child: Text(label ?? '${day.relative ?? day.weekday} · ${day.dayMonth}', style: sans(size: 13, weight: selected ? FontWeight.w600 : FontWeight.w500, color: selected ? PTokens.primaryDark : PTokens.ink)),
+          child: Text(
+            runs ? '${day.relative ?? day.weekday} · ${day.dayMonth}' : '${day.relative ?? day.weekday} · ${day.dayMonth} · không có chuyến',
+            style: sans(size: 13, weight: selected ? FontWeight.w600 : FontWeight.w500, color: selected ? PTokens.primaryDark : (runs ? PTokens.ink : PTokens.muted)),
+          ),
         ),
       ),
     );
@@ -135,17 +140,18 @@ class _TravelDateStripState extends State<TravelDateStrip> {
             controller: _scroll,
             scrollDirection: Axis.horizontal,
             itemCount: days.length,
-            separatorBuilder: (context, index) => SizedBox(width: store.calendar.demoDates.contains(days[index].id) ? _spacing * 3 : _spacing),
+            separatorBuilder: (context, index) => const SizedBox(width: _spacing),
             itemBuilder: (context, i) {
               final d = days[i];
               final on = d.id == selected;
               final weekend = d.weekday == 'T7' || d.weekday == 'CN';
-              // The demo day sits apart from the real calendar so nobody books it by mistake.
-              final demo = store.calendar.demoDates.contains(d.id);
+              // A day without a departure on this route (fixed timetable) is drawn lighter but can still be picked:
+              // the results then say there is no trip that day.
+              final runs = store.hasDeparture(d.id);
               return Semantics(
                 selected: on,
                 button: true,
-                label: d.long,
+                label: runs ? d.long : '${d.long}, không có chuyến',
                 excludeSemantics: true,
                 child: InkWell(
                   onTap: () => widget.onChanged(d.id),
@@ -154,13 +160,13 @@ class _TravelDateStripState extends State<TravelDateStrip> {
                     width: _cell,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: on ? PTokens.primary : (demo ? PTokens.warnSoft : PTokens.surface),
+                      color: on ? PTokens.primary : (runs ? PTokens.surface : PTokens.canvas),
                       borderRadius: BorderRadius.circular(PTokens.radiusControl),
-                      border: Border.all(color: on ? PTokens.primary : (demo ? PTokens.warn : PTokens.line)),
+                      border: Border.all(color: on ? PTokens.primary : PTokens.line),
                     ),
                     child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Text(demo ? 'Thử' : (d.relative == 'Hôm nay' ? 'Nay' : d.weekday), style: sans(size: 12, weight: FontWeight.w600, color: on ? Colors.white : (demo ? PTokens.warnInk : (weekend ? PTokens.danger : PTokens.muted)))),
-                      Text(d.dayMonth, style: mono(size: 15, weight: FontWeight.w700, color: on ? Colors.white : PTokens.ink)),
+                      Text(d.relative == 'Hôm nay' ? 'Nay' : d.weekday, style: sans(size: 12, weight: FontWeight.w600, color: on ? Colors.white : (!runs ? PTokens.muted : (weekend ? PTokens.danger : PTokens.muted)))),
+                      Text(d.dayMonth, style: mono(size: 15, weight: FontWeight.w700, color: on ? Colors.white : (runs ? PTokens.ink : PTokens.muted))),
                     ]),
                   ),
                 ),
@@ -207,6 +213,8 @@ class _CalendarSheet extends StatelessWidget {
         Text('Chọn ngày đi', style: sans(size: 18, weight: FontWeight.w700)),
         gap(4),
         Text('Đặt trước tối đa ${daysBetween(cal.today, cal.lastDate)} ngày, đến $lastLabel. Giờ theo Việt Nam.', style: sans(size: 13, color: PTokens.muted)),
+        if (cal.days.any((d) => !store.hasDeparture(d)))
+          Text('Ngày chữ nhạt: không có chuyến trên tuyến này.', style: sans(size: 13, color: PTokens.muted)),
         gap(12),
         Row(children: [
           for (final h in vnWeekdayHeaders)
@@ -255,14 +263,16 @@ class _MonthGrid extends StatelessWidget {
   }
 
   Widget _dayCell(BuildContext context, ServiceCalendar cal, String id, int day) {
+    // Every day of the booking window can be picked; a day without a departure is drawn lighter.
     final allowed = cal.allows(id);
+    final runs = store.hasDeparture(id);
     final selected = id == store.date;
     final today = id == cal.today;
     return Semantics(
       button: allowed,
       selected: selected,
       enabled: allowed,
-      label: TravelDate.of(id).long,
+      label: runs ? TravelDate.of(id).long : '${TravelDate.of(id).long}, không có chuyến',
       excludeSemantics: true,
       child: InkWell(
         onTap: allowed ? () => Navigator.of(context).pop(id) : null,
@@ -274,7 +284,7 @@ class _MonthGrid extends StatelessWidget {
             borderRadius: BorderRadius.circular(PTokens.radiusControl),
             border: today && !selected ? Border.all(color: PTokens.primary, width: 1.5) : null,
           ),
-          child: Text('$day', style: mono(size: 16, weight: selected || today ? FontWeight.w700 : FontWeight.w500, color: selected ? Colors.white : (allowed ? PTokens.ink : PTokens.lineStrong))),
+          child: Text('$day', style: mono(size: 16, weight: selected || today ? FontWeight.w700 : FontWeight.w500, color: selected ? Colors.white : (!allowed ? PTokens.lineStrong : (runs ? PTokens.ink : PTokens.muted)))),
         ),
       ),
     );

@@ -139,6 +139,10 @@ ACTIVE DRIVING MODE (Cockpit Lockout) ◄─────────────
   - `/ops/audit` -> `MGR-028-audit-logs.md`
   - `/ops/roles-permissions` -> `MGR-029-roles-permissions.md`
   - `/ops/settings` -> `MGR-030-settings.md`
+- **Content & Timetable (served page `/manager`):**
+  - "Lịch chạy" -> `MGR-032-schedules.md`
+  - "Quảng cáo" -> `MGR-031-promo-banners.md`
+  - "Duyệt đón tận nhà" -> `MGR-033-home-requests.md`
 
 ---
 

@@ -15,11 +15,13 @@ const PUBLIC_RULES = [
   ['GET', /^\/api\/v1\/service-config$/],
   ['POST', /^\/api\/v1\/service-areas\/check$/],
   ['GET', /^\/api\/v1\/passenger\/home-feed$/],
+  ['GET', /^\/api\/v1\/passenger\/promo-banners(\/[^/]+)?$/],
   ['POST', /^\/api\/v1\/(auth\/(passenger|driver|staff)\/|passenger\/auth\/|driver\/auth\/|ops\/auth\/)/],
   ['POST', /^\/api\/v1\/webhooks\//],
   ['GET', /^\/api\/v1\/(passenger\/)?(stations|trips)(\/search)?$/],
   ['GET', /^\/api\/v1\/routes\/stops\/search$/],
-  ['GET', /^\/api\/v1\/(passenger\/)?trips\/[^/]+(\/(seat-map|tracking|radar|stops|eta|disruptions|replacement-info))?$/]
+  ['GET', /^\/api\/v1\/trips\/run-days$/],
+  ['GET', /^\/api\/v1\/(passenger\/)?trips\/[^/]+(\/(seat-map|tracking|tracking\/stream|radar|stops|eta|disruptions|replacement-info))?$/]
 ];
 
 const PASSENGER_RULES = [
@@ -28,9 +30,9 @@ const PASSENGER_RULES = [
 ];
 
 const IDEMPOTENT_RULES = {
-  passenger: /\/(seats\/hold|hold-seats|bookings\/create|checkout\/create-order|delegate|qr\/reissue|cancel)$/,
-  driver: /\/(readiness|start|arrive|inaccessible|boarding|boarding\/manual|board-qr|payments\/cod-collect|collect-cod|onboard-hail|incidents?|end|no-show|batch-replay)$/,
-  staff: /\/(platform\/operators(\/[^/]+\/(activate|deactivate))?|pos\/(orders|bookings|hotline-hold)|refunds\/[^/]+\/process|service-areas(\/[^/]+\/(activate|deactivate))?|trips\/[^/]+\/assign|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem)$/
+  passenger: /\/(seats\/hold|hold-seats|bookings\/create|checkout\/create-order|delegate|qr\/reissue|cancel|home-request\/withdraw|tickets\/[^/]+\/stops)$/,
+  driver: /\/(readiness|start|home-run|arrive|inaccessible|boarding|boarding\/manual|board-qr|payments\/cod-collect|collect-cod|onboard-hail|incidents?|end|no-show|batch-replay)$/,
+  staff: /\/(platform\/operators(\/[^/]+\/(activate|deactivate))?|pos\/(orders|bookings|hotline-hold)|refunds\/[^/]+\/process|service-areas(\/[^/]+\/(activate|deactivate))?|promo-banners(\/[^/]+\/(activate|deactivate))?|schedules|trips\/[^/]+\/(assign|cancel|sales)|home-requests\/[^/]+\/[^/]+\/(confirm|reject)|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem)$/
 };
 
 // Staff permissions by role (MGR-029). The first matching rule decides; no rule means any staff role.
@@ -42,7 +44,11 @@ const STAFF_RULES = [
   [/^\/api\/v1\/ops\/bookings/, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']],
   [/^\/api\/v1\/ops\/trips\/[^/]+\/(delay|replace-vehicle|swap-vehicle|seats\/override-lock)$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/service-(config|areas)/, ['FLEET_DIRECTOR', 'DISPATCHER']],
+  [/^\/api\/v1\/ops\/schedules/, ['FLEET_DIRECTOR', 'DISPATCHER']],
+  [/^\/api\/v1\/ops\/promo-banners/, ['FLEET_DIRECTOR']],
   [/^\/api\/v1\/ops\/trips\/[^/]+\/assign(-options)?$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
+  [/^\/api\/v1\/ops\/trips\/[^/]+\/(cancel|sales)$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
+  [/^\/api\/v1\/ops\/home-requests/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/debt-receipts\//, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']]
 ];
 

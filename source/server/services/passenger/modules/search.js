@@ -5,8 +5,9 @@
 
 import { effectiveStops } from '../../../core/routeStops.js';
 import { findOperatorById } from '../../../core/operators.js';
-import { DEMO_DATE, addDays, parseRunId, runId, serviceCalendar, vnDate } from '../../../core/serviceDate.js';
-import { stopCoords, routeShape } from '../../../core/geo.js';
+import crypto from 'crypto';
+import { DEMO_DATE, addDays, parseRunId, parseServiceDate, runId, serviceCalendar, vnDate } from '../../../core/serviceDate.js';
+import { stopCoords, routeShape, aliasShape } from '../../../core/geo.js';
 
 export const STATIONS_DATABASE = [
   {
@@ -195,6 +196,142 @@ for (const trip of MOCK_TRIPS_DATABASE) {
 // Schedules: the seed trips, each repeated every day at the same time.
 const SCHEDULE_TEMPLATES = new Map(MOCK_TRIPS_DATABASE.map(t => [t.trip_id, t]));
 
+/** Rebuilds the schedule index after the catalog was reloaded from the database: runs carry a schedule_id. */
+export function reloadScheduleTemplates() {
+  SCHEDULE_TEMPLATES.clear();
+  for (const t of MOCK_TRIPS_DATABASE) {
+    if (t.schedule_id) continue;
+    SCHEDULE_TEMPLATES.set(t.trip_id, t);
+    aliasShape(t.trip_id, t.shape_id);
+  }
+}
+
+// ---------- Fixed timetable of a company (D128, D129) ----------
+// A schedule is a fixed departure of a route: a clock time, the weekdays it runs (1 = Monday .. 7 = Sunday),
+// a validity (YYYY-MM-DD, inclusive) and an on/off switch. Each day it runs has its own trip.
+// Changes never touch a day already on sale: a schedule keeps dated versions, and a travel day takes the
+// latest version in force on that day (`settingsOn`). A change starts on the first day not yet on sale.
+export const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
+const HHMM_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+// What a dated version may change; the route, stops and bus type stay with the schedule.
+const VERSION_FIELDS = ['departure_time', 'arrival_time', 'duration_minutes', 'base_fare_vnd', 'days_of_week', 'valid_to', 'active'];
+
+export function weekdayOf(date) {
+  const d = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return d === 0 ? 7 : d;
+}
+
+/** The schedule as it stands on a travel day: its base, then every dated version in force by then. */
+export function settingsOn(schedule, date) {
+  let settings = schedule;
+  for (const v of schedule.versions || []) {
+    if (v.effective_from <= date) settings = { ...settings, ...pickVersion(v) };
+  }
+  return settings;
+}
+
+function pickVersion(v) {
+  return Object.fromEntries(VERSION_FIELDS.filter(k => v[k] !== undefined).map(k => [k, v[k]]));
+}
+
+/** Does this schedule run on that travel day? */
+export function runsOn(schedule, date) {
+  if (!schedule) return false;
+  const s = settingsOn(schedule, date);
+  if (s.active === false) return false;
+  if (Array.isArray(s.days_of_week) && !s.days_of_week.includes(weekdayOf(date))) return false;
+  if (schedule.valid_from && date < schedule.valid_from) return false;
+  if (s.valid_to && date > s.valid_to) return false;
+  return true;
+}
+
+function versionView(v) {
+  return {
+    departure: v.departure_time.slice(11, 16),
+    duration_minutes: v.duration_minutes,
+    days_of_week: v.days_of_week || ALL_WEEKDAYS,
+    valid_to: v.valid_to || null,
+    active: v.active !== false,
+    base_fare_vnd: v.base_fare_vnd
+  };
+}
+
+/**
+ * The office's view of a schedule on `today`: the settings in force, and the dated changes still to come
+ * (`locked` when their first day is already on sale, so they can no longer be cancelled).
+ */
+export function scheduleView(t, { today = vnDate(), changeFrom = null } = {}) {
+  const current = settingsOn(t, today);
+  const status = t.valid_from && t.valid_from > today ? 'UPCOMING'
+    : current.valid_to && current.valid_to < today ? 'ENDED'
+      : current.active === false ? 'STOPPED' : 'ACTIVE';
+  return {
+    schedule_id: t.trip_id,
+    route_id: t.route_id,
+    route_name: t.route_name,
+    ...versionView(current),
+    valid_from: t.valid_from || null,
+    status,
+    extra: Boolean(t.extra),
+    vehicle_type: t.vehicle_type,
+    vehicle_title: t.vehicle_title,
+    total_seats: t.total_seats,
+    upcoming: (t.versions || []).filter(v => v.effective_from > today).map(v => ({
+      effective_from: v.effective_from,
+      locked: Boolean(changeFrom) && v.effective_from < changeFrom,
+      ...versionView({ ...settingsOn(t, v.effective_from) })
+    }))
+  };
+}
+
+function invalid(message) {
+  return { ok: false, status: 400, code: 'VALIDATION_ERROR', message };
+}
+
+const dmy = (date) => date.split('-').reverse().join('/');
+
+/** Checks the editable fields of a schedule; returns an error result or null. */
+function checkScheduleFields(f) {
+  if (!HHMM_RE.test(f.departure || '')) return invalid('Giờ xuất bến dạng HH:mm');
+  if (!Number.isInteger(f.duration_minutes) || f.duration_minutes < 15 || f.duration_minutes > 24 * 60) return invalid('Thời gian chạy 15-1440 phút');
+  if (!Array.isArray(f.days_of_week) || !f.days_of_week.length || f.days_of_week.some(d => !ALL_WEEKDAYS.includes(d)) || new Set(f.days_of_week).size !== f.days_of_week.length) {
+    return invalid('Chọn ít nhất một ngày chạy trong tuần (1 = Thứ Hai .. 7 = Chủ Nhật)');
+  }
+  for (const key of ['valid_from', 'valid_to']) {
+    if (f[key] !== null && f[key] !== undefined && !parseServiceDate(f[key])) return invalid('Ngày hiệu lực dạng YYYY-MM-DD');
+  }
+  if (f.valid_from && f.valid_to && f.valid_to < f.valid_from) return invalid('Ngày kết thúc phải từ ngày bắt đầu trở đi');
+  if (!Number.isInteger(f.base_fare_vnd) || f.base_fare_vnd < 10000 || f.base_fare_vnd > 10000000) return invalid('Giá vé 10.000 - 10.000.000 đ');
+  if (typeof f.active !== 'boolean') return invalid('Trạng thái bật/tắt không hợp lệ');
+  return null;
+}
+
+/** Departure and arrival of a schedule's template (the date part is only a placeholder). */
+function clockTimes(departure, durationMinutes) {
+  const dep = `${DEMO_DATE}T${departure}:00+07:00`;
+  const arr = new Date(Date.parse(dep) + durationMinutes * 60000 + 7 * 3600000).toISOString();
+  return { departure_time: dep, arrival_time: `${arr.slice(0, 10)}T${arr.slice(11, 19)}+07:00` };
+}
+
+/** The editable fields of a schedule as the office sends them, over the settings in force. */
+function editFields(current, input) {
+  const view = versionView(current);
+  const pick = (k) => (input[k] === undefined ? view[k] : input[k]);
+  return {
+    departure: pick('departure'),
+    duration_minutes: pick('duration_minutes'),
+    days_of_week: pick('days_of_week'),
+    valid_to: pick('valid_to'),
+    base_fare_vnd: pick('base_fare_vnd'),
+    active: pick('active')
+  };
+}
+
+function versionOf(fields) {
+  const { departure, ...rest } = fields;
+  return { ...rest, ...clockTimes(departure, fields.duration_minutes), days_of_week: [...fields.days_of_week].sort() };
+}
+
 export class PassengerSearchService {
   /**
    * PAX-005: Location / Station search with diacritics fuzzy matching
@@ -225,22 +362,25 @@ export class PassengerSearchService {
    */
   materializeRun(templateId, date) {
     const template = SCHEDULE_TEMPLATES.get(templateId);
-    if (!template) return null;
+    // A day the schedule does not run has no trip (an existing one keeps its tickets: see _findTrip).
+    if (!template || !runsOn(template, date)) return null;
     if (date === DEMO_DATE) return template;
     const id = runId(templateId, date);
     const existing = MOCK_TRIPS_DATABASE.find(t => t.trip_id === id);
     if (existing) return existing;
-    // Same Vietnam clock time on the new day; arrival keeps the trip's duration.
-    const time = template.departure_time.slice(10);
+    // The timetable in force that day; same Vietnam clock time, arrival keeps the trip's duration.
+    const settings = settingsOn(template, date);
+    const time = settings.departure_time.slice(10);
     const departure = `${date}${time}`;
-    const arrival = new Date(Date.parse(departure) + (Date.parse(template.arrival_time) - Date.parse(template.departure_time)));
+    const arrival = new Date(Date.parse(departure) + (Date.parse(settings.arrival_time) - Date.parse(settings.departure_time)));
+    const { versions, valid_from, valid_to, days_of_week, active, ...base } = structuredClone(settings);
     const run = {
-      ...structuredClone(template),
+      ...base,
       trip_id: id,
       schedule_id: templateId,
       departure_time: departure,
       arrival_time: `${vnDate(arrival.getTime())}T${new Date(arrival.getTime() + 7 * 3600000).toISOString().slice(11, 19)}+07:00`,
-      available_seats_count: template.total_seats
+      available_seats_count: settings.total_seats
     };
     MOCK_TRIPS_DATABASE.push(run);
     return run;
@@ -276,7 +416,7 @@ export class PassengerSearchService {
     const normDest = this._normalizeVietnamese(destinationCity);
 
     // A travel day lists that day's runs of every schedule; without a day, the seed trips (old callers).
-    const pool = date ? [...SCHEDULE_TEMPLATES.keys()].map(id => this.materializeRun(id, date)) : [...SCHEDULE_TEMPLATES.values()];
+    const pool = date ? [...SCHEDULE_TEMPLATES.keys()].map(id => this.materializeRun(id, date)).filter(Boolean) : [...SCHEDULE_TEMPLATES.values()];
     let results = pool.filter(trip => {
       if (operatorId && trip.operator_id !== operatorId) return false;
 
@@ -350,6 +490,154 @@ export class PassengerSearchService {
     };
   }
 
+  /**
+   * May a new booking be made on this trip? A day's run whose schedule no longer runs that day (switched off,
+   * weekday or validity changed) keeps its tickets but takes no new ones.
+   */
+  isOnSchedule(tripId) {
+    const run = parseRunId(tripId);
+    if (!run) return true;
+    return runsOn(SCHEDULE_TEMPLATES.get(run.templateId), run.date);
+  }
+
+  /** Travel days of the window on which some schedule of the company serves origin -> destination. */
+  runDays({ originCity, destinationCity, operatorId, days, routeOpen = () => true }) {
+    const normOrigin = this._normalizeVietnamese(originCity);
+    const normDest = this._normalizeVietnamese(destinationCity);
+    const serving = [...SCHEDULE_TEMPLATES.values()].filter(t => (!operatorId || t.operator_id === operatorId) && routeOpen(t.route_id) && this._serves(t, normOrigin, normDest));
+    return days.filter(day => serving.some(t => runsOn(t, day)));
+  }
+
+  /** Does any schedule of the company run from one city to the other (D135)? */
+  servesCities(operatorId, originCity, destinationCity) {
+    const o = this._normalizeVietnamese(originCity);
+    const d = this._normalizeVietnamese(destinationCity);
+    return [...SCHEDULE_TEMPLATES.values()].some(t => t.operator_id === operatorId && this._serves(t, o, d));
+  }
+
+  _serves(trip, normOrigin, normDest) {
+    const stops = this._stopsOf(trip);
+    const pickup = stops.find(s => this._normalizeVietnamese(s.city) === normOrigin && s.pickup_allowed);
+    const dropoff = stops.find(s => this._normalizeVietnamese(s.city) === normDest && s.dropoff_allowed);
+    return Boolean(pickup && dropoff && pickup.order < dropoff.order);
+  }
+
+  /** A company's timetable for the office, by route then departure. */
+  listSchedules(operatorId, when = {}) {
+    return [...SCHEDULE_TEMPLATES.values()]
+      .filter(t => t.operator_id === operatorId)
+      .map(t => scheduleView(t, when))
+      .sort((a, b) => a.route_id.localeCompare(b.route_id) || a.departure.localeCompare(b.departure));
+  }
+
+  /**
+   * A new fixed departure on a route the company already runs: stops, bus type and road come from that route.
+   * It starts on `changeFrom` at the earliest, the first day not yet on sale (D129).
+   */
+  createSchedule(operatorId, input = {}, { changeFrom, today = vnDate() }) {
+    const source = this.templateForRoute(input.route_id, operatorId);
+    if (!source) return { ok: false, status: 404, code: 'ROUTE_NOT_FOUND', message: 'Không tìm thấy tuyến của nhà xe' };
+    // An extra departure (chuyến tăng cường, spec 3.4, D134) runs on one day and may be inside the booking
+    // window: it adds seats and changes nothing already sold.
+    const extra = input.extra_date !== undefined && input.extra_date !== null;
+    if (extra) {
+      if (!parseServiceDate(input.extra_date)) return invalid('Ngày chạy tăng cường dạng YYYY-MM-DD');
+      if (input.extra_date < today) return invalid('Ngày chạy tăng cường đã qua');
+    }
+    const validFrom = extra ? input.extra_date : input.valid_from || changeFrom;
+    if (!extra && validFrom < changeFrom) return invalid(`Lịch mới áp dụng sớm nhất từ ${dmy(changeFrom)}, sau các ngày đang mở bán`);
+    const fields = {
+      departure: input.departure,
+      duration_minutes: input.duration_minutes ?? source.duration_minutes,
+      days_of_week: extra ? ALL_WEEKDAYS : input.days_of_week ?? ALL_WEEKDAYS,
+      valid_from: validFrom,
+      valid_to: extra ? validFrom : input.valid_to ?? null,
+      base_fare_vnd: input.base_fare_vnd ?? source.base_fare_vnd,
+      active: input.active ?? true
+    };
+    const error = checkScheduleFields(fields);
+    if (error) return error;
+    const id = `sch_${crypto.randomBytes(5).toString('hex')}`;
+    const { versions, ...from } = structuredClone(source);
+    const schedule = {
+      ...from,
+      ...versionOf(fields),
+      valid_from: validFrom,
+      trip_id: id,
+      // No bus is given yet: the office assigns one per day or for the whole schedule.
+      plate_number: null,
+      extra,
+      available_seats_count: source.total_seats,
+      shape_id: source.shape_id || source.trip_id
+    };
+    delete schedule.schedule_id;
+    MOCK_TRIPS_DATABASE.push(schedule);
+    SCHEDULE_TEMPLATES.set(id, schedule);
+    aliasShape(id, schedule.shape_id);
+    return { ok: true, before: null, schedule };
+  }
+
+  /**
+   * Changes a schedule from `effective_from` (default and earliest: `changeFrom`). A schedule with no day on
+   * sale yet is changed outright; otherwise the change is a dated version and the days on sale keep theirs.
+   */
+  updateSchedule(operatorId, scheduleId, input = {}, { today, changeFrom }) {
+    const schedule = SCHEDULE_TEMPLATES.get(scheduleId);
+    if (!schedule || schedule.operator_id !== operatorId) return { ok: false, status: 404, code: 'SCHEDULE_NOT_FOUND', message: 'Không tìm thấy lịch chạy' };
+    const before = structuredClone(schedule);
+    // Versions already in force for every day still ahead fold into the base.
+    const due = (schedule.versions || []).filter(v => v.effective_from <= today);
+    if (due.length) {
+      const ahead = schedule.versions.filter(v => v.effective_from > today);
+      for (const v of due) Object.assign(schedule, pickVersion(v));
+      schedule.versions = ahead;
+    }
+
+    if (schedule.valid_from && schedule.valid_from >= changeFrom) {
+      // Nothing of it is on sale yet: change it outright (its start may move, never before changeFrom).
+      const validFrom = input.valid_from ?? schedule.valid_from;
+      if (validFrom < changeFrom) return invalid(`Lịch áp dụng sớm nhất từ ${dmy(changeFrom)}, sau các ngày đang mở bán`);
+      const fields = { ...editFields(schedule, input), valid_from: validFrom };
+      const error = checkScheduleFields(fields);
+      if (error) return error;
+      Object.assign(schedule, versionOf(fields), { valid_from: validFrom, versions: [] });
+      return { ok: true, before, schedule, effective_from: validFrom };
+    }
+
+    if (schedule.extra) {
+      return { ok: false, status: 409, code: 'EXTRA_RUN_ON_SALE', message: 'Chuyến tăng cường đang bán vé, không sửa được; hủy chuyến trên bảng điều độ nếu không chạy' };
+    }
+    if (input.valid_from !== undefined && input.valid_from !== schedule.valid_from) {
+      return invalid('Lịch đang bán vé, không đổi được ngày bắt đầu');
+    }
+    const effective = input.effective_from || changeFrom;
+    if (!parseServiceDate(effective) || effective < changeFrom) {
+      return invalid(`Thay đổi có hiệu lực sớm nhất từ ${dmy(changeFrom)}: các ngày trước đó đã mở bán`);
+    }
+    const fields = editFields(settingsOn(schedule, effective), input);
+    const error = checkScheduleFields({ ...fields, valid_from: schedule.valid_from || null });
+    if (error) return error;
+    // A later change replaces the ones not on sale yet from the same day on.
+    schedule.versions = [...(schedule.versions || []).filter(v => v.effective_from < effective), { effective_from: effective, ...versionOf(fields) }];
+    return { ok: true, before, schedule, effective_from: effective };
+  }
+
+  /** Drops the changes of a schedule that start on a day not yet on sale. */
+  cancelScheduleChanges(operatorId, scheduleId, { changeFrom }) {
+    const schedule = SCHEDULE_TEMPLATES.get(scheduleId);
+    if (!schedule || schedule.operator_id !== operatorId) return { ok: false, status: 404, code: 'SCHEDULE_NOT_FOUND', message: 'Không tìm thấy lịch chạy' };
+    const keep = (schedule.versions || []).filter(v => v.effective_from < changeFrom);
+    if (keep.length === (schedule.versions || []).length) return { ok: false, status: 404, code: 'NO_PENDING_CHANGE', message: 'Không có thay đổi nào chưa mở bán để hủy' };
+    const before = structuredClone(schedule);
+    schedule.versions = keep;
+    return { ok: true, before, schedule };
+  }
+
+  /** The day's runs already set up for a company (whatever its schedules say now). */
+  existingRunsOn(date, operatorId) {
+    return MOCK_TRIPS_DATABASE.filter(t => t.schedule_id && parseRunId(t.trip_id)?.date === date && (!operatorId || t.operator_id === operatorId));
+  }
+
   /** Ids of a company's schedules. */
   schedulesOf(operatorId) {
     return [...SCHEDULE_TEMPLATES.values()].filter(t => !operatorId || t.operator_id === operatorId).map(t => t.trip_id);
@@ -364,6 +652,13 @@ export class PassengerSearchService {
   routeStops(routeId, operatorId = null) {
     const template = this.templateForRoute(routeId, operatorId);
     return template ? this._stopsOf(template) : [];
+  }
+
+  /** Planned time and its source at each stop of a sold trip, by stop id, the same times the passenger sees. */
+  stopTimes(tripId) {
+    const trip = this._findTrip(tripId);
+    if (!trip) return {};
+    return Object.fromEntries(this._stopsOf(trip).map(s => [s.stop_id, { planned_time: s.planned_time, time_source: s.time_source }]));
   }
 
   /** The stops of a trip as its company set them for the route (times, allowed, hidden). */

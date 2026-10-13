@@ -39,6 +39,11 @@ describe('Tenant Driver API', () => {
       assert.strictEqual(tripsData.data.trips[0].trip_id, 'trp_xv_hn_th_01');
       assert.ok(tripsData.data.trips[0].stops[0].lat !== undefined);
       assert.ok(tripsData.data.trips[0].route_shape !== undefined);
+      // The driver sees the planned time at each stop the passenger sees (first stop = departure).
+      const stops = tripsData.data.trips[0].stops;
+      assert.ok(stops.every(s => typeof s.planned_time === 'string'));
+      assert.strictEqual(Date.parse(stops[0].planned_time), Date.parse(tripsData.data.trips[0].planned_departure_time));
+      assert.ok(stops.every((s, i) => i === 0 || Date.parse(s.planned_time) >= Date.parse(stops[i - 1].planned_time)));
     } finally {
       server.close();
     }

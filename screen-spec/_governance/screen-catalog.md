@@ -2,7 +2,7 @@
 
 **Document Version:** 1.0  
 **Status:** Approved Baseline  
-**Total Screens:** 79 Screens (25 Passenger, 19 Driver, 30 Manager, 5 Shared)
+**Total Screens:** 81 Screens (25 Passenger, 19 Driver, 32 Manager, 5 Shared)
 
 ---
 
@@ -98,6 +98,9 @@
 | **MGR-028** | Manager | Immutable Audit Logs Directory | `/ops/audit` | Sidebar Nav | `/ops/audit/:logId` | P1 | Draft | Source-backed |
 | **MGR-029** | Manager | RBAC Roles & Permissions Matrix | `/ops/roles-permissions` | Settings Submenu | `/ops/settings` | P1 | Draft | Source-backed |
 | **MGR-030** | Manager | System Global Configuration | `/ops/settings` | Sidebar Nav | `/ops/dashboard` | P2 | Draft | Source-backed |
+| **MGR-031** | Manager | Promotion Banners of the Passenger App | `/manager` → "Quảng cáo" | Sidebar Nav | `/manager` | P2 | Draft | Product owner 2026-10-12 (D124, D125) |
+| **MGR-032** | Manager | Fixed Timetable (Lịch chạy) | `/manager` → "Lịch chạy" | Sidebar Nav | `/manager` | P1 | Draft | Product owner 2026-10-12 (D128, D129) |
+| **MGR-033** | Manager | Home Pickup / Drop-off Review | `/manager` → "Duyệt đón tận nhà" | Sidebar Nav | `/manager` | P1 | Draft | Fixed-route spec 2026-10-12 (D130) |
 
 ---
 

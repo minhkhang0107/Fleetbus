@@ -171,6 +171,11 @@ Section 2 traced 48 of the 79 screens. These 31 had no row. The last column list
 | `MGR-026` | Notification Campaign Engine | `POST /api/v1/ops/notifications/broadcast` (deferred, `api-screen-map` section 5) | - | `TC-MGR-09` |
 | `MGR-029` | RBAC Roles & Permissions Matrix | `POST / PUT /api/v1/ops/rbac/roles` (deferred, `api-screen-map` section 5) | `BR-AUTH-003` | `TC-MGR-01`, `TC-SPEC-A01` |
 | `MGR-030` | System Global Configuration | `POST / PUT /api/v1/ops/settings` (deferred, `api-screen-map` section 5) | `BR-SYS-001` | none: spec only |
+| `MGR-031` | Promotion Banners of the Passenger App | `/api/v1/ops/promo-banners` (served) | `D124`, `D125` | `test/server/promo_banners.test.js` |
+| `MGR-032` | Fixed Timetable | `/api/v1/ops/schedules`, `/api/v1/trips/run-days` (served) | `BR-SCHED-001`..`009`, `D128`, `D129`, `D134` | `TC-SCHED-01`..`03` (`test/server/schedules.test.js`), `TC-FR-11` |
+| `MGR-033` | Home Pickup / Drop-off Review | `/api/v1/ops/home-requests` (served) | `BR-HOME-001`..`007`, `D130` | `TC-FR-01`..`04` (`test/server/fixed_route_rules.test.js`) |
+| `MGR-014` (sale, cancel) | Dispatch Board: one day's departure | `POST /api/v1/ops/trips/{tripId}/sales`, `…/cancel` (served) | `D131`, `D132` | `TC-FR-05`..`08` |
+| `PAX-017` (home status, stops) | Ticket: home service status, stop change | `POST /api/v1/passenger/tickets/{ticketId}/home-request/withdraw`, `…/stops` (served) | `BR-TICKET-010`, `BR-TICKET-011`, `D130`, `D133` | `TC-FR-04`, `TC-FR-09`, `TC-FR-10`; Flutter `app_test.dart` |
 | `SH-002` | Permission Denied (403 Forbidden) | none (local screen) | `BR-AUTH-003`, `BR-PERM-001` | none: spec only |
 | `SH-003` | Network Offline & Server Error | none (local screen) | `BR-CONN-001`, `BR-NET-001` | none: spec only |
 | `SH-004` | System Maintenance Notice | none (local screen) | `BR-MAINT-001`, `BR-SYS-001` | none: spec only |

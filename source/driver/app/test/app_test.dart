@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:app/src/presentation/driver_cockpit_dashboard.dart';
 import 'package:app/src/presentation/driver_end_trip_screen.dart';
+import 'package:app/src/presentation/driver_home_run_screen.dart';
 import 'package:app/src/presentation/driver_incident_dialog.dart';
 import 'package:app/src/presentation/driver_login_screen.dart';
 import 'package:app/src/presentation/driver_manifest_screen.dart';
@@ -77,6 +78,10 @@ void main() {
         return ok(ticket);
       }
       if (path.endsWith('/readiness')) return ok({'status': 'READY'});
+      if (path.endsWith('/home-run')) {
+        trip['home_run_started_at'] = '2026-08-27T22:00:00Z';
+        return ok(trip);
+      }
       if (path.endsWith('/start')) {
         trip['status'] = 'IN_TRANSIT';
         return ok(trip);
@@ -182,6 +187,40 @@ void main() {
     store.dispose();
   });
 
+  test('a demo trip on another day keeps the simulated clock; a boarding shows on that clock, not the server time', () async {
+    final store = await started();
+    expect(store.realClock, isFalse);
+    final p = store.manifest.firstWhere((p) => p.seat == 'A01');
+    final before = store.clock;
+    expect(await store.board(p), isNull);
+    final boarded = store.manifest.firstWhere((p) => p.seat == 'A01');
+    expect(store.boardedTime(boarded), before, reason: 'the server says 07:05 real time; the cab shows its own clock');
+    store.dispose();
+  });
+
+  test('a trip running today uses the real time, for the clock and for each boarding', () async {
+    final store = storeWithServer();
+    final now = DateTime.now().toUtc();
+    trip['planned_departure_time'] = now.toIso8601String();
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    expect(store.realClock, isTrue);
+    final vn = now.add(const Duration(hours: 7));
+    expect(store.clock, vn.hour * 60 + vn.minute);
+    expect(await store.startTrip(), isNull);
+    expect(await store.board(store.manifest.firstWhere((p) => p.seat == 'A01')), isNull);
+    expect(store.boardedTime(store.manifest.firstWhere((p) => p.seat == 'A01')), 7 * 60 + 5, reason: 'boarded_at 00:05Z is 07:05 in Vietnam');
+    store.dispose();
+  });
+
+  test('stop times are the planned times the server sends, as the passenger sees them', () async {
+    final store = storeWithServer();
+    final stops = (trip['stops'] as List).cast<Map<String, dynamic>>();
+    stops[1]['planned_time'] = '2026-08-28T01:18:00.000Z';
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    expect(store.stops.map((s) => s.time), ['07:00', '08:18', '08:30'], reason: 'a stop without a planned time falls back to the even split');
+    store.dispose();
+  });
+
   test('the backup PIN is checked by the server', () async {
     final store = await started();
     final p = store.manifest.firstWhere((p) => p.seat == 'A01');
@@ -248,7 +287,7 @@ void main() {
       await tester.runAsync(() async {
         expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
       });
-      const screens = <Widget>[DriverLoginScreen(), MainShellScreen(), DriverReadinessScreen(), DriverCockpitDashboard(), DriverManifestScreen(), DriverQrScannerScreen(), DriverEndTripScreen(), DriverIncidentScreen()];
+      const screens = <Widget>[DriverLoginScreen(), MainShellScreen(), DriverReadinessScreen(), DriverHomeRunScreen(), DriverCockpitDashboard(), DriverManifestScreen(), DriverQrScannerScreen(), DriverEndTripScreen(), DriverIncidentScreen()];
       for (final screen in screens) {
         await tester.pumpWidget(DriverScope(store: store, child: MaterialApp(home: screen)));
         await tester.pump();
@@ -327,6 +366,26 @@ void main() {
     expect(req.headers['idempotency-key'], isNotNull);
     final after = store.manifest.firstWhere((m) => m.seat == 'B03');
     expect((after.inaccessible, after.meetingPoint), (true, 'đầu ngõ 12'));
+    store.dispose();
+  });
+  test('setting off for the home pickups sends the bus position before departure, heading to the next address (D143)', () async {
+    final store = storeWithServer();
+    (trip['manifest'] as List).add({'ticket_id': 't_b04', 'seat_code': 'B04', 'passenger_name': 'Đỗ Văn Nhà', 'phone_masked': '090***011', 'pickup_stop_id': 'stp_hn_gb', 'dropoff_stop_id': 'stp_th_pb', 'boarding_status': 'ISSUED', 'payment_method': 'VIETQR', 'cod_amount_vnd': 0, 'home_pickup': {'address': '12 Hàng Bài', 'lat': 21.0245, 'lng': 105.8523, 'window_from': '2026-08-27T22:45:00Z', 'window_to': '2026-08-27T23:30:00Z'}});
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    expect((store.homePickupsWaiting.single.seat, store.homeWindow), ('B04', '05:45–06:30'));
+    await store.sendTelemetry();
+    expect(sent.where((r) => r.url.path.endsWith('/telemetry')), isEmpty, reason: 'no position before the run starts');
+
+    final from = (store.lat, store.lng);
+    expect(await store.startHomeRun(), isNull);
+    expect(store.homeRunStarted, isTrue);
+    expect(sent.any((r) => r.url.path == '/api/v1/driver/trips/trp_hn_th_01/home-run' && r.headers['idempotency-key'] != null), isTrue);
+    await store.sendTelemetry();
+    final pings = sent.where((r) => r.url.path.endsWith('/telemetry')).map((r) => jsonDecode(r.body) as Map<String, dynamic>).toList();
+    expect(pings, isNotEmpty);
+    double gap(double lat, double lng) => (lat - 21.0245).abs() + (lng - 105.8523).abs();
+    expect(gap(pings.last['lat'], pings.last['lng']), lessThan(gap(from.$1, from.$2)), reason: 'the bus moves toward the address');
+    expect(pings.last['speed_kmh'], greaterThan(0));
     store.dispose();
   });
 }

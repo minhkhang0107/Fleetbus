@@ -199,11 +199,12 @@ class DriverCockpitDashboard extends StatelessWidget {
                       const SizedBox(height: 12),
                       stopCard,
                       const SizedBox(height: 12),
+                      // Stopped: the stop's actions come first, so the driver never scrolls for them.
+                      if (!store.moving) ...[...actions, const SizedBox(height: 12)],
                       progress,
                       const SizedBox(height: 12),
                       DriverRouteMap(store: store),
-                      const SizedBox(height: 12),
-                      ...actions,
+                      if (store.moving) ...[const SizedBox(height: 12), ...actions],
                     ]),
             ),
             Container(

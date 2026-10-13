@@ -73,6 +73,25 @@
   .toolbar select, .toolbar input { border: 1px solid var(--line-strong); border-radius: 8px; padding: 7px 10px; background: #fff; }
   .list-fallback { max-height: calc(100vh - 150px); overflow: auto; }
   .vehicle-dot { width: 18px; height: 18px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px #64748b; }
+  /* Promotion banners (MGR-031) */
+  .slide { position: relative; overflow: hidden; border-radius: 12px; color: #fff; padding: 14px 16px; height: 132px; display: flex; flex-direction: column; background-size: cover; background-position: center; }
+  .slide b { font-size: 17px; line-height: 1.25; } .slide span { font-size: 13px; opacity: .9; margin-top: 4px; }
+  .slide i { margin-top: auto; align-self: flex-start; background: #fff; border-radius: 999px; padding: 4px 12px; font-style: normal; font-weight: 600; font-size: 12px; }
+  .slide.mini { height: 44px; width: 72px; padding: 0; border-radius: 8px; }
+  .phone { max-width: 360px; }
+  .bannerSplit { grid-template-columns: minmax(0, 1.5fr) minmax(360px, 1fr); }
+  #bannersBox .pill { white-space: nowrap; }
+  #bannersBox .btn { padding: 4px 10px; font-size: 13px; white-space: nowrap; }
+  #bannersBox .acts { display: flex; gap: 6px; justify-content: flex-end; }
+  .htmlPreview { width: 100%; height: 260px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  .field textarea.code { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 13px; min-height: 180px; resize: vertical; }
+  /* Fixed timetable (MGR-032) */
+  .days { display: flex; gap: 3px; }
+  .days span { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 6px; background: #f1f5f9; color: #94a3b8; }
+  .days span.on { background: var(--primary-soft); color: var(--primary); }
+  .dayPick { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .dayPick label { display: flex; align-items: center; gap: 4px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 4px 8px; cursor: pointer; }
+  #schedulesBox .btn { padding: 4px 10px; font-size: 13px; white-space: nowrap; }
   .toast { position: fixed; right: 16px; bottom: 16px; background: var(--ink); color: #fff; padding: 10px 14px; border-radius: 8px; z-index: 2000; }
   @media (max-width: 900px) {
     #app { grid-template-columns: 1fr; }
@@ -103,9 +122,12 @@
     <div class="company" id="companyName"></div>
     <button data-view="overview">Tổng quan</button>
     <button data-view="dispatch">Điều độ chuyến</button>
+    <button data-view="schedules">Lịch chạy</button>
     <button data-view="live">Bản đồ xe</button>
     <button data-view="bookings">Đặt chỗ</button>
     <button data-view="service">Cấu hình đón trả</button>
+    <button data-view="homereq">Duyệt đón tận nhà <span class="pill warn hidden" id="homeReqCount"></span></button>
+    <button data-view="banners">Quảng cáo</button>
     <button data-view="audit">Nhật ký thao tác</button>
     <button data-view="platform" class="hidden" id="navPlatform">Nhà xe (nền tảng)</button>
     <div class="spacer"></div>
@@ -135,6 +157,39 @@
       </div>
     </div>
 
+    <!-- Fixed timetable of the company (MGR-032, D128) -->
+    <div data-panel="schedules" class="hidden">
+      <h2>Lịch chạy cố định</h2>
+      <p class="muted" style="margin:-6px 0 8px">Mỗi dòng là một giờ xuất bến cố định của tuyến. Mỗi ngày lịch chạy có một chuyến để bán vé.</p>
+      <p style="margin:0 0 14px" id="scheduleRule"></p>
+      <div class="split bannerSplit">
+        <div class="card scroll" style="padding:0" id="schedulesBox"></div>
+        <form class="card" id="scheduleForm" novalidate>
+          <div class="section-title" style="margin-top:0" id="scheduleFormTitle">Thêm giờ chạy</div>
+          <div class="field"><label for="sRoute">Tuyến</label><select id="sRoute" name="route_id"></select></div>
+          <div class="row">
+            <div class="field grow"><label for="sTime">Giờ xuất bến</label><input id="sTime" name="departure" type="time" required></div>
+            <div class="field grow"><label for="sDur">Thời gian chạy (phút)</label><input id="sDur" name="duration_minutes" type="number" min="15" max="1440"></div>
+          </div>
+          <label class="row" style="margin:0 0 10px" id="sExtraField"><input type="checkbox" name="extra" id="sExtra"> Chuyến tăng cường (chạy một ngày, bán ngay)</label>
+          <div class="field hidden" id="sExtraDateField"><label for="sExtraDate">Ngày chạy tăng cường</label><input id="sExtraDate" name="extra_date" type="date"></div>
+          <div id="sRecurring">
+          <div class="field" style="margin-bottom:4px"><label>Ngày chạy trong tuần</label></div>
+          <div class="dayPick" id="sDays"></div>
+          <div class="row">
+            <div class="field grow" id="sFromField"><label for="sFrom">Áp dụng từ</label><input id="sFrom" name="valid_from" type="date"></div>
+            <div class="field grow hidden" id="sEffField"><label for="sEff">Thay đổi có hiệu lực từ</label><input id="sEff" name="effective_from" type="date"></div>
+            <div class="field grow"><label for="sTo">Chạy đến (trống = không hạn)</label><input id="sTo" name="valid_to" type="date"></div>
+          </div>
+          </div>
+          <div class="field"><label for="sFare">Giá vé (đ)</label><input id="sFare" name="base_fare_vnd" type="number" min="10000" step="1000"></div>
+          <label class="row" style="margin:0 0 12px"><input type="checkbox" name="active" checked> Đang chạy</label>
+          <div class="error" id="scheduleError"></div>
+          <div class="row"><button class="btn primary" type="submit" id="scheduleSave">Thêm giờ chạy</button><button class="btn hidden" type="button" id="scheduleCancel">Hủy sửa</button></div>
+        </form>
+      </div>
+    </div>
+
     <!-- Live map with list fallback (spec 7.3, AC 13-14) -->
     <div data-panel="live" class="hidden">
       <h2>Bản đồ xe</h2>
@@ -160,6 +215,47 @@
     <div data-panel="service" class="hidden">
       <h2>Cấu hình đón trả khách</h2>
       <div id="serviceBox"></div>
+    </div>
+
+    <!-- Home pickup / drop-off requests the office reviews (MGR-033, D130) -->
+    <div data-panel="homereq" class="hidden">
+      <h2>Duyệt đón / trả tận nhà</h2>
+      <p class="muted" style="margin:-6px 0 8px">Địa chỉ trong vùng "nhà xe duyệt" chờ ở đây. Khi chưa xác nhận, khách lên xe ở bến và tài xế không thấy địa chỉ. Từ chối thì khách được hoàn phụ phí và được hủy vé không mất phí. Chưa duyệt khi xe xuất bến thì tự từ chối.</p>
+      <div class="toolbar"><select id="homeReqStatus"><option value="PENDING_REVIEW">Chờ duyệt</option><option value="CONFIRMED">Đã xác nhận</option><option value="REJECTED">Đã từ chối</option><option value="WITHDRAWN">Khách đã hủy</option><option value="ALL">Tất cả</option></select><span class="muted" id="homeReqInfo"></span></div>
+      <div class="card scroll" style="padding:0" id="homeReqBox"></div>
+    </div>
+
+    <!-- Promotion banners on the passenger home slider (MGR-031, D125) -->
+    <div data-panel="banners" class="hidden">
+      <h2>Quảng cáo trên app khách</h2>
+      <p class="muted" style="margin:-6px 0 14px">Hiện ở slider trang chủ app khách, theo thứ tự tăng dần. Không còn quảng cáo nào đang chạy thì app ẩn slider.</p>
+      <div class="split bannerSplit">
+        <div>
+          <div class="toolbar"><button class="btn primary" id="bannerNew">+ Thêm quảng cáo</button><span class="muted" id="bannerCount"></span></div>
+          <div class="card scroll" style="padding:0" id="bannersBox"></div>
+        </div>
+        <form class="card" id="bannerForm" novalidate>
+          <div class="section-title" style="margin-top:0" id="bannerFormTitle">Thêm quảng cáo</div>
+          <div class="field"><label for="bTitle">Tiêu đề (tối đa 80 ký tự)</label><input id="bTitle" name="title" maxlength="80" required></div>
+          <div class="field"><label for="bSubtitle">Mô tả ngắn</label><input id="bSubtitle" name="subtitle" maxlength="120"></div>
+          <div class="row">
+            <div class="field"><label for="bColor">Màu nền</label><input id="bColor" name="background_color" type="color" value="#2563eb" style="height:38px;width:64px;padding:2px"></div>
+            <div class="field grow"><label for="bImage">Ảnh banner (đường dẫn, không bắt buộc)</label><input id="bImage" name="image_url" placeholder="https://..."></div>
+            <div class="field"><label for="bOrder">Thứ tự</label><input id="bOrder" name="sort_order" type="number" min="0" max="999" value="1" style="width:80px"></div>
+          </div>
+          <div class="row">
+            <div class="field grow"><label for="bStart">Bắt đầu (trống = ngay)</label><input id="bStart" name="starts_at" type="datetime-local"></div>
+            <div class="field grow"><label for="bEnd">Kết thúc (trống = không hạn)</label><input id="bEnd" name="ends_at" type="datetime-local"></div>
+          </div>
+          <div class="field"><label for="bHtml">Nội dung trang chi tiết (HTML: h2, p, b, ul, li, img, a...; không script)</label><textarea id="bHtml" name="content_html" class="code" required></textarea></div>
+          <label class="row" style="margin:0 0 12px"><input type="checkbox" name="active" checked> Bật ngay khi lưu</label>
+          <div class="section-title">Xem trước</div>
+          <div class="phone" id="bannerSlidePreview"></div>
+          <iframe class="htmlPreview" id="bannerHtmlPreview" sandbox title="Xem trước trang chi tiết" style="margin-top:10px"></iframe>
+          <div class="error" id="bannerError"></div>
+          <div class="row"><button class="btn primary" type="submit" id="bannerSave">Tạo quảng cáo</button><button class="btn hidden" type="button" id="bannerCancel">Hủy sửa</button></div>
+        </form>
+      </div>
     </div>
 
     <!-- Audit -->
@@ -300,7 +396,7 @@ function show(view) {
   if (state.user?.role === 'PLATFORM_ADMIN' && view !== 'platform' && !state.platformCode) {
     toast('Chọn nhà xe ở thanh trên để xem dữ liệu điều hành');
   }
-  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), live: openLive, bookings: loadBookings, service: loadService, audit: loadAudit, platform: loadOperators })[view]();
+  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, audit: loadAudit, platform: loadOperators })[view]();
 }
 
 // ---------- overview ----------
@@ -337,7 +433,7 @@ async function loadBoard() {
       <td>${esc(t.route_name || t.route_id)}<div class="muted mono" style="font-size:12px">${esc(t.trip_id)}</div></td>
       <td class="mono">${t.vehicle_plate ? esc(t.vehicle_plate) : '<span class="pill warn">Chưa gán xe</span>'}<div class="muted" style="font-size:12px">${esc(t.driver_name || '')}</div></td>
       <td class="mono">${esc(t.booked_seats)}/${esc(t.total_seats)}${t.held_seats ? `<div class="muted" style="font-size:12px">giữ ${esc(t.held_seats)}</div>` : ''}</td>
-      <td>${pill(t.status)}${t.delay_minutes ? ` <span class="pill warn">+${esc(t.delay_minutes)}p</span>` : ''}</td>
+      <td>${pill(t.status)}${t.delay_minutes ? ` <span class="pill warn">+${esc(t.delay_minutes)}p</span>` : ''}${t.sales_closed && t.status !== 'CANCELLED' ? ' <span class="pill warn">Ngừng bán</span>' : ''}</td>
     </tr>`).join('') : '<tr><td colspan="5" class="muted">Không có chuyến trong ca.</td></tr>';
   document.querySelectorAll('#board tr[data-trip]').forEach(tr => tr.addEventListener('click', () => openTrip(tr.dataset.trip)));
   if (state.selectedTrip) refreshTripLive();
@@ -372,6 +468,8 @@ async function openTrip(tripId) {
     : `<div>${stops.length ? stops.map(st => `<div class="row" style="padding:3px 0"><span class="mono muted">${esc(st.order)}</span><span class="grow">${esc(st.name)}</span></div>`).join('') : '<p class="muted">Chưa có dữ liệu điểm dừng.</p>'}</div>`}
     <div class="section-title">Báo trễ chính thức</div>
     <form class="row" id="delayForm"><input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="minutes" type="number" min="5" max="600" value="15"> <input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="reason" placeholder="Lý do (khách nhận được)"><button class="btn" type="submit">Công bố</button></form>
+    ${saleBlock(t)}
+    <div ${t.status === 'CANCELLED' ? 'class="hidden"' : ''}>
     <div class="section-title">Giữ chỗ qua tổng đài</div>
     <form id="holdForm">
       <div class="row"><div class="field grow"><label>Họ tên khách</label><input name="name" required></div><div class="field grow"><label>Số điện thoại</label><input name="phone" required inputmode="tel"></div></div>
@@ -380,7 +478,8 @@ async function openTrip(tripId) {
         <div class="field grow"><label>Điểm trả</label><select name="dropoff">${stops.slice().reverse().map(st => `<option value="${esc(st.stop_id)}">${esc(st.name)}</option>`).join('')}</select></div></div>
       <div class="error" id="holdError"></div>
       <button class="btn primary" type="submit">Giữ chỗ (khách trả tiền mặt khi lên xe)</button>
-    </form>`;
+    </form>
+    </div>`;
   drawTripMap(track);
   $('#assignForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -391,6 +490,7 @@ async function openTrip(tripId) {
     toast(`Đã gán xe ${r.data.vehicle_plate}, tài xế ${r.data.driver_name}`);
     loadBoard(); openTrip(tripId);
   });
+  bindSaleBlock(tripId, t);
   $('#delayForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
@@ -407,6 +507,75 @@ async function openTrip(tripId) {
     toast(`Đã giữ chỗ ${r.data.pnr} · hạn ${hhmm(r.data.hold_until)}`);
     f.reset(); loadBoard();
   });
+}
+
+// Online sale of this day's departure, and cancelling it (D131): every ticket refunded in full, passengers told.
+function saleBlock(t) {
+  if (t.status === 'CANCELLED') return `<div class="section-title">Bán vé</div><p class="error" style="margin:0">Đã hủy chuyến${t.cancel_reason ? `: ${esc(t.cancel_reason)}` : ''}. Vé đã bán được hoàn 100%, chờ duyệt hoàn tiền.</p>`;
+  if (['IN_TRANSIT', 'COMPLETED'].includes(t.status)) return '';
+  return `<div class="section-title">Bán vé và hủy chuyến</div>
+    <div class="row" style="margin-bottom:8px"><span class="grow">${t.sales_closed ? `<span class="pill warn">Đang ngừng bán trực tuyến</span>${t.sales_closed_reason ? ` <span class="muted">${esc(t.sales_closed_reason)}</span>` : ''}` : '<span class="pill ok">Đang bán trực tuyến</span>'}</span>
+      <button class="btn" type="button" id="salesToggle">${t.sales_closed ? 'Mở bán lại' : 'Ngừng bán trực tuyến'}</button></div>
+    <form class="row" id="cancelTripForm"><input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="reason" placeholder="Lý do hủy chuyến (khách nhận được)"><button class="btn danger" type="submit">Hủy chuyến</button></form>
+    <div class="error" id="cancelTripError"></div>`;
+}
+function bindSaleBlock(tripId, t) {
+  $('#salesToggle')?.addEventListener('click', async () => {
+    const r = await api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/sales`, { method: 'POST', idempotent: true, body: { open: Boolean(t.sales_closed) } });
+    toast(r.ok ? (t.sales_closed ? 'Đã mở bán lại' : 'Đã ngừng bán trực tuyến; vé đã bán giữ nguyên') : r.message);
+    if (r.ok) { loadBoard(); openTrip(tripId); }
+  });
+  let armed = false;
+  $('#cancelTripForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const reason = e.target.reason.value.trim();
+    const btn = e.target.querySelector('button');
+    if (reason.length < 5) { $('#cancelTripError').textContent = 'Cần lý do (từ 5 ký tự) để báo khách'; return; }
+    // Two clicks, no browser dialog: cancelling refunds every ticket of the departure.
+    if (!armed) { armed = true; btn.textContent = `Bấm lần nữa: hủy và hoàn tiền ${t.booked_seats || 0} vé`; $('#cancelTripError').textContent = ''; return; }
+    const r = await api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/cancel`, { method: 'POST', idempotent: true, body: { reason } });
+    if (!r.ok) { $('#cancelTripError').textContent = r.message; armed = false; btn.textContent = 'Hủy chuyến'; return; }
+    toast(`Đã hủy chuyến: ${r.data.cancelled_tickets} vé chờ hoàn ${vnd(r.data.refund_total_vnd)}, khách đã được báo`);
+    loadBoard(); openTrip(tripId);
+  });
+}
+
+// ---------- home pickup / drop-off review (MGR-033, D130) ----------
+const HOME_STATUS = { PENDING_REVIEW: ['Chờ duyệt', 'warn'], CONFIRMED: ['Đã xác nhận', 'ok'], REJECTED: ['Đã từ chối', 'danger'], WITHDRAWN: ['Khách đã hủy', ''] };
+$('#homeReqStatus').addEventListener('change', () => loadHomeRequests());
+async function loadHomeRequests() {
+  const status = $('#homeReqStatus').value;
+  const r = await api(`/api/v1/ops/home-requests?status=${status}`);
+  if (!r.ok) { $('#homeReqBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.status === 403 ? 'Chỉ giám đốc và điều độ duyệt được.' : r.message)}</p>`; return; }
+  const list = r.data || [];
+  if (status === 'PENDING_REVIEW') { $('#homeReqCount').textContent = list.length || ''; $('#homeReqCount').classList.toggle('hidden', !list.length); }
+  $('#homeReqInfo').textContent = `${list.length} yêu cầu`;
+  // Keep a reason being typed across the 5-second refresh.
+  if (document.activeElement?.closest?.('#homeReqBox')) return;
+  $('#homeReqBox').innerHTML = list.length ? `<table><thead><tr><th>Chuyến</th><th>Khách</th><th>Địa chỉ</th><th>Phụ phí</th><th>Trạng thái</th><th></th></tr></thead><tbody>${list.map(q => {
+    const [label, kind] = HOME_STATUS[q.status] || [q.status, ''];
+    const late = q.status === 'PENDING_REVIEW' && q.review_deadline && Date.parse(q.review_deadline) < Date.now();
+    return `<tr><td class="mono">${esc(hhmm(q.departure_time))} ${esc(dmy(q.departure_time))}<div class="muted" style="font-size:12px">${esc(q.route_name || q.trip_id)}</div></td>
+      <td>${esc(q.passenger_name || '')}<div class="muted mono" style="font-size:12px">${esc(q.pnr)} · ${esc(q.passenger_phone || '')} · ghế ${esc(q.seat_codes.join(', '))}</div></td>
+      <td><span class="pill ${q.side === 'PICKUP' ? 'info' : ''}">${q.side === 'PICKUP' ? 'Đón' : 'Trả'}</span> ${esc(q.address)}${q.note ? `<div class="muted" style="font-size:12px">${esc(q.note)}</div>` : ''}<div class="muted" style="font-size:12px">${esc(q.area_name)}${q.window_from ? ` · khung đón ${esc(hhmm(q.window_from))}–${esc(hhmm(q.window_to))}` : ''} · <a href="https://www.openstreetmap.org/?mlat=${esc(q.lat)}&mlon=${esc(q.lng)}#map=17/${esc(q.lat)}/${esc(q.lng)}" target="_blank" rel="noopener">xem bản đồ</a></div></td>
+      <td class="mono" style="white-space:nowrap">${esc(vnd(q.fee_vnd))}</td>
+      <td style="white-space:nowrap"><span class="pill ${kind}">${esc(label)}</span>${late ? ' <span class="pill danger">Quá hạn duyệt</span>' : ''}${q.reject_reason ? `<div class="muted" style="font-size:12px">${esc(q.reject_reason)}</div>` : ''}</td>
+      <td>${q.status === 'PENDING_REVIEW' ? `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><button class="btn primary" data-hr-ok="${esc(q.order_id)}" data-side="${esc(q.side)}">Xác nhận</button><input data-hr-reason="${esc(q.request_id)}" placeholder="Lý do từ chối" style="border:1px solid var(--line-strong);border-radius:8px;padding:6px 8px;width:160px"><button class="btn danger" data-hr-no="${esc(q.order_id)}" data-side="${esc(q.side)}" data-req="${esc(q.request_id)}">Từ chối</button></div>` : ''}</td></tr>`;
+  }).join('')}</tbody></table>` : '<p class="muted" style="padding:16px;margin:0">Không có yêu cầu.</p>';
+  const box = $('#homeReqBox');
+  box.querySelectorAll('button[data-hr-ok]').forEach(b => b.addEventListener('click', async () => {
+    const r2 = await api(`/api/v1/ops/home-requests/${encodeURIComponent(b.dataset.hrOk)}/${b.dataset.side}/confirm`, { method: 'POST', idempotent: true, body: {} });
+    toast(r2.ok ? 'Đã xác nhận, khách và tài xế đã nhận địa chỉ' : r2.message);
+    loadHomeRequests();
+  }));
+  box.querySelectorAll('button[data-hr-no]').forEach(b => b.addEventListener('click', async () => {
+    const reason = box.querySelector(`input[data-hr-reason="${CSS.escape(b.dataset.req)}"]`).value.trim();
+    if (reason.length < 5) { toast('Ghi lý do từ chối (từ 5 ký tự) để báo khách'); return; }
+    const r2 = await api(`/api/v1/ops/home-requests/${encodeURIComponent(b.dataset.hrNo)}/${b.dataset.side}/reject`, { method: 'POST', idempotent: true, body: { reason } });
+    toast(r2.ok ? 'Đã từ chối, phụ phí chờ hoàn cho khách' : r2.message);
+    document.activeElement?.blur?.();
+    loadHomeRequests();
+  }));
 }
 
 // Bus and driver of the trip: unavailable ones stay listed, greyed, with the reason.
@@ -511,6 +680,16 @@ async function loadService() {
   companyStopStyle = c.stop_style || 'STATIONS';
   const box = (name, modes) => modes.map(m => `<label class="row" style="margin:4px 0"><input type="checkbox" name="${name}" value="${m}" ${(c[name] || []).includes(m) ? 'checked' : ''}> ${esc(MODE_LABEL[m])}</label>`).join('');
   $('#serviceBox').innerHTML = `
+    <form class="card" id="endpointsForm" style="margin-bottom:16px">
+      <div class="section-title" style="margin-top:0">Điểm đi và điểm đến trên app khách</div>
+      <p class="muted" style="margin:0 0 8px">Khi cố định, app khách luôn hiện hai bến này và không cho chọn nơi khác.</p>
+      <label class="row" style="gap:6px;margin-bottom:8px"><input type="checkbox" name="fixed"> Cố định điểm đi và điểm đến</label>
+      <div class="row"><div class="field grow"><label>Điểm đi</label><select name="origin"></select></div><div class="field grow"><label>Điểm đến</label><select name="destination"></select></div></div>
+      <label class="row" style="gap:6px;margin-bottom:8px"><input type="checkbox" name="allow_swap"> Cho khách đổi chiều (chuyến đi, chuyến về)</label>
+      <div class="muted" id="endpointsInfo" style="margin-bottom:8px"></div>
+      <div class="error" id="endpointsError"></div>
+      <button class="btn primary" type="submit">Lưu điểm đi, điểm đến</button>
+    </form>
     <div class="card" style="margin-bottom:16px">
       <div class="section-title" style="margin-top:0">Theo từng tuyến</div>
       <p class="muted" style="margin:0 0 8px">"Theo nhà xe" dùng cấu hình chung bên dưới. Tuyến kiểu xe buýt vẽ lộ trình với mọi điểm đón trả dọc đường; tuyến chỉ tại bến chỉ cho chọn bến.</p>
@@ -535,7 +714,8 @@ async function loadService() {
           <div class="row"><div class="field grow"><label>Tên vùng</label><input name="name" required></div>
             <div class="field"><label>Loại</label><select name="kind"><option value="PICKUP">Đón</option><option value="DROPOFF">Trả</option></select></div></div>
           <div class="row"><div class="field grow"><label>Phụ phí (đ)</label><input name="fee" type="number" min="0" value="0"></div>
-            <div class="field grow"><label>Đặt trước tối thiểu (phút)</label><input name="lead" type="number" min="0" value="60"></div></div>
+            <div class="field grow"><label>Đặt trước tối thiểu (phút)</label><input name="lead" type="number" min="0" value="60"></div>
+            <div class="field grow"><label>Xác nhận địa chỉ</label><select name="confirmation"><option value="AUTO">Tự động</option><option value="MANUAL">Nhà xe duyệt</option></select></div></div>
           <div class="row"><div class="field grow"><label>Giờ phục vụ từ</label><input name="from" value="05:00"></div><div class="field grow"><label>đến</label><input name="to" value="21:00"></div></div>
           <div class="error" id="areaError"></div>
           <div class="row"><button class="btn primary" type="submit">Tạo vùng</button><button class="btn" type="button" id="areaClear">Xóa các điểm đã chấm</button><span class="muted" id="areaCount">0 điểm</span></div>
@@ -552,6 +732,32 @@ async function loadService() {
   });
   drawAreas(c.service_areas || []);
   loadRouteConfigs();
+  loadEndpoints();
+}
+// Fixed origin and destination of the passenger app (D135).
+async function loadEndpoints() {
+  const f = $('#endpointsForm'); if (!f) return;
+  const r = await api('/api/v1/ops/service-config/endpoints');
+  if (!r.ok) { $('#endpointsError').textContent = r.message; return; }
+  const { fixed_endpoints: fe, resolved, stations } = r.data;
+  const options = (selected) => stations.map(st => `<option value="${esc(st.station_id)}" ${st.station_id === selected ? 'selected' : ''}>${esc(st.city)} · ${esc(st.name)}</option>`).join('');
+  f.origin.innerHTML = options(fe?.origin_station_id);
+  f.destination.innerHTML = options(fe?.destination_station_id || stations[stations.length - 1]?.station_id);
+  f.fixed.checked = Boolean(fe);
+  f.allow_swap.checked = fe ? fe.allow_swap !== false : true;
+  const sync = () => { f.origin.disabled = f.destination.disabled = f.allow_swap.disabled = !f.fixed.checked; };
+  sync();
+  f.fixed.onchange = sync;
+  $('#endpointsInfo').innerHTML = resolved
+    ? `App đang hiện <b>${esc(resolved.origin.city)} → ${esc(resolved.destination.city)}</b>${resolved.allow_swap ? ', khách đổi chiều được' : ', chỉ một chiều'}. ${resolved.forward_available ? '' : '<span class="pill warn">Chưa có lịch chạy chiều đi</span> '}${resolved.allow_swap && !resolved.reverse_available ? '<span class="pill warn">Chưa có lịch chạy chiều về: khách đổi chiều sẽ không thấy chuyến. Thêm ở "Lịch chạy".</span>' : ''}`
+    : 'Khách đang tự chọn điểm đi và điểm đến.';
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = f.fixed.checked ? { origin_station_id: f.origin.value, destination_station_id: f.destination.value, allow_swap: f.allow_swap.checked } : { fixed_endpoints: null };
+    const r2 = await api('/api/v1/ops/service-config/endpoints', { method: 'PUT', body });
+    $('#endpointsError').textContent = r2.ok ? '' : r2.message;
+    if (r2.ok) { toast('Đã lưu. App khách nhận khi mở lại trang chủ'); loadEndpoints(); }
+  };
 }
 let companyStopStyle = 'STATIONS';
 const STOP_STYLE_LABEL = { ROUTE_LINE: 'Tuyến kiểu xe buýt (điểm đón trả dọc đường)', STATIONS: 'Chỉ tại bến' };
@@ -576,13 +782,14 @@ async function loadRouteConfigs() {
   if (!r.ok) { box.innerHTML = `<p class="error">${esc(r.message)}</p>`; return; }
   const modeBoxes = (route, name, modes) => `<label class="row" style="gap:6px"><input type="checkbox" data-inherit="${name}" ${route.own[name] ? '' : 'checked'}> Theo nhà xe</label>` +
     modes.map(m => `<label class="row" style="gap:6px"><input type="checkbox" name="${name}" value="${m}" ${route[name].includes(m) ? 'checked' : ''} ${route.own[name] ? '' : 'disabled'}> ${esc(MODE_LABEL[m])}</label>`).join('');
-  box.innerHTML = `<table><thead><tr><th>Tuyến</th><th>Kiểu điểm đón trả</th><th>Đón</th><th>Trả</th><th></th></tr></thead><tbody>${r.data.routes.map(rt => `
+  box.innerHTML = `<table><thead><tr><th>Tuyến</th><th>Kiểu điểm đón trả</th><th>Đón</th><th>Trả</th><th>Bán vé</th><th></th></tr></thead><tbody>${r.data.routes.map(rt => `
     <tr data-route="${esc(rt.route_id)}"><td>${esc(rt.name)}<div class="muted mono" style="font-size:12px">${esc(rt.route_id)}</div></td>
       <td><select name="stop_style"><option value="">Theo nhà xe (${esc(STOP_STYLE_LABEL[companyStopStyle])})</option>${Object.entries(STOP_STYLE_LABEL).map(([v, l]) => `<option value="${v}" ${rt.own.stop_style === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></td>
       <td>${modeBoxes(rt, 'pickup_modes', ['FIXED_STOP', 'HOME_PICKUP'])}</td>
       <td>${modeBoxes(rt, 'dropoff_modes', ['FIXED_LOCATION', 'HOME_DROPOFF'])}</td>
+      <td><label class="row" style="gap:6px" title="Vé đã bán giữ nguyên; muốn hủy chuyến của ngày nào thì hủy trên bảng điều độ"><input type="checkbox" name="sales_suspended" ${rt.own.sales_suspended ? 'checked' : ''}> Tạm ngừng bán</label></td>
       <td><button class="btn" data-save>Lưu</button></td></tr>
-    <tr data-stops-of="${esc(rt.route_id)}"><td colspan="5" style="padding-top:0">${stopsEditor(rt)}</td></tr>`).join('')}</tbody></table>`;
+    <tr data-stops-of="${esc(rt.route_id)}"><td colspan="6" style="padding-top:0">${stopsEditor(rt)}</td></tr>`).join('')}</tbody></table>`;
   box.querySelectorAll('button[data-save-stops]').forEach(b => b.addEventListener('click', async () => {
     const routeId = b.dataset.saveStops;
     const rows = [...box.querySelectorAll(`tr[data-stop][data-route-id="${routeId}"]`)];
@@ -608,7 +815,7 @@ async function loadRouteConfigs() {
     const row = b.closest('tr');
     if (!row.dataset.route) return;
     const modes = (name) => row.querySelector(`input[data-inherit="${name}"]`).checked ? null : [...row.querySelectorAll(`input[name="${name}"]:checked`)].map(i => i.value);
-    const body = { stop_style: row.querySelector('select[name="stop_style"]').value || null, pickup_modes: modes('pickup_modes'), dropoff_modes: modes('dropoff_modes') };
+    const body = { stop_style: row.querySelector('select[name="stop_style"]').value || null, pickup_modes: modes('pickup_modes'), dropoff_modes: modes('dropoff_modes'), sales_suspended: row.querySelector('input[name="sales_suspended"]').checked || null };
     const r2 = await api(`/api/v1/ops/service-config/routes/${encodeURIComponent(row.dataset.route)}`, { method: 'PUT', body });
     toast(r2.ok ? 'Đã lưu cấu hình tuyến' : r2.message);
     if (r2.ok) loadRouteConfigs();
@@ -624,10 +831,15 @@ function drawAreas(areas) {
     bounds.push(...poly.getLatLngs()[0]);
   });
   if (bounds.length) map.fitBounds(bounds, { padding: [20, 20] });
-  $('#areaList').innerHTML = areas.length ? `<table><thead><tr><th>Vùng</th><th>Loại</th><th>Phụ phí</th><th>Đặt trước</th><th>Giờ</th><th></th></tr></thead><tbody>${areas.map(a => `<tr><td>${esc(a.name)}</td><td>${a.kind === 'PICKUP' ? 'Đón' : 'Trả'}</td><td class="mono">${esc(vnd(a.fee_vnd))}</td><td class="mono">${esc(a.lead_time_minutes)}p</td><td class="mono">${esc(a.service_hours?.from)}–${esc(a.service_hours?.to)}</td><td><button class="btn ${a.active ? 'danger' : ''}" data-area="${esc(a.area_id)}" data-active="${a.active ? 1 : 0}">${a.active ? 'Tắt' : 'Bật'}</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">Chưa có vùng phục vụ.</p>';
+  $('#areaList').innerHTML = areas.length ? `<table><thead><tr><th>Vùng</th><th>Loại</th><th>Phụ phí</th><th>Đặt trước</th><th>Giờ</th><th>Xác nhận</th><th></th></tr></thead><tbody>${areas.map(a => `<tr><td>${esc(a.name)}</td><td>${a.kind === 'PICKUP' ? 'Đón' : 'Trả'}</td><td class="mono">${esc(vnd(a.fee_vnd))}</td><td class="mono">${esc(a.lead_time_minutes)}p</td><td class="mono">${esc(a.service_hours?.from)}–${esc(a.service_hours?.to)}</td><td><select data-area-confirm="${esc(a.area_id)}"><option value="AUTO" ${(a.confirmation || 'AUTO') === 'AUTO' ? 'selected' : ''}>Tự động</option><option value="MANUAL" ${a.confirmation === 'MANUAL' ? 'selected' : ''}>Nhà xe duyệt</option></select></td><td><button class="btn ${a.active ? 'danger' : ''}" data-area="${esc(a.area_id)}" data-active="${a.active ? 1 : 0}">${a.active ? 'Tắt' : 'Bật'}</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">Chưa có vùng phục vụ.</p>';
   document.querySelectorAll('#areaList button[data-area]').forEach(b => b.addEventListener('click', async () => {
     const r = await api(`/api/v1/ops/service-areas/${encodeURIComponent(b.dataset.area)}/${b.dataset.active === '1' ? 'deactivate' : 'activate'}`, { method: 'POST', idempotent: true });
     toast(r.ok ? 'Đã cập nhật vùng' : r.message); if (r.ok) loadService();
+  }));
+  document.querySelectorAll('#areaList select[data-area-confirm]').forEach(sel => sel.addEventListener('change', async () => {
+    const r = await api(`/api/v1/ops/service-areas/${encodeURIComponent(sel.dataset.areaConfirm)}`, { method: 'PATCH', body: { confirmation: sel.value } });
+    toast(r.ok ? (sel.value === 'MANUAL' ? 'Địa chỉ mới trong vùng sẽ chờ nhà xe duyệt' : 'Địa chỉ mới trong vùng được xác nhận ngay') : r.message);
+    if (!r.ok) loadService();
   }));
   draft.points = []; draft.layer = null;
   map.on('click', (e) => {
@@ -640,7 +852,7 @@ function drawAreas(areas) {
     e.preventDefault();
     const f = e.target;
     if (draft.points.length < 3) { $('#areaError').textContent = 'Chấm ít nhất 3 điểm trên bản đồ'; return; }
-    const r = await api('/api/v1/ops/service-areas', { method: 'POST', idempotent: true, body: { name: f.name.value.trim(), kind: f.kind.value, polygon: draft.points, fee_vnd: Number(f.fee.value), lead_time_minutes: Number(f.lead.value), service_hours: { from: f.from.value.trim(), to: f.to.value.trim() } } });
+    const r = await api('/api/v1/ops/service-areas', { method: 'POST', idempotent: true, body: { name: f.name.value.trim(), kind: f.kind.value, polygon: draft.points, fee_vnd: Number(f.fee.value), lead_time_minutes: Number(f.lead.value), service_hours: { from: f.from.value.trim(), to: f.to.value.trim() }, confirmation: f.confirmation.value } });
     $('#areaError').textContent = r.ok ? '' : r.message;
     if (r.ok) { toast('Đã tạo vùng phục vụ'); loadService(); }
   });
@@ -651,8 +863,279 @@ async function loadAudit() {
   const r = await api('/api/v1/ops/audit-logs');
   if (!r.ok) { $('#auditBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.message)}</p>`; return; }
   const list = r.data.audit_logs || [];
-  $('#auditBox').innerHTML = `<table><thead><tr><th>Thời điểm</th><th>Người làm</th><th>Thao tác</th><th>Đối tượng</th></tr></thead><tbody>${list.length ? list.map(x => `<tr><td class="mono">${esc(hhmm(x.at || x.timestamp))} ${esc(dmy(x.at || x.timestamp))}</td><td>${esc(x.actor || '')}<div class="muted" style="font-size:12px">${esc(x.role || '')}</div></td><td>${esc(x.action)}</td><td class="mono">${esc(x.resource || '')}</td></tr>`).join('') : '<tr><td colspan="4" class="muted">Chưa có thao tác.</td></tr>'}</tbody></table>`;
+  const chain = r.data.chain;
+  // The server chains each company's entries; a removed or edited entry breaks the chain.
+  const chainNote = !chain ? '' : chain.intact
+    ? `<p style="margin:0;padding:10px 16px;border-bottom:1px solid var(--line)"><span class="pill ok">Chuỗi nhật ký nguyên vẹn</span> <span class="muted">${esc(chain.checked)} dòng đã kiểm</span></p>`
+    : `<p style="margin:0;padding:10px 16px;border-bottom:1px solid var(--line)"><span class="pill danger">Chuỗi nhật ký bị đứt</span> <span class="muted">tại ${esc(chain.broken_at)}: có dòng bị xóa hoặc sửa ngoài hệ thống</span></p>`;
+  $('#auditBox').innerHTML = chainNote + `<table><thead><tr><th>Thời điểm</th><th>Người làm</th><th>Thao tác</th><th>Đối tượng</th></tr></thead><tbody>${list.length ? list.map(x => `<tr><td class="mono">${esc(hhmm(x.at || x.timestamp))} ${esc(dmy(x.at || x.timestamp))}</td><td>${esc(x.actor || '')}<div class="muted" style="font-size:12px">${esc(x.role || '')}</div></td><td>${esc(x.action)}</td><td class="mono">${esc(x.resource || '')}</td></tr>`).join('') : '<tr><td colspan="4" class="muted">Chưa có thao tác.</td></tr>'}</tbody></table>`;
 }
+
+// ---------- fixed timetable (MGR-032, D129) ----------
+const WEEKDAY_SHORT = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']; // 1 = Monday .. 7 = Sunday
+const schedules = { list: [], routes: [], editing: null, changeFrom: null };
+const dayChips = (days) => `<div class="days">${WEEKDAY_SHORT.map((d, i) => `<span class="${days.includes(i + 1) ? 'on' : ''}">${d}</span>`).join('')}</div>`;
+const ddmm = (day) => (day ? `${day.slice(8, 10)}/${day.slice(5, 7)}/${day.slice(0, 4)}` : '');
+const daysText = (days) => (days.length === 7 ? 'mọi ngày' : days.map(d => WEEKDAY_SHORT[d - 1]).join(', '));
+const SCHEDULE_STATUS = { ACTIVE: ['Đang chạy', 'ok'], UPCOMING: ['Sắp áp dụng', 'info'], STOPPED: ['Tạm ngừng', 'warn'], ENDED: ['Đã kết thúc', ''] };
+$('#sDays').innerHTML = WEEKDAY_SHORT.map((d, i) => `<label><input type="checkbox" name="day" value="${i + 1}" checked> ${d}</label>`).join('');
+// What the schedule will be once its coming changes apply (the last one wins).
+const lastSettings = (sc) => (sc.upcoming.length ? sc.upcoming[sc.upcoming.length - 1] : sc);
+function changeText(u) {
+  if (!u.active) return 'ngừng chạy';
+  return `${u.departure} · ${daysText(u.days_of_week)} · ${vnd(u.base_fare_vnd)}${u.valid_to ? ` · đến ${ddmm(u.valid_to)}` : ''}`;
+}
+async function loadSchedules() {
+  const r = await api('/api/v1/ops/schedules');
+  if (!r.ok) {
+    $('#schedulesBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.status === 403 ? 'Chỉ giám đốc và điều độ sửa được lịch chạy.' : r.message)}</p>`;
+    $('#scheduleForm').classList.add('hidden');
+    return;
+  }
+  $('#scheduleForm').classList.remove('hidden');
+  schedules.list = r.data.schedules || [];
+  schedules.routes = r.data.routes || [];
+  schedules.changeFrom = r.data.change_from;
+  const lastSale = new Date(Date.parse(`${r.data.change_from}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  const windowDays = Math.round((Date.parse(lastSale) - Date.parse(r.data.today)) / 86400000);
+  $('#scheduleRule').innerHTML = `<span class="pill info">Khách đặt trước tối đa ${esc(windowDays)} ngày, đến ${esc(ddmm(lastSale))}</span> Lịch mới và mọi thay đổi có hiệu lực từ <b>${esc(ddmm(r.data.change_from))}</b>; các ngày đang bán giữ nguyên giờ, giá và ngày chạy.`;
+  for (const id of ['sFrom', 'sEff', 'sTo']) $(`#${id}`).min = id === 'sTo' ? r.data.today : r.data.change_from;
+  $('#sExtraDate').min = r.data.today;
+  if (!schedules.editing) {
+    $('#sRoute').innerHTML = schedules.routes.map(rt => `<option value="${esc(rt.route_id)}">${esc(rt.name)}</option>`).join('');
+    if (!$('#sFrom').value) $('#sFrom').value = r.data.change_from;
+  }
+  let lastRoute = null;
+  $('#schedulesBox').innerHTML = schedules.list.length ? `<table><thead><tr><th>Giờ</th><th>Ngày chạy · áp dụng</th><th>Giá</th><th>Trạng thái</th><th></th></tr></thead><tbody>${schedules.list.map(sc => {
+    const routeName = schedules.routes.find(rt => rt.route_id === sc.route_id)?.name || sc.route_name;
+    const head = sc.route_id !== lastRoute ? `<tr><td colspan="5" style="background:#f8fafc;font-weight:700">${esc(routeName)}</td></tr>` : '';
+    lastRoute = sc.route_id;
+    const span = sc.status === 'UPCOMING' ? `Áp dụng từ ${esc(ddmm(sc.valid_from))}${sc.valid_to ? ` đến ${esc(ddmm(sc.valid_to))}` : ''}` : sc.valid_to ? `Chạy đến ${esc(ddmm(sc.valid_to))}` : 'Không hạn';
+    const [label, kind] = SCHEDULE_STATUS[sc.status] || [sc.status, ''];
+    if (sc.extra) return `${head}<tr><td style="min-width:150px"><span class="mono" style="font-size:16px;font-weight:700">${esc(sc.departure)}</span><div class="muted" style="font-size:12px">${esc(sc.duration_minutes)} phút</div></td><td><span class="pill info">Tăng cường</span> <span class="muted">ngày ${esc(ddmm(sc.valid_from))}</span></td><td class="mono" style="white-space:nowrap">${esc(vnd(sc.base_fare_vnd))}</td><td>${sc.status === 'ENDED' ? '<span class="pill">Đã chạy</span>' : '<span class="pill ok">Đang bán</span>'}</td><td class="muted" style="font-size:12px">Hủy trên bảng điều độ nếu không chạy</td></tr>`;
+    const changes = sc.upcoming.map(u => `<div style="font-size:12px;margin-top:6px;padding:4px 8px;border-radius:6px;background:var(--warn-soft);color:var(--warn)">Từ ${esc(ddmm(u.effective_from))}: ${esc(changeText(u))}${u.locked ? ' (đã mở bán)' : ''}</div>`).join('');
+    const cancellable = sc.upcoming.some(u => !u.locked);
+    const willRun = lastSettings(sc).active;
+    return `${head}<tr class="${schedules.editing === sc.schedule_id ? 'sel' : ''}"><td style="min-width:150px"><span class="mono" style="font-size:16px;font-weight:700">${esc(sc.departure)}</span><div class="muted" style="font-size:12px">${esc(sc.duration_minutes)} phút${sc.route_name !== routeName ? ` · ${esc(sc.route_name)}` : ''}</div><div class="muted" style="font-size:12px">${esc(sc.vehicle_title || sc.vehicle_type)}</div></td><td>${dayChips(sc.days_of_week)}<div class="muted" style="font-size:12px;margin-top:4px">${span}</div>${changes}</td><td class="mono" style="white-space:nowrap">${esc(vnd(sc.base_fare_vnd))}</td><td style="white-space:nowrap"><span class="pill ${kind}">${esc(label)}</span></td>
+      <td><div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap"><button class="btn" data-edit-sch="${esc(sc.schedule_id)}">Sửa</button><button class="btn" data-toggle-sch="${esc(sc.schedule_id)}" data-run="${willRun ? '1' : '0'}">${willRun ? 'Ngừng' : 'Chạy lại'}</button>${cancellable ? `<button class="btn danger" data-cancel-sch="${esc(sc.schedule_id)}">Hủy thay đổi</button>` : ''}</div></td></tr>`;
+  }).join('')}</tbody></table>` : '<p class="muted" style="padding:16px;margin:0">Nhà xe chưa có lịch chạy.</p>';
+  const box = $('#schedulesBox');
+  box.querySelectorAll('button[data-edit-sch]').forEach(b => b.addEventListener('click', () => editSchedule(b.dataset.editSch)));
+  box.querySelectorAll('button[data-toggle-sch]').forEach(b => b.addEventListener('click', async () => {
+    const r2 = await api(`/api/v1/ops/schedules/${encodeURIComponent(b.dataset.toggleSch)}`, { method: 'PATCH', body: { active: b.dataset.run !== '1' } });
+    toast(r2.ok ? `${b.dataset.run === '1' ? 'Ngừng chạy' : 'Chạy lại'} từ ${ddmm(r2.data.effective_from)}` : r2.message);
+    if (r2.ok) loadSchedules();
+  }));
+  box.querySelectorAll('button[data-cancel-sch]').forEach(b => b.addEventListener('click', async () => {
+    const r2 = await api(`/api/v1/ops/schedules/${encodeURIComponent(b.dataset.cancelSch)}/changes`, { method: 'DELETE' });
+    toast(r2.ok ? 'Đã hủy thay đổi chưa mở bán' : r2.message);
+    if (r2.ok) loadSchedules();
+  }));
+}
+function resetScheduleForm() {
+  schedules.editing = null;
+  const f = $('#scheduleForm');
+  f.reset();
+  f.querySelectorAll('input[name="day"]').forEach(c => { c.checked = true; });
+  f.valid_from.value = schedules.changeFrom || '';
+  $('#sFromField').classList.remove('hidden');
+  $('#sEffField').classList.add('hidden');
+  $('#sRoute').disabled = false;
+  $('#sExtraField').classList.remove('hidden');
+  toggleExtra();
+  $('#scheduleFormTitle').textContent = 'Thêm giờ chạy';
+  $('#scheduleSave').textContent = 'Thêm giờ chạy';
+  $('#scheduleCancel').classList.add('hidden');
+  $('#scheduleError').textContent = '';
+}
+function editSchedule(id) {
+  const sc = schedules.list.find(x => x.schedule_id === id);
+  if (!sc) return;
+  schedules.editing = id;
+  const f = $('#scheduleForm');
+  // The form starts from what the schedule will be after its coming changes.
+  const next = lastSettings(sc);
+  $('#sRoute').innerHTML = `<option value="${esc(sc.route_id)}">${esc(sc.route_name)}</option>`;
+  $('#sRoute').disabled = true; // a departure stays on its route; add a new one for another route
+  f.extra.checked = false; $('#sExtraField').classList.add('hidden'); toggleExtra();
+  f.departure.value = next.departure; f.duration_minutes.value = next.duration_minutes;
+  f.querySelectorAll('input[name="day"]').forEach(c => { c.checked = next.days_of_week.includes(Number(c.value)); });
+  f.valid_to.value = next.valid_to || '';
+  f.base_fare_vnd.value = next.base_fare_vnd; f.active.checked = next.active;
+  // Not on sale yet: its start may move. On sale: the change starts on a day not on sale.
+  const upcoming = sc.status === 'UPCOMING';
+  $('#sFromField').classList.toggle('hidden', !upcoming);
+  $('#sEffField').classList.toggle('hidden', upcoming);
+  f.valid_from.value = sc.valid_from || '';
+  f.effective_from.value = schedules.changeFrom;
+  $('#scheduleFormTitle').textContent = `Sửa giờ ${sc.departure} · ${sc.route_name}`;
+  $('#scheduleSave').textContent = 'Lưu thay đổi';
+  $('#scheduleCancel').classList.remove('hidden');
+  $('#scheduleError').textContent = '';
+  document.querySelectorAll('#schedulesBox tr').forEach(tr => tr.classList.toggle('sel', !!tr.querySelector(`button[data-edit-sch="${CSS.escape(id)}"]`)));
+}
+$('#scheduleCancel').addEventListener('click', () => { resetScheduleForm(); loadSchedules(); });
+// An extra departure runs on one day inside the booking window: no weekdays, no validity (D134).
+function toggleExtra() {
+  const on = $('#sExtra').checked;
+  $('#sExtraDateField').classList.toggle('hidden', !on);
+  $('#sRecurring').classList.toggle('hidden', on);
+}
+$('#sExtra').addEventListener('change', toggleExtra);
+$('#scheduleForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const days = [...f.querySelectorAll('input[name="day"]:checked')].map(c => Number(c.value));
+  if (!f.departure.value) { $('#scheduleError').textContent = 'Cần giờ xuất bến'; return; }
+  if (!schedules.editing && f.extra.checked) {
+    if (!f.extra_date.value) { $('#scheduleError').textContent = 'Chọn ngày chạy tăng cường'; return; }
+    const extra = { route_id: f.route_id.value, departure: f.departure.value, extra_date: f.extra_date.value };
+    if (f.duration_minutes.value) extra.duration_minutes = Number(f.duration_minutes.value);
+    if (f.base_fare_vnd.value) extra.base_fare_vnd = Number(f.base_fare_vnd.value);
+    const r = await api('/api/v1/ops/schedules', { method: 'POST', idempotent: true, body: extra });
+    $('#scheduleError').textContent = r.ok ? '' : r.message;
+    if (!r.ok) return;
+    toast(`Đã thêm chuyến tăng cường ${extra.departure} ngày ${ddmm(extra.extra_date)}, đang mở bán`);
+    resetScheduleForm(); loadSchedules();
+    return;
+  }
+  if (!days.length) { $('#scheduleError').textContent = 'Chọn ít nhất một ngày chạy'; return; }
+  const body = { departure: f.departure.value, days_of_week: days, valid_to: f.valid_to.value || null, active: f.active.checked };
+  if (f.duration_minutes.value) body.duration_minutes = Number(f.duration_minutes.value);
+  if (f.base_fare_vnd.value) body.base_fare_vnd = Number(f.base_fare_vnd.value);
+  const editing = schedules.editing;
+  const sc = schedules.list.find(x => x.schedule_id === editing);
+  if (!editing) { body.route_id = f.route_id.value; body.valid_from = f.valid_from.value || null; }
+  else if (sc?.status === 'UPCOMING') body.valid_from = f.valid_from.value || sc.valid_from;
+  else if (f.effective_from.value) body.effective_from = f.effective_from.value;
+  $('#scheduleSave').disabled = true;
+  const r = editing
+    ? await api(`/api/v1/ops/schedules/${encodeURIComponent(editing)}`, { method: 'PATCH', body })
+    : await api('/api/v1/ops/schedules', { method: 'POST', idempotent: true, body });
+  $('#scheduleSave').disabled = false;
+  $('#scheduleError').textContent = r.ok ? '' : r.message;
+  if (!r.ok) return;
+  toast(`${editing ? 'Đã lưu' : 'Đã thêm giờ chạy'}, có hiệu lực từ ${ddmm(r.data.effective_from || r.data.valid_from)}`);
+  resetScheduleForm();
+  loadSchedules();
+});
+
+// ---------- promotion banners (MGR-031) ----------
+const BANNER_STATUS = { LIVE: ['Đang chạy', 'ok'], SCHEDULED: ['Chưa bắt đầu', 'info'], ENDED: ['Đã kết thúc', ''], OFF: ['Đang tắt', 'warn'] };
+const banners = { list: [], editing: null };
+// datetime-local works in the office's wall clock; the server stores Vietnam time with its offset.
+const toLocalInput = (iso) => { if (!iso) return ''; const d = new Date(Date.parse(iso) + 7 * 3600000); return isNaN(d) ? '' : d.toISOString().slice(0, 16); };
+const fromLocalInput = (v) => (v ? `${v}:00+07:00` : null);
+const dmyhm = (iso) => iso ? `${dmy(iso)} ${hhmm(iso)}` : '';
+function slideHtml(b, mini = false) {
+  const bg = b.image_url ? `background-image:url('${esc(b.image_url)}')` : `background:linear-gradient(135deg, ${esc(b.background_color)}, color-mix(in srgb, ${esc(b.background_color)} 75%, #000))`;
+  if (mini) return `<div class="slide mini" style="${bg}"></div>`;
+  return `<div class="slide" style="${bg}">${b.image_url ? '' : `<b>${esc(b.title || 'Tiêu đề')}</b>${b.subtitle ? `<span>${esc(b.subtitle)}</span>` : ''}<i style="color:${esc(b.background_color)}">Xem chi tiết</i>`}</div>`;
+}
+async function loadBanners() {
+  const r = await api('/api/v1/ops/promo-banners');
+  if (!r.ok) {
+    $('#bannersBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.status === 403 ? 'Chỉ giám đốc nhà xe sửa được quảng cáo.' : r.message)}</p>`;
+    $('#bannerForm').classList.add('hidden');
+    return;
+  }
+  $('#bannerForm').classList.remove('hidden');
+  banners.list = r.data.banners || [];
+  const live = banners.list.filter(b => b.status === 'LIVE').length;
+  $('#bannerCount').textContent = `${live} đang chạy / ${banners.list.length} quảng cáo`;
+  $('#bannersBox').innerHTML = banners.list.length ? `<table><thead><tr><th></th><th>Quảng cáo</th><th>Trạng thái</th><th title="Thứ tự trên slider">TT</th><th></th></tr></thead><tbody>${banners.list.map(b => {
+    const [label, kind] = BANNER_STATUS[b.status] || [b.status, ''];
+    const when = b.starts_at || b.ends_at ? `${esc(dmyhm(b.starts_at) || 'ngay')} → ${esc(dmyhm(b.ends_at) || 'không hạn')}` : 'Không hạn';
+    return `<tr class="${banners.editing === b.banner_id ? 'sel' : ''}"><td>${slideHtml(b, true)}</td><td style="width:100%"><b>${esc(b.title)}</b>${b.subtitle ? `<div class="muted" style="font-size:12px">${esc(b.subtitle)}</div>` : ''}<div class="muted" style="font-size:12px">${when}</div></td><td><span class="pill ${kind}">${esc(label)}</span></td><td class="mono">${esc(b.sort_order)}</td>
+      <td><div class="acts"><button class="btn" data-edit="${esc(b.banner_id)}">Sửa</button> <button class="btn" data-toggle="${esc(b.banner_id)}" data-active="${b.active ? '1' : '0'}">${b.active ? 'Tắt' : 'Bật'}</button> <button class="btn danger" data-del="${esc(b.banner_id)}">Xóa</button></div></td></tr>`;
+  }).join('')}</tbody></table>` : '<p class="muted" style="padding:16px;margin:0">Chưa có quảng cáo. App khách đang ẩn slider.</p>';
+  const box = $('#bannersBox');
+  box.querySelectorAll('button[data-edit]').forEach(b => b.addEventListener('click', () => editBanner(b.dataset.edit)));
+  box.querySelectorAll('button[data-toggle]').forEach(b => b.addEventListener('click', async () => {
+    const r2 = await api(`/api/v1/ops/promo-banners/${encodeURIComponent(b.dataset.toggle)}/${b.dataset.active === '1' ? 'deactivate' : 'activate'}`, { method: 'POST', idempotent: true });
+    toast(r2.ok ? (b.dataset.active === '1' ? 'Đã tắt quảng cáo' : 'Đã bật quảng cáo') : r2.message);
+    if (r2.ok) loadBanners();
+  }));
+  // Deleting cannot be undone: the first click arms the button, a second one within 4 s deletes.
+  box.querySelectorAll('button[data-del]').forEach(b => b.addEventListener('click', async () => {
+    if (!b.dataset.armed) {
+      b.dataset.armed = '1'; b.textContent = 'Xóa hẳn?';
+      setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = 'Xóa'; } }, 4000);
+      return;
+    }
+    const r2 = await api(`/api/v1/ops/promo-banners/${encodeURIComponent(b.dataset.del)}`, { method: 'DELETE' });
+    toast(r2.ok ? 'Đã xóa quảng cáo' : r2.message);
+    if (r2.ok) { if (banners.editing === b.dataset.del) resetBannerForm(); loadBanners(); }
+  }));
+  if (!banners.editing) {
+    // A new banner goes last unless the director picks another place.
+    if (!$('#bannerForm').title.value) $('#bannerForm').sort_order.value = String(Math.max(0, ...banners.list.map(b => b.sort_order)) + 1);
+    previewBanner();
+  }
+}
+function resetBannerForm() {
+  banners.editing = null;
+  const f = $('#bannerForm');
+  f.reset();
+  f.background_color.value = '#2563eb';
+  f.sort_order.value = String(Math.max(0, ...banners.list.map(b => b.sort_order)) + 1);
+  $('#bannerFormTitle').textContent = 'Thêm quảng cáo';
+  $('#bannerSave').textContent = 'Tạo quảng cáo';
+  $('#bannerCancel').classList.add('hidden');
+  f.active.closest('label').classList.remove('hidden');
+  $('#bannerError').textContent = '';
+  previewBanner();
+}
+function editBanner(id) {
+  const b = banners.list.find(x => x.banner_id === id);
+  if (!b) return;
+  banners.editing = id;
+  const f = $('#bannerForm');
+  f.title.value = b.title; f.subtitle.value = b.subtitle || ''; f.background_color.value = b.background_color.toLowerCase();
+  f.image_url.value = b.image_url || ''; f.sort_order.value = b.sort_order;
+  f.starts_at.value = toLocalInput(b.starts_at); f.ends_at.value = toLocalInput(b.ends_at); f.content_html.value = b.content_html;
+  $('#bannerFormTitle').textContent = 'Sửa quảng cáo';
+  $('#bannerSave').textContent = 'Lưu thay đổi';
+  $('#bannerCancel').classList.remove('hidden');
+  f.active.closest('label').classList.add('hidden'); // on / off has its own button in the list
+  $('#bannerError').textContent = '';
+  document.querySelectorAll('#bannersBox tr').forEach(tr => tr.classList.toggle('sel', !!tr.querySelector(`button[data-edit="${CSS.escape(id)}"]`)));
+  previewBanner();
+}
+function bannerBody() {
+  const f = $('#bannerForm');
+  return {
+    title: f.title.value.trim(), subtitle: f.subtitle.value.trim(), background_color: f.background_color.value.toUpperCase(),
+    image_url: f.image_url.value.trim() || null, sort_order: Number(f.sort_order.value), starts_at: fromLocalInput(f.starts_at.value),
+    ends_at: fromLocalInput(f.ends_at.value), content_html: f.content_html.value
+  };
+}
+// The detail page preview runs in a sandboxed frame (no scripts), styled like the app's card.
+function previewBanner() {
+  const b = bannerBody();
+  $('#bannerSlidePreview').innerHTML = slideHtml(b);
+  $('#bannerHtmlPreview').srcdoc = `<!doctype html><meta charset="utf-8"><style>body{font:15px/1.5 system-ui,sans-serif;color:#0f172a;margin:16px}img{max-width:100%}h2{font-size:20px;margin:0 0 8px}</style>${b.content_html || '<p style="color:#94a3b8">Nội dung trang chi tiết hiện ở đây.</p>'}`;
+}
+$('#bannerForm').addEventListener('input', previewBanner);
+$('#bannerNew').addEventListener('click', () => { resetBannerForm(); loadBanners(); $('#bTitle').focus(); });
+$('#bannerCancel').addEventListener('click', () => { resetBannerForm(); loadBanners(); });
+$('#bannerForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = bannerBody();
+  if (!body.title) { $('#bannerError').textContent = 'Cần tiêu đề'; return; }
+  if (!body.content_html.trim()) { $('#bannerError').textContent = 'Cần nội dung trang chi tiết'; return; }
+  $('#bannerSave').disabled = true;
+  const editing = banners.editing;
+  const r = editing
+    ? await api(`/api/v1/ops/promo-banners/${encodeURIComponent(editing)}`, { method: 'PATCH', body })
+    : await api('/api/v1/ops/promo-banners', { method: 'POST', idempotent: true, body: { ...body, active: e.target.active.checked } });
+  $('#bannerSave').disabled = false;
+  $('#bannerError').textContent = r.ok ? '' : r.message;
+  if (!r.ok) return;
+  toast(editing ? 'Đã lưu quảng cáo' : 'Đã tạo quảng cáo');
+  resetBannerForm();
+  loadBanners();
+});
 
 // ---------- platform admin ----------
 async function loadPlatformOperatorPicker() {

@@ -103,6 +103,21 @@ describe('The office gives a trip its bus and driver (MGR-017)', () => {
     assert.strictEqual(services.driverService.activeTrips.get(tripId).vehicle_plate, '29B-444.11');
   });
 
+  it('a ticket sold before the run has a driver reaches the driver once the office assigns one', async () => {
+    // A day of its own, away from the clashes the other cases set up.
+    const tripId = id('trp_hn_th_02', addDays(day, 4));
+    assert.strictEqual(services.driverService.activeTrips.get(tripId)?.driver_id ?? null, null);
+    const hold = await request(`/api/v1/passenger/trips/${tripId}/hold-seats`, { method: 'POST', token: pax, body: { seatCodes: ['B05'] } });
+    assert.strictEqual(hold.status, 200, JSON.stringify(hold.body));
+    const order = await request('/api/v1/passenger/bookings/create', { method: 'POST', token: pax, body: { tripId, holdId: hold.body.data.hold_id, seatCodes: ['B05'], payer: { full_name: 'Vũ Thị Sớm', phone: '0906667788' }, passengers: [{ seat_code: 'B05', full_name: 'Vũ Thị Sớm', phone: '0906667788' }] } });
+    services.paymentService.settlePayment(order.body.data.payment.order_id);
+
+    const first = await assign(tripId, { vehicleId: 'veh_04', driverId: 'drv_9912b' });
+    assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+    await assign(tripId, { vehicleId: 'veh_04', driverId: 'drv_9912b' });
+    assert.deepStrictEqual(services.driverService.activeTrips.get(tripId).manifest.map(p => p.seat_code), ['B05'], 'once, not twice');
+  });
+
   it('a trip under way cannot be changed; only directors and dispatchers assign', async () => {
     services.managerService.findTrip(id('trp_hn_th_02')).status = 'IN_TRANSIT';
     const running = await assign(id('trp_hn_th_02'), { vehicleId: 'veh_03', driverId: 'drv_9912b' });

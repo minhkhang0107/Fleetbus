@@ -14,5 +14,6 @@
   },
   "keywords": ["fleetbus", "passenger", "driver", "manager", "operations", "telemetry", "realtime", "vietqr", "nodejs", "api-gateway"],
   "author": "FleetBus Engineering",
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "engines": { "node": ">=22.5" }
 }

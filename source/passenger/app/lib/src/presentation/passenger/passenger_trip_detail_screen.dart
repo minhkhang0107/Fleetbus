@@ -34,22 +34,7 @@ class PassengerTripDetailScreen extends StatelessWidget {
     final note = Text('Ghế trống ở bước sau tính theo đoạn bạn đi. Giá vé hiện là giá chung của chuyến, dù bạn đi đoạn nào.', style: sans(size: 13, color: PTokens.muted, height: 1.5));
     final Widget body;
     if (trip.routeLine) {
-      final map = _RouteMap(trip: trip, pickupId: store.pickup, dropoffId: store.dropoff);
-      body = PSplit(leftFlex: 5, rightFlex: 4, left: [
-        Text('Lộ trình và điểm đón trả', style: sans(size: 15, weight: FontWeight.w600)),
-        gap(8),
-        const _RouteLinePicker(),
-        if (!pWide(context)) ...[gap(12), map],
-      ], right: [
-        if (pWide(context)) ...[map, gap(16)],
-        if (homeOptionsPickup.isNotEmpty || homeOptionsDropoff.isNotEmpty) ...[
-          Text('Hoặc đón trả tận nhà', style: sans(size: 15, weight: FontWeight.w600)),
-          gap(8),
-          ...homeOptionsPickup,
-          ...homeOptionsDropoff,
-        ],
-        note,
-      ]);
+      body = _RouteLineBody(homeOptions: [...homeOptionsPickup, ...homeOptionsDropoff], note: note);
     } else {
       // Bus stations only: no route drawing, the stations and the home options.
       final stations = store.stops().where((s) => s.station).toList();
@@ -81,7 +66,7 @@ class PassengerTripDetailScreen extends StatelessWidget {
       bottomNavigationBar: BottomAction(children: [
         Expanded(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${store.homePickup != null ? 'Tận nhà' : '${p.short} ${p.time}'} → ${store.homeDropoff != null ? 'Tận nhà' : '${d.short} ${d.time}'}', style: sans(size: 12, color: PTokens.muted)),
+            Text('${store.homePickup != null ? 'Tận nhà' : '${p.short} ${p.timeLabel}'} → ${store.homeDropoff != null ? 'Tận nhà' : '${d.short} ${d.timeLabel}'}', style: sans(size: 12, color: PTokens.muted)),
             Text(store.homeFees > 0 ? '${vnd(trip.price)} + ${vnd(store.homeFees)}' : vnd(trip.price), style: mono(size: 17, weight: FontWeight.w700)),
           ]),
         ),
@@ -91,18 +76,80 @@ class PassengerTripDetailScreen extends StatelessWidget {
   }
 }
 
-/// The route as a bus line: one node per stop on a vertical line, with its planned time, whether it is a
-/// station or a roadside point, and what it serves. The passenger picks where to get on, then where to get
-/// off; the ride between them is highlighted.
-class _RouteLinePicker extends StatefulWidget {
-  const _RouteLinePicker();
+/// A ROUTE_LINE trip: home pickup / drop-off first (offered at the first and last city only, D118), then the
+/// route as a bus line, then the map. The map follows the stop just chosen.
+class _RouteLineBody extends StatefulWidget {
+  const _RouteLineBody({required this.homeOptions, required this.note});
+  final List<Widget> homeOptions;
+  final Widget note;
 
   @override
-  State<_RouteLinePicker> createState() => _RouteLinePickerState();
+  State<_RouteLineBody> createState() => _RouteLineBodyState();
 }
 
-class _RouteLinePickerState extends State<_RouteLinePicker> {
-  bool _pickingDropoff = false;
+class _RouteLineBodyState extends State<_RouteLineBody> {
+  String? _focus;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = PassengerScope.of(context);
+    final trip = store.trip!;
+    final map = _RouteMap(trip: trip, pickupId: store.pickup, dropoffId: store.dropoff, focusId: _focus);
+    final anyEstimate = trip.stops.any((s) => s.estimated);
+    return PSplit(leftFlex: 5, rightFlex: 4, left: [
+      if (widget.homeOptions.isNotEmpty) ...[
+        Text('Đón trả tận nhà', style: sans(size: 15, weight: FontWeight.w600)),
+        gap(4),
+        Text('Đón ở ${trip.stops.firstWhere((s) => s.pickup, orElse: () => trip.stops.first).city}, trả ở ${trip.stops.lastWhere((s) => s.dropoff, orElse: () => trip.stops.last).city}. Hoặc chọn điểm dừng bên dưới.', style: sans(size: 13, color: PTokens.muted)),
+        gap(8),
+        ...widget.homeOptions,
+        gap(8),
+      ],
+      Text('Lộ trình và điểm đón trả', style: sans(size: 15, weight: FontWeight.w600)),
+      gap(4),
+      Text('Chạm vào một điểm để lên hoặc xuống xe ở đó.', style: sans(size: 13, color: PTokens.muted)),
+      gap(8),
+      _RouteLinePicker(onChosen: (id) => setState(() => _focus = id)),
+      gap(8),
+      _Advice(estimated: anyEstimate),
+      if (!pWide(context)) ...[gap(12), map],
+    ], right: [
+      if (pWide(context)) ...[map, gap(16)],
+      widget.note,
+    ]);
+  }
+}
+
+/// How to be at a stop: on time, and that the times are estimates when the company did not set them.
+class _Advice extends StatelessWidget {
+  const _Advice({required this.estimated});
+  final bool estimated;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: PTokens.primarySoft, borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Icon(Icons.schedule, size: 18, color: PTokens.primaryDark),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            '${estimated ? 'Giờ có dấu ~ là giờ ước tính, có thể lệch do đường xá. ' : ''}Có mặt ở điểm đón trước 10 phút; xe chỉ dừng ngắn ở điểm dọc đường.',
+            style: sans(size: 13, color: PTokens.primaryDark, height: 1.4),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+/// The route as a bus line: one node per stop with its time, whether it is a station or a roadside point, and
+/// what it serves. A tap picks what the stop allows: a pickup-only stop is the boarding point, a drop-off-only
+/// stop (after the boarding point) is the alighting point; a stop that serves both asks when both make sense.
+class _RouteLinePicker extends StatelessWidget {
+  const _RouteLinePicker({required this.onChosen});
+  final ValueChanged<String> onChosen;
 
   @override
   Widget build(BuildContext context) {
@@ -111,20 +158,44 @@ class _RouteLinePickerState extends State<_RouteLinePicker> {
     final p = stops.indexWhere((s) => s.id == store.pickup);
     final d = stops.indexWhere((s) => s.id == store.dropoff);
     final lastDrop = stops.lastIndexWhere((s) => s.dropoff);
-    bool enabled(int i) => _pickingDropoff ? stops[i].dropoff && i > p : stops[i].pickup && i < lastDrop;
+    bool canBoard(int i) => stops[i].pickup && i < lastDrop;
+    bool canAlight(int i) => stops[i].dropoff && i > p;
+
+    void board(int i) {
+      store.setPickup(stops[i].id);
+      store.rememberRide();
+      onChosen(stops[i].id);
+    }
+
+    void alight(int i) {
+      store.setDropoff(stops[i].id);
+      store.rememberRide();
+      onChosen(stops[i].id);
+    }
+
+    Future<void> choose(int i) async {
+      final up = canBoard(i) && i != p;
+      final down = canAlight(i) && i != d;
+      if (up && down) {
+        final pickUp = await showAppSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text(stops[i].name, style: sans(size: 18, weight: FontWeight.w700)),
+              gap(4),
+              Text('${stops[i].timeLabel} · ${stops[i].station ? 'Bến xe' : 'Điểm dọc đường'}', style: sans(size: 13, color: PTokens.muted)),
+              gap(14),
+              PrimaryButton(label: 'Lên xe ở đây', icon: Icons.trip_origin, onPressed: () => Navigator.of(ctx).pop(true)),
+              gap(8),
+              GhostButton(label: 'Xuống xe ở đây', onPressed: () => Navigator.of(ctx).pop(false)),
+            ]));
+        if (pickUp == null) return;
+        pickUp ? board(i) : alight(i);
+      } else if (up) {
+        board(i);
+      } else if (down) {
+        alight(i);
+      }
+    }
+
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SegmentedButton<bool>(
-        segments: [
-          ButtonSegment(value: false, label: Text('Điểm lên: ${store.homePickup != null ? 'tận nhà' : store.stop(store.pickup).short}', overflow: TextOverflow.ellipsis), icon: const Icon(Icons.trip_origin, size: 18)),
-          ButtonSegment(value: true, label: Text('Điểm xuống: ${store.homeDropoff != null ? 'tận nhà' : store.stop(store.dropoff).short}', overflow: TextOverflow.ellipsis), icon: const Icon(Icons.place, size: 18)),
-        ],
-        selected: {_pickingDropoff},
-        showSelectedIcon: false,
-        onSelectionChanged: (v) => setState(() => _pickingDropoff = v.first),
-      ),
-      gap(6),
-      Text(_pickingDropoff ? 'Chạm vào điểm bạn xuống xe' : 'Chạm vào điểm bạn lên xe', style: sans(size: 13, color: PTokens.muted)),
-      gap(8),
       for (var i = 0; i < stops.length; i++)
         _LineStop(
           stop: stops[i],
@@ -134,15 +205,8 @@ class _RouteLinePickerState extends State<_RouteLinePicker> {
           rideBelow: i >= p && i < d,
           role: i == p ? (store.homePickup != null ? 'Lên xe · đón tận nhà' : 'Lên xe') : (i == d ? (store.homeDropoff != null ? 'Xuống xe · trả tận nhà' : 'Xuống xe') : null),
           pickupNode: i == p,
-          enabled: enabled(i),
-          onTap: () {
-            if (_pickingDropoff) {
-              store.setDropoff(stops[i].id);
-            } else {
-              store.setPickup(stops[i].id);
-              setState(() => _pickingDropoff = true);
-            }
-          },
+          enabled: canBoard(i) || canAlight(i),
+          onTap: () => choose(i),
         ),
     ]);
   }
@@ -169,7 +233,7 @@ class _LineStop extends StatelessWidget {
       button: enabled,
       enabled: enabled,
       selected: role != null,
-      label: '${stop.name}, ${stop.time}, ${stop.station ? 'bến xe' : 'điểm dọc đường'}, $serves${role != null ? ', $role' : ''}',
+      label: '${stop.name}, ${stop.estimated ? 'khoảng ' : ''}${stop.time}, ${stop.station ? 'bến xe' : 'điểm dọc đường'}, $serves${role != null ? ', $role' : ''}',
       excludeSemantics: true,
       child: InkWell(
         onTap: enabled ? onTap : null,
@@ -177,7 +241,7 @@ class _LineStop extends StatelessWidget {
         child: SizedBox(
           height: 64,
           child: Row(children: [
-            SizedBox(width: 52, child: Text(stop.time, style: mono(size: 14, weight: FontWeight.w600, color: enabled || role != null ? PTokens.ink : PTokens.lineStrong))),
+            SizedBox(width: 56, child: Text(stop.timeLabel, style: mono(size: 14, weight: FontWeight.w600, color: enabled || role != null ? PTokens.ink : PTokens.lineStrong))),
             SizedBox(
               width: 28,
               child: Column(children: [
@@ -215,10 +279,11 @@ class _LineStop extends StatelessWidget {
 
 /// The route on the map with its stops; the stops of the chosen ride are listed first.
 class _RouteMap extends StatelessWidget {
-  const _RouteMap({required this.trip, required this.pickupId, required this.dropoffId});
+  const _RouteMap({required this.trip, required this.pickupId, required this.dropoffId, this.focusId});
   final Trip trip;
   final String pickupId;
   final String dropoffId;
+  final String? focusId;
 
   @override
   Widget build(BuildContext context) {
@@ -230,7 +295,7 @@ class _RouteMap extends StatelessWidget {
     if (stops.length < 2 && trip.routeShape.length < 2) return const SizedBox.shrink();
     return ClipRRect(
       borderRadius: BorderRadius.circular(PTokens.radius),
-      child: SizedBox(height: pWide(context) ? 360 : 260, child: PassengerRouteMap(route: trip.routeShape, stops: stops)),
+      child: SizedBox(height: pWide(context) ? 360 : 260, child: PassengerRouteMap(route: trip.routeShape, stops: stops, pickupStopId: pickupId, dropoffStopId: dropoffId, focusStopId: focusId)),
     );
   }
 }
@@ -270,7 +335,7 @@ class _StopOption extends StatelessWidget {
                   Text(stop.note, style: sans(size: 12, color: PTokens.muted)),
                 ]),
               ),
-              Text(stop.time, style: mono(size: 14)),
+              Text(stop.timeLabel, style: mono(size: 14)),
             ]),
           ),
         ),
@@ -310,7 +375,7 @@ class _HomeOption extends StatelessWidget {
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(title, style: sans(size: 15, weight: FontWeight.w600)),
-                Text(selected ? home!.address : 'Chọn địa chỉ trong vùng nhà xe phục vụ', style: sans(size: 12, color: PTokens.muted), maxLines: 2, overflow: TextOverflow.ellipsis),
+                Text(selected ? home!.address : (PassengerScope.of(context).homeServiceSummary(pickupSide: pickupSide) ?? 'Chọn địa chỉ trong vùng nhà xe phục vụ'), style: sans(size: 12, color: PTokens.muted), maxLines: 2, overflow: TextOverflow.ellipsis),
               ]),
             ),
             if (selected) Text('+${vnd(home!.feeVnd)}', style: mono(size: 14)) else const Icon(Icons.chevron_right, color: PTokens.muted),

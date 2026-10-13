@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:app/src/presentation/passenger/passenger_live_radar_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_route_map.dart';
 import 'package:app/src/presentation/passenger/passenger_store.dart';
+import 'package:app/src/presentation/passenger/passenger_wallet_screen.dart';
 import 'package:data/src/service/passenger_api_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -50,8 +53,12 @@ void main() {
     await tester.pumpAndSettle();
 
     // Finds the "Điểm đón" label and stop name
-    expect(find.text('Điểm đón'), findsOneWidget);
-    expect(find.text('Giáp Bát'), findsOneWidget);
+    expect(find.textContaining('Điểm đón · Giáp Bát'), findsOneWidget);
+
+    // The bus circle and the pickup ring sit exactly on their coordinates; the labels hang outside them.
+    final state = tester.state<PassengerRouteMapState>(find.byType(PassengerRouteMap));
+    final onScreen = tester.getTopLeft(find.byType(FlutterMap)) + state.mapController.camera.latLngToScreenOffset(const LatLng(20.98, 105.84));
+    expect((tester.getCenter(find.byIcon(Icons.directions_bus)) - onScreen).distance, lessThan(1.5), reason: 'the bus icon is drawn on the bus position, not above or below it');
 
     // Finds the attribution text
     expect(find.textContaining('OpenStreetMap contributors'), findsOneWidget);
@@ -123,8 +130,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Điểm trả'), findsOneWidget);
-    expect(find.text('Ninh Bình'), findsOneWidget);
+    expect(find.textContaining('Điểm trả · Ninh Bình'), findsOneWidget);
   });
 
   testWidgets('pumps map with tracking: null, then rebuilds with route and camera moves', (tester) async {
@@ -241,6 +247,148 @@ void main() {
     expect(find.text('Điểm trả'), findsOneWidget);
     // AND shows hud text below the metrics
     expect(find.text('Xe đang di chuyển đến điểm trả (Cách 63 km, ~61 phút)'), findsOneWidget);
+  });
+
+  testWidgets('the tracking screen shows the bus pushed by the server and asks again only when the stream drops', (tester) async {
+    final pushed = StreamController<List<int>>();
+    var asked = 0;
+    final client = MockClient.streaming((req, _) async {
+      if (req.url.path.endsWith('/tracking/stream')) {
+        expect(req.headers['Accept'], 'text/event-stream');
+        expect(req.url.queryParameters['ticket_id'], 'tkt_01');
+        return http.StreamedResponse(pushed.stream, 200, headers: {'content-type': 'text/event-stream; charset=utf-8'});
+      }
+      asked++;
+      final body = jsonEncode({'status': 'success', 'data': {'signal_status': 'LIVE', 'hud_status_text': 'Ảnh chụp ban đầu'}});
+      return http.StreamedResponse(Stream.value(utf8.encode(body)), 200, headers: {'content-type': 'application/json; charset=utf-8'});
+    });
+    final store = PassengerStore(api: PassengerApiClientService(baseUrl: 'http://test', client: client));
+    final ticket = Ticket.fromJson({
+      'ticket_id': 'tkt_01',
+      'pnr': 'BG-0001',
+      'trip_id': 'trp_01',
+      'route_name': 'Hà Nội — Thanh Hóa',
+      'departure_time': '2026-08-28T07:00:00+07:00',
+      'seat_code': 'A01',
+      'fare_vnd': 220000,
+      'passenger_name': 'Nguyễn An',
+      'pickup_stop': 'Bến xe Giáp Bát',
+      'dropoff_stop': 'Bến xe Phía Bắc',
+      'status': 'BOARDED',
+    });
+    await tester.pumpWidget(MaterialApp(home: PassengerScope(store: store, child: PassengerLiveRadarScreen(ticket: ticket))));
+    await tester.pump();
+    expect(asked, 1);
+
+    final event = jsonEncode({'signal_status': 'LIVE', 'hud_status_text': 'Xe đang dừng ở Bến xe Ninh Bình'});
+    pushed.add(utf8.encode('retry: 5000\n\nevent: tracking\ndata: $event\n\n'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Xe đang dừng ở Bến xe Ninh Bình'), findsOneWidget);
+
+    // While the stream is open the screen does not ask every 10 s.
+    await tester.pump(const Duration(seconds: 25));
+    expect(asked, 1);
+
+    // The stream drops: the screen asks again every 10 s until it reconnects.
+    await pushed.close();
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 10));
+    expect(asked, 2);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  Future<void> pumpTracking(WidgetTester tester, Map<String, dynamic> data) async {
+    final client = MockClient((req) async => http.Response(
+          jsonEncode({'status': 'success', 'data': data}),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        ));
+    final store = PassengerStore(api: PassengerApiClientService(baseUrl: 'http://test', client: client));
+    final ticket = Ticket.fromJson({
+      'ticket_id': 'tkt_02',
+      'pnr': 'BG-0002',
+      'trip_id': 'trp_01',
+      'route_name': 'Hà Nội — Thanh Hóa',
+      'departure_time': '2026-08-28T07:00:00+07:00',
+      'seat_code': 'A02',
+      'fare_vnd': 220000,
+      'passenger_name': 'Nguyễn An',
+      'pickup_stop': 'Bến xe Ninh Bình',
+      'dropoff_stop': 'Bến xe Phía Bắc',
+      'status': 'ISSUED',
+    });
+    await tester.pumpWidget(MaterialApp(home: PassengerScope(store: store, child: PassengerLiveRadarScreen(ticket: ticket))));
+    await tester.pump();
+    await tester.pump();
+  }
+
+  testWidgets('the passenger sees where the bus is, when it will be at the stop, and how late (D143)', (tester) async {
+    await pumpTracking(tester, {
+      'signal_status': 'LIVE',
+      'has_position': true,
+      'bus_position': {'lat': 20.54, 'lng': 105.91, 'speed_kmh': 60, 'bearing_deg': 180},
+      'target_stop': {'stop_id': 'stp_nb', 'name': 'Bến xe Ninh Bình', 'lat': 20.25, 'lng': 105.97, 'kind': 'PICKUP'},
+      'eta_minutes': 32,
+      'distance_meters': 31000,
+      'target_planned_time': '2026-08-28T01:18:00.000Z',
+      'expected_at': '2026-08-28T01:26:00.000Z',
+      'late_minutes': 8,
+      'bus_location': {'at_stop': null, 'last_passed_stop': 'Nút giao Phủ Lý (cao tốc)', 'next_stop': 'Bến xe Ninh Bình', 'stops_before_target': 0},
+    });
+    expect(find.text('Xe vừa qua Nút giao Phủ Lý (cao tốc), sắp tới Ninh Bình'), findsOneWidget);
+    expect(find.text('Trạm kế tiếp là trạm của bạn'), findsOneWidget);
+    expect(find.text('~08:26'), findsOneWidget);
+    expect(find.text('32 phút'), findsOneWidget);
+    expect(find.text('Đến điểm đón · 31.0 km'), findsOneWidget);
+    expect(find.text('Trễ khoảng 8 phút so với dự kiến 08:18'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a home pickup before the driver sets off shows the promised window at the address (D143)', (tester) async {
+    await pumpTracking(tester, {
+      'signal_status': 'NO_SIGNAL',
+      'has_position': false,
+      'target_stop': {'stop_id': null, 'name': '12 Hàng Bài, Hoàn Kiếm', 'lat': 21.0245, 'lng': 105.8523, 'kind': 'HOME_PICKUP'},
+      'target_planned_time': '2026-08-27T22:45:00.000Z',
+      'target_window': {'from': '2026-08-27T22:45:00.000Z', 'to': '2026-08-27T23:30:00.000Z'},
+    });
+    expect(find.text('Tài xế chưa lên đường đón bạn'), findsOneWidget);
+    expect(find.text('Đón tại 12 Hàng Bài, Hoàn Kiếm'), findsOneWidget);
+    expect(find.text('Khung đón'), findsOneWidget);
+    expect(find.text('05:45–06:30'), findsOneWidget);
+    expect(find.text('Đến chỗ bạn'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('the ticket in Vé của tôi says how long until the bus is there, once it is on its way (D143)', (tester) async {
+    final client = MockClient((req) async => http.Response(
+          jsonEncode({'status': 'success', 'data': {
+            'signal_status': 'LIVE',
+            'has_position': true,
+            'view': 'TICKET',
+            'bus_position': {'lat': 20.54, 'lng': 105.91, 'speed_kmh': 60},
+            'target_stop': {'stop_id': 'stp_nb', 'name': 'Bến xe Ninh Bình', 'lat': 20.25, 'lng': 105.97, 'kind': 'PICKUP'},
+            'eta_minutes': 12,
+            'expected_at': '2026-08-28T01:20:00.000Z',
+            'late_minutes': 2,
+            'bus_location': {'at_stop': 'Nút giao Phủ Lý (cao tốc)', 'next_stop': 'Bến xe Ninh Bình', 'stops_before_target': 0},
+          }}),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        ));
+    final store = PassengerStore(api: PassengerApiClientService(baseUrl: 'http://test', client: client));
+    final ticket = Ticket.fromJson({
+      'ticket_id': 'tkt_03', 'pnr': 'BG-0003', 'trip_id': 'trp_01', 'route_name': 'Hà Nội — Thanh Hóa',
+      'departure_time': '2026-08-28T07:00:00+07:00', 'seat_code': 'A03', 'fare_vnd': 220000, 'passenger_name': 'Nguyễn An',
+      'pickup_stop': 'Bến xe Ninh Bình', 'dropoff_stop': 'Bến xe Phía Bắc', 'status': 'ACTIVE',
+    });
+    await tester.pumpWidget(MaterialApp(home: PassengerScope(store: store, child: Scaffold(body: TicketCard(ticket: ticket)))));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Xe còn 12 phút · tới lúc ~08:20'), findsOneWidget);
+    expect(find.text('Xe đang ở Nút giao Phủ Lý (cao tốc)'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
   });
 
   test('loadTracking parses full tracking payload and sends ticket_id query', () async {

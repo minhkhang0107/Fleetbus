@@ -21,13 +21,13 @@ describe('Travel dates: Vietnam calendar, 30-day booking window, one run per day
       assert.strictEqual(addDays('2026-12-31', 1), '2027-01-01');
     });
 
-    it('books from today to 30 days ahead, nothing before or after', () => {
+    it('books from today to 14 days ahead, nothing before or after', () => {
       const cal = serviceCalendar(NOW, { production: true });
-      assert.deepStrictEqual({ today: cal.today, last: cal.last_date, demo: cal.demo_dates }, { today: '2026-10-11', last: '2026-11-10', demo: [] });
+      assert.deepStrictEqual({ today: cal.today, last: cal.last_date, demo: cal.demo_dates }, { today: '2026-10-11', last: '2026-10-25', demo: [] });
       assert.strictEqual(checkTravelDate('2026-10-11', NOW).ok, true);
-      assert.strictEqual(checkTravelDate('2026-11-10', NOW).ok, true);
+      assert.strictEqual(checkTravelDate('2026-10-25', NOW).ok, true);
       assert.strictEqual(checkTravelDate('2026-10-10', NOW).code, 'DATE_IN_PAST');
-      assert.strictEqual(checkTravelDate('2026-11-11', NOW).code, 'DATE_BEYOND_WINDOW');
+      assert.strictEqual(checkTravelDate('2026-10-26', NOW).code, 'DATE_BEYOND_WINDOW');
       assert.strictEqual(checkTravelDate('11/10/2026', NOW).code, 'INVALID_DATE');
       assert.strictEqual(checkTravelDate('2026-08-28', NOW, { production: false }).ok, true, 'the seed demo day outside production');
       assert.strictEqual(checkTravelDate('2026-08-28', NOW, { production: true }).code, 'DATE_IN_PAST');
@@ -70,7 +70,7 @@ describe('Travel dates: Vietnam calendar, 30-day booking window, one run per day
     it('the app gets today and the last bookable day from the server', async () => {
       const cal = (await request('/api/v1/app/config?operator=SAOMAI')).body.data.service_calendar;
       assert.strictEqual(cal.today, vnDate(Date.now()));
-      assert.strictEqual(cal.last_date, addDays(cal.today, 30));
+      assert.strictEqual(cal.last_date, addDays(cal.today, 14));
       assert.strictEqual(cal.timezone, 'Asia/Ho_Chi_Minh');
     });
 
@@ -86,8 +86,8 @@ describe('Travel dates: Vietnam calendar, 30-day booking window, one run per day
       assert.notDeepStrictEqual(other.body.data.map(t => t.trip_id), res.body.data.map(t => t.trip_id), 'another day, other runs');
     });
 
-    it('refuses a malformed day, a past day and a day beyond 30 days', async () => {
-      for (const [date, code] of [['28/08', 'INVALID_DATE'], ['2026-02-30', 'INVALID_DATE'], [addDays(vnDate(Date.now()), -1), 'DATE_IN_PAST'], [addDays(vnDate(Date.now()), 31), 'DATE_BEYOND_WINDOW']]) {
+    it('refuses a malformed day, a past day and a day beyond 14 days', async () => {
+      for (const [date, code] of [['28/08', 'INVALID_DATE'], ['2026-02-30', 'INVALID_DATE'], [addDays(vnDate(Date.now()), -1), 'DATE_IN_PAST'], [addDays(vnDate(Date.now()), 15), 'DATE_BEYOND_WINDOW']]) {
         const res = await request(`/api/v1/trips/search?date=${encodeURIComponent(date)}`);
         assert.strictEqual(res.status, 400, date);
         assert.strictEqual(res.body.code, code, date);

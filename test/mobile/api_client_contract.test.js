@@ -31,11 +31,12 @@ function normalize(template) {
 function calls(client) {
   const src = read(client);
   const found = [];
-  const re = /\b_(get|post|put|delete)\(\s*'([^']+)'([^;]*);/g;
+  const re = /\b_(get|post|put|patch|delete|stream)\(\s*'([^']+)'([^;]*);/g;
   let match;
   while ((match = re.exec(src)) !== null) {
     found.push({
-      method: match[1].toUpperCase(),
+      // _stream is a GET answered with server-sent events.
+      method: match[1] === 'stream' ? 'GET' : match[1].toUpperCase(),
       path: normalize(CLIENTS[client].prefix + match[2]),
       idempotent: /idempotent:\s*true/.test(match[3]),
       text: match[0]
@@ -56,7 +57,7 @@ describe('Flutter API clients follow the server contract', () => {
   for (const client of Object.keys(CLIENTS)) {
     describe(`${client} client`, () => {
       it(`TC-CLIENT-${client}-01: finds the calls it makes`, () => {
-        assert.ok(calls(client).length >= 5, 'the client must route every request through _get, _post, _put or _delete');
+        assert.ok(calls(client).length >= 5, 'the client must route every request through _get, _post, _put, _patch or _delete');
       });
 
       it(`TC-CLIENT-${client}-02: every call is an endpoint the server serves, on its canonical path`, () => {
