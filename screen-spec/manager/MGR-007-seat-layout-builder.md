@@ -43,7 +43,7 @@ A column with no seat on a deck is drawn as the aisle.
 ## 3. Screen
 - **List:** every layout with decks, seats, "Có sẵn" on built-ins and the plates using it. Actions: "Nhân bản" (copy into the editor), and on company layouts "Sửa" and "Xóa" (second click "Xóa hẳn?" confirms; no browser dialogs).
 - **Preview:** each deck drawn from the front ("Đầu xe"), coloured by seat type (Phòng VIP, Giường nằm, Ghế ngồi).
-- **Editor:** name, vehicle type, decks (1–3), rows (1–20), columns (1–8), aisle columns (e.g. `2`), default seat type, code prefix per deck. "Tạo lưới" fills the grid; clicking a cell switches a seat on or off; codes renumber in order (`A01`, `A02` …). The seat count updates as cells change. "Lưu sơ đồ" saves; errors show under the grid.
+- **Editor:** name, kind of bus (Limousine VIP, Giường nằm, Ghế ngồi, Xe khác; it sets the default seat type, and `vehicle_type` is built from it and the decks, e.g. 1 deck + Ghế ngồi = `SINGLE_DECK_SEATER`), decks (1–3), rows (1–20), columns (1–8), aisle columns (e.g. `2`), default seat type, code prefix per deck. "Tạo lưới" fills the grid; clicking a cell switches a seat on or off; codes renumber in order (`A01`, `A02` …). The seat count updates as cells change. "Lưu sơ đồ" saves; errors show under the grid.
 
 ## 4. API
 | Method | Path | Notes |

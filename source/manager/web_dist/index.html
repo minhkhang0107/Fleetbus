@@ -284,10 +284,9 @@
               <div class="field grow" style="min-width:180px">
                 <label for="layoutVehicleType">Loại xe</label>
                 <select id="layoutVehicleType" name="vehicle_type">
-                  <option value="DOUBLE_DECK_VIP_CABIN">Limousine VIP (2 tầng)</option>
-                  <option value="DOUBLE_DECK_SLEEPER">Giường nằm (2 tầng)</option>
-                  <option value="SINGLE_DECK_SEATER">Ghế ngồi (1 tầng)</option>
-                  <option value="DOUBLE_DECK_SEATER">Ghế ngồi (2 tầng)</option>
+                  <option value="VIP_CABIN">Limousine VIP</option>
+                  <option value="SLEEPER">Giường nằm</option>
+                  <option value="SEATER">Ghế ngồi</option>
                   <option value="OTHER">Xe khác</option>
                 </select>
               </div>
@@ -1623,6 +1622,17 @@ async function deleteLayoutTwoClick(btn, layoutId) {
   loadLayouts();
 }
 
+// The kind of bus is chosen apart from its decks: vehicle_type is built from both (SINGLE_DECK_SEATER, DOUBLE_DECK_VIP_CABIN...).
+function vehicleTypeOf(kind, decks) {
+  if (kind === 'OTHER') return 'OTHER';
+  return `${decks > 1 ? 'DOUBLE_DECK' : 'SINGLE_DECK'}_${kind}`;
+}
+
+function vehicleKindOf(vehicleType) {
+  const kind = String(vehicleType || '').replace(/^(SINGLE|DOUBLE)_DECK_/, '');
+  return ['VIP_CABIN', 'SLEEPER', 'SEATER', 'OTHER'].includes(kind) ? kind : 'VIP_CABIN';
+}
+
 function openNewLayoutEditor() {
   layoutsState.editingId = null;
   $('#layoutPreviewCard').classList.add('hidden');
@@ -1632,7 +1642,7 @@ function openNewLayoutEditor() {
   $('#layoutEditorError').textContent = '';
 
   $('#layoutName').value = '';
-  $('#layoutVehicleType').value = 'DOUBLE_DECK_VIP_CABIN';
+  $('#layoutVehicleType').value = 'VIP_CABIN';
   $('#layoutDecks').value = '2';
   $('#layoutRows').value = '6';
   $('#layoutCols').value = '3';
@@ -1658,7 +1668,7 @@ function editCustomLayout(layout) {
   $('#layoutEditorError').textContent = '';
 
   $('#layoutName').value = layout.name || '';
-  $('#layoutVehicleType').value = layout.vehicle_type || 'DOUBLE_DECK_VIP_CABIN';
+  $('#layoutVehicleType').value = vehicleKindOf(layout.vehicle_type);
   const totalDecks = Number(layout.total_decks) || 1;
   const totalCols = Number(layout.columns) || 3;
   $('#layoutDecks').value = totalDecks;
@@ -1792,6 +1802,11 @@ function closeLayoutEditor() {
 $('#layoutCancelEditBtn')?.addEventListener('click', closeLayoutEditor);
 $('#layoutNewBtn')?.addEventListener('click', openNewLayoutEditor);
 $('#layoutGenGridBtn')?.addEventListener('click', generateEditorGrid);
+// New seats take the bus's kind of seat.
+$('#layoutVehicleType')?.addEventListener('change', () => {
+  const seat = { VIP_CABIN: 'VIP_CABIN', SLEEPER: 'SLEEPER', SEATER: 'SEAT' }[$('#layoutVehicleType').value];
+  if (seat) $('#layoutSeatType').value = seat;
+});
 $('#layoutDecks')?.addEventListener('input', () => {
   const d = Math.max(1, Math.min(3, Number($('#layoutDecks').value) || 1));
   $('#layoutPrefix2Field').classList.toggle('hidden', d < 2);
@@ -1807,8 +1822,8 @@ $('#layoutEditorCard')?.addEventListener('submit', async (e) => {
   if (!name) { errEl.textContent = 'Vui lòng nhập tên sơ đồ (tối đa 80 ký tự)'; return; }
   if (name.length > 80) { errEl.textContent = 'Tên sơ đồ không được vượt quá 80 ký tự'; return; }
 
-  const vehicle_type = $('#layoutVehicleType').value;
   const total_decks = Number($('#layoutDecks').value) || 1;
+  const vehicle_type = vehicleTypeOf($('#layoutVehicleType').value, total_decks);
   const columns = Number($('#layoutCols').value) || 1;
 
   if (!layoutsState.editorSeats.length) {
