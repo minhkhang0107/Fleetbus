@@ -20,6 +20,20 @@ import { publicFixedEndpoints } from '../core/fixedEndpoints.js';
 // The plate passengers see is the bus the office gave the run; a day's run with no bus yet shows none.
 function withAssignedBus(services, trip) {
   const ops = services.managerService?.trips?.find(t => t.trip_id === trip.trip_id);
+  const vehicle = ops?.vehicle_id && services.managerService.vehicles?.find(v => v.vehicle_id === ops.vehicle_id);
+  if (vehicle) {
+    // The bus decides the seats (D147): its model, its layout's size, and what is still free on it.
+    const layout = services.managerService.layoutOfVehicle(vehicle.vehicle_id);
+    const taken = services.seatMapService?.getOccupiedSeatCodes?.(trip.trip_id)?.length || 0;
+    return {
+      ...trip,
+      plate_number: ops.vehicle_plate || vehicle.plate_number,
+      vehicle_title: vehicle.model || trip.vehicle_title,
+      vehicle_type: layout.vehicle_type,
+      total_seats: layout.seats.length,
+      available_seats_count: Math.max(0, layout.seats.length - taken)
+    };
+  }
   if (ops) return { ...trip, plate_number: ops.vehicle_plate || null };
   return trip.schedule_id ? { ...trip, plate_number: services.managerService?.defaultPlateFor?.(trip.schedule_id) ?? null } : trip;
 }

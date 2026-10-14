@@ -10,6 +10,15 @@ import 'passenger_widgets.dart';
 class PassengerSeatMapScreen extends StatefulWidget {
   const PassengerSeatMapScreen({super.key});
 
+  /// Deck label for phone tabs and wide-screen card titles.
+  static String deckTitle(List<int> decks, int deck, int free) {
+    if (decks.length <= 1) return '$free ghế trống';
+    if (decks.length == 2) {
+      return '${deck == decks.first ? 'Tầng dưới' : 'Tầng trên'} · $free trống';
+    }
+    return 'Tầng $deck · $free trống';
+  }
+
   @override
   State<PassengerSeatMapScreen> createState() => _PassengerSeatMapScreenState();
 }
@@ -45,20 +54,34 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerCheckoutScreen()));
   }
 
-  /// Rows of one deck: the A column on the left, the aisle, the B column on the right.
+  /// Rows of one deck built as a grid from row/column.
   List<Widget> _deckRows(PassengerStore store, int deck) {
-    final seats = store.deckSeats(deck);
-    final left = seats.keys.where((c) => c.startsWith('A')).toList();
-    final right = seats.keys.where((c) => c.startsWith('B')).toList();
-    final rows = left.length > right.length ? left.length : right.length;
+    final deckSeats = store.seatMap.where((s) => s.deck == deck).toList();
+    final seatByRowCol = <(int, int), Seat>{
+      for (final s in deckSeats) (s.row, s.column): s,
+    };
+    final seatCols = deckSeats.map((s) => s.column).toSet();
+    final maxRow = deckSeats.fold<int>(0, (m, s) => s.row > m ? s.row : m);
+    final totalCols = store.seatColumns;
+
     return [
       Row(children: [const Icon(Icons.adjust, size: 18, color: PTokens.muted), const SizedBox(width: 8), Text('Đầu xe', style: sans(size: 12, color: PTokens.muted))]),
       gap(10),
-      for (var i = 0; i < rows; i++) ...[
+      for (var r = 1; r <= maxRow; r++) ...[
         Row(children: [
-          Expanded(child: i < left.length ? _SeatButton(code: left[i], state: seats[left[i]]!, onLimit: () => setState(() => _limitHit = true)) : const SizedBox()),
-          const SizedBox(width: 68),
-          Expanded(child: i < right.length ? _SeatButton(code: right[i], state: seats[right[i]]!, onLimit: () => setState(() => _limitHit = true)) : const SizedBox()),
+          for (var c = 1; c <= totalCols; c++)
+            if (!seatCols.contains(c))
+              const SizedBox(width: 20)
+            else if (seatByRowCol.containsKey((r, c)))
+              Expanded(
+                child: _SeatButton(
+                  code: seatByRowCol[(r, c)]!.code,
+                  state: seatByRowCol[(r, c)]!.state,
+                  onLimit: () => setState(() => _limitHit = true),
+                ),
+              )
+            else
+              const Expanded(child: SizedBox()),
         ]),
         gap(10),
       ],
@@ -80,16 +103,16 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
           color: PTokens.surface,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
           child: Column(children: [
-            // Wide screens show every deck at once, so the deck switch is only for phones.
-            if (!wide) Container(
+            // Wide screens show every deck at once, so the deck switch is only for phones with multiple decks.
+            if (!wide && decks.length > 1) Container(
               padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
               child: Row(children: [
                 for (final d in decks)
-                  _DeckTab(label: '${d == 1 ? 'Tầng dưới' : 'Tầng trên'} · ${store.freeOnDeck(d)} trống', selected: store.deck == d, onTap: () => store.setDeck(d)),
+                  _DeckTab(label: PassengerSeatMapScreen.deckTitle(decks, d, store.freeOnDeck(d)), selected: store.deck == d, onTap: () => store.setDeck(d)),
               ]),
             ),
-            if (!wide) gap(10),
+            if (!wide && decks.length > 1) gap(10),
             Wrap(spacing: 12, runSpacing: 6, children: const [
               _Legend(fill: PTokens.surface, border: Color(0xFF94A3B8), label: 'Trống'),
               _Legend(fill: PTokens.primary, border: PTokens.primary, label: 'Bạn chọn'),
@@ -116,7 +139,7 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
                             constraints: const BoxConstraints(maxWidth: 380),
                             // Each deck in its own card so the two seat plans don't read as one.
                             child: AppCard(padding: const EdgeInsets.fromLTRB(16, 14, 16, 6), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                            Text('${d == 1 ? 'Tầng dưới' : 'Tầng trên'} · ${store.freeOnDeck(d)} trống', style: sans(size: 15, weight: FontWeight.w600)),
+                            Text(PassengerSeatMapScreen.deckTitle(decks, d, store.freeOnDeck(d)), style: sans(size: 15, weight: FontWeight.w600)),
                             gap(10),
                             ..._deckRows(store, d),
                           ])),
@@ -128,7 +151,7 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
                   ]),
                 )
               : ListView(padding: const EdgeInsets.fromLTRB(32, 16, 32, 16), children: [
-                  ..._deckRows(store, store.deck),
+                  ..._deckRows(store, decks.contains(store.deck) ? store.deck : decks.first),
                   if (_limitHit) Text('Mỗi lần đặt tối đa ${PassengerStore.maxSeats} ghế.', style: sans(size: 13, color: PTokens.danger)),
                 ]),
         ),
@@ -207,26 +230,30 @@ class _SeatButton extends StatelessWidget {
             SeatState.free => (PTokens.surface, const Color(0xFF94A3B8), PTokens.ink, '${(store.trip?.price ?? 0) ~/ 1000}k', true),
           };
     final semantic = selected ? 'bạn đang chọn' : switch (state) { SeatState.held => 'người khác đang giữ', SeatState.booked => 'đã bán', SeatState.blocked => 'khóa kỹ thuật', SeatState.free => 'trống' };
-    return Semantics(
-      button: true,
-      enabled: enabled,
-      selected: selected,
-      label: 'Ghế $code, $semantic',
-      excludeSemantics: true,
-      child: InkWell(
-        onTap: enabled
-            ? () {
-                if (!store.toggleSeat(code)) onLimit();
-              }
-            : null,
-        borderRadius: BorderRadius.circular(PTokens.radiusControl),
-        child: Container(
-          height: 60,
-          decoration: BoxDecoration(color: bg, border: Border.all(color: border, width: 1.5), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Text(code, style: mono(size: 15, color: fg)),
-            Text(sub, style: sans(size: 11, weight: FontWeight.w500, color: fg)),
-          ]),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Semantics(
+        button: true,
+        enabled: enabled,
+        selected: selected,
+        label: 'Ghế $code, $semantic',
+        excludeSemantics: true,
+        child: InkWell(
+          onTap: enabled
+              ? () {
+                  if (!store.toggleSeat(code)) onLimit();
+                }
+              : null,
+          borderRadius: BorderRadius.circular(PTokens.radiusControl),
+          child: Container(
+            height: 60,
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            decoration: BoxDecoration(color: bg, border: Border.all(color: border, width: 1.5), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              FittedBox(fit: BoxFit.scaleDown, child: Text(code, style: mono(size: 15, color: fg))),
+              FittedBox(fit: BoxFit.scaleDown, child: Text(sub, style: sans(size: 11, weight: FontWeight.w500, color: fg))),
+            ]),
+          ),
         ),
       ),
     );

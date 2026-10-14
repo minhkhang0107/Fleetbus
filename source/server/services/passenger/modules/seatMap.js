@@ -4,6 +4,7 @@
  */
 
 import { MOCK_TRIPS_DATABASE } from './search.js';
+import { DEFAULT_LAYOUT_ID, findLayout } from '../../../core/seatLayouts.js';
 
 // Trips that can be sold: the passenger search trips and the trips on the manager and driver boards.
 const SEEDED_TRIPS = ['trp_hn_th_01', 'trp_hn_th_02', 'trp_hn_th_03', 'trp_991823', 'trp_991824', 'trp_xv_hn_th_01'];
@@ -15,6 +16,8 @@ export class PassengerSeatMapService {
     this.seatHolds = new Map();
     // (tripId) => ordered stops [{ stop_id, pickup_allowed?, dropoff_allowed? }], set by the event bridge
     this.stopsProvider = null;
+    // (tripId) => layout template, set by the event bridge
+    this.layoutProvider = null;
     this.holdDurationSeconds = 600; // 10 minutes Redis lock standard
     this.maxSeatsPerBooking = 5;
 
@@ -29,72 +32,123 @@ export class PassengerSeatMapService {
     }
   }
 
-  /** The seats of a trip; a schedule's run for another day gets an empty cabin the first time it is asked. */
+  /** The seats of a trip; a schedule's run or rebuilt trip gets built the first time it is asked. */
   _layout(tripId) {
-    if (!this.tripLayouts.has(tripId) && MOCK_TRIPS_DATABASE.some(t => t.trip_id === tripId && t.schedule_id)) {
-      this._initMockTripLayout(tripId, { seedBookings: false });
+    if (!this.tripLayouts.has(tripId)) {
+      if (SEEDED_TRIPS.includes(tripId) || MOCK_TRIPS_DATABASE.some(t => t.trip_id === tripId) || this.layoutProvider?.(tripId)) {
+        this._initMockTripLayout(tripId, { seedBookings: false });
+      }
     }
     return this.tripLayouts.get(tripId);
   }
 
   _initMockTripLayout(tripId, { seedBookings = true } = {}) {
+    // The seats of the bus the trip runs with (D147), else the 22-cabin default.
+    const template = this.layoutProvider?.(tripId) || findLayout(DEFAULT_LAYOUT_ID);
     // A seat costs the trip's base fare from the catalog (trips only on the ops boards keep 220.000 đ)
     const fare = MOCK_TRIPS_DATABASE.find(t => t.trip_id === tripId)?.base_fare_vnd ?? 220000;
-    const seats = [];
-    // Deck 1 (Tầng 1): A01-A06, B01-B05
-    for (let i = 1; i <= 6; i++) {
-      seats.push({
-        seat_code: `A0${i}`,
-        deck: 1,
-        row: i,
-        column: 1,
-        type: 'VIP_CABIN',
+    const seats = template.seats.map(s => {
+      const isDemo = seedBookings && (s.seat_code === 'A03' || s.seat_code === 'B06');
+      return {
+        seat_code: s.seat_code,
+        deck: s.deck,
+        row: s.row,
+        column: s.column,
+        type: s.type,
         price_vnd: fare,
-        bookings: seedBookings && i === 3 ? [{ whole: true, pnr: null }] : []
-      });
-    }
-    for (let i = 1; i <= 5; i++) {
-      seats.push({
-        seat_code: `B0${i}`,
-        deck: 1,
-        row: i,
-        column: 3,
-        type: 'VIP_CABIN',
-        price_vnd: fare,
-        bookings: []
-      });
-    }
-    // Deck 2 (Tầng 2): A07-A11, B06-B11
-    for (let i = 7; i <= 11; i++) {
-      seats.push({
-        seat_code: `A${i.toString().padStart(2, '0')}`,
-        deck: 2,
-        row: i - 6,
-        column: 1,
-        type: 'VIP_CABIN',
-        price_vnd: fare,
-        bookings: []
-      });
-    }
-    for (let i = 6; i <= 11; i++) {
-      seats.push({
-        seat_code: `B${i.toString().padStart(2, '0')}`,
-        deck: 2,
-        row: i - 5,
-        column: 3,
-        type: 'VIP_CABIN',
-        price_vnd: fare,
-        bookings: seedBookings && i === 6 ? [{ whole: true, pnr: null }] : []
-      });
-    }
+        bookings: isDemo ? [{ whole: true, pnr: null }] : []
+      };
+    });
 
     this.tripLayouts.set(tripId, {
-      vehicle_type: 'DOUBLE_DECK_VIP_CABIN',
-      total_decks: 2,
-      total_seats: 22,
-      aisle_column: 2,
+      layout_id: template.layout_id,
+      vehicle_type: template.vehicle_type,
+      total_decks: template.total_decks,
+      columns: template.columns,
+      total_seats: template.seats.length,
       seats
     });
+  }
+
+  /**
+   * Sold or actively held seat codes on a trip.
+   */
+  getOccupiedSeatCodes(tripId, mockNow = Date.now()) {
+    this._cleanExpiredHolds(mockNow);
+    const layout = this.tripLayouts.get(tripId);
+    const codes = new Set();
+    if (layout?.seats) {
+      for (const s of layout.seats) {
+        if (s.bookings && s.bookings.length > 0) {
+          codes.add(s.seat_code);
+        }
+      }
+    }
+    for (const hold of this.seatHolds.values()) {
+      if (hold.tripId === tripId) {
+        codes.add(hold.seatCode);
+      }
+    }
+    return [...codes];
+  }
+
+  /**
+   * Rebuilds seat layout when a vehicle is assigned or changed.
+   */
+  rebuildLayout(tripId, mockNow = Date.now()) {
+    this._cleanExpiredHolds(mockNow);
+    const oldLayout = this.tripLayouts.get(tripId);
+    const occupied = this.getOccupiedSeatCodes(tripId, mockNow);
+    if (occupied.length === 0) {
+      this.tripLayouts.delete(tripId);
+      return { success: true };
+    }
+
+    const template = this.layoutProvider?.(tripId) || findLayout(DEFAULT_LAYOUT_ID);
+    if (!template) {
+      return { success: false, code: 'LAYOUT_NOT_FOUND', error: 'Không tìm thấy sơ đồ ghế' };
+    }
+
+    const templateCodes = new Set(template.seats.map(s => s.seat_code));
+    const missing = occupied.filter(c => !templateCodes.has(c));
+    if (missing.length > 0) {
+      return {
+        success: false,
+        code: 'LAYOUT_MISSING_SOLD_SEATS',
+        error: `Xe mới thiếu ghế đã bán: ${missing.join(', ')}`
+      };
+    }
+
+    const fare = MOCK_TRIPS_DATABASE.find(t => t.trip_id === tripId)?.base_fare_vnd ?? 220000;
+    const newSeats = template.seats.map(s => {
+      const oldSeat = oldLayout?.seats.find(os => os.seat_code === s.seat_code);
+      const seatObj = {
+        seat_code: s.seat_code,
+        deck: s.deck,
+        row: s.row,
+        column: s.column,
+        type: s.type,
+        price_vnd: fare,
+        bookings: oldSeat?.bookings ? [...oldSeat.bookings] : []
+      };
+      if (oldSeat?.blocked) {
+        seatObj.blocked = true;
+        seatObj.block_reason = oldSeat.block_reason;
+        seatObj.blocked_by = oldSeat.blocked_by;
+      }
+      return seatObj;
+    });
+
+    this.tripLayouts.set(tripId, {
+      layout_id: template.layout_id,
+      vehicle_type: template.vehicle_type,
+      total_decks: template.total_decks,
+      columns: template.columns,
+      total_seats: template.seats.length,
+      seats: newSeats
+    });
+
+    return { success: true };
   }
 
 
@@ -241,6 +295,8 @@ export class PassengerSeatMapService {
         trip_id: tripId,
         pickup_stop_id: resolved.pickup_stop_id,
         dropoff_stop_id: resolved.dropoff_stop_id,
+        layout_id: layout.layout_id,
+        columns: layout.columns,
         total_decks: layout.total_decks,
         total_seats: layout.total_seats,
         seats: evaluatedSeats

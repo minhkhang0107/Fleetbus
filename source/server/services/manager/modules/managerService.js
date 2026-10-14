@@ -12,6 +12,7 @@ import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js
 import { verifyTotp } from '../../../core/totp.js';
 import { getStaffTotpSecret } from '../../../config.js';
 import { DEFAULT_OPERATOR_ID, OPERATOR_INACTIVE, findOperatorById, publicOperatorProfile } from '../../../core/operators.js';
+import { DEFAULT_LAYOUT_ID, findLayout } from '../../../core/seatLayouts.js';
 
 const POS_PAYMENT_METHODS = ['CASH_POS', 'CARD_POS', 'BANK_TRANSFER'];
 // BR-MGR-AUTH-001: these roles need a TOTP code on every login (ROLE_OPS_ADMIN and ROLE_FINANCE of the spec)
@@ -89,12 +90,13 @@ export class ManagerOperationsService {
   constructor() {
     this.loginGuard = new LoginGuard();
     this.vehicles = [
-      { vehicle_id: 'veh_01', plate_number: '29B-123.45', model: 'Limousine 34 Phòng VIP', total_seats: 34, status: 'ASSIGNED', driver_name: 'Trần Văn Bình', lat: 20.9812, lng: 105.8430, speed_kmh: 62, heading: 180, gps_status: 'LIVE', gps_health: 'LIVE', operator_id: 'op_saomai' },
-      { vehicle_id: 'veh_02', plate_number: '29B-444.11', model: 'Cabin Cung Điện VIP 22', total_seats: 22, status: 'IN_TRANSIT', driver_name: 'Lê Văn Toàn', lat: 20.4500, lng: 105.9200, speed_kmh: 55, heading: 175, gps_status: 'STALE', gps_health: 'STALE', operator_id: 'op_saomai' },
-      { vehicle_id: 'veh_04', plate_number: '29B-882.19', model: 'Cabin Cung Điện VIP 22', total_seats: 22, status: 'ASSIGNED', driver_name: 'Trần Văn Bình', lat: 20.9806, lng: 105.8413, speed_kmh: 0, heading: 0, gps_status: 'LIVE', gps_health: 'LIVE', operator_id: 'op_saomai' },
-      { vehicle_id: 'veh_03', plate_number: '29B-888.22', model: 'Sleeper 34 Giường Nằm', total_seats: 34, status: 'STANDBY', driver_name: 'Hoàng Anh Tuấn', lat: 20.9800, lng: 105.8400, speed_kmh: 0, heading: 0, gps_status: 'LIVE', gps_health: 'LIVE', operator_id: 'op_saomai' },
-      { vehicle_id: 'veh_xv_01', plate_number: '30H-246.80', model: 'Limousine Xuyên Việt 22 Phòng', total_seats: 22, status: 'ASSIGNED', driver_name: 'Đỗ Minh Khoa', lat: 21.0285, lng: 105.7787, speed_kmh: 0, heading: 0, gps_status: 'LIVE', gps_health: 'LIVE', operator_id: 'op_xuyenviet' }
+      { vehicle_id: 'veh_01', plate_number: '29B-123.45', model: 'Limousine 34 Phòng VIP', total_seats: 34, layout_id: 'CABIN_34', status: 'ASSIGNED', driver_name: 'Trần Văn Bình', lat: 20.9812, lng: 105.8430, speed_kmh: 62, heading: 180, gps_status: 'LIVE', gps_health: 'LIVE', operator_id: 'op_saomai' },
+      { vehicle_id: 'veh_02', plate_number: '29B-444.11', model: 'Cabin Cung Điện VIP 22', total_seats: 22, layout_id: 'CABIN_22', status: 'IN_TRANSIT', driver_name: 'Lê Văn Toàn', lat: 20.4500, lng: 105.9200, speed_kmh: 55, heading: 175, gps_status: 'STALE', gps_health: 'STALE', operator_id: 'op_saomai' },
+      { vehicle_id: 'veh_04', plate_number: '29B-882.19', model: 'Cabin Cung Điện VIP 22', total_seats: 22, layout_id: 'CABIN_22', status: 'ASSIGNED', driver_name: 'Trần Văn Bình', lat: 20.9806, lng: 105.8413, speed_kmh: 0, heading: 0, gps_status: 'LIVE', gps_health: 'LIVE', operator_id: 'op_saomai' },
+      { vehicle_id: 'veh_03', plate_number: '29B-888.22', model: 'Sleeper 34 Giường Nằm', total_seats: 34, layout_id: 'SLEEPER_34', status: 'STANDBY', driver_name: 'Hoàng Anh Tuấn', lat: 20.9800, lng: 105.8400, speed_kmh: 0, heading: 0, gps_status: 'LIVE', gps_health: 'LIVE', operator_id: 'op_saomai' },
+      { vehicle_id: 'veh_xv_01', plate_number: '30H-246.80', model: 'Limousine Xuyên Việt 22 Phòng', total_seats: 22, layout_id: 'CABIN_22', status: 'ASSIGNED', driver_name: 'Đỗ Minh Khoa', lat: 21.0285, lng: 105.7787, speed_kmh: 0, heading: 0, gps_status: 'LIVE', gps_health: 'LIVE', operator_id: 'op_xuyenviet' }
     ];
+    this.seatLayouts = [];
 
     this.drivers = [
       // Same people, ids and licences as the driver app (DRI-001), so a driver named here can sign in and see the trip
@@ -361,9 +363,16 @@ export class ManagerOperationsService {
    * MGR-005: Fleet Roster & Vehicles
    */
   getFleetRoster(operatorId = DEFAULT_OPERATOR_ID) {
+    const list = this.vehicles
+      .filter(v => (v.operator_id || DEFAULT_OPERATOR_ID) === operatorId)
+      .map(v => {
+        // A bus saved before layouts existed runs on the old 22-cabin map its tickets were sold on (D147).
+        const layout = this.layoutOfVehicle(v.vehicle_id);
+        return { ...v, layout_id: layout.layout_id, layout_name: layout.name, total_seats: layout.seats.length };
+      });
     return {
       success: true,
-      data: this.vehicles.filter(v => v.operator_id === operatorId)
+      data: list
     };
   }
 
@@ -375,12 +384,31 @@ export class ManagerOperationsService {
     return this.getFleetRoster(operatorId);
   }
 
-  addVehicle({ plate_number, model = 'Thaco Mobihome VIP', total_seats = 34 }, operatorId = DEFAULT_OPERATOR_ID) {
+  layoutOfVehicle(vehicleId) {
+    const v = this.vehicles.find(veh => veh.vehicle_id === vehicleId);
+    if (!v) return findLayout(DEFAULT_LAYOUT_ID, this.seatLayouts);
+    return findLayout(v.layout_id, this.seatLayouts) || findLayout(DEFAULT_LAYOUT_ID, this.seatLayouts);
+  }
+
+  layoutOfTrip(tripId) {
+    const trip = this.findTrip(tripId);
+    if (!trip || !trip.vehicle_id) return null;
+    return this.layoutOfVehicle(trip.vehicle_id);
+  }
+
+  addVehicle({ plate_number, model = 'Thaco Mobihome VIP', total_seats, layout_id }, operatorId = DEFAULT_OPERATOR_ID) {
+    const chosenLayoutId = layout_id || DEFAULT_LAYOUT_ID;
+    const template = findLayout(chosenLayoutId, this.seatLayouts) || findLayout(DEFAULT_LAYOUT_ID, this.seatLayouts);
+    const seatsCount = (layout_id !== undefined || total_seats === undefined)
+      ? (template ? template.seats.length : (total_seats || 34))
+      : total_seats;
     const newVehicle = {
-      vehicle_id: `veh_${Date.now()}`,
+      vehicle_id: `veh_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       plate_number,
       model,
-      total_seats,
+      total_seats: seatsCount,
+      layout_id: template ? template.layout_id : chosenLayoutId,
+      layout_name: template ? template.name : null,
       status: 'STANDBY',
       driver_name: 'Chưa gán',
       lat: 20.9812,
@@ -516,11 +544,17 @@ export class ManagerOperationsService {
       return w.start < own.end + TURNAROUND && own.start < w.end + TURNAROUND;
     });
     const day = vnDate(own.start);
+    const inventory = this._inventory();
+    const occupiedCodes = inventory?.getOccupiedSeatCodes?.(tripId) || [];
     const vehicles = this.vehicles.filter(v => v.operator_id === operatorId).map(v => {
       const busy = clash('vehicle_id', v.vehicle_id);
+      const vTemplate = this.layoutOfVehicle(v.vehicle_id);
+      const templateSeatCodes = new Set(vTemplate?.seats?.map(s => s.seat_code) || []);
+      const missing = occupiedCodes.filter(c => !templateSeatCodes.has(c));
       const reason = v.status === 'MAINTENANCE' ? 'Xe đang bảo dưỡng'
         : (v.total_seats || 0) < sold ? `Xe ${v.total_seats} chỗ, chuyến đã bán ${sold} ghế`
-          : busy ? `Đang chạy chuyến ${busy.trip_id} trùng giờ` : null;
+          : missing.length > 0 ? `Xe thiếu ghế đã bán: ${missing.join(', ')}`
+            : busy ? `Đang chạy chuyến ${busy.trip_id} trùng giờ` : null;
       return { vehicle_id: v.vehicle_id, plate_number: v.plate_number, model: v.model, total_seats: v.total_seats, assigned: v.vehicle_id === trip.vehicle_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
     });
     const drivers = this.drivers.filter(d => d.operator_id === operatorId).map(d => {
@@ -549,12 +583,29 @@ export class ManagerOperationsService {
     const driver = options.data.drivers.find(d => d.driver_id === driverId);
     if (!vehicle) return { success: false, error: 'Không tìm thấy xe', code: 'VEHICLE_NOT_FOUND' };
     if (!driver) return { success: false, error: 'Không tìm thấy tài xế', code: 'DRIVER_NOT_FOUND' };
+
+    const inventory = this._inventory();
+    const occupiedCodes = inventory?.getOccupiedSeatCodes?.(tripId) || [];
+    const chosenTemplate = this.layoutOfVehicle(vehicleId);
+    if (chosenTemplate && occupiedCodes.length > 0) {
+      const templateCodes = new Set(chosenTemplate.seats.map(s => s.seat_code));
+      const missing = occupiedCodes.filter(c => !templateCodes.has(c));
+      if (missing.length > 0) {
+        return {
+          success: false,
+          code: 'LAYOUT_MISSING_SOLD_SEATS',
+          error: `Xe mới thiếu ghế đã bán: ${missing.join(', ')}`
+        };
+      }
+    }
+
     if (!vehicle.available && !vehicle.assigned) return { success: false, error: vehicle.reason, code: 'VEHICLE_UNAVAILABLE', conflict_trip_id: vehicle.conflict_trip_id };
     if (!driver.available && !driver.assigned) return { success: false, error: driver.reason, code: 'DRIVER_UNAVAILABLE', conflict_trip_id: driver.conflict_trip_id };
 
     const previous = { vehicle_id: trip.vehicle_id || null, vehicle_plate: trip.vehicle_plate || null, driver_id: trip.driver_id || null };
     trip.vehicle_id = vehicle.vehicle_id;
     trip.vehicle_plate = vehicle.plate_number;
+    trip.total_seats = vehicle.total_seats;
     trip.driver_id = driver.driver_id;
     if (scope === 'SCHEDULE') {
       if (!this.scheduleAssignments) this.scheduleAssignments = {};

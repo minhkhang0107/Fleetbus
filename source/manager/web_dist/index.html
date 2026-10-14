@@ -93,10 +93,43 @@
   .dayPick label { display: flex; align-items: center; gap: 4px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 4px 8px; cursor: pointer; }
   #schedulesBox .btn { padding: 4px 10px; font-size: 13px; white-space: nowrap; }
   .toast { position: fixed; right: 16px; bottom: 16px; background: var(--ink); color: #fff; padding: 10px 14px; border-radius: 8px; z-index: 2000; }
+  /* Seat Layouts (MGR-007) & Fleet (MGR-005, MGR-006) */
+  .layoutsSplit { grid-template-columns: minmax(0, 1.1fr) minmax(340px, 1.4fr); }
+  .seat-box {
+    display: flex; align-items: center; justify-content: center;
+    height: 38px; min-width: 42px; border-radius: 6px;
+    font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+    font-size: 11px; font-weight: 700;
+    border: 1px solid var(--line-strong); user-select: none; box-sizing: border-box;
+    background: #f1f5f9; color: #334155;
+  }
+  .seat-box.seat-vip_cabin { background: #fae8ff; border-color: #d946ef; color: #86198f; }
+  .seat-box.seat-sleeper { background: #eff6ff; border-color: #60a5fa; color: #1d4ed8; }
+  .seat-box.seat-seat { background: #f0fdf4; border-color: #4ade80; color: #15803d; }
+  .aisle-cell { width: 22px; min-height: 38px; }
+  .empty-cell { height: 38px; min-width: 42px; border-radius: 6px; box-sizing: border-box; }
+  .editor-cell { cursor: pointer; transition: transform 0.08s; }
+  .editor-cell:hover { transform: scale(1.05); }
+  .empty-cell.editor-cell {
+    border: 1px dashed var(--line-strong); color: var(--muted);
+    display: flex; align-items: center; justify-content: center; font-size: 14px; opacity: .5;
+  }
+  .empty-cell.editor-cell:hover { background: #f1f5f9; opacity: 1; }
+  .deck-bus-frame {
+    background: #f8fafc; border: 2px solid var(--line-strong); border-radius: 12px;
+    padding: 12px; margin-bottom: 14px; display: inline-block; min-width: 180px; vertical-align: top;
+  }
+  .deck-front-label {
+    text-align: center; font-size: 11px; font-weight: 700; color: var(--muted);
+    padding: 3px 6px; margin-bottom: 10px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 6px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .deck-title { font-weight: 700; font-size: 13px; margin: 0 0 6px; color: var(--ink); }
+  .deck-grid { display: grid; gap: 6px; justify-content: center; }
   @media (max-width: 900px) {
     #app { grid-template-columns: 1fr; }
     nav { flex-direction: row; flex-wrap: wrap; } nav .spacer, nav .who { display: none; }
-    .split { grid-template-columns: 1fr; }
+    .split, .layoutsSplit { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -123,6 +156,8 @@
     <button data-view="overview">Tổng quan</button>
     <button data-view="dispatch">Điều độ chuyến</button>
     <button data-view="schedules">Lịch chạy</button>
+    <button data-view="fleet">Đội xe</button>
+    <button data-view="layouts">Sơ đồ ghế</button>
     <button data-view="live">Bản đồ xe</button>
     <button data-view="bookings">Đặt chỗ</button>
     <button data-view="service">Cấu hình đón trả</button>
@@ -187,6 +222,132 @@
           <div class="error" id="scheduleError"></div>
           <div class="row"><button class="btn primary" type="submit" id="scheduleSave">Thêm giờ chạy</button><button class="btn hidden" type="button" id="scheduleCancel">Hủy sửa</button></div>
         </form>
+      </div>
+    </div>
+
+    <!-- Fleet Management (MGR-005, MGR-006) -->
+    <div data-panel="fleet" class="hidden">
+      <h2>Đội xe</h2>
+      <p class="muted" style="margin:-6px 0 14px">Quản lý danh sách phương tiện, phân bổ sơ đồ ghế cho từng xe.</p>
+      
+      <div class="card" style="margin-bottom:16px">
+        <div class="section-title" style="margin-top:0">Thêm xe</div>
+        <form id="fleetAddForm" novalidate>
+          <div class="row" style="flex-wrap:wrap;align-items:flex-end">
+            <div class="field" style="flex:1;min-width:160px;margin-bottom:0">
+              <label for="vehPlate">Biển số xe</label>
+              <input id="vehPlate" name="plate_number" placeholder="Ví dụ: 29B-123.45" required>
+            </div>
+            <div class="field" style="flex:1;min-width:200px;margin-bottom:0">
+              <label for="vehModel">Dòng xe</label>
+              <input id="vehModel" name="model" placeholder="Ví dụ: Limousine 34 Phòng VIP" required>
+            </div>
+            <div class="field" style="flex:1;min-width:240px;margin-bottom:0">
+              <label for="vehLayout">Sơ đồ ghế</label>
+              <select id="vehLayout" name="layout_id" required></select>
+            </div>
+            <div style="margin-bottom:0">
+              <button class="btn primary" type="submit" id="vehAddBtn">Thêm xe</button>
+            </div>
+          </div>
+          <div class="error" id="fleetAddError" style="margin-top:6px"></div>
+        </form>
+      </div>
+
+      <div class="card scroll" style="padding:0" id="fleetBox"></div>
+    </div>
+
+    <!-- Seat Layouts (MGR-007) -->
+    <div data-panel="layouts" class="hidden">
+      <h2>Sơ đồ ghế</h2>
+      <p class="muted" style="margin:-6px 0 14px">Quản lý sơ đồ ghế mẫu và cấu hình sơ đồ ghế riêng của nhà xe.</p>
+      <div class="split layoutsSplit">
+        <div>
+          <div class="toolbar">
+            <button class="btn primary" id="layoutNewBtn">+ Tạo sơ đồ riêng</button>
+            <span class="muted" id="layoutCount"></span>
+          </div>
+          <div class="error" id="layoutsListError" style="margin-bottom:6px"></div>
+          <div class="card scroll" style="padding:0" id="layoutsListBox"></div>
+        </div>
+        <div id="layoutsRightView">
+          <div class="card" id="layoutPreviewCard">
+            <div id="layoutPreviewContent"><p class="muted">Chọn một sơ đồ ghế để xem chi tiết.</p></div>
+          </div>
+          <form class="card hidden" id="layoutEditorCard" novalidate>
+            <div class="section-title" style="margin-top:0" id="layoutEditorTitle">Tạo sơ đồ riêng</div>
+            <div class="field">
+              <label for="layoutName">Tên sơ đồ (tối đa 80 ký tự)</label>
+              <input id="layoutName" name="name" maxlength="80" placeholder="Ví dụ: Limousine VIP 24 phòng" required>
+            </div>
+            <div class="row" style="flex-wrap:wrap">
+              <div class="field grow" style="min-width:180px">
+                <label for="layoutVehicleType">Loại xe</label>
+                <select id="layoutVehicleType" name="vehicle_type">
+                  <option value="DOUBLE_DECK_VIP_CABIN">Limousine VIP (2 tầng)</option>
+                  <option value="DOUBLE_DECK_SLEEPER">Giường nằm (2 tầng)</option>
+                  <option value="SINGLE_DECK_SEATER">Ghế ngồi (1 tầng)</option>
+                  <option value="DOUBLE_DECK_SEATER">Ghế ngồi (2 tầng)</option>
+                  <option value="OTHER">Xe khác</option>
+                </select>
+              </div>
+              <div class="field" style="width:110px">
+                <label for="layoutDecks">Số tầng (1–3)</label>
+                <input id="layoutDecks" name="total_decks" type="number" min="1" max="3" value="2" required>
+              </div>
+            </div>
+            <div class="row" style="flex-wrap:wrap">
+              <div class="field" style="width:110px">
+                <label for="layoutRows">Số hàng (1–20)</label>
+                <input id="layoutRows" name="rows" type="number" min="1" max="20" value="6" required>
+              </div>
+              <div class="field" style="width:110px">
+                <label for="layoutCols">Số cột (1–8)</label>
+                <input id="layoutCols" name="columns" type="number" min="1" max="8" value="3" required>
+              </div>
+              <div class="field grow" style="min-width:140px">
+                <label for="layoutAisles">Cột lối đi (phẩy, vd: 2)</label>
+                <input id="layoutAisles" name="aisle_columns" placeholder="Ví dụ: 2">
+              </div>
+            </div>
+            <div class="row" style="flex-wrap:wrap">
+              <div class="field grow" style="min-width:160px">
+                <label for="layoutSeatType">Loại ghế mặc định</label>
+                <select id="layoutSeatType" name="seat_type">
+                  <option value="VIP_CABIN">Phòng VIP</option>
+                  <option value="SLEEPER">Giường nằm</option>
+                  <option value="SEAT">Ghế ngồi</option>
+                </select>
+              </div>
+              <div class="field" style="width:80px">
+                <label for="layoutPrefix1">Tiền tố T1</label>
+                <input id="layoutPrefix1" name="prefix1" value="A" maxlength="2" style="text-transform:uppercase">
+              </div>
+              <div class="field" style="width:80px" id="layoutPrefix2Field">
+                <label for="layoutPrefix2">Tiền tố T2</label>
+                <input id="layoutPrefix2" name="prefix2" value="B" maxlength="2" style="text-transform:uppercase">
+              </div>
+              <div class="field hidden" style="width:80px" id="layoutPrefix3Field">
+                <label for="layoutPrefix3">Tiền tố T3</label>
+                <input id="layoutPrefix3" name="prefix3" value="C" maxlength="2" style="text-transform:uppercase">
+              </div>
+            </div>
+            <div class="row" style="margin-bottom:12px">
+              <button class="btn" type="button" id="layoutGenGridBtn">Tạo lưới</button>
+              <span class="muted" style="font-size:13px">Bấm vào ô để bật/tắt ghế. Mã ghế tự đánh số liên tục.</span>
+            </div>
+            <div class="row" style="margin-bottom:10px;justify-content:space-between">
+              <div class="section-title" style="margin:0">Xem trước lưới ghế</div>
+              <div>Số ghế: <b id="editorSeatCount" class="mono" style="color:var(--primary);font-size:16px">0</b> chỗ</div>
+            </div>
+            <div id="layoutEditorPreview" style="margin-bottom:12px;overflow-x:auto"></div>
+            <div class="error" id="layoutEditorError"></div>
+            <div class="row" style="margin-top:10px">
+              <button class="btn primary" type="submit" id="layoutSaveBtn">Lưu sơ đồ</button>
+              <button class="btn" type="button" id="layoutCancelEditBtn">Hủy</button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
 
@@ -396,7 +557,7 @@ function show(view) {
   if (state.user?.role === 'PLATFORM_ADMIN' && view !== 'platform' && !state.platformCode) {
     toast('Chọn nhà xe ở thanh trên để xem dữ liệu điều hành');
   }
-  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, audit: loadAudit, platform: loadOperators })[view]();
+  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, fleet: loadFleet, layouts: loadLayouts, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, audit: loadAudit, platform: loadOperators })[view]();
 }
 
 // ---------- overview ----------
@@ -1186,6 +1347,619 @@ $('#bannerForm').addEventListener('submit', async (e) => {
   resetBannerForm();
   loadBanners();
 });
+
+// ---------- fleet (MGR-005, MGR-006) ----------
+const fleetState = { vehicles: [], layouts: [] };
+
+async function loadFleet() {
+  const [vr, lr] = await Promise.all([
+    api('/api/v1/ops/vehicles'),
+    api('/api/v1/ops/seat-layouts')
+  ]);
+
+  const rawLayouts = lr.data || lr.raw;
+  fleetState.layouts = Array.isArray(rawLayouts) ? rawLayouts : (rawLayouts?.layouts || (Array.isArray(lr.data?.layouts) ? lr.data.layouts : []));
+
+  const layoutSelect = $('#vehLayout');
+  if (layoutSelect) {
+    layoutSelect.innerHTML = fleetState.layouts.map(l =>
+      `<option value="${esc(l.layout_id)}">${esc(l.name)} (${esc(l.total_seats || l.seats?.length || 0)} chỗ)</option>`
+    ).join('');
+  }
+
+  const box = $('#fleetBox');
+  if (!vr.ok) {
+    box.innerHTML = `<p class="error" style="padding:16px">${esc(vr.message)}</p>`;
+    return;
+  }
+
+  const rawVehicles = vr.data;
+  fleetState.vehicles = Array.isArray(rawVehicles) ? rawVehicles : (rawVehicles?.vehicles || []);
+
+  if (!fleetState.vehicles.length) {
+    box.innerHTML = '<p class="muted" style="padding:16px;margin:0">Chưa có xe nào trong đội xe.</p>';
+    return;
+  }
+
+  box.innerHTML = `<table>
+    <thead>
+      <tr>
+        <th>Biển số</th>
+        <th>Dòng xe</th>
+        <th>Sơ đồ ghế</th>
+        <th>Trạng thái</th>
+        <th>Đổi sơ đồ ghế</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${fleetState.vehicles.map(v => {
+        const l = fleetState.layouts.find(x => x.layout_id === v.layout_id);
+        const layoutName = l ? l.name : (v.layout_name || v.layout_id || 'Chưa gán');
+        const seatCount = v.total_seats ?? (l ? (l.total_seats || l.seats?.length) : '—');
+        return `<tr>
+          <td><span class="mono"><b>${esc(v.plate_number)}</b></span></td>
+          <td>${esc(v.model)}</td>
+          <td>${esc(layoutName)} <span class="muted mono">(${esc(seatCount)} chỗ)</span></td>
+          <td>${pill(v.status)}</td>
+          <td>
+            <div class="row" style="gap:6px">
+              <select data-veh-select="${esc(v.vehicle_id)}" style="max-width:220px">
+                ${fleetState.layouts.map(lay => `
+                  <option value="${esc(lay.layout_id)}" ${lay.layout_id === v.layout_id ? 'selected' : ''}>
+                    ${esc(lay.name)} (${esc(lay.total_seats || lay.seats?.length || 0)} chỗ)
+                  </option>
+                `).join('')}
+              </select>
+              <button class="btn" data-veh-change="${esc(v.vehicle_id)}">Đổi sơ đồ</button>
+            </div>
+            <div class="error" id="vehError_${esc(v.vehicle_id)}" style="margin-top:4px"></div>
+          </td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+
+  box.querySelectorAll('button[data-veh-change]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const vId = btn.dataset.vehChange;
+      const select = box.querySelector(`select[data-veh-select="${CSS.escape(vId)}"]`) || box.querySelector(`select[data-veh-select="${vId}"]`);
+      const errEl = document.getElementById(`vehError_${vId}`);
+      if (errEl) errEl.textContent = '';
+      if (!select) return;
+      btn.disabled = true;
+      const r = await api(`/api/v1/ops/vehicles/${encodeURIComponent(vId)}`, {
+        method: 'PATCH',
+        body: { layout_id: select.value }
+      });
+      btn.disabled = false;
+      if (!r.ok) {
+        if (errEl) errEl.textContent = r.message;
+        return;
+      }
+      toast('Đã cập nhật sơ đồ xe');
+      loadFleet();
+    });
+  });
+}
+
+$('#fleetAddForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const plate = f.plate_number.value.trim();
+  const model = f.model.value.trim();
+  const layout_id = f.layout_id.value;
+  $('#fleetAddError').textContent = '';
+  if (!plate) { $('#fleetAddError').textContent = 'Vui lòng nhập biển số xe'; return; }
+  if (!model) { $('#fleetAddError').textContent = 'Vui lòng nhập dòng xe'; return; }
+  $('#vehAddBtn').disabled = true;
+  const r = await api('/api/v1/ops/vehicles', {
+    method: 'POST',
+    body: { plate_number: plate, model, layout_id },
+    idempotent: true
+  });
+  $('#vehAddBtn').disabled = false;
+  if (!r.ok) {
+    $('#fleetAddError').textContent = r.message;
+    return;
+  }
+  f.reset();
+  toast('Đã thêm xe vào đội xe');
+  loadFleet();
+});
+
+// ---------- seat layouts (MGR-007) ----------
+const layoutsState = {
+  list: [],
+  selectedId: null,
+  editingId: null,
+  editorSeats: []
+};
+
+const SEAT_TYPE_LABELS = {
+  VIP_CABIN: 'Phòng VIP',
+  SLEEPER: 'Giường nằm',
+  SEAT: 'Ghế ngồi'
+};
+const seatTypeLabel = (t) => SEAT_TYPE_LABELS[t] || t || 'Ghế';
+
+function deckTitle(deck, totalDecks) {
+  if (totalDecks === 1) return '';
+  if (totalDecks === 2) return deck === 1 ? 'Tầng dưới' : 'Tầng trên';
+  return `Tầng ${deck}`;
+}
+
+function renderDeckGridHtml(layout, deckNumber, interactive = false) {
+  const seats = interactive ? layoutsState.editorSeats : (layout?.seats || []);
+  const totalColumns = Number(interactive ? $('#layoutCols').value : (layout?.columns || 3)) || 3;
+  const deckSeats = seats.filter(s => s.deck === deckNumber);
+  const maxRow = interactive
+    ? Math.max(1, Number($('#layoutRows').value) || 1, ...deckSeats.map(s => s.row || 1))
+    : Math.max(1, ...deckSeats.map(s => s.row || 1));
+
+  // A grid column with no seat on any row of a deck is an aisle.
+  const aisleCols = new Set();
+  for (let c = 1; c <= totalColumns; c++) {
+    if (!deckSeats.some(s => s.column === c)) {
+      aisleCols.add(c);
+    }
+  }
+
+  const gridTemplate = aisleCols.size
+    ? Array.from({ length: totalColumns }, (_, i) => aisleCols.has(i + 1) ? (interactive ? '32px' : '22px') : 'minmax(42px, 56px)').join(' ')
+    : `repeat(${totalColumns}, minmax(42px, 56px))`;
+
+  const title = deckTitle(deckNumber, interactive ? (Number($('#layoutDecks').value) || 1) : (layout?.total_decks || 1));
+
+  let cellsHtml = '';
+  for (let r = 1; r <= maxRow; r++) {
+    for (let c = 1; c <= totalColumns; c++) {
+      const seat = deckSeats.find(s => s.row === r && s.column === c);
+      if (seat) {
+        const cls = `seat-box seat-${(seat.type || 'SEAT').toLowerCase()}${interactive ? ' editor-cell' : ''}`;
+        const titleAttr = `${esc(seat.seat_code)} · ${esc(seatTypeLabel(seat.type))}${interactive ? ' (bấm để xóa)' : ''}`;
+        cellsHtml += `<div class="${cls}" data-deck="${deckNumber}" data-row="${r}" data-col="${c}" title="${titleAttr}">${esc(seat.seat_code)}</div>`;
+      } else {
+        if (interactive) {
+          cellsHtml += `<div class="empty-cell editor-cell" data-deck="${deckNumber}" data-row="${r}" data-col="${c}" title="Bấm để thêm ghế">+</div>`;
+        } else if (aisleCols.has(c)) {
+          cellsHtml += '<div class="aisle-cell"></div>';
+        } else {
+          cellsHtml += '<div class="empty-cell"></div>';
+        }
+      }
+    }
+  }
+
+  return `<div class="deck-bus-frame">
+    ${title ? `<div class="deck-title">${esc(title)}</div>` : ''}
+    <div class="deck-front-label">Đầu xe</div>
+    <div class="deck-grid" style="grid-template-columns: ${gridTemplate}">
+      ${cellsHtml}
+    </div>
+  </div>`;
+}
+
+function showLayoutPreview(layout) {
+  if (!layout) {
+    $('#layoutPreviewContent').innerHTML = '<p class="muted" style="padding:16px">Chọn một sơ đồ ghế để xem chi tiết.</p>';
+    return;
+  }
+
+  const plates = (layout.used_by && layout.used_by.length)
+    ? layout.used_by.map(p => `<span class="pill mono">${esc(p)}</span>`).join(' ')
+    : '<span class="muted">Chưa có xe sử dụng</span>';
+
+  const decksHtml = Array.from({ length: layout.total_decks || 1 }, (_, i) =>
+    renderDeckGridHtml(layout, i + 1, false)
+  ).join('');
+
+  $('#layoutPreviewContent').innerHTML = `
+    <div class="row" style="justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="row" style="gap:8px;margin-bottom:4px">
+          <h3 style="margin:0;font-size:18px">${esc(layout.name)}</h3>
+          ${layout.builtin ? '<span class="pill info">Có sẵn</span>' : '<span class="pill">Tự tạo</span>'}
+        </div>
+        <div class="muted" style="font-size:13px">
+          ${esc(layout.total_decks || 1)} tầng · ${esc(layout.total_seats || layout.seats?.length || 0)} chỗ · ${esc(layout.columns || 0)} cột
+        </div>
+      </div>
+      <div class="row" style="gap:6px">
+        <button class="btn" id="previewCloneBtn">Nhân bản</button>
+        ${!layout.builtin ? `
+          <button class="btn" id="previewEditBtn">Sửa</button>
+          <button class="btn danger" id="previewDelBtn">Xóa</button>
+        ` : ''}
+      </div>
+    </div>
+    <div style="margin-bottom:14px;font-size:13px">
+      <span class="muted">Đang dùng: </span>${plates}
+    </div>
+    <div class="row" style="gap:16px;margin-bottom:14px;font-size:12px;flex-wrap:wrap">
+      <span class="row" style="gap:6px"><span class="seat-box seat-vip_cabin" style="height:20px;min-width:24px;font-size:10px"></span> Phòng VIP</span>
+      <span class="row" style="gap:6px"><span class="seat-box seat-sleeper" style="height:20px;min-width:24px;font-size:10px"></span> Giường nằm</span>
+      <span class="row" style="gap:6px"><span class="seat-box seat-seat" style="height:20px;min-width:24px;font-size:10px"></span> Ghế ngồi</span>
+    </div>
+    <div class="row" style="gap:16px;align-items:flex-start;flex-wrap:wrap">
+      ${decksHtml}
+    </div>
+  `;
+
+  $('#previewCloneBtn')?.addEventListener('click', () => duplicateLayout(layout));
+  $('#previewEditBtn')?.addEventListener('click', () => editCustomLayout(layout));
+  $('#previewDelBtn')?.addEventListener('click', (e) => deleteLayoutTwoClick(e.target, layout.layout_id));
+}
+
+async function deleteLayoutTwoClick(btn, layoutId) {
+  if (!btn.dataset.armed) {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Xóa hẳn?';
+    setTimeout(() => {
+      if (btn.isConnected) {
+        delete btn.dataset.armed;
+        btn.textContent = 'Xóa';
+      }
+    }, 4000);
+    return;
+  }
+  delete btn.dataset.armed;
+  btn.textContent = 'Đang xóa...';
+  btn.disabled = true;
+  const r = await api(`/api/v1/ops/seat-layouts/${encodeURIComponent(layoutId)}`, {
+    method: 'DELETE'
+  });
+  btn.disabled = false;
+  btn.textContent = 'Xóa';
+  if (!r.ok) {
+    const listErr = $('#layoutsListError');
+    if (listErr) listErr.textContent = r.message;
+    toast(r.message || 'Không thể xóa sơ đồ ghế');
+    return;
+  }
+  toast('Đã xóa sơ đồ ghế');
+  if (layoutsState.selectedId === layoutId) {
+    layoutsState.selectedId = null;
+  }
+  loadLayouts();
+}
+
+function openNewLayoutEditor() {
+  layoutsState.editingId = null;
+  $('#layoutPreviewCard').classList.add('hidden');
+  $('#layoutEditorCard').classList.remove('hidden');
+  $('#layoutEditorTitle').textContent = 'Tạo sơ đồ riêng';
+  $('#layoutSaveBtn').textContent = 'Lưu sơ đồ';
+  $('#layoutEditorError').textContent = '';
+
+  $('#layoutName').value = '';
+  $('#layoutVehicleType').value = 'DOUBLE_DECK_VIP_CABIN';
+  $('#layoutDecks').value = '2';
+  $('#layoutRows').value = '6';
+  $('#layoutCols').value = '3';
+  $('#layoutAisles').value = '2';
+  $('#layoutSeatType').value = 'VIP_CABIN';
+  $('#layoutPrefix1').value = 'A';
+  $('#layoutPrefix2').value = 'B';
+  $('#layoutPrefix3').value = 'C';
+
+  $('#layoutPrefix2Field').classList.remove('hidden');
+  $('#layoutPrefix3Field').classList.add('hidden');
+
+  generateEditorGrid();
+}
+
+function editCustomLayout(layout) {
+  if (!layout) return;
+  layoutsState.editingId = layout.layout_id;
+  $('#layoutPreviewCard').classList.add('hidden');
+  $('#layoutEditorCard').classList.remove('hidden');
+  $('#layoutEditorTitle').textContent = `Sửa sơ đồ: ${layout.name}`;
+  $('#layoutSaveBtn').textContent = 'Lưu thay đổi';
+  $('#layoutEditorError').textContent = '';
+
+  $('#layoutName').value = layout.name || '';
+  $('#layoutVehicleType').value = layout.vehicle_type || 'DOUBLE_DECK_VIP_CABIN';
+  const totalDecks = Number(layout.total_decks) || 1;
+  const totalCols = Number(layout.columns) || 3;
+  $('#layoutDecks').value = totalDecks;
+  $('#layoutCols').value = totalCols;
+
+  const seats = layout.seats || [];
+  const maxRow = Math.max(1, ...seats.map(s => s.row || 1));
+  $('#layoutRows').value = maxRow;
+
+  const aisleArr = [];
+  for (let c = 1; c <= totalCols; c++) {
+    if (!seats.some(s => s.column === c)) aisleArr.push(c);
+  }
+  $('#layoutAisles').value = aisleArr.join(', ');
+
+  $('#layoutSeatType').value = seats[0]?.type || 'VIP_CABIN';
+
+  const p1 = seats.find(s => s.deck === 1)?.seat_code?.replace(/[0-9]/g, '') || 'A';
+  const p2 = seats.find(s => s.deck === 2)?.seat_code?.replace(/[0-9]/g, '') || 'B';
+  const p3 = seats.find(s => s.deck === 3)?.seat_code?.replace(/[0-9]/g, '') || 'C';
+  $('#layoutPrefix1').value = p1;
+  $('#layoutPrefix2').value = p2;
+  $('#layoutPrefix3').value = p3;
+
+  $('#layoutPrefix2Field').classList.toggle('hidden', totalDecks < 2);
+  $('#layoutPrefix3Field').classList.toggle('hidden', totalDecks < 3);
+
+  layoutsState.editorSeats = JSON.parse(JSON.stringify(seats));
+  renderEditorPreview();
+}
+
+function duplicateLayout(layout) {
+  if (!layout) return;
+  editCustomLayout(layout);
+  layoutsState.editingId = null;
+  $('#layoutEditorTitle').textContent = 'Nhân bản sơ đồ ghế';
+  $('#layoutSaveBtn').textContent = 'Tạo sơ đồ';
+  $('#layoutName').value = `${layout.name} (bản sao)`;
+}
+
+function generateEditorGrid() {
+  const totalDecks = Math.max(1, Math.min(3, Number($('#layoutDecks').value) || 1));
+  const rows = Math.max(1, Math.min(20, Number($('#layoutRows').value) || 1));
+  const cols = Math.max(1, Math.min(8, Number($('#layoutCols').value) || 1));
+  const aisleStr = $('#layoutAisles').value || '';
+  const aisleSet = new Set(
+    aisleStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n >= 1 && n <= cols)
+  );
+  const seatType = $('#layoutSeatType').value || 'VIP_CABIN';
+
+  const p1 = ($('#layoutPrefix1').value || 'A').trim().toUpperCase() || 'A';
+  const p2 = ($('#layoutPrefix2').value || 'B').trim().toUpperCase() || 'B';
+  const p3 = ($('#layoutPrefix3').value || 'C').trim().toUpperCase() || 'C';
+  const prefixes = [p1, p2, p3];
+
+  layoutsState.editorSeats = [];
+  for (let d = 1; d <= totalDecks; d++) {
+    const prefix = prefixes[d - 1] || 'A';
+    let seatNum = 1;
+    for (let r = 1; r <= rows; r++) {
+      for (let c = 1; c <= cols; c++) {
+        if (aisleSet.has(c)) continue;
+        const code = prefix + String(seatNum++).padStart(2, '0');
+        layoutsState.editorSeats.push({
+          seat_code: code,
+          deck: d,
+          row: r,
+          column: c,
+          type: seatType
+        });
+      }
+    }
+  }
+  renderEditorPreview();
+}
+
+function renumberEditorSeats() {
+  const totalDecks = Math.max(1, Math.min(3, Number($('#layoutDecks').value) || 1));
+  const p1 = ($('#layoutPrefix1').value || 'A').trim().toUpperCase() || 'A';
+  const p2 = ($('#layoutPrefix2').value || 'B').trim().toUpperCase() || 'B';
+  const p3 = ($('#layoutPrefix3').value || 'C').trim().toUpperCase() || 'C';
+  const prefixes = [p1, p2, p3];
+
+  for (let d = 1; d <= totalDecks; d++) {
+    const deckSeats = layoutsState.editorSeats.filter(s => s.deck === d);
+    deckSeats.sort((a, b) => a.row !== b.row ? a.row - b.row : a.column - b.column);
+    const prefix = prefixes[d - 1] || 'A';
+    deckSeats.forEach((s, i) => {
+      s.seat_code = prefix + String(i + 1).padStart(2, '0');
+    });
+  }
+}
+
+function renderEditorPreview() {
+  $('#editorSeatCount').textContent = layoutsState.editorSeats.length;
+  const totalDecks = Math.max(1, Math.min(3, Number($('#layoutDecks').value) || 1));
+
+  let decksHtml = '';
+  for (let d = 1; d <= totalDecks; d++) {
+    decksHtml += renderDeckGridHtml(null, d, true);
+  }
+  const previewEl = $('#layoutEditorPreview');
+  previewEl.innerHTML = `<div class="row" style="gap:16px;align-items:flex-start;flex-wrap:wrap">${decksHtml}</div>`;
+
+  previewEl.querySelectorAll('.editor-cell').forEach(cell => {
+    cell.addEventListener('click', () => {
+      const d = Number(cell.dataset.deck);
+      const r = Number(cell.dataset.row);
+      const c = Number(cell.dataset.col);
+      const idx = layoutsState.editorSeats.findIndex(s => s.deck === d && s.row === r && s.column === c);
+      if (idx >= 0) {
+        layoutsState.editorSeats.splice(idx, 1);
+      } else {
+        const type = $('#layoutSeatType').value || 'VIP_CABIN';
+        layoutsState.editorSeats.push({ seat_code: '', deck: d, row: r, column: c, type });
+      }
+      renumberEditorSeats();
+      renderEditorPreview();
+    });
+  });
+}
+
+function closeLayoutEditor() {
+  $('#layoutEditorCard').classList.add('hidden');
+  $('#layoutPreviewCard').classList.remove('hidden');
+  layoutsState.editingId = null;
+  const sel = layoutsState.list.find(l => l.layout_id === layoutsState.selectedId) || layoutsState.list[0];
+  showLayoutPreview(sel);
+}
+
+$('#layoutCancelEditBtn')?.addEventListener('click', closeLayoutEditor);
+$('#layoutNewBtn')?.addEventListener('click', openNewLayoutEditor);
+$('#layoutGenGridBtn')?.addEventListener('click', generateEditorGrid);
+$('#layoutDecks')?.addEventListener('input', () => {
+  const d = Math.max(1, Math.min(3, Number($('#layoutDecks').value) || 1));
+  $('#layoutPrefix2Field').classList.toggle('hidden', d < 2);
+  $('#layoutPrefix3Field').classList.toggle('hidden', d < 3);
+});
+
+$('#layoutEditorCard')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = $('#layoutEditorError');
+  errEl.textContent = '';
+
+  const name = $('#layoutName').value.trim();
+  if (!name) { errEl.textContent = 'Vui lòng nhập tên sơ đồ (tối đa 80 ký tự)'; return; }
+  if (name.length > 80) { errEl.textContent = 'Tên sơ đồ không được vượt quá 80 ký tự'; return; }
+
+  const vehicle_type = $('#layoutVehicleType').value;
+  const total_decks = Number($('#layoutDecks').value) || 1;
+  const columns = Number($('#layoutCols').value) || 1;
+
+  if (!layoutsState.editorSeats.length) {
+    errEl.textContent = 'Sơ đồ phải có ít nhất 1 ghế';
+    return;
+  }
+
+  for (let d = 1; d <= total_decks; d++) {
+    if (!layoutsState.editorSeats.some(s => s.deck === d)) {
+      errEl.textContent = `Tầng ${d} không có ghế nào`;
+      return;
+    }
+  }
+
+  const body = {
+    name,
+    vehicle_type,
+    total_decks,
+    columns,
+    seats: layoutsState.editorSeats
+  };
+
+  const btn = $('#layoutSaveBtn');
+  btn.disabled = true;
+
+  let r;
+  if (layoutsState.editingId) {
+    r = await api(`/api/v1/ops/seat-layouts/${encodeURIComponent(layoutsState.editingId)}`, {
+      method: 'PATCH',
+      body
+    });
+  } else {
+    r = await api('/api/v1/ops/seat-layouts', {
+      method: 'POST',
+      body,
+      idempotent: true
+    });
+  }
+
+  btn.disabled = false;
+  if (!r.ok) {
+    errEl.textContent = r.message;
+    return;
+  }
+
+  toast(layoutsState.editingId ? 'Đã lưu thay đổi sơ đồ' : 'Đã tạo sơ đồ mới');
+  const savedId = r.data?.layout_id || layoutsState.editingId;
+  closeLayoutEditor();
+  layoutsState.selectedId = savedId;
+  await loadLayouts();
+});
+
+async function loadLayouts() {
+  const r = await api('/api/v1/ops/seat-layouts');
+  const box = $('#layoutsListBox');
+  if (!r.ok) {
+    box.innerHTML = `<p class="error" style="padding:16px">${esc(r.message)}</p>`;
+    return;
+  }
+
+  const raw = r.data || r.raw;
+  layoutsState.list = Array.isArray(raw) ? raw : (raw?.layouts || (Array.isArray(r.data?.layouts) ? r.data.layouts : []));
+
+  $('#layoutCount').textContent = `${layoutsState.list.length} sơ đồ`;
+  const listErr = $('#layoutsListError');
+  if (listErr) listErr.textContent = '';
+
+  if (!layoutsState.list.length) {
+    box.innerHTML = '<p class="muted" style="padding:16px;margin:0">Chưa có sơ đồ ghế nào.</p>';
+    showLayoutPreview(null);
+    return;
+  }
+
+  if (!layoutsState.selectedId || !layoutsState.list.some(l => l.layout_id === layoutsState.selectedId)) {
+    layoutsState.selectedId = layoutsState.list[0].layout_id;
+  }
+
+  box.innerHTML = `<table>
+    <thead>
+      <tr>
+        <th>Sơ đồ</th>
+        <th>Thông số</th>
+        <th style="text-align:right">Thao tác</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${layoutsState.list.map(l => {
+        const isSel = layoutsState.selectedId === l.layout_id;
+        const plates = l.used_by && l.used_by.length ? esc(l.used_by.join(', ')) : 'chưa gán';
+        return `<tr class="click ${isSel ? 'sel' : ''}" data-layout-id="${esc(l.layout_id)}">
+          <td>
+            <b>${esc(l.name)}</b> ${l.builtin ? '<span class="pill info">Có sẵn</span>' : ''}
+            <div class="muted" style="font-size:12px">đang dùng: ${plates}</div>
+          </td>
+          <td class="mono" style="font-size:12px">
+            ${esc(l.total_decks || 1)} tầng · ${esc(l.total_seats || l.seats?.length || 0)} chỗ
+          </td>
+          <td style="text-align:right">
+            <div class="row" style="gap:4px;justify-content:flex-end">
+              <button class="btn" style="padding:3px 8px;font-size:12px" data-layout-clone="${esc(l.layout_id)}">Nhân bản</button>
+              ${!l.builtin ? `
+                <button class="btn" style="padding:3px 8px;font-size:12px" data-layout-edit="${esc(l.layout_id)}">Sửa</button>
+                <button class="btn danger" style="padding:3px 8px;font-size:12px" data-layout-del="${esc(l.layout_id)}">Xóa</button>
+              ` : ''}
+            </div>
+          </td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+
+  box.querySelectorAll('tr[data-layout-id]').forEach(tr => {
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      const lId = tr.dataset.layoutId;
+      layoutsState.selectedId = lId;
+      box.querySelectorAll('tr[data-layout-id]').forEach(rEl => rEl.classList.toggle('sel', rEl.dataset.layoutId === lId));
+      closeLayoutEditor();
+      const sel = layoutsState.list.find(x => x.layout_id === lId);
+      showLayoutPreview(sel);
+    });
+  });
+
+  box.querySelectorAll('button[data-layout-clone]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const l = layoutsState.list.find(x => x.layout_id === btn.dataset.layoutClone);
+      if (l) duplicateLayout(l);
+    });
+  });
+
+  box.querySelectorAll('button[data-layout-edit]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const l = layoutsState.list.find(x => x.layout_id === btn.dataset.layoutEdit);
+      if (l) editCustomLayout(l);
+    });
+  });
+
+  box.querySelectorAll('button[data-layout-del]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteLayoutTwoClick(btn, btn.dataset.layoutDel);
+    });
+  });
+
+  if ($('#layoutEditorCard').classList.contains('hidden')) {
+    const sel = layoutsState.list.find(l => l.layout_id === layoutsState.selectedId) || layoutsState.list[0];
+    showLayoutPreview(sel);
+  }
+}
 
 // ---------- platform admin ----------
 async function loadPlatformOperatorPicker() {

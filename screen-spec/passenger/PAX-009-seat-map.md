@@ -5,7 +5,7 @@
 **Screen Type:** Full Screen  
 **Priority:** P0 (Core Journey / Blocking)  
 **Route:** `/trip/:tripId/seat-map`  
-**Version:** 1.0  
+**Version:** 1.1 (D147, 2026-10-14)  
 **Source Requirements:** `F-PAS-09`, `BR-SEAT-001`, `BR-SEAT-002`, `UC-PAS-SEAT-001`  
 **Taste-Skill Config:** `DESIGN_VARIANCE: 7`, `MOTION_INTENSITY: 5`, `VISUAL_DENSITY: 3`
 
@@ -263,3 +263,19 @@ Scenario: Realtime hold broadcast conflict
 | `TC-PAX-009-02` | Validation | Attempt to select 6th seat | Blocks selection with limit toast |
 | `TC-PAX-009-03` | Realtime | Receive WS `SEAT_HELD` for selected seat | Auto-deselects with conflict notice |
 | `TC-PAX-009-04` | Accessibility | VoiceOver swipe across seat grid | Announces seat code, deck, price, and status in Vietnamese |
+
+---
+
+## 14. Seat Layout of the Bus (D147)
+The map is drawn from the layout of the bus assigned to the trip (MGR-006, MGR-007), not a fixed 2-deck cabin.
+
+- `GET /api/v1/trips/{tripId}/seat-map` adds `layout_id`, `total_decks`, `columns`, and per seat `deck`, `row`, `column`, `type`. A trip with no bus yet uses `CABIN_22`.
+- Seats sit in a grid of `columns` per row. A column with no seat on that deck is the aisle (narrow gap); an empty cell inside a seat column stays blank.
+- Deck tabs only when the bus has more than one deck: "Tầng dưới" / "Tầng trên" for 2, "Tầng 1/2/3" for 3. A 1-deck bus shows "n ghế trống" with no tabs.
+- Trip search and trip detail (PAX-006, PAX-007) of a trip with a bus show that bus: `vehicle_title` = its model, `total_seats` = its layout's seats, `available_seats_count` = seats minus those sold or held, `vehicle_type` from the layout.
+- The deck on a ticket and on the driver's list comes from the layout, not from the seat code's letter.
+
+| Test ID | Condition | Expected |
+|---|---|---|
+| `TC-PAX-009-05` | 45-seat bus (1 deck, 5 columns) | no deck tabs; 2 + aisle + 2 per row, back row of 5 |
+| `TC-PAX-009-06` | 2-deck bus | seats placed by row/column on each deck; tab titles Tầng dưới / Tầng trên |

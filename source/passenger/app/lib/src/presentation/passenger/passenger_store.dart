@@ -242,11 +242,22 @@ class Trip {
 
 enum SeatState { free, held, booked, blocked }
 
+/// A seat or sleeper berth on a deck grid.
 class Seat {
-  const Seat(this.code, this.deck, this.state);
+  const Seat(
+    this.code,
+    this.deck,
+    this.state, {
+    this.row = 1,
+    this.column = 1,
+    this.type = 'VIP_CABIN',
+  });
   final String code;
   final int deck;
   final SeatState state;
+  final int row;
+  final int column;
+  final String type;
 }
 
 enum TicketStatus { active, boarded, refunding, cancelled, noShow }
@@ -595,6 +606,7 @@ class PassengerStore extends ChangeNotifier {
   List<ServiceArea> serviceAreas = [];
   int get homeFees => (homePickup?.feeVnd ?? 0) + (homeDropoff?.feeVnd ?? 0);
   int deck = 1;
+  int seatColumns = 1;
   List<Seat> seatMap = [];
   bool loadingSeats = false;
   final List<String> seats = [];
@@ -1062,8 +1074,22 @@ class PassengerStore extends ChangeNotifier {
         'BLOCKED' => SeatState.blocked,
         _ => SeatState.held,
       };
-      return Seat(s['seat_code'], (s['deck'] as num?)?.toInt() ?? 1, state);
+      final row = (s['row'] as num?)?.toInt() ?? 1;
+      final col = (s['column'] as num?)?.toInt() ?? 1;
+      final type = s['type'] as String? ?? 'VIP_CABIN';
+      return Seat(
+        s['seat_code'],
+        (s['deck'] as num?)?.toInt() ?? 1,
+        state,
+        row: row < 1 ? 1 : row,
+        column: col < 1 ? 1 : col,
+        type: type.isEmpty ? 'VIP_CABIN' : type,
+      );
     }).toList();
+    final cols = (r.value!['columns'] as num?)?.toInt();
+    final maxCol = seatMap.fold<int>(1, (max, s) => s.column > max ? s.column : max);
+    seatColumns = (cols != null && cols >= 1) ? cols : maxCol;
+    if (!decks.contains(deck) && decks.isNotEmpty) deck = decks.first;
     seats.removeWhere((c) => seatMap.any((s) => s.code == c && s.state != SeatState.free));
     notifyListeners();
     return null;

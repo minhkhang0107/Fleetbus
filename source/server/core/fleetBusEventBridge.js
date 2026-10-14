@@ -118,6 +118,7 @@ export class FleetBusEventBridge extends EventEmitter {
         if (passengerTrip?.success) return passengerTrip.data.stops;
         return driverService?.activeTrips?.get(tripId)?.stops || null;
       };
+      seatMapService.layoutProvider = (tripId) => managerService?.layoutOfTrip?.(tripId) || null;
     }
     // A schedule's run on another day gets its ops and driver trips the first time the office or a sale needs it.
     if (managerService) {
@@ -440,7 +441,7 @@ export class FleetBusEventBridge extends EventEmitter {
             fare_vnd: Math.round(booking.total_fare_vnd / seatCodes.length),
             owner_phone: booking.phone,
             seat_code: seatCode,
-            deck: seatMapService?.getSeatInfo?.(tripId, seatCode)?.deck ?? (seatCode.startsWith('A') ? 1 : 2),
+            deck: seatMapService?.getSeatInfo?.(tripId, seatCode)?.deck || 1,
             passenger_name: booking.passenger_name,
             passenger_phone: booking.phone,
             pickup_stop: stopName(booking.pickup_stop_id, 0),
@@ -607,6 +608,7 @@ export class FleetBusEventBridge extends EventEmitter {
     // MGR-017: the office gave a trip its bus and driver. The driver trip follows; passengers who already have a
     // ticket are told once per new pair when the bus or the driver changed (spec 9).
     this.on('TRIP_ASSIGNED', ({ tripId, vehiclePlate, vehicleModel, capacity, driverId, driverName, previous }) => {
+      seatMapService?.rebuildLayout?.(tripId);
       const detail = services.searchService?.getTripDetail?.(tripId);
       const catalogTrip = detail?.success ? detail.data : null;
       const driverTrip = driverService?.applyAssignment?.(tripId, { driverId, vehiclePlate, vehicleModel, capacity }, catalogTrip, parseRunId(tripId)?.templateId || null);

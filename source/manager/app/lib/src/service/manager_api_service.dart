@@ -99,6 +99,40 @@ class ManagerApiService {
     return _get('/ops/vehicles');
   }
 
+  // MGR-006: Create vehicle
+  Future<Map<String, dynamic>> createVehicle({
+    required String plateNumber,
+    required String model,
+    required String layoutId,
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/vehicles',
+      body: {
+        'plate_number': plateNumber,
+        'model': model,
+        'layout_id': layoutId,
+      },
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  // MGR-006: Update vehicle
+  Future<Map<String, dynamic>> updateVehicle(
+    String vehicleId, {
+    String? layoutId,
+    String? model,
+  }) {
+    return _patch(
+      '/ops/vehicles/${Uri.encodeComponent(vehicleId)}',
+      body: {
+        if (layoutId != null) 'layout_id': layoutId,
+        if (model != null) 'model': model,
+      },
+    );
+  }
+
   // MGR-015: Crew Directory
   Future<Map<String, dynamic>> getCrew() {
     return _get('/ops/drivers');
@@ -362,5 +396,25 @@ class ManagerApiService {
   // MGR-033 (D130): Refuse a request with a reason the passenger reads; its fee is refunded
   Future<Map<String, dynamic>> rejectHomeRequest(String orderId, String side, {required String reason, String? idempotencyKey}) {
     return _post('/ops/home-requests/${Uri.encodeComponent(orderId)}/$side/reject', body: {'reason': reason}, idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-007: Seat layout templates
+  Future<Map<String, dynamic>> getSeatLayouts() {
+    return _get('/ops/seat-layouts');
+  }
+
+  // MGR-007: Create seat layout template
+  Future<Map<String, dynamic>> createSeatLayout(Map<String, dynamic> layout, {String? idempotencyKey}) {
+    return _post('/ops/seat-layouts', body: layout, idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-007: Update seat layout template
+  Future<Map<String, dynamic>> updateSeatLayout(String layoutId, Map<String, dynamic> layout) {
+    return _patch('/ops/seat-layouts/${Uri.encodeComponent(layoutId)}', body: layout);
+  }
+
+  // MGR-007: Delete seat layout template
+  Future<Map<String, dynamic>> deleteSeatLayout(String layoutId) {
+    return _delete('/ops/seat-layouts/${Uri.encodeComponent(layoutId)}');
   }
 }

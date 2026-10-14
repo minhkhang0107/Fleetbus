@@ -72,9 +72,9 @@
 | **MGR-002** | Manager | Operations Overview Dashboard | `/ops/dashboard` | Main Navigation | `/ops/radar`, `/ops/trips`, `/ops/alerts` | P0 | Draft | Source-backed |
 | **MGR-003** | Manager | Live Fleet Operations Radar | `/ops/radar` | Main Navigation, Dashboard Widget | `/ops/vehicle/:id/live`, `/ops/trip/:id` | P0 | Draft | Source-backed |
 | **MGR-004** | Manager | Vehicle Live Telemetry Inspector | `/ops/vehicle/:id/live` | Live Radar, Vehicle Directory | `/ops/radar`, `/ops/vehicle/:id/edit` | P0 | Draft | Source-backed |
-| **MGR-005** | Manager | Vehicle Fleet Directory | `/ops/vehicles` | Sidebar Nav | `/ops/vehicle/create`, `/ops/vehicle/:id` | P1 | Draft | Source-backed |
-| **MGR-006** | Manager | Vehicle Create & Edit | `/ops/vehicles/new`, `/:id/edit` | Vehicle Directory | `/ops/vehicles`, `/ops/seat-layouts` | P1 | Draft | Source-backed |
-| **MGR-007** | Manager | Visual Seat Layout Builder | `/ops/seat-layouts/builder` | Vehicle Edit, Layout Directory | `/ops/vehicles`, `/ops/seat-layouts` | P1 | Draft | Source-backed |
+| **MGR-005** | Manager | Fleet (Đội xe) with each bus's seat layout | `/manager` → "Đội xe" | Sidebar Nav | `/manager` | P1 | Draft | Seat layouts 2026-10-14 (D147) |
+| **MGR-006** | Manager | Add a Bus, Change its Seat Layout | `/manager` → "Đội xe" | Fleet | `/manager` | P1 | Draft | Seat layouts 2026-10-14 (D147) |
+| **MGR-007** | Manager | Seat Layouts (Sơ đồ ghế) and builder | `/manager` → "Sơ đồ ghế" | Sidebar Nav | `/manager` | P1 | Draft | Seat layouts 2026-10-14 (D147) |
 | **MGR-008** | Manager | Route & Corridor Directory | `/ops/routes` | Sidebar Nav | `/ops/route/create`, `/ops/route/:id` | P1 | Draft | Source-backed |
 | **MGR-009** | Manager | Route & Geofence Stop Builder | `/ops/routes/builder` | Route Directory | `/ops/routes`, `/ops/trips/new` | P1 | Draft | Source-backed |
 | **MGR-010** | Manager | Trip Schedule Directory | `/ops/trips` | Sidebar Nav | `/ops/trip/new`, `/ops/trip/:id` | P0 | Draft | Source-backed |

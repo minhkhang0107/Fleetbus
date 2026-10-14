@@ -52,6 +52,8 @@ export function stateCollections(services, { idempotency } = {}) {
     listCollection('hotline_reservations', () => managerService.hotlineReservations, own),
     listCollection('refund_requests', () => managerService.refundRequests, own),
     listCollection('audit_log', () => managerService.auditLog, own, { freeze: true }),
+    // Seat layout templates a company drew for its own buses (D147).
+    listCollection('custom_seat_layouts', () => managerService.seatLayouts, own),
     objectCollection('schedule_assignments', () => managerService.scheduleAssignments, (o) => { managerService.scheduleAssignments = o; }, (_, key) => tripOwner(key)),
 
     // Passengers

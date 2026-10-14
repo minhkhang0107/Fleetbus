@@ -3,6 +3,7 @@
  * Covers all specifications MGR-001 through MGR-030 and API Screen Map matrix.
  */
 
+import crypto from 'crypto';
 import { DEFAULT_OPERATOR_ID } from '../core/operators.js';
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
 import { maskPhone } from '../services/passenger/core/formatters.js';
@@ -11,6 +12,7 @@ import { tripVisibleTo } from '../core/tenancy.js';
 import { parseServiceDate } from '../core/serviceDate.js';
 import { isProduction } from '../config.js';
 import { resolveHomeBooking, routeServiceConfig } from '../core/serviceAreas.js';
+import { BUILTIN_LAYOUTS, validateLayout, findLayout } from '../core/seatLayouts.js';
 
 // Seat conflicts and reservation mismatches are conflicts (409); a missing trip or reservation is 404.
 function inventoryErrorStatus(code) {
@@ -103,6 +105,231 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   if (FLEET_PATHS.includes(pathname) && req.method === 'GET') {
     const fleet = managerService.getFleetRoster(req.operatorId);
     sendSuccess(res, fleet.data || fleet);
+    return true;
+  }
+
+  // POST /api/v1/ops/vehicles (MGR-006)
+  if (pathname === '/api/v1/ops/vehicles' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const plateNumber = String(body?.plate_number || body?.plateNumber || '').trim();
+      if (!plateNumber) {
+        sendError(res, 'Biển số xe không được để trống', 'VALIDATION_ERROR', 400);
+        return;
+      }
+      const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+      const exists = managerService.vehicles.some(v => (v.operator_id || DEFAULT_OPERATOR_ID) === operatorId && (v.plate_number || '').trim().toLowerCase() === plateNumber.toLowerCase());
+      if (exists) {
+        sendError(res, 'Biển số xe đã tồn tại trong đội xe của công ty', 'VEHICLE_EXISTS', 409);
+        return;
+      }
+      const layoutId = body?.layout_id || body?.layoutId;
+      const customLayouts = (managerService.seatLayouts || []).filter(l => (l.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
+      const layout = layoutId ? findLayout(layoutId, customLayouts) : null;
+      if (!layout) {
+        sendError(res, 'Sơ đồ ghế không hợp lệ hoặc không thuộc nhà xe', 'VALIDATION_ERROR', 400);
+        return;
+      }
+      const model = body?.model ? String(body.model).trim() : 'Thaco Mobihome VIP';
+      const result = managerService.addVehicle({ plate_number: plateNumber, model, layout_id: layout.layout_id }, operatorId);
+      const newVehicle = result.data;
+      audit(req, managerService, { action: 'VEHICLE_CREATE', resource: newVehicle.vehicle_id, before: null, after: newVehicle });
+      sendSuccess(res, newVehicle, 201);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // PATCH /api/v1/ops/vehicles/:vehicleId (MGR-006)
+  const vehicleOne = pathname.match(/^\/api\/v1\/ops\/vehicles\/([^/]+)$/);
+  if (vehicleOne && req.method === 'PATCH') {
+    const vehicleId = decodeURIComponent(vehicleOne[1]);
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const vehicle = managerService.vehicles.find(v => v.vehicle_id === vehicleId && (v.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
+    if (!vehicle) {
+      sendError(res, 'Không tìm thấy xe', 'VEHICLE_NOT_FOUND', 404);
+      return true;
+    }
+    parseJsonBody(req).then(body => {
+      const before = { ...vehicle };
+      const assignedTrips = managerService.trips.filter(t => (t.operator_id || DEFAULT_OPERATOR_ID) === operatorId && t.vehicle_id === vehicleId && t.status !== 'COMPLETED');
+      if (body.layout_id !== undefined && body.layout_id !== vehicle.layout_id) {
+        const customLayouts = (managerService.seatLayouts || []).filter(l => (l.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
+        const newLayout = findLayout(body.layout_id, customLayouts);
+        if (!newLayout) {
+          sendError(res, 'Sơ đồ ghế không tồn tại hoặc không thuộc nhà xe', 'VALIDATION_ERROR', 400);
+          return;
+        }
+        const newCodes = new Set(newLayout.seats.map(s => s.seat_code));
+        for (const trip of assignedTrips) {
+          const occupied = services.seatMapService ? services.seatMapService.getOccupiedSeatCodes(trip.trip_id) : [];
+          const missing = occupied.filter(c => !newCodes.has(c));
+          if (missing.length > 0 || (occupied.length === 0 && ((trip.booked_seats || 0) + (trip.held_seats || 0)) > 0)) {
+            sendError(res, `Sơ đồ mới thiếu ghế đã bán hoặc đang giữ: ${missing.length > 0 ? missing.join(', ') : 'ghế đã bán'}`, 'LAYOUT_MISSING_SOLD_SEATS', 409);
+            return;
+          }
+        }
+        vehicle.layout_id = newLayout.layout_id;
+        vehicle.total_seats = newLayout.seats.length;
+        vehicle.layout_name = newLayout.name;
+        for (const trip of assignedTrips) {
+          trip.total_seats = vehicle.total_seats;
+          if (services.seatMapService) services.seatMapService.rebuildLayout(trip.trip_id);
+        }
+      }
+      if (body.model !== undefined) {
+        vehicle.model = String(body.model).trim();
+      }
+      audit(req, managerService, { action: 'VEHICLE_UPDATE', resource: vehicleId, before, after: { ...vehicle } });
+      sendSuccess(res, vehicle);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/ops/seat-layouts (MGR-007)
+  if (pathname === '/api/v1/ops/seat-layouts' && req.method === 'GET') {
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const companyVehicles = managerService.vehicles.filter(v => (v.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
+    const companyCustom = (managerService.seatLayouts || []).filter(l => (l.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
+    const all = [
+      ...BUILTIN_LAYOUTS.map(b => ({ ...b, builtin: true })),
+      ...companyCustom.map(c => ({ ...c, builtin: false }))
+    ];
+    const data = all.map(l => ({
+      layout_id: l.layout_id,
+      name: l.name,
+      vehicle_type: l.vehicle_type,
+      total_decks: l.total_decks,
+      columns: l.columns,
+      total_seats: l.total_seats || l.seats?.length || 0,
+      seats: l.seats,
+      builtin: Boolean(l.builtin),
+      used_by: companyVehicles.filter(v => managerService.layoutOfVehicle(v.vehicle_id)?.layout_id === l.layout_id).map(v => v.plate_number)
+    }));
+    sendSuccess(res, data);
+    return true;
+  }
+
+  // POST /api/v1/ops/seat-layouts (MGR-007)
+  if (pathname === '/api/v1/ops/seat-layouts' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const candidate = {
+        name: body?.name,
+        vehicle_type: body?.vehicle_type || (body?.total_decks > 1 ? 'DOUBLE_DECK_SLEEPER' : 'SINGLE_DECK_SEATER'),
+        total_decks: body?.total_decks,
+        columns: body?.columns,
+        seats: body?.seats
+      };
+      const err = validateLayout(candidate);
+      if (err) {
+        sendError(res, err, 'VALIDATION_ERROR', 400);
+        return;
+      }
+      const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+      const newLayout = {
+        layout_id: `custom_${crypto.randomBytes(4).toString('hex')}`,
+        operator_id: operatorId,
+        name: candidate.name,
+        vehicle_type: candidate.vehicle_type,
+        total_decks: candidate.total_decks,
+        columns: candidate.columns,
+        total_seats: candidate.seats.length,
+        seats: candidate.seats,
+        builtin: false
+      };
+      managerService.seatLayouts.push(newLayout);
+      audit(req, managerService, { action: 'SEAT_LAYOUT_CREATE', resource: newLayout.layout_id, before: null, after: newLayout });
+      sendSuccess(res, newLayout, 201);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // PATCH or DELETE /api/v1/ops/seat-layouts/:layoutId (MGR-007)
+  const seatLayoutOne = pathname.match(/^\/api\/v1\/ops\/seat-layouts\/([^/]+)$/);
+  if (seatLayoutOne && req.method === 'PATCH') {
+    const layoutId = decodeURIComponent(seatLayoutOne[1]);
+    if (BUILTIN_LAYOUTS.some(b => b.layout_id === layoutId)) {
+      sendError(res, 'Không thể chỉnh sửa sơ đồ mặc định của hệ thống', 'LAYOUT_BUILTIN', 409);
+      return true;
+    }
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const existing = (managerService.seatLayouts || []).find(l => l.layout_id === layoutId && (l.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
+    if (!existing) {
+      sendError(res, 'Không tìm thấy sơ đồ ghế', 'LAYOUT_NOT_FOUND', 404);
+      return true;
+    }
+    parseJsonBody(req).then(body => {
+      const candidate = {
+        name: body.name !== undefined ? body.name : existing.name,
+        vehicle_type: body.vehicle_type !== undefined ? body.vehicle_type : existing.vehicle_type,
+        total_decks: body.total_decks !== undefined ? body.total_decks : existing.total_decks,
+        columns: body.columns !== undefined ? body.columns : existing.columns,
+        seats: body.seats !== undefined ? body.seats : existing.seats
+      };
+      const err = validateLayout(candidate);
+      if (err) {
+        sendError(res, err, 'VALIDATION_ERROR', 400);
+        return;
+      }
+
+      const usingVehicles = managerService.vehicles.filter(v => (v.operator_id || DEFAULT_OPERATOR_ID) === operatorId && v.layout_id === layoutId);
+      const inUse = usingVehicles.some(v => {
+        const trips = managerService.trips.filter(t => (t.operator_id || DEFAULT_OPERATOR_ID) === operatorId && t.vehicle_id === v.vehicle_id && t.status !== 'COMPLETED');
+        return trips.some(t => {
+          const held = services.seatMapService ? services.seatMapService.getOccupiedSeatCodes(t.trip_id).length : 0;
+          return ((t.booked_seats || 0) + (t.held_seats || 0) + held) > 0;
+        });
+      });
+      if (inUse) {
+        sendError(res, 'Sơ đồ đang được sử dụng bởi chuyến xe đã có vé đặt hoặc đang giữ chỗ', 'LAYOUT_IN_USE', 409);
+        return;
+      }
+
+      const before = { ...existing };
+      existing.name = candidate.name;
+      existing.vehicle_type = candidate.vehicle_type;
+      existing.total_decks = candidate.total_decks;
+      existing.columns = candidate.columns;
+      existing.seats = candidate.seats;
+      existing.total_seats = candidate.seats.length;
+
+      for (const v of usingVehicles) {
+        v.total_seats = existing.total_seats;
+        v.layout_name = existing.name;
+        // Finished trips keep the seats they ran with.
+        const trips = managerService.trips.filter(t => (t.operator_id || DEFAULT_OPERATOR_ID) === operatorId && t.vehicle_id === v.vehicle_id && t.status !== 'COMPLETED');
+        for (const t of trips) {
+          t.total_seats = existing.total_seats;
+          if (services.seatMapService) services.seatMapService.rebuildLayout(t.trip_id);
+        }
+      }
+
+      audit(req, managerService, { action: 'SEAT_LAYOUT_UPDATE', resource: layoutId, before, after: { ...existing } });
+      sendSuccess(res, existing);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  if (seatLayoutOne && req.method === 'DELETE') {
+    const layoutId = decodeURIComponent(seatLayoutOne[1]);
+    if (BUILTIN_LAYOUTS.some(b => b.layout_id === layoutId)) {
+      sendError(res, 'Không thể xóa sơ đồ mặc định của hệ thống', 'LAYOUT_BUILTIN', 409);
+      return true;
+    }
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const index = (managerService.seatLayouts || []).findIndex(l => l.layout_id === layoutId && (l.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
+    if (index < 0) {
+      sendError(res, 'Không tìm thấy sơ đồ ghế', 'LAYOUT_NOT_FOUND', 404);
+      return true;
+    }
+    const using = managerService.vehicles.filter(v => (v.operator_id || DEFAULT_OPERATOR_ID) === operatorId && v.layout_id === layoutId);
+    if (using.length > 0) {
+      const plates = using.map(v => v.plate_number).join(', ');
+      sendError(res, `Sơ đồ đang được sử dụng bởi các xe: ${plates}`, 'LAYOUT_IN_USE', 409, { plates: using.map(v => v.plate_number) });
+      return true;
+    }
+    const before = managerService.seatLayouts[index];
+    managerService.seatLayouts.splice(index, 1);
+    audit(req, managerService, { action: 'SEAT_LAYOUT_DELETE', resource: layoutId, before, after: null });
+    sendSuccess(res, { deleted: true, layout_id: layoutId });
     return true;
   }
 

@@ -1326,7 +1326,7 @@ export class DriverCockpitService {
       ticket_id: ticketId,
       pnr,
       seat_code,
-      deck: seat_code.startsWith('A') ? 1 : 2,
+      deck: inventory?.getSeatInfo?.(tripId, seat_code)?.deck || 1,
       passenger_name,
       passenger_phone: normalizedPhone,
       phone_masked: normalizedPhone ? maskPhone(normalizedPhone) : null,

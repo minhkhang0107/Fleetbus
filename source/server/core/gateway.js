@@ -34,11 +34,13 @@ const PASSENGER_RULES = [
 const IDEMPOTENT_RULES = {
   passenger: /\/(seats\/hold|hold-seats|bookings\/create|checkout\/create-order|delegate|qr\/reissue|cancel|home-request\/withdraw|tickets\/[^/]+\/stops)$/,
   driver: /\/(readiness|start|home-run|home-order|home-arrived|home-missed|arrive|inaccessible|boarding|boarding\/manual|board-qr|payments\/cod-collect|collect-cod|onboard-hail|incidents?|end|no-show|batch-replay)$/,
-  staff: /\/(platform\/operators(\/[^/]+\/(activate|deactivate))?|pos\/(orders|bookings|hotline-hold)|refunds\/[^/]+\/process|service-areas(\/[^/]+\/(activate|deactivate))?|promo-banners(\/[^/]+\/(activate|deactivate))?|schedules|trips\/[^/]+\/(assign|cancel|sales)|home-requests\/[^/]+\/[^/]+\/(confirm|reject)|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem)$/
+  staff: /\/(platform\/operators(\/[^/]+\/(activate|deactivate))?|pos\/(orders|bookings|hotline-hold)|refunds\/[^/]+\/process|service-areas(\/[^/]+\/(activate|deactivate))?|promo-banners(\/[^/]+\/(activate|deactivate))?|schedules|trips\/[^/]+\/(assign|cancel|sales)|home-requests\/[^/]+\/[^/]+\/(confirm|reject)|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem|seat-layouts(\/[^/]+)?|vehicles(\/[^/]+)?)$/
 };
 
 // Staff permissions by role (MGR-029). The first matching rule decides; no rule means any staff role.
 const STAFF_RULES = [
+  [/^\/api\/v1\/ops\/seat-layouts/, ['FLEET_DIRECTOR', 'DISPATCHER']],
+  [['POST', 'PATCH'], /^\/api\/v1\/ops\/vehicles(\/[^/]+)?$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/pos\/hotline-hold/, ['FLEET_DIRECTOR', 'CASHIER', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/pos\//, ['FLEET_DIRECTOR', 'CASHIER']],
   [/^\/api\/v1\/ops\/audit-logs/, ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'DISPATCHER']],
@@ -103,8 +105,16 @@ export function authenticate(req, access, pathname) {
     if (pathname.startsWith(`${API}/platform/`) && identity.role !== PLATFORM_ROLE) {
       return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Vai trò của bạn không được phép thực hiện thao tác này' };
     }
-    const rule = STAFF_RULES.find(([re]) => re.test(pathname));
-    if (rule && identity.role !== PLATFORM_ROLE && !rule[1].includes(identity.role)) {
+    const rule = STAFF_RULES.find((entry) => {
+      if (entry.length === 3) {
+        const [methods, re] = entry;
+        const matchesMethod = Array.isArray(methods) ? methods.includes(req.method) : methods === req.method;
+        return matchesMethod && re.test(pathname);
+      }
+      return entry[0].test(pathname);
+    });
+    const allowedRoles = rule ? (rule.length === 3 ? rule[2] : rule[1]) : null;
+    if (rule && identity.role !== PLATFORM_ROLE && !allowedRoles.includes(identity.role)) {
       return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Vai trò của bạn không được phép thực hiện thao tác này' };
     }
   }

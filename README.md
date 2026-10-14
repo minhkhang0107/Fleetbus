@@ -130,6 +130,18 @@ FLEETBUS_FCM_SERVICE_ACCOUNT=~/.config/fleetbus/fcm-service-account.json npm sta
 
 App khách bật Firebase khi có `source/passenger/app/android/app/google-services.json` (đủ 4 bản dev, qa, stg, production). App tài xế gửi GPS thật khi build với `--dart-define=FLEETBUS_DEVICE_GPS=true`; không có cờ này thì xe chạy giả lập để demo.
 
+### Sơ đồ ghế theo từng xe (D147)
+
+Mỗi xe mang một sơ đồ ghế; mọi chuyến xe đó chạy đều bán vé theo sơ đồ này.
+
+- **Mẫu có sẵn** (`source/server/core/seatLayouts.js`): `CABIN_22` (Limousine 22 phòng, 2 tầng, sơ đồ cũ), `CABIN_34` (Limousine 34 phòng, 2 tầng 3 dãy), `SLEEPER_34` (giường nằm 34 chỗ, 2 tầng), `SEAT_45` (ghế ngồi 45 chỗ, 1 tầng).
+- **Web điều hành > "Sơ đồ ghế"**: xem trước từng tầng, nhân bản mẫu, tự vẽ sơ đồ riêng (1–3 tầng, tối đa 8 cột, chọn cột lối đi, bấm ô để bật/tắt ghế).
+- **Web điều hành > "Đội xe"**: thêm xe kèm sơ đồ, đổi sơ đồ của xe.
+- **Không mất ghế đã bán**: đổi sơ đồ xe, gán xe cho chuyến hay sửa sơ đồ đều bị chặn nếu sơ đồ mới thiếu ghế đã bán/đang giữ (`LAYOUT_MISSING_SOLD_SEATS`, `LAYOUT_IN_USE`).
+- **App khách** vẽ ghế theo hàng/cột của sơ đồ, chỉ có tab tầng khi xe nhiều tầng; danh sách chuyến hiện đúng dòng xe và số chỗ của xe được gán.
+
+Spec: `screen-spec/manager/MGR-005`, `MGR-006`, `MGR-007`, `screen-spec/passenger/PAX-009` (mục 14).
+
 ## 6. Tài Liệu Kỹ Thuật Tham Khảo
 
 - 📖 [Tài Liệu Chi Tiết Trạng Thái Hệ Thống (STATE.md)](STATE.md)

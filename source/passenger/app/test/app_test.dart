@@ -73,6 +73,8 @@ void main() {
   List<String>? runDaysAnswer;
   // The company's fixed origin and destination in the app config (D135); null = passengers pick places.
   Map<String, dynamic>? fixedEndpointsAnswer;
+  // Custom seat map answer for tests; null = default fake layout.
+  Map<String, dynamic>? seatMapAnswer;
 
   Future<PassengerStore> storeWithServer({bool selectOp = true}) async {
     sent = [];
@@ -140,11 +142,14 @@ void main() {
         list = [trip];
       }
       if (path.endsWith('/seat-map')) {
-        data = {
+        data = seatMapAnswer ?? {
+          'layout_id': 'lay_2deck_3col',
+          'total_decks': 2,
+          'columns': 3,
           'seats': [
-            {'seat_code': 'A01', 'deck': 1, 'state': 'BOOKED', 'segment_state': 'BOOKED'},
-            {'seat_code': 'A02', 'deck': 1, 'state': 'AVAILABLE', 'segment_state': 'AVAILABLE'},
-            {'seat_code': 'B01', 'deck': 2, 'state': 'AVAILABLE', 'segment_state': 'AVAILABLE'},
+            {'seat_code': 'A01', 'deck': 1, 'row': 1, 'column': 1, 'type': 'VIP_CABIN', 'state': 'BOOKED', 'segment_state': 'BOOKED'},
+            {'seat_code': 'A02', 'deck': 1, 'row': 2, 'column': 1, 'type': 'VIP_CABIN', 'state': 'AVAILABLE', 'segment_state': 'AVAILABLE'},
+            {'seat_code': 'B01', 'deck': 2, 'row': 1, 'column': 3, 'type': 'VIP_CABIN', 'state': 'AVAILABLE', 'segment_state': 'AVAILABLE'},
           ],
         };
       }
@@ -214,6 +219,103 @@ void main() {
     expect(bodyOf('/seats/hold'), {'seatCodes': ['A02'], 'pickupStopId': 'stp_hn_gb', 'dropoffStopId': 'stp_th_pb'});
     expect(store.holdPhase, 'hold');
     store.stopHold();
+  });
+
+  testWidgets('seat map: 1-deck 5-column layout has no deck switch text and lays out without overflow at 360x800', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      seatMapAnswer = null;
+    });
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1.0;
+    seatMapAnswer = {
+      'layout_id': 'coach_45',
+      'total_decks': 1,
+      'columns': 5,
+      'seats': [
+        {'seat_code': 'S01', 'deck': 1, 'row': 1, 'column': 1, 'type': 'SEAT', 'state': 'AVAILABLE'},
+        {'seat_code': 'S02', 'deck': 1, 'row': 1, 'column': 2, 'type': 'SEAT', 'state': 'AVAILABLE'},
+        {'seat_code': 'S03', 'deck': 1, 'row': 1, 'column': 4, 'type': 'SEAT', 'state': 'AVAILABLE'},
+        {'seat_code': 'S04', 'deck': 1, 'row': 1, 'column': 5, 'type': 'SEAT', 'state': 'AVAILABLE'},
+        {'seat_code': 'S05', 'deck': 1, 'row': 2, 'column': 1, 'type': 'SEAT', 'state': 'AVAILABLE'},
+        {'seat_code': 'S06', 'deck': 1, 'row': 2, 'column': 2, 'type': 'SEAT', 'state': 'AVAILABLE'},
+        {'seat_code': 'S07', 'deck': 1, 'row': 2, 'column': 3, 'type': 'SEAT', 'state': 'AVAILABLE'},
+        {'seat_code': 'S08', 'deck': 1, 'row': 2, 'column': 4, 'type': 'SEAT', 'state': 'AVAILABLE'},
+        {'seat_code': 'S09', 'deck': 1, 'row': 2, 'column': 5, 'type': 'SEAT', 'state': 'AVAILABLE'},
+      ],
+    };
+
+    final store = await storeWithServer();
+    await store.loadTrips();
+    store.chooseTrip(store.trips.single);
+    await store.loadSeatMap();
+
+    await tester.pumpWidget(MaterialApp(
+      builder: phoneColumnBuilder,
+      home: PassengerScope(store: store, child: const PassengerSeatMapScreen()),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.textContaining('Tầng'), findsNothing);
+    expect(find.text('S01'), findsOneWidget);
+    expect(find.text('S02'), findsOneWidget);
+    expect(find.text('S03'), findsOneWidget);
+    expect(find.text('S04'), findsOneWidget);
+    expect(find.text('S05'), findsOneWidget);
+    expect(find.text('S06'), findsOneWidget);
+    expect(find.text('S07'), findsOneWidget);
+    expect(find.text('S08'), findsOneWidget);
+    expect(find.text('S09'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('seat map: 2-deck 3-column layout shows both deck titles and B01 sits right of A01', (tester) async {
+    addTearDown(() {
+      seatMapAnswer = null;
+    });
+    seatMapAnswer = {
+      'layout_id': 'cabin_22',
+      'total_decks': 2,
+      'columns': 3,
+      'seats': [
+        {'seat_code': 'A01', 'deck': 1, 'row': 1, 'column': 1, 'type': 'VIP_CABIN', 'state': 'AVAILABLE'},
+        {'seat_code': 'B01', 'deck': 1, 'row': 1, 'column': 3, 'type': 'VIP_CABIN', 'state': 'AVAILABLE'},
+        {'seat_code': 'A02', 'deck': 2, 'row': 1, 'column': 1, 'type': 'VIP_CABIN', 'state': 'AVAILABLE'},
+        {'seat_code': 'B02', 'deck': 2, 'row': 1, 'column': 3, 'type': 'VIP_CABIN', 'state': 'AVAILABLE'},
+      ],
+    };
+
+    final store = await storeWithServer();
+    await store.loadTrips();
+    store.chooseTrip(store.trips.single);
+    await store.loadSeatMap();
+
+    await tester.pumpWidget(MaterialApp(
+      builder: phoneColumnBuilder,
+      home: PassengerScope(store: store, child: const PassengerSeatMapScreen()),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.textContaining('Tầng dưới'), findsWidgets);
+    expect(find.textContaining('Tầng trên'), findsWidgets);
+    final a01 = tester.getCenter(find.text('A01'));
+    final b01 = tester.getCenter(find.text('B01'));
+    expect(b01.dx, greaterThan(a01.dx));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  test('deckTitle helper formats single deck, 2 decks, and 3 decks correctly', () {
+    expect(PassengerSeatMapScreen.deckTitle([1], 1, 9), '9 ghế trống');
+    expect(PassengerSeatMapScreen.deckTitle([1, 2], 1, 5), 'Tầng dưới · 5 trống');
+    expect(PassengerSeatMapScreen.deckTitle([1, 2], 2, 4), 'Tầng trên · 4 trống');
+    expect(PassengerSeatMapScreen.deckTitle([1, 2, 3], 1, 3), 'Tầng 1 · 3 trống');
+    expect(PassengerSeatMapScreen.deckTitle([1, 2, 3], 2, 2), 'Tầng 2 · 2 trống');
+    expect(PassengerSeatMapScreen.deckTitle([1, 2, 3], 3, 1), 'Tầng 3 · 1 trống');
   });
 
   test('travel days come from the server calendar: today by default, nothing outside the window, sent as YYYY-MM-DD', () async {

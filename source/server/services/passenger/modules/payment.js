@@ -179,7 +179,7 @@ export class PassengerPaymentService {
         route_name: order.route_name,
         departure_time: order.departure_time,
         seat_code: seatCode,
-        deck: seatInfo ? seatInfo.deck : (seatCode.startsWith('A0') || seatCode.startsWith('B0') ? 1 : 2),
+        deck: seatInfo?.deck || 1,
         fare_vnd: Math.round(order.amount_vnd / order.seat_codes.length),
         owner_phone: order.payer?.phone || passenger.phone,
         passenger_name: passenger.full_name,
