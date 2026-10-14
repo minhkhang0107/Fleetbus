@@ -21,6 +21,9 @@ function opsTrip(services, tripId) {
 export function saleBlock(services, tripId, operatorConfig, routeId) {
   const ops = opsTrip(services, tripId);
   if (ops?.status === 'CANCELLED') return { code: 'TRIP_CANCELLED', message: 'Nhà xe đã hủy chuyến này. Chọn chuyến khác.' };
+  // A finished run is not sold, even when the bus ran ahead of its timetable (D148). A running one still sells
+  // seats from the stops ahead.
+  if (ops?.status === 'COMPLETED') return { code: 'TRIP_COMPLETED', message: 'Chuyến này đã kết thúc. Chọn chuyến khác.' };
   if (ops?.sales_closed) return { code: 'SALES_CLOSED', message: 'Chuyến đã ngừng bán vé trực tuyến. Chọn chuyến khác hoặc gọi tổng đài.' };
   if (routeServiceConfig(operatorConfig, routeId).sales_suspended) {
     return { code: 'ROUTE_SUSPENDED', message: 'Tuyến đang tạm ngừng bán vé. Chọn tuyến hoặc nhà xe khác.' };
@@ -32,6 +35,7 @@ export function saleBlock(services, tripId, operatorConfig, routeId) {
 export function saleStatus(services, tripId) {
   const ops = opsTrip(services, tripId);
   if (ops?.status === 'CANCELLED') return 'CANCELLED';
+  if (ops?.status === 'COMPLETED') return 'COMPLETED';
   return ops?.sales_closed ? 'SALES_CLOSED' : 'ON_SALE';
 }
 

@@ -202,7 +202,7 @@ class _PassengerBookingSuccessScreenState extends State<PassengerBookingSuccessS
               gap(20),
               Text('Đặt vé thành công', textAlign: TextAlign.center, style: sans(size: 24, weight: FontWeight.w700)),
               gap(6),
-              Text('Đã nhận ${vnd(ticket.paid)}. Vé và mã đặt chỗ đã gửi qua SMS tới ${maskPhone(phone)}.', textAlign: TextAlign.center, style: sans(size: 14, color: PTokens.muted, height: 1.5)),
+              Text('Đã nhận ${vnd(ticket.paid)}. Vé đã lưu trong mục "Vé của tôi" của số ${maskPhone(phone)}.', textAlign: TextAlign.center, style: sans(size: 14, color: PTokens.muted, height: 1.5)),
               gap(20),
               AppCard(
                 padding: EdgeInsets.zero,

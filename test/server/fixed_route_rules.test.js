@@ -152,6 +152,15 @@ describe('Fixed routes, schedules and home service rules', () => {
       assert.strictEqual((await request(`/api/v1/ops/trips/${run('trp_hn_th_03')}/sales`, { method: 'POST', token: cashier, body: { open: false } })).status, 403);
     });
 
+    it('TC-FR-05b: a run that finished ahead of its timetable is no longer sold (D148)', async () => {
+      const ops = services.managerService.findTrip(run('trp_hn_th_03'));
+      ops.status = 'COMPLETED';
+      assert.ok(!(await search(`&date=${day2}`)).includes(run('trp_hn_th_03')));
+      assert.strictEqual((await hold(run('trp_hn_th_03'), 'stp_hn_gb', 'stp_th_sam_son')).res.body.code, 'TRIP_COMPLETED');
+      ops.status = 'SCHEDULED';
+      assert.ok((await search(`&date=${day2}`)).includes(run('trp_hn_th_03')));
+    });
+
     it('TC-FR-06: cancelling refunds every ticket in full, tells passengers and stops all sales', async () => {
       const { ticket } = await buy(run('trp_hn_th_02'), { pickup: 'stp_hn_gb', dropoff: 'stp_th_pb' });
       const short = await request(`/api/v1/ops/trips/${run('trp_hn_th_02')}/cancel`, { method: 'POST', token: dispatcher, body: { reason: 'lũ' } });

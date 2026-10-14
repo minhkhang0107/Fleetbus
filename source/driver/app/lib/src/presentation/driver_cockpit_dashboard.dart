@@ -53,7 +53,7 @@ class DriverCockpitDashboard extends StatelessWidget {
     final board = store.manifest.where((p) => p.from == s.id && p.status == PaxStatus.waiting).length;
     final drop = store.manifest.where((p) => p.to == s.id && p.status == PaxStatus.boarded).length;
     final cod = store.manifest.where((p) => p.from == s.id && p.codDue && p.status == PaxStatus.waiting).length;
-    final eta = (toMinutes(s.time) - store.clock).clamp(1, 999);
+    final eta = store.minutesToNextStop ?? (toMinutes(s.time) - store.clock).clamp(1, 999);
     final wide = dWide(context);
     final speed = _bigMetric('Tốc độ', '${store.speed}', 'km/h');
     // Stopped but not yet confirmed at the stop: the bus is there, a countdown would be wrong.

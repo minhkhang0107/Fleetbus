@@ -28,6 +28,8 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
   Timer? _poll;
   PassengerStore? _store;
 
+  String? _bannerTicketId;
+
   @override
   void initState() {
     super.initState();
@@ -39,9 +41,14 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
   void didChangeDependencies() {
     super.didChangeDependencies();
     final store = PassengerScope.read(context);
-    if (!identical(store, _store)) {
+    final isNewStore = !identical(store, _store);
+    if (isNewStore) {
+      final wasNull = _store == null;
       _store?.removeListener(_onStore);
       _store = store..addListener(_onStore);
+      if (wasNull && _index == 1) {
+        store.loadTickets();
+      }
     }
   }
 
@@ -66,6 +73,7 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _store?.loadNotices();
+      _store?.loadTickets();
       _startPolling();
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       _poll?.cancel();
@@ -75,9 +83,20 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
   /// D144: "the bus is coming" shows on top of whatever screen is open, with a way to see the bus.
   void _onStore() {
     final store = _store;
-    final alert = store?.pendingAlert;
-    if (store == null || alert == null || !mounted) return;
+    if (store == null || !mounted) return;
+
+    if (_bannerTicketId != null) {
+      final current = store.tickets.where((t) => t.id == _bannerTicketId).firstOrNull;
+      if (current != null && (current.status == TicketStatus.boarded || current.past)) {
+        ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+        _bannerTicketId = null;
+      }
+    }
+
+    final alert = store.pendingAlert;
+    if (alert == null) return;
     store.pendingAlert = null;
+    _bannerTicketId = alert.ticketId;
     final ticket = store.tickets.where((t) => t.id == alert.ticketId).firstOrNull;
     final messenger = ScaffoldMessenger.of(context);
     messenger.clearMaterialBanners();
@@ -89,10 +108,17 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
         Text(alert.body, style: sans(size: 13, color: PTokens.ink)),
       ]),
       actions: [
-        TextButton(onPressed: messenger.hideCurrentMaterialBanner, child: const Text('Đóng')),
+        TextButton(
+          onPressed: () {
+            _bannerTicketId = null;
+            messenger.hideCurrentMaterialBanner();
+          },
+          child: const Text('Đóng'),
+        ),
         if (ticket != null)
           TextButton(
             onPressed: () {
+              _bannerTicketId = null;
               messenger.hideCurrentMaterialBanner();
               Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerLiveRadarScreen(ticket: ticket)));
             },

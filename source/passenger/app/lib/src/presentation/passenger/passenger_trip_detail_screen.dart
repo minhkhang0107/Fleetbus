@@ -135,7 +135,7 @@ class _Advice extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            '${estimated ? 'Giờ có dấu ~ là giờ ước tính, có thể lệch do đường xá. ' : ''}Có mặt ở điểm đón trước 10 phút; xe chỉ dừng ngắn ở điểm dọc đường.',
+            '${estimated ? 'Giờ có dấu ~ là giờ ước tính, có thể lệch do đường xá. ' : ''}Có mặt ở điểm đón trước 15 phút; xe chỉ dừng ngắn ở điểm dọc đường.',
             style: sans(size: 13, color: PTokens.primaryDark, height: 1.4),
           ),
         ),

@@ -328,12 +328,17 @@ export class ManagerOperationsService {
         total_tracked_vehicles: vehicles.length,
         vehicles: vehicles.map(v => {
           const health = this._gpsHealth(v, mockNow);
+          const activeTrips = this.trips
+            .filter(t => (t.operator_id || DEFAULT_OPERATOR_ID) === operatorId && t.vehicle_id === v.vehicle_id && !['COMPLETED', 'CANCELLED'].includes(t.status))
+            .sort((a, b) => (Date.parse(a.departure_time) || 0) - (Date.parse(b.departure_time) || 0));
+          const workingTrip = activeTrips.find(t => t.status === 'IN_TRANSIT') || activeTrips[0];
+          const assignedDriver = workingTrip?.driver_id ? this.drivers.find(d => d.driver_id === workingTrip.driver_id) : null;
           return {
             vehicle_id: v.vehicle_id,
             plate_number: v.plate_number,
             model: v.model,
             status: v.status,
-            driver_name: v.driver_name,
+            driver_name: assignedDriver?.full_name || v.driver_name,
             lat: v.lat,
             lng: v.lng,
             speed_kmh: v.speed_kmh,
@@ -551,11 +556,12 @@ export class ManagerOperationsService {
       const vTemplate = this.layoutOfVehicle(v.vehicle_id);
       const templateSeatCodes = new Set(vTemplate?.seats?.map(s => s.seat_code) || []);
       const missing = occupiedCodes.filter(c => !templateSeatCodes.has(c));
+      const seatCount = vTemplate?.seats?.length || 0;
       const reason = v.status === 'MAINTENANCE' ? 'Xe đang bảo dưỡng'
-        : (v.total_seats || 0) < sold ? `Xe ${v.total_seats} chỗ, chuyến đã bán ${sold} ghế`
+        : seatCount < sold ? `Xe ${seatCount} chỗ, chuyến đã bán ${sold} ghế`
           : missing.length > 0 ? `Xe thiếu ghế đã bán: ${missing.join(', ')}`
             : busy ? `Đang chạy chuyến ${busy.trip_id} trùng giờ` : null;
-      return { vehicle_id: v.vehicle_id, plate_number: v.plate_number, model: v.model, total_seats: v.total_seats, assigned: v.vehicle_id === trip.vehicle_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
+      return { vehicle_id: v.vehicle_id, plate_number: v.plate_number, model: v.model, total_seats: seatCount, assigned: v.vehicle_id === trip.vehicle_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
     });
     const drivers = this.drivers.filter(d => d.operator_id === operatorId).map(d => {
       const busy = clash('driver_id', d.driver_id);
@@ -605,7 +611,8 @@ export class ManagerOperationsService {
     const previous = { vehicle_id: trip.vehicle_id || null, vehicle_plate: trip.vehicle_plate || null, driver_id: trip.driver_id || null };
     trip.vehicle_id = vehicle.vehicle_id;
     trip.vehicle_plate = vehicle.plate_number;
-    trip.total_seats = vehicle.total_seats;
+    const layout = this.layoutOfVehicle(vehicle.vehicle_id);
+    trip.total_seats = layout?.seats?.length || vehicle.total_seats;
     trip.driver_id = driver.driver_id;
     if (scope === 'SCHEDULE') {
       if (!this.scheduleAssignments) this.scheduleAssignments = {};
@@ -615,7 +622,7 @@ export class ManagerOperationsService {
       tripId,
       vehiclePlate: vehicle.plate_number,
       vehicleModel: vehicle.model,
-      capacity: vehicle.total_seats,
+      capacity: trip.total_seats,
       driverId: driver.driver_id,
       driverName: driver.full_name,
       previous

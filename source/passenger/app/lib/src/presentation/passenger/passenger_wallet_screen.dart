@@ -55,8 +55,8 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
   @override
   Widget build(BuildContext context) {
     final store = PassengerScope.of(context);
-    final upcoming = store.tickets.where((t) => t.active).toList();
-    final past = store.tickets.where((t) => !t.active).toList();
+    final upcoming = store.tickets.where((t) => !t.past).toList();
+    final past = store.tickets.where((t) => t.past).toList();
     final list = _history ? past : upcoming;
     return Column(children: [
       Container(
@@ -135,10 +135,10 @@ class TicketCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = ticket;
-    final active = t.active;
+    final active = !t.past && t.active;
     final status = switch (t.status) {
       TicketStatus.active => const Pill('Đã thanh toán', PillKind.ok),
-      TicketStatus.boarded => const Pill('Đã lên xe', PillKind.ok),
+      TicketStatus.boarded => t.past ? const Pill('Đã đi', PillKind.mute) : const Pill('Đã lên xe', PillKind.ok),
       TicketStatus.refunding => const Pill('Đang hoàn tiền', PillKind.info),
       TicketStatus.noShow => const Pill('Vắng mặt', PillKind.mute),
       TicketStatus.cancelled => const Pill('Đã hủy', PillKind.mute),
@@ -175,7 +175,7 @@ class TicketCard extends StatelessWidget {
             ]),
             gap(6),
             Text(active ? '${t.date} · Ghế ${t.seat} · ${_pickupLine(t)}' : '${t.date} · Ghế ${t.seat}${t.refund != null ? ' · hoàn ${vnd(t.refund!)}' : ''}', style: sans(size: 13, color: PTokens.muted)),
-            if (t.status == TicketStatus.active) _BusComing(ticket: t),
+            if (active && t.status == TicketStatus.active) _BusComing(ticket: t),
             if (active) ...[
               gap(10),
               Row(children: [

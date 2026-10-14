@@ -285,6 +285,7 @@ class Ticket {
     this.homeDropoffStatus,
     this.homePickupReason,
     this.homeDropoffReason,
+    this.past = false,
   });
   final String id;
   final String pnr;
@@ -320,11 +321,12 @@ class Ticket {
   String? qrValue;
   String? pin;
   int? refund;
+  bool past;
 
   bool get active => status == TicketStatus.active || status == TicketStatus.boarded;
   String get departure => delay == 0 ? dep : addMinutes(dep, delay);
 
-  factory Ticket.fromJson(Map<String, dynamic> j) {
+  factory Ticket.fromJson(Map<String, dynamic> j, {bool past = false}) {
     final dep = DateTime.parse(j['departure_time']).toUtc().add(const Duration(hours: 7));
     final status = switch (j['status']) {
       'ACTIVE' => TicketStatus.active,
@@ -356,6 +358,7 @@ class Ticket {
       pickupNotice: j['home_pickup']?['inaccessible_at'] == null
           ? null
           : 'Xe không vào được địa chỉ (${j['home_pickup']['inaccessible_reason'] ?? ''})${j['home_pickup']['meeting_point'] != null ? '. Hẹn ở ${j['home_pickup']['meeting_point']}' : '. Tài xế sẽ gọi cho bạn'}',
+      past: past,
     )..refund = (j['refund_amount_vnd'] as num?)?.toInt();
   }
 }
@@ -1253,15 +1256,18 @@ class PassengerStore extends ChangeNotifier {
     final up = await _call(() => api.getTicketWallet(tab: 'UPCOMING'));
     final past = await _call(() => api.getTicketWallet(tab: 'HISTORY'));
     final list = <Ticket>[];
-    for (final r in [up, past]) {
-      if (r.ok) list.addAll(((r.value!['value'] ?? r.value) as List).cast<Map<String, dynamic>>().map(Ticket.fromJson));
+    if (up.ok) {
+      list.addAll(((up.value!['value'] ?? up.value) as List).cast<Map<String, dynamic>>().map(Ticket.fromJson));
+    }
+    if (past.ok) {
+      list.addAll(((past.value!['value'] ?? past.value) as List).cast<Map<String, dynamic>>().map((j) => Ticket.fromJson(j, past: true)));
     }
     for (final t in list) {
       final old = tickets.where((o) => o.id == t.id).firstOrNull;
       if (old != null) t.plate = old.plate;
     }
     tickets = list;
-    for (final tripId in tickets.where((t) => t.active).map((t) => t.tripId).toSet()) {
+    for (final tripId in tickets.where((t) => !t.past && t.active).map((t) => t.tripId).toSet()) {
       final d = await _call(() => api.getDisruptions(tripId));
       final minutes = d.ok ? (d.value!['delay_minutes'] ?? d.value!['current_delay_minutes'] ?? 0) : 0;
       for (final t in tickets.where((t) => t.tripId == tripId)) {

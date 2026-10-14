@@ -228,6 +228,27 @@ String vnd(int amount) {
 
 String routeLabel(String name) => name.replaceAll(RegExp(r'\s*\(.*\)'), '').replaceAll(' — ', ' → ');
 
+/// Remaining travel minutes: along the road if both points are within 2000 m, else straight-line x1.3.
+int? minutesToStop({
+  required double busLat,
+  required double busLng,
+  double? stopLat,
+  double? stopLng,
+  RoutePath? road,
+  required num speedKmh,
+}) {
+  if (stopLat == null || stopLng == null) return null;
+  final double distance;
+  if (road != null && road.distanceTo(busLat, busLng) <= 2000 && road.distanceTo(stopLat, stopLng) <= 2000) {
+    distance = (road.project(stopLat, stopLng) - road.project(busLat, busLng)).abs();
+  } else {
+    distance = RoutePath.haversine(busLat, busLng, stopLat, stopLng) * 1.3;
+  }
+  final effectiveSpeed = math.max(speedKmh, 30);
+  final rawMinutes = (distance / 1000.0) / effectiveSpeed * 60;
+  return rawMinutes.ceil().clamp(1, 999);
+}
+
 const _networkError = 'Không kết nối được máy chủ. Thao tác chưa được gửi, thử lại khi có mạng.';
 
 class DriverStore extends ChangeNotifier {
@@ -378,6 +399,17 @@ class DriverStore extends ChangeNotifier {
   double get lng => _lng;
   double get bearing => _bearing;
   RoutePath? get road => _road;
+
+  /// Estimated minutes to the next stop, or null if the stop has no coordinates.
+  int? get minutesToNextStop => minutesToStop(
+        busLat: _lat,
+        busLng: _lng,
+        stopLat: stop.lat,
+        stopLng: stop.lng,
+        road: _road,
+        speedKmh: speed,
+      );
+
   List<Passenger> get atStopPassengers => manifest.where((p) => p.from == stop.id && !p.hail).toList();
 
   /// Passengers on board who get off at the current stop, so the crew can open the hold for them.

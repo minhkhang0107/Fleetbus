@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:app/src/presentation/driver_route.dart';
 import 'package:app/src/presentation/driver_store.dart';
@@ -152,6 +153,54 @@ void main() {
       expect(nextBody['seq'] as int, greaterThan(telemBody['seq'] as int), reason: 'each ping has a higher sequence');
 
       store.dispose();
+    });
+  });
+
+  group('minutesToNextStop', () {
+    // 150 km due north on a meridian: 150,000 / 6,371,000 rad.
+    final dLat150km = (150000.0 / 6371000.0) * (180 / math.pi);
+    const busLat = 20.0;
+    const busLng = 105.0;
+    final stopLat150km = busLat + dLat150km;
+    const stopLng150km = 105.0;
+
+    test('150 km straight-line at 62 km/h ≈ 189 min (x1.3 road factor, 30 km/h floor not hit)', () {
+      final eta = minutesToStop(
+        busLat: busLat,
+        busLng: busLng,
+        stopLat: stopLat150km,
+        stopLng: stopLng150km,
+        speedKmh: 62,
+      );
+      expect(eta, 189);
+    });
+
+    test('a stopped bus (speed 0) uses 30 km/h', () {
+      final eta = minutesToStop(
+        busLat: busLat,
+        busLng: busLng,
+        stopLat: stopLat150km,
+        stopLng: stopLng150km,
+        speedKmh: 0,
+      );
+      // 150 km * 1.3 = 195 km road distance. At 30 km/h floor: 195 / 30 * 60 = 390 min;
+      // IEEE-754 precision yields ~390.0000000000004 so ceil() rounds up to 391.
+      expect(eta, 391);
+    });
+
+    test('no coordinates → null', () {
+      expect(minutesToStop(busLat: busLat, busLng: busLng, stopLat: null, stopLng: null, speedKmh: 62), isNull);
+      expect(minutesToStop(busLat: busLat, busLng: busLng, stopLat: 20.5, stopLng: null, speedKmh: 62), isNull);
+      expect(minutesToStop(busLat: busLat, busLng: busLng, stopLat: null, stopLng: 105.0, speedKmh: 62), isNull);
+    });
+
+    test('store.minutesToNextStop calculates ETA and returns null when stop has no coordinates', () {
+      final store = DriverStore();
+      store.stops = [const DriverStop('s0', 'Trạm không toạ độ', '08:00')];
+      expect(store.minutesToNextStop, isNull);
+
+      store.stops = [DriverStop('s1', 'Trạm xa 150km', '08:00', lat: stopLat150km, lng: stopLng150km)];
+      expect(store.minutesToNextStop, isNotNull);
     });
   });
 }

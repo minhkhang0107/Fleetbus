@@ -10,6 +10,7 @@ import 'package:app/src/presentation/passenger/passenger_seat_map_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_trip_detail_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_search_results_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_main_shell.dart';
+import 'package:app/src/presentation/passenger/passenger_wallet_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_home_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_location_picker_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_login_screen.dart';
@@ -75,11 +76,14 @@ void main() {
   Map<String, dynamic>? fixedEndpointsAnswer;
   // Custom seat map answer for tests; null = default fake layout.
   Map<String, dynamic>? seatMapAnswer;
+  // History tickets for wallet tests; null = empty.
+  List<Map<String, dynamic>>? historyTicketsAnswer;
 
   Future<PassengerStore> storeWithServer({bool selectOp = true}) async {
     sent = [];
     paid = false;
     ticketStatus = 'ACTIVE';
+    historyTicketsAnswer = null;
     final client = MockClient((req) async {
       sent.add(req);
       Map<String, dynamic>? data;
@@ -166,7 +170,16 @@ void main() {
         };
       }
       if (path.endsWith('/verify-status')) data = {'payment_status': paid ? 'PAID' : 'PENDING_PAYMENT', 'is_settled': paid};
-      if (path.endsWith('/passenger/tickets')) list = req.url.queryParameters['tab'] == 'UPCOMING' && paid ? [{...ticket, 'status': ticketStatus}] : [];
+      if (path.endsWith('/passenger/tickets')) {
+        final tab = req.url.queryParameters['tab'];
+        if (tab == 'UPCOMING') {
+          list = paid ? [{...ticket, 'status': ticketStatus}] : [];
+        } else if (tab == 'HISTORY') {
+          list = historyTicketsAnswer ?? [];
+        } else {
+          list = [];
+        }
+      }
       if (path.endsWith('/disruptions')) data = {'has_disruption': false};
       if (path.endsWith('/notifications')) list = [];
       if (path.endsWith('/tickets/tkt_BG1_A02')) {
@@ -452,7 +465,7 @@ void main() {
     expect(find.text('Trả tận nhà'), findsNothing, reason: 'the route does not allow home drop-off');
 
     expect(find.text('Đón trả tận nhà'), findsOneWidget, reason: 'home service comes first, not after the map');
-    expect(find.textContaining('Có mặt ở điểm đón trước 10 phút'), findsOneWidget);
+    expect(find.textContaining('Có mặt ở điểm đón trước 15 phút'), findsOneWidget);
 
     // Ninh Bình both picks up and drops off, between the current stops: the app asks which.
     await tester.tap(find.bySemanticsLabel(RegExp('^Bến xe Ninh Bình')));
@@ -777,6 +790,113 @@ void main() {
     expect(find.byType(PassengerRouteMap), findsOneWidget);
     
     // Cleanup pending timers
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('the payment success text informs ticket is saved in app and no longer mentions SMS', (tester) async {
+    final store = await storeWithServer();
+    paid = true;
+    await store.verifyOtp('0987654321', '123456');
+    await store.loadTickets();
+    final t = store.tickets.single;
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(
+        store: store,
+        child: PassengerBookingSuccessScreen(ticket: t, phone: '0987654321'),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('SMS'), findsNothing);
+    expect(find.textContaining('Vé đã lưu trong mục "Vé của tôi" của số 0987 *** 321'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('wallet puts HISTORY tickets under "Lịch sử" with "Đã đi" and UPCOMING ones under "Sắp đi"', (tester) async {
+    final store = await storeWithServer();
+    paid = true;
+    ticketStatus = 'ACTIVE';
+    historyTicketsAnswer = [
+      {
+        ...ticket,
+        'ticket_id': 'tkt_past_01',
+        'pnr': 'BG-000099',
+        'status': 'BOARDED',
+      },
+    ];
+    await store.verifyOtp('0987654321', '123456');
+    await store.loadTickets();
+
+    expect(store.tickets.length, 2);
+    expect(store.tickets.first.past, isFalse);
+    expect(store.tickets.last.past, isTrue);
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(
+        store: store,
+        child: const Scaffold(body: PassengerWalletScreen()),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // Default tab is "Sắp đi · 1": upcoming ticket shows "Đã thanh toán" and action buttons
+    expect(find.text('Sắp đi · 1'), findsOneWidget);
+    expect(find.text('BG-000001'), findsOneWidget);
+    expect(find.text('Đã thanh toán'), findsOneWidget);
+    expect(find.text('Mở vé'), findsOneWidget);
+    expect(find.text('Theo dõi xe'), findsOneWidget);
+    expect(find.text('BG-000099'), findsNothing);
+
+    // Switch to "Lịch sử" tab: past boarded ticket shows "Đã đi" and no tracking/QR actions
+    await tester.tap(find.text('Lịch sử'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('BG-000099'), findsOneWidget);
+    expect(find.text('Đã đi'), findsOneWidget);
+    expect(find.text('BG-000001'), findsNothing);
+    expect(find.text('Mở vé'), findsNothing);
+    expect(find.text('Theo dõi xe'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('stale "the bus is at your pickup" banner is hidden after loadTickets() when ticket is boarded or past', (tester) async {
+    final store = await storeWithServer();
+    paid = true;
+    ticketStatus = 'ACTIVE';
+    await store.verifyOtp('0987654321', '123456');
+    await store.loadTickets();
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(
+        store: store,
+        child: const PassengerMainShell(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // Trigger an alert for the ticket
+    store.pendingAlert = AppNotice(
+      'Xe sắp tới đón bạn',
+      'Mời bạn lên xe, ghế A02',
+      'vừa xong',
+      ticketId: 'tkt_BG1_A02',
+      type: 'PICKUP_APPROACHING',
+    );
+    store.notifyListeners();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Xe sắp tới đón bạn'), findsOneWidget);
+    expect(find.text('Mời bạn lên xe, ghế A02'), findsOneWidget);
+
+    // Ticket becomes BOARDED and loadTickets runs
+    ticketStatus = 'BOARDED';
+    await store.loadTickets();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Xe sắp tới đón bạn'), findsNothing);
+
     await tester.pumpWidget(const SizedBox());
   });
 

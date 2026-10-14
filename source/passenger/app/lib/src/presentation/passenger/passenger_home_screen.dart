@@ -17,7 +17,7 @@ class PassengerHomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = PassengerScope.of(context);
-    final upcoming = store.tickets.where((t) => t.status == TicketStatus.active).toList();
+    final upcoming = store.tickets.where((t) => !t.past && t.status == TicketStatus.active).toList();
     final name = store.userName;
     final op = store.operator;
     final recent = store.recentPairs;

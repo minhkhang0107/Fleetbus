@@ -502,17 +502,29 @@ export class FleetBusEventBridge extends EventEmitter {
     // A phone hold whose pickup stop the bus has left is released (the passenger did not board).
     this.on('STOP_ARRIVED', ({ tripId, stopId }) => {
       managerService?.releaseExpiredHotlineHolds?.();
-      // Spec 9: "the bus is at your pickup", once per ticket.
+      // Spec 9: "the bus is at your pickup", once per phone at that stop with all seats listed.
       const trip = driverService?.activeTrips?.get(tripId);
       const stop = trip?.stops?.find(s => s.stop_id === stopId);
+      const byPhone = new Map();
       for (const p of this._waitingAtStops(trip)) {
-        if (p.pickup_stop_id !== stopId) continue;
-        trackingService?.sendNotificationOnce?.(`${p.ticket_id}:PICKUP_ARRIVED`, p.passenger_phone, {
+        if (p.pickup_stop_id !== stopId || !p.passenger_phone) continue;
+        const list = byPhone.get(p.passenger_phone) || [];
+        list.push(p);
+        byPhone.set(p.passenger_phone, list);
+      }
+      for (const [phone, passengers] of byPhone) {
+        const seatList = passengers.map(p => p.seat_code).filter(Boolean).join(', ');
+        trackingService?.sendNotificationOnce?.(`${tripId}:${stopId}:${phone}:PICKUP_ARRIVED`, phone, {
           operatorId: operatorOfTrip(this.services, tripId),
           title: 'Xe đã tới điểm đón',
-          body: `Xe ${trip.vehicle_plate} đã tới ${stop?.name || 'điểm đón'}. Mời bạn lên xe, ghế ${p.seat_code}.`,
+          body: `Xe ${trip.vehicle_plate} đã tới ${stop?.name || 'điểm đón'}. Mời bạn lên xe, ghế ${seatList}.`,
           type: 'PICKUP_ARRIVED',
-          payload: { trip_id: tripId, ticket_id: p.ticket_id, stop_id: stopId }
+          payload: {
+            trip_id: tripId,
+            ticket_id: passengers[0].ticket_id,
+            ticket_ids: passengers.map(p => p.ticket_id),
+            stop_id: stopId
+          }
         });
       }
     });
