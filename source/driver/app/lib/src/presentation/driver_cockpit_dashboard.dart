@@ -23,7 +23,7 @@ class DriverCockpitDashboard extends StatelessWidget {
             const SizedBox(height: 8),
             Text('Chỉ dùng khi chuyến không thể đi tiếp, ví dụ xe hỏng và khách đã chuyển sang xe khác. Lý do được gửi cho điều hành.', style: dsans(size: 15, color: DTokens.sub, height: 1.5)),
             const SizedBox(height: 12),
-            TextField(controller: why, maxLines: 3, style: dsans(size: 15), decoration: InputDecoration(labelText: 'Lý do', errorText: error)),
+            TextField(controller: why, maxLines: 3, maxLength: 200, style: dsans(size: 15), decoration: InputDecoration(labelText: 'Lý do', errorText: error)),
             const SizedBox(height: 14),
             SheetActions(
               primary: BigButton(

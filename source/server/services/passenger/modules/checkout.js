@@ -3,7 +3,7 @@
  * Implements PAX-011 (Passenger Info Form) and PAX-012 (Booking Review Checkout).
  */
 
-import { validateVietnamPhone, validateCCCD } from '../core/formatters.js';
+import { validateVietnamPhone, validateCCCD, validatePersonName } from '../core/formatters.js';
 
 export const PROMO_VOUCHERS = {
   'BUSGO50K': { type: 'FIXED', value: 50000, minOrder: 200000, description: 'Giảm 50.000 đ cho đơn từ 200k' },
@@ -20,8 +20,9 @@ export class PassengerCheckoutService {
     const actualSeatsCount = seatCodes ? seatCodes.length : (selectedSeatsCount || actualPassengers.length);
 
     // 1. Validate Payer
-    if (!actualPayer || !actualPayer.full_name || actualPayer.full_name.trim().length < 2) {
-      return { success: false, isValid: false, error: 'Họ và tên người đặt vé không hợp lệ', code: 'INVALID_PAYER_NAME' };
+    const payerNameCheck = validatePersonName(actualPayer?.full_name);
+    if (!actualPayer || !payerNameCheck.isValid) {
+      return { success: false, isValid: false, error: payerNameCheck.message, code: 'INVALID_PAYER_NAME' };
     }
     const phoneCheck = validateVietnamPhone(actualPayer.phone);
     if (!phoneCheck.isValid) {
@@ -43,11 +44,12 @@ export class PassengerCheckoutService {
       const p = actualPassengers[i];
       const seatCode = p.seat_code || (seatCodes ? seatCodes[i] : `A0${i + 1}`);
 
-      if (!p || !p.full_name || p.full_name.trim().length < 2) {
+      const passengerNameCheck = validatePersonName(p?.full_name);
+      if (!p || !passengerNameCheck.isValid) {
         return {
           success: false,
           isValid: false,
-          error: `Họ tên hành khách ghế ${seatCode} không được để trống`,
+          error: passengerNameCheck.message,
           code: 'INVALID_PASSENGER_NAME'
         };
       }
@@ -61,7 +63,7 @@ export class PassengerCheckoutService {
 
       validatedPassengers.push({
         seat_code: seatCode,
-        full_name: p.full_name.trim(),
+        full_name: passengerNameCheck.normalized,
         phone: p.phone ? validateVietnamPhone(p.phone).normalized || actualPayer.phone : actualPayer.phone,
         cccd: p.cccd ? p.cccd.replace(/\s/g, '') : null
       });
@@ -72,7 +74,7 @@ export class PassengerCheckoutService {
       isValid: true,
       data: {
         payer: {
-          full_name: actualPayer.full_name.trim(),
+          full_name: payerNameCheck.normalized,
           phone: phoneCheck.normalized,
           email: actualPayer.email || `${phoneCheck.normalized}@passenger.busgo.vn`
         },

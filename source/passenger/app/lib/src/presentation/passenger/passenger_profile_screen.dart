@@ -10,6 +10,13 @@ import 'passenger_widgets.dart';
 class PassengerProfileScreen extends StatelessWidget {
   const PassengerProfileScreen({super.key});
 
+  static String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '';
+    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+    return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = PassengerScope.of(context);
@@ -24,11 +31,24 @@ class PassengerProfileScreen extends StatelessWidget {
         child: PMaxWidth(maxWidth: 720, child: ListView(padding: const EdgeInsets.all(16), children: [
           AppCard(
             child: Row(children: [
-              CircleAvatar(radius: 24, backgroundColor: PTokens.primarySoft, child: Text(store.loggedIn ? 'NA' : '?', style: sans(size: 15, weight: FontWeight.w600, color: PTokens.primaryDark))),
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: PTokens.primarySoft,
+                child: !store.loggedIn
+                    ? Text('?', style: sans(size: 15, weight: FontWeight.w600, color: PTokens.primaryDark))
+                    : (store.userName != null && store.userName!.trim().isNotEmpty
+                        ? Text(_initials(store.userName!), style: sans(size: 15, weight: FontWeight.w600, color: PTokens.primaryDark))
+                        : const Icon(Icons.person, color: PTokens.primaryDark, size: 24)),
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(store.userName ?? 'Chưa đăng nhập', style: sans(size: 16, weight: FontWeight.w600)),
+                  Text(
+                    !store.loggedIn
+                        ? 'Chưa đăng nhập'
+                        : (store.userName ?? 'Khách BusGo'),
+                    style: sans(size: 16, weight: FontWeight.w600),
+                  ),
                   if (store.userPhone != null) Text(store.userPhone!, style: mono(size: 13, weight: FontWeight.w500, color: PTokens.muted)),
                 ]),
               ),

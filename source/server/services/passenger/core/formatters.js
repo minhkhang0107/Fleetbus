@@ -39,6 +39,38 @@ export function validateVietnamPhone(phone) {
   return { isValid: true, normalized };
 }
 
+export function validatePersonName(name) {
+  const normalized = typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : '';
+  if (normalized.length < 2 || normalized.length > 60) {
+    return { isValid: false, normalized, message: 'Họ tên cần 2-60 ký tự' };
+  }
+  // Must not contain digits or forbidden characters, and must contain at least one letter
+  if (/[0-9<>{}@[\]#$%^*=_|\\/~]/u.test(normalized) || !/\p{L}/u.test(normalized)) {
+    return { isValid: false, normalized, message: 'Họ tên không được chứa số hoặc ký tự đặc biệt' };
+  }
+  return { isValid: true, normalized, message: null };
+}
+
+export function normalizePlate(raw) {
+  if (!raw || typeof raw !== 'string') {
+    return { isValid: false, normalized: null, message: 'Biển số không đúng dạng (VD: 29B-123.45)' };
+  }
+  const cleaned = raw.toUpperCase().replace(/[\s\.\-]/g, '');
+  const m5 = cleaned.match(/^([0-9]{2}[A-Z]{1,2}[0-9]?)([0-9]{5})$/);
+  if (m5) {
+    const prefix = m5[1];
+    const tail = m5[2];
+    return { isValid: true, normalized: `${prefix}-${tail.slice(0, 3)}.${tail.slice(3)}`, message: null };
+  }
+  const m4 = cleaned.match(/^([0-9]{2}[A-Z]{1,2}[0-9]?)([0-9]{4})$/);
+  if (m4) {
+    const prefix = m4[1];
+    const tail = m4[2];
+    return { isValid: true, normalized: `${prefix}-${tail}`, message: null };
+  }
+  return { isValid: false, normalized: null, message: 'Biển số không đúng dạng (VD: 29B-123.45)' };
+}
+
 /**
  * OQ-007: drivers only ever see a masked phone, e.g. 0987123456 -> 098***456.
  */

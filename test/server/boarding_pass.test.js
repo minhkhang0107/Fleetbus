@@ -48,7 +48,7 @@ describe('Boarding pass: static versioned QR (PAX-017, D104)', () => {
       body: {
         tripId: TRIP, userId, holdId: hold.body.data.hold_id, seatCodes: [seat],
         payer: { full_name: 'Nguyen Van Test', phone: '0987000222' },
-        passengers: [{ seat_code: seat, full_name: 'Hanh Khach ' + seat }]
+        passengers: [{ seat_code: seat, full_name: 'Hanh Khach' }]
       }
     });
     assert.strictEqual(created.status, 201, JSON.stringify(created.body));

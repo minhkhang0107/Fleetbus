@@ -83,6 +83,11 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
       setState(() => _error = 'Chạm lên bản đồ để chọn vị trí đón');
       return;
     }
+    final addr = _address.text.trim();
+    if (addr.length < 5 || addr.length > 200) {
+      setState(() => _error = 'Địa chỉ cần 5-200 ký tự');
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -157,9 +162,9 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
           gap(4),
         ],
         gap(8),
-        LabeledField(label: 'Địa chỉ (số nhà, ngõ, đường)', controller: _address, hint: 'VD: 12 ngõ 34 Giải Phóng, Hoàng Mai'),
+        LabeledField(label: 'Địa chỉ (số nhà, ngõ, đường)', controller: _address, hint: 'VD: 12 ngõ 34 Giải Phóng, Hoàng Mai', maxLength: 200),
         gap(12),
-        LabeledField(label: 'Ghi chú cho tài xế (không bắt buộc)', controller: _note, hint: 'VD: cổng xanh, gọi trước 10 phút'),
+        LabeledField(label: 'Ghi chú cho tài xế (không bắt buộc)', controller: _note, hint: 'VD: cổng xanh, gọi trước 10 phút', maxLength: 200, showCounter: true),
         gap(12),
         Text(
           widget.pickupSide ? 'Xe đón trước giờ xuất bến; nhà xe sẽ báo khung giờ đón. Xe lớn có thể không vào được ngõ nhỏ, tài xế sẽ gọi cho bạn.' : 'Xe trả bạn sau khi tới bến cuối, trong vùng phục vụ.',

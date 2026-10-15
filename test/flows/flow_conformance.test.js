@@ -92,7 +92,7 @@ describe('Cross-app flows (FLOW-01 to FLOW-07)', () => {
         holdId: hold.body.data.hold_id,
         seatCodes,
         payer: { full_name: 'Khach Flow', phone: pax.phone, email: 'flow@busgo.vn' },
-        passengers: seatCodes.map((seat_code) => ({ full_name: `Khach ${seat_code}`, phone: pax.phone, seat_code }))
+        passengers: seatCodes.map((seat_code) => ({ full_name: 'Khach Flow', phone: pax.phone, seat_code }))
       }
     });
     assert.strictEqual(order.status, 201, JSON.stringify(order.body));

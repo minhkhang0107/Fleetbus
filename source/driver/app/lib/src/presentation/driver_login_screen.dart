@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'driver_store.dart';
 import 'driver_widgets.dart';
@@ -81,11 +82,26 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
   List<Widget> _fields() => [
         Text('MÃ NHÀ XE', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.sub)),
         const SizedBox(height: 6),
-        TextField(controller: _operator, style: dmono(size: 18, weight: FontWeight.w600), decoration: const InputDecoration(hintText: 'Ví dụ SAOMAI'), textCapitalization: TextCapitalization.characters),
+        TextField(
+          controller: _operator,
+          style: dmono(size: 18, weight: FontWeight.w600),
+          decoration: const InputDecoration(hintText: 'Ví dụ SAOMAI'),
+          textCapitalization: TextCapitalization.characters,
+          maxLength: 20,
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
+            TextInputFormatter.withFunction((oldValue, newValue) => newValue.copyWith(text: newValue.text.toUpperCase())),
+          ],
+        ),
         const SizedBox(height: 18),
         Text('MÃ NHÂN VIÊN HOẶC SỐ ĐIỆN THOẠI', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.sub)),
         const SizedBox(height: 6),
-        TextField(controller: _id, style: dmono(size: 18, weight: FontWeight.w600)),
+        TextField(
+          controller: _id,
+          style: dmono(size: 18, weight: FontWeight.w600),
+          maxLength: 20,
+          textInputAction: TextInputAction.next,
+        ),
         const SizedBox(height: 18),
         Text('MÃ PIN 6 SỐ', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.sub)),
         const SizedBox(height: 6),
@@ -94,6 +110,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
           obscureText: true,
           maxLength: 6,
           keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           style: dmono(size: 18, weight: FontWeight.w600),
           decoration: InputDecoration(counterText: '', errorText: _error, hintText: 'Nhập 6 số'),
           onChanged: (_) {

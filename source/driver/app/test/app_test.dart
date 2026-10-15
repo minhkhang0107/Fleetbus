@@ -15,6 +15,7 @@ import 'package:app/src/presentation/driver_widgets.dart';
 import 'package:app/src/presentation/main_shell_screen.dart';
 import 'package:app/src/service/driver_api_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -267,6 +268,74 @@ void main() {
     expect(await store.endTrip(), isNull);
     expect(store.trip, TripState.completed);
     expect(store.endedCash, 0);
+    store.dispose();
+  });
+
+  testWidgets('the end of a trip asks for nothing: one tap ends it', (tester) async {
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final store = await started();
+    store.leaveStop();
+    await store.arrive();
+    store.leaveStop();
+    await store.arrive();
+    await tester.pumpWidget(DriverScope(store: store, child: const MaterialApp(home: DriverEndTripScreen())));
+    expect(find.byType(TextField), findsNothing);
+    await tester.tap(find.widgetWithText(BigButton, 'Kết thúc và nộp 0 đ'));
+    await tester.pumpAndSettle();
+    expect(store.trip, TripState.completed);
+    final body = jsonDecode(sent.lastWhere((r) => r.url.path.endsWith('/end')).body) as Map<String, dynamic>;
+    expect(body.keys, isNot(contains('odometer_km')));
+    store.dispose();
+  });
+
+  testWidgets('login fields formatters, max lengths, and actions', (tester) async {
+    final store = storeWithServer();
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverLoginScreen()),
+    ));
+    await tester.pump();
+
+    final textFields = tester.widgetList<TextField>(find.byType(TextField)).toList();
+    expect(textFields.length, 3);
+
+    // Operator field
+    expect(textFields[0].textCapitalization, TextCapitalization.characters);
+    expect(textFields[0].maxLength, 20);
+
+    // ID field
+    expect(textFields[1].maxLength, 20);
+    expect(textFields[1].textInputAction, TextInputAction.next);
+
+    // PIN field
+    expect(textFields[2].maxLength, 6);
+    expect(textFields[2].inputFormatters?.contains(FilteringTextInputFormatter.digitsOnly), isTrue);
+
+    // Test operator typing uppercase and filtering
+    await tester.enterText(find.byType(TextField).at(0), 'saomai123');
+    await tester.pump();
+    expect(find.text('SAOMAI123'), findsOneWidget);
+
+    store.dispose();
+  });
+
+  testWidgets('free text fields have maxLength 200 with visible counter', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+
+    final store = storeWithServer();
+
+    await tester.pumpWidget(DriverScope(store: store, child: const MaterialApp(home: DriverIncidentScreen())));
+    await tester.pump();
+    final incidentTf = tester.widget<TextField>(find.byType(TextField));
+    expect(incidentTf.maxLength, 200);
+
     store.dispose();
   });
 

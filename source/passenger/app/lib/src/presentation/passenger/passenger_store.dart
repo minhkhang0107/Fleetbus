@@ -999,10 +999,11 @@ class PassengerStore extends ChangeNotifier {
   /// Checks a home address with the server for this trip; returns an error to show, or null once it is set.
   /// A home pickup rides from the first stop, a home drop-off from the last one (spec adjustment A4).
   Future<String?> setHomeAddress({required bool pickupSide, required String address, required double lat, required double lng, String note = ''}) async {
-    if (address.trim().isEmpty) return 'Nhập địa chỉ để tài xế tìm được bạn';
+    final trimmed = address.trim();
+    if (trimmed.length < 5 || trimmed.length > 200) return 'Địa chỉ cần 5-200 ký tự';
     final r = await _call(() => api.checkServiceArea(kind: pickupSide ? 'PICKUP' : 'DROPOFF', lat: lat, lng: lng, tripId: trip?.id));
     if (!r.ok) return r.error;
-    final home = HomeAddress(address: address.trim(), lat: lat, lng: lng, feeVnd: (r.value!['fee_vnd'] as num? ?? 0).toInt(), areaName: '${r.value!['area_name'] ?? ''}', note: note.trim(), needsReview: r.value!['confirmation'] == 'MANUAL');
+    final home = HomeAddress(address: trimmed, lat: lat, lng: lng, feeVnd: (r.value!['fee_vnd'] as num? ?? 0).toInt(), areaName: '${r.value!['area_name'] ?? ''}', note: note.trim().length > 200 ? note.trim().substring(0, 200) : note.trim(), needsReview: r.value!['confirmation'] == 'MANUAL');
     final list = stops();
     if (pickupSide) {
       homePickup = home;

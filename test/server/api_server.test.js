@@ -270,8 +270,8 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
         seatCodes: ['A05', 'A06'],
         payer: { full_name: 'Nguyễn Văn Server', phone: '0919888999' },
         passengers: [
-          { full_name: 'Khách 1', phone: '0919888999' },
-          { full_name: 'Khách 2', phone: '0919888000' }
+          { full_name: 'Khách Một', phone: '0919888999' },
+          { full_name: 'Khách Hai', phone: '0919888000' }
         ],
         amountVnd: 440000,
         pickupStop: 'Giáp Bát',

@@ -71,7 +71,7 @@ describe('Spec conformance: money, tickets and boarding', () => {
         holdId: hold.body.data.hold_id,
         seatCodes: seats,
         payer: { full_name: 'Nguyen Van Test', phone: '0987000111' },
-        passengers: seats.map((s) => ({ seat_code: s, full_name: 'Hanh Khach ' + s })),
+        passengers: seats.map((s) => ({ seat_code: s, full_name: 'Hanh Khach' })),
         ...extra
       }
     });

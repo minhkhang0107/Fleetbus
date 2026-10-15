@@ -6,7 +6,7 @@
 import crypto from 'crypto';
 import { createShareToken } from '../../passenger/core/cryptoEngine.js';
 import { DEMO_DATE, vnDate } from '../../../core/serviceDate.js';
-import { validateVietnamPhone } from '../../passenger/core/formatters.js';
+import { validateVietnamPhone, validatePersonName } from '../../passenger/core/formatters.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
 import { verifyTotp } from '../../../core/totp.js';
@@ -740,8 +740,9 @@ export class ManagerOperationsService {
     if (!Array.isArray(seatCodes) || seatCodes.length === 0) {
       return { success: false, error: 'Vui lòng chọn ít nhất 1 ghế', code: 'NO_SEAT_SELECTED' };
     }
-    if (!passengerName || !String(passengerName).trim()) {
-      return { success: false, error: 'Thiếu họ tên hành khách', code: 'INVALID_PASSENGER_NAME' };
+    const nameCheck = validatePersonName(passengerName);
+    if (!nameCheck.isValid) {
+      return { success: false, error: nameCheck.message, code: 'VALIDATION_ERROR' };
     }
     if (homePickup && !phone) {
       return { success: false, error: 'Đón tận nhà cần số điện thoại để báo khách khi xe tới', code: 'INVALID_PHONE' };
@@ -788,7 +789,7 @@ export class ManagerOperationsService {
     const newBooking = {
       pnr,
       trip_id: tripId,
-      passenger_name: passengerName,
+      passenger_name: nameCheck.normalized,
       phone,
       seat_codes: seatCodes,
       total_fare_vnd: totalFare,
@@ -824,7 +825,7 @@ export class ManagerOperationsService {
 
     return {
       success: true,
-      message: `Xuất vé POS thành công cho khách ${passengerName} (${seatCodes.join(', ')})`,
+      message: `Xuất vé POS thành công cho khách ${nameCheck.normalized} (${seatCodes.join(', ')})`,
       data: newBooking
     };
   }
@@ -860,8 +861,9 @@ export class ManagerOperationsService {
     if (!Array.isArray(seatCodes) || seatCodes.length === 0) {
       return { success: false, error: 'Vui lòng chọn ít nhất 1 ghế', code: 'NO_SEAT_SELECTED' };
     }
-    if (!passengerName || !String(passengerName).trim()) {
-      return { success: false, error: 'Thiếu họ tên khách gọi điện', code: 'INVALID_PASSENGER_NAME' };
+    const nameCheck = validatePersonName(passengerName);
+    if (!nameCheck.isValid) {
+      return { success: false, error: nameCheck.message, code: 'VALIDATION_ERROR' };
     }
     if (!validateVietnamPhone(phone).isValid) {
       return { success: false, error: 'Số điện thoại khách không hợp lệ', code: 'INVALID_PHONE' };
@@ -921,7 +923,7 @@ export class ManagerOperationsService {
       reservation_id: reservationId,
       pnr: `BG-RSV-${Math.floor(100 + Math.random() * 900)}`,
       trip_id: tripId,
-      passenger_name: passengerName,
+      passenger_name: nameCheck.normalized,
       phone,
       seat_codes: seatCodes,
       hold_policy: holdPolicy,

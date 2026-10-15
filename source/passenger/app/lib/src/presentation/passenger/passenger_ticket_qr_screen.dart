@@ -106,22 +106,31 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
             gap(8),
             Text('Người nhận có link xem vé và mã PIN dự phòng trong tin nhắn. Bạn vẫn quản lý được vé.', style: sans(size: 14, color: PTokens.muted, height: 1.5)),
             gap(12),
-            LabeledField(label: 'Số điện thoại người nhận', controller: phone, keyboardType: TextInputType.phone, isMono: true, errorText: error),
+            LabeledField(
+              label: 'Số điện thoại người nhận',
+              controller: phone,
+              keyboardType: TextInputType.phone,
+              isMono: true,
+              errorText: error,
+              maxLength: 15,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d\s+.-]'))],
+              autofillHints: const [AutofillHints.telephoneNumber],
+            ),
             gap(14),
             PrimaryButton(
               label: 'Gửi vé',
               onPressed: () async {
-                final p = phone.text.replaceAll(' ', '');
-                if (!validPhone(p)) {
-                  setSheet(() => error = 'Số điện thoại cần 10 chữ số.');
+                if (!validPhone(phone.text)) {
+                  setSheet(() => error = 'Số điện thoại không hợp lệ (VD: 0912 345 678)');
                   return;
                 }
-                final e = await store.shareTicket(widget.ticket, p);
+                final normalized = normalizePhone(phone.text);
+                final e = await store.shareTicket(widget.ticket, normalized);
                 if (e != null) {
                   setSheet(() => error = e);
                   return;
                 }
-                if (ctx.mounted) Navigator.of(ctx).pop(p);
+                if (ctx.mounted) Navigator.of(ctx).pop(normalized);
               },
             ),
           ]),

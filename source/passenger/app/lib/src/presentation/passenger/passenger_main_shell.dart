@@ -185,7 +185,10 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
         onTap: () {
           setState(() => _index = i);
           final store = PassengerScope.read(context);
-          if (i == 0) store.loadBanners();
+          if (i == 0) {
+            store.loadBanners();
+            store.loadTickets();
+          }
           if (i == 1) store.loadTickets();
           if (i == 2) store.loadNotices().then((_) => store.markRead());
         },

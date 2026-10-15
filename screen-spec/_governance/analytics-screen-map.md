@@ -47,14 +47,14 @@
 | Event Name | Screen ID | Trigger Condition | Event Payload Schema |
 | :--- | :--- | :--- | :--- |
 | `DRIVER_SHIFT_STARTED` | `DRI-002` | Driver logs in and opens shift | `{ driver_id, vehicle_id, scheduled_trips_count }` |
-| `READINESS_CHECKLIST_SUBMITTED`| `DRI-004`| Driver verifies bus readiness | `{ trip_id, odometer, fuel_level, tire_status, pass_all: true }` |
+| `READINESS_CHECKLIST_SUBMITTED`| `DRI-004`| Driver verifies bus readiness | `{ trip_id, fuel_level, tire_status, pass_all: true }` |
 | `TRIP_STARTED` | `DRI-005` | Start trip action confirmed | `{ trip_id, route_id, departure_time_actual, start_lat, start_lng }` |
 | `TELEMETRY_INGESTED` | `DRI-006` | Background GPS pub (sample 1/min) | `{ trip_id, speed_kmh, heading, accuracy_meters, battery_pct }` |
 | `TICKET_SCANNED_OFFLINE`| `DRI-009`| QR scanned & verified locally | `{ ticket_id, seat_code, scan_duration_ms, signature_valid: true }` |
 | `BOARDING_SYNC_FLUSHED`| `DRI-015`| SQLite outbox synced to backend | `{ trip_id, synced_boarding_events_count, queue_latency_seconds }` |
 | `COD_COLLECTED` | `DRI-012` | Driver confirms cash receipt | `{ ticket_id, amount_collected, receipt_no }` |
 | `NO_SHOW_MARKED` | `DRI-011` | Passenger marked no-show | `{ ticket_id, stop_id, grace_period_waited_seconds, reason }` |
-| `TRIP_ENDED` | `DRI-017` | Trip finished & manifest signed | `{ trip_id, final_odometer, boarded_count, no_show_count }` |
+| `TRIP_ENDED` | `DRI-017` | Trip finished & manifest signed | `{ trip_id, boarded_count, no_show_count }` |
 
 ---
 

@@ -272,7 +272,10 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   const inaccessible = pathname.match(/^\/api\/v1\/driver\/trips\/([^/]+)\/tickets\/([^/]+)\/inaccessible$/);
   if (inaccessible && req.method === 'POST') {
     parseJsonBody(req).then(body => {
-      const result = driverService.reportInaccessibleAddress(inaccessible[1], inaccessible[2], { reason: body.reason, meetingPoint: body.meeting_point ?? body.meetingPoint });
+      const result = driverService.reportInaccessibleAddress(inaccessible[1], inaccessible[2], {
+        reason: body.reason,
+        meetingPoint: body.meeting_point ?? body.meetingPoint
+      });
       if (result.success) sendSuccess(res, result.data);
       else sendError(res, result.error, result.code, ['TRIP_NOT_FOUND', 'TICKET_NOT_FOUND'].includes(result.code) ? 404 : (result.code === 'VALIDATION_ERROR' ? 400 : 409));
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
@@ -318,14 +321,14 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
       const result = driverService.reportIncident(
         tripId,
         body.incidentType || body.type || body.incident_type,
-        body.description,
+        body.description !== undefined ? body.description : (body.note !== undefined ? body.note : body.desc),
         body.estimatedDelayMinutes || body.delay_minutes || 0,
         { lat: body.lat, lng: body.lng }
       );
       if (result.success) {
         sendSuccess(res, result);
       } else {
-        sendError(res, result.error, 'INCIDENT_ERROR', 400);
+        sendError(res, result.error, result.code || 'INCIDENT_ERROR', 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -349,11 +352,11 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.endTrip(tripId, { earlyEndReason: body.early_end_reason || body.earlyEndReason });
+      const result = driverService.endTrip(tripId, { earlyEndReason: body.early_end_reason ?? body.earlyEndReason });
       if (result.success) {
         sendSuccess(res, result.data || result);
       } else {
-        sendError(res, result.error, result.code, 400);
+        sendError(res, result.error, result.code, result.code === 'TRIP_NOT_FOUND' ? 404 : 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;

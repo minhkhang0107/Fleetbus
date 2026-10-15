@@ -52,8 +52,8 @@ test('Multi-tenant Payments and Tickets (T2b)', async (t) => {
         tripId,
         holdId,
         seatCodes: ['A06'],
-        payer: { phone, full_name: 'Khách T2B' },
-        passengers: [{ phone, full_name: 'Khách T2B' }]
+        payer: { phone, full_name: 'Khách Xuyên Việt' },
+        passengers: [{ phone, full_name: 'Khách Xuyên Việt' }]
       });
       assert.strictEqual(bookRes.status, 201);
       order = bookRes.data.data.payment;

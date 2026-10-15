@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'passenger_store.dart';
@@ -423,7 +424,24 @@ Widget gap(double h) => SizedBox(height: h);
 
 /// Text field with its label above (design: label above input).
 class LabeledField extends StatelessWidget {
-  const LabeledField({super.key, required this.label, required this.controller, this.keyboardType, this.errorText, this.isMono = false, this.hint, this.maxLength, this.autofocus = false});
+  const LabeledField({
+    super.key,
+    required this.label,
+    required this.controller,
+    this.keyboardType,
+    this.errorText,
+    this.isMono = false,
+    this.hint,
+    this.maxLength,
+    this.autofocus = false,
+    this.inputFormatters,
+    this.textInputAction,
+    this.onSubmitted,
+    this.autofillHints,
+    this.textCapitalization = TextCapitalization.none,
+    this.showCounter = false,
+  });
+
   final String label;
   final TextEditingController controller;
   final TextInputType? keyboardType;
@@ -432,6 +450,12 @@ class LabeledField extends StatelessWidget {
   final String? hint;
   final int? maxLength;
   final bool autofocus;
+  final List<TextInputFormatter>? inputFormatters;
+  final TextInputAction? textInputAction;
+  final ValueChanged<String>? onSubmitted;
+  final Iterable<String>? autofillHints;
+  final TextCapitalization textCapitalization;
+  final bool showCounter;
 
   @override
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -442,13 +466,47 @@ class LabeledField extends StatelessWidget {
           keyboardType: keyboardType,
           autofocus: autofocus,
           maxLength: maxLength,
+          inputFormatters: inputFormatters,
+          textInputAction: textInputAction,
+          onSubmitted: onSubmitted,
+          autofillHints: autofillHints,
+          textCapitalization: textCapitalization,
           style: isMono ? mono(size: 15) : sans(size: 15, weight: FontWeight.w500),
-          decoration: InputDecoration(hintText: hint, errorText: errorText, counterText: ''),
+          decoration: InputDecoration(
+            hintText: hint,
+            errorText: errorText,
+            counterText: showCounter ? null : '',
+          ),
         ),
       ]);
 }
 
-bool validPhone(String raw) => RegExp(r'^0\d{9}$').hasMatch(raw.replaceAll(' ', ''));
+bool validPhone(String raw) {
+  final cleaned = raw.replaceAll(RegExp(r'[\s.-]'), '');
+  return RegExp(r'^(?:\+84|84|0)(3|5|7|8|9)\d{8}$').hasMatch(cleaned);
+}
+
+String normalizePhone(String raw) {
+  final cleaned = raw.replaceAll(RegExp(r'[\s.-]'), '');
+  if (cleaned.startsWith('+84')) return '0${cleaned.substring(3)}';
+  if (cleaned.startsWith('84')) return '0${cleaned.substring(2)}';
+  return cleaned;
+}
+
+String normalizeName(String raw) => raw.trim().replaceAll(RegExp(r'\s+'), ' ');
+
+String? nameError(String raw) {
+  final normalized = normalizeName(raw);
+  if (normalized.length < 2 || normalized.length > 60) {
+    return 'Họ tên cần 2-60 ký tự.';
+  }
+  final forbiddenPattern = RegExp(r'[\d<>{}[\]@#$%^*=_|\\/~]');
+  final letterPattern = RegExp(r'\p{L}', unicode: true);
+  if (forbiddenPattern.hasMatch(normalized) || !letterPattern.hasMatch(normalized)) {
+    return 'Họ tên không được chứa số hoặc ký tự đặc biệt.';
+  }
+  return null;
+}
 
 /// Material empty state: a tonal circle with the icon, a title, what will show here, and the next step.
 /// Inside a scroll view so a pull still refreshes the list ([onRefresh]).

@@ -12,7 +12,7 @@
 ---
 
 ## 1. Purpose & User Story
-- **Purpose:** Formally complete the active trip at the final destination terminal. Reconciles passenger manifest (boarded, no-show, alighted counts), confirms total cash collected (COD fares + on-the-road hail fares), compiles issued rest-stop debt receipts for cashier clearance, records final odometer reading, terminates native Android GPS foreground tracking service, transitions trip state in PostgreSQL to `COMPLETED`, and returns driver to shift schedule (`DRI-002`).
+- **Purpose:** Formally complete the active trip at the final destination terminal. Reconciles passenger manifest (boarded, no-show, alighted counts), confirms total cash collected (COD fares + on-the-road hail fares), compiles issued rest-stop debt receipts for cashier clearance, terminates native Android GPS foreground tracking service, transitions trip state in PostgreSQL to `COMPLETED`, and returns driver to shift schedule (`DRI-002`).
 - **Actor:** Driver / Assistant Driver.
 - **Entry Condition:** Vehicle arrived at final stop on `DRI-006` or `DRI-008`.
 - **Outcome:** Trip completed; telemetry service stopped; manifest locked; shift financial handover ledger updated.
@@ -46,11 +46,6 @@
 │ │ • Số tiền cần hoàn trả tại trạm: 280.000 đ  │   │
 │ └──────────────────────────────────────────────┘  │
 │                                                   │
-│ 🔢 SỐ CÔNG-TƠ-MÉT KẾT THÚC (Odometer)             │
-│ ┌─────────────────────────────────────────────┐   │
-│ │ [ 143015 ] km  (Quãng đường: 165 km)        │   │
-│ └─────────────────────────────────────────────┘   │
-│                                                   │
 │ ✍️ KÝ XÁC NHẬN BÀN GIAO MANIFEST                   │
 │ ┌─────────────────────────────────────────────┐   │
 │ │ [ Vùng ký chữ ký điện tử trên màn hình ]    │   │
@@ -70,7 +65,6 @@
 | `TripSummaryCard` | Container Card | Yes | Trip + Manifest | Static Summary | Displays route, vehicle, passenger counts |
 | `FinancialSummaryCard`| Summary Card | Yes | Payment Records | Reconciled | Breaks down COD cash, Hail cash, and total cash |
 | `DebtReceiptAuditCard`| Warning Card | Conditional | Debt Records | Issued Receipts | Lists pending rest-stop debt receipts for cashier |
-| `OdometerInput` | NumberField | Yes | User Input | Auto-calculated | Driver inputs end odometer |
 | `SignaturePad` | Canvas Widget | Yes | User Gesture | Signed / Empty | Captures driver electronic signature |
 | `CompleteTripCTA` | Primary Button | Yes | Form Valid | Enabled | Submits end trip payload with Idempotency Key |
 
@@ -85,7 +79,6 @@
 - **Request Body:**
 ```json
 {
-  "odometer_end_km": 143015,
   "total_boarded": 27,
   "total_no_show": 1,
   "total_cod_collected_vnd": 880000,
@@ -130,7 +123,7 @@
 ## 6. Analytics & Telemetry
 - `END_TRIP_SCREEN_OPENED`: `{ trip_id: "trp_991823" }`
 - `CASH_RECONCILIATION_CONFIRMED`: `{ total_cash: 1240000, cod_cash: 880000, hail_cash: 360000 }`
-- `TRIP_COMPLETED_SUCCESS`: `{ trip_id: "trp_991823", odometer_diff: 165 }`
+- `TRIP_COMPLETED_SUCCESS`: `{ trip_id: "trp_991823" }`
 
 ---
 
@@ -140,7 +133,6 @@
 - **COD Label:** *"Tiền vé COD:"*
 - **Hail Label:** *"Khách vẫy dọc đường:"*
 - **Debt Label:** *"Biên lai nợ tiền thừa phát hành:"*
-- **Odometer Helper:** *"Nhập số công-tơ-mét hiện tại trên bảng đồng hồ"*
 - **Submit CTA:** *"HOÀN TẤT & KẾT THÚC CHUYẾN ĐI"*
 
 ---

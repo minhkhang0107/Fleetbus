@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'passenger_login_screen.dart';
 import 'passenger_main_shell.dart';
@@ -81,6 +82,16 @@ class _PassengerSplashScreenState extends State<PassengerSplashScreen> {
                       label: 'Mã nhà xe',
                       controller: _codeController,
                       hint: 'Ví dụ SAOMAI',
+                      maxLength: 20,
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
+                        TextInputFormatter.withFunction((oldValue, newValue) =>
+                          newValue.copyWith(text: newValue.text.toUpperCase()),
+                        ),
+                      ],
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _submit(),
                     ),
                     if (_error != null) ...[
                       gap(8),

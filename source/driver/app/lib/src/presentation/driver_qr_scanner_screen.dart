@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'driver_cod_dialog.dart';
@@ -90,6 +91,7 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
               controller: pin,
               keyboardType: TextInputType.number,
               maxLength: 6,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               style: dmono(size: 18, weight: FontWeight.w600),
               decoration: InputDecoration(labelText: 'Mã PIN 6 số', counterText: '', errorText: error),
             ),

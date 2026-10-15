@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'passenger_main_shell.dart';
 import 'passenger_store.dart';
@@ -80,12 +81,12 @@ class _OtpFormState extends State<OtpForm> {
 
   Future<void> _submit() async {
     final store = PassengerScope.read(context);
-    final phone = _phone.text.replaceAll(' ', '');
     if (!_codeSent) {
-      if (!validPhone(phone)) {
-        setState(() => _error = 'Số điện thoại cần 10 chữ số, bắt đầu bằng 0.');
+      if (!validPhone(_phone.text)) {
+        setState(() => _error = 'Số điện thoại không hợp lệ (VD: 0912 345 678)');
         return;
       }
+      final phone = normalizePhone(_phone.text);
       setState(() => _busy = true);
       final error = await store.requestOtp(phone);
       if (!mounted) return;
@@ -111,6 +112,7 @@ class _OtpFormState extends State<OtpForm> {
       setState(() => _error = 'Mã chưa đúng. Kiểm tra tin nhắn và nhập lại.');
       return;
     }
+    final phone = normalizePhone(_phone.text);
     setState(() => _busy = true);
     final error = await store.verifyOtp(phone, code);
     if (!mounted) return;
@@ -130,10 +132,29 @@ class _OtpFormState extends State<OtpForm> {
       if (widget.title != null) ...[Text(widget.title!, style: sans(size: 18, weight: FontWeight.w700)), gap(6)],
       Text(widget.intro, style: sans(size: inSheet ? 14 : 15, color: inSheet ? PTokens.muted : PTokens.ink, height: 1.5)),
       gap(14),
-      LabeledField(label: 'Số điện thoại', controller: _phone, keyboardType: TextInputType.phone, isMono: true, hint: '0912 345 678', errorText: !_codeSent ? _error : null),
+      LabeledField(
+        label: 'Số điện thoại',
+        controller: _phone,
+        keyboardType: TextInputType.phone,
+        isMono: true,
+        hint: '0912 345 678',
+        errorText: !_codeSent ? _error : null,
+        maxLength: 15,
+        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d\s+.-]'))],
+        autofillHints: const [AutofillHints.telephoneNumber],
+      ),
       if (_codeSent) ...[
         gap(12),
-        LabeledField(label: 'Mã 6 số đã gửi tới ${maskPhone(_phone.text.replaceAll(' ', ''))}', controller: _otp, keyboardType: TextInputType.number, isMono: true, maxLength: 6, autofocus: true, errorText: _error),
+        LabeledField(
+          label: 'Mã 6 số đã gửi tới ${maskPhone(normalizePhone(_phone.text))}',
+          controller: _otp,
+          keyboardType: TextInputType.number,
+          isMono: true,
+          maxLength: 6,
+          autofocus: true,
+          errorText: _error,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        ),
         gap(4),
         Align(
           alignment: Alignment.centerLeft,

@@ -47,7 +47,7 @@ class DriverManifestScreen extends StatelessWidget {
                 ChoiceChip(label: Text(r), selected: reason == r, onSelected: (_) => setSheet(() => reason = r)),
             ]),
             const SizedBox(height: 12),
-            TextField(controller: meet, style: dsans(size: 16), decoration: const InputDecoration(labelText: 'Hẹn khách ở đâu? (không bắt buộc)', hintText: 'VD: đầu ngõ, cổng chợ')),
+            TextField(controller: meet, maxLength: 200, style: dsans(size: 16), decoration: const InputDecoration(labelText: 'Hẹn khách ở đâu? (không bắt buộc)', hintText: 'VD: đầu ngõ, cổng chợ')),
             const SizedBox(height: 8),
             Text('Khách nhận thông báo; điều hành nhận cảnh báo để sắp xếp.', style: dsans(size: 13, color: DTokens.muted)),
             const SizedBox(height: 14),

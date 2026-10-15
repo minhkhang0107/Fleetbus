@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'passenger_payment_processing_screen.dart';
 import 'passenger_store.dart';
@@ -58,12 +59,14 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
 
   Future<void> _pay(PassengerStore store) async {
     setState(() {
-      _nameError = _name.text.trim().length < 2 ? 'Nhập họ và tên người đi.' : null;
-      _phoneError = validPhone(_phone.text) ? null : 'Số điện thoại cần 10 chữ số, bắt đầu bằng 0.';
+      _nameError = nameError(_name.text);
+      _phoneError = validPhone(_phone.text) ? null : 'Số điện thoại không hợp lệ (VD: 0912 345 678)';
     });
     if (_nameError != null || _phoneError != null) return;
+    final normalizedName = normalizeName(_name.text);
+    final normalizedPhone = normalizePhone(_phone.text);
     setState(() => _creating = true);
-    final error = await store.createOrder(_name.text.trim(), _phone.text.replaceAll(' ', ''));
+    final error = await store.createOrder(normalizedName, normalizedPhone);
     if (!mounted) return;
     setState(() => _creating = false);
     if (error != null) {
@@ -72,7 +75,7 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
     }
     Navigator.of(context).push(MaterialPageRoute(
       settings: const RouteSettings(name: 'vietqr'),
-      builder: (_) => PassengerPaymentProcessingScreen(name: _name.text.trim(), phone: _phone.text.replaceAll(' ', '')),
+      builder: (_) => PassengerPaymentProcessingScreen(name: normalizedName, phone: normalizedPhone),
     ));
   }
 
@@ -101,9 +104,26 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
             gap(16),
             Text('Người đi', style: sans(size: 15, weight: FontWeight.w600)),
             gap(10),
-            LabeledField(label: 'Họ và tên', controller: _name, errorText: _nameError),
+            LabeledField(
+              label: 'Họ và tên',
+              controller: _name,
+              errorText: _nameError,
+              maxLength: 60,
+              textCapitalization: TextCapitalization.words,
+              autofillHints: const [AutofillHints.name],
+              textInputAction: TextInputAction.next,
+            ),
             gap(10),
-            LabeledField(label: 'Số điện thoại nhận vé', controller: _phone, keyboardType: TextInputType.phone, isMono: true, errorText: _phoneError),
+            LabeledField(
+              label: 'Số điện thoại nhận vé',
+              controller: _phone,
+              keyboardType: TextInputType.phone,
+              isMono: true,
+              errorText: _phoneError,
+              maxLength: 15,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d\s+.-]'))],
+              autofillHints: const [AutofillHints.telephoneNumber],
+            ),
             gap(16),
             Text('Mã giảm giá', style: sans(size: 15, weight: FontWeight.w600)),
             gap(8),

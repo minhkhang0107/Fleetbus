@@ -6,7 +6,7 @@
 import crypto from 'crypto';
 import { DEFAULT_OPERATOR_ID } from '../core/operators.js';
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
-import { maskPhone } from '../services/passenger/core/formatters.js';
+import { maskPhone, normalizePlate } from '../services/passenger/core/formatters.js';
 import { ADMIN_ROLE } from '../core/gateway.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { parseServiceDate } from '../core/serviceDate.js';
@@ -111,13 +111,15 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   // POST /api/v1/ops/vehicles (MGR-006)
   if (pathname === '/api/v1/ops/vehicles' && req.method === 'POST') {
     parseJsonBody(req).then(body => {
-      const plateNumber = String(body?.plate_number || body?.plateNumber || '').trim();
-      if (!plateNumber) {
-        sendError(res, 'Biển số xe không được để trống', 'VALIDATION_ERROR', 400);
+      const rawPlate = body?.plate_number ?? body?.plateNumber;
+      const plateCheck = normalizePlate(rawPlate);
+      if (!plateCheck.isValid) {
+        sendError(res, plateCheck.message, 'VALIDATION_ERROR', 400);
         return;
       }
+      const normalizedPlate = plateCheck.normalized;
       const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
-      const exists = managerService.vehicles.some(v => (v.operator_id || DEFAULT_OPERATOR_ID) === operatorId && (v.plate_number || '').trim().toLowerCase() === plateNumber.toLowerCase());
+      const exists = managerService.vehicles.some(v => (v.operator_id || DEFAULT_OPERATOR_ID) === operatorId && normalizePlate(v.plate_number).normalized === normalizedPlate);
       if (exists) {
         sendError(res, 'Biển số xe đã tồn tại trong đội xe của công ty', 'VEHICLE_EXISTS', 409);
         return;
@@ -129,8 +131,17 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         sendError(res, 'Sơ đồ ghế không hợp lệ hoặc không thuộc nhà xe', 'VALIDATION_ERROR', 400);
         return;
       }
-      const model = body?.model ? String(body.model).trim() : 'Thaco Mobihome VIP';
-      const result = managerService.addVehicle({ plate_number: plateNumber, model, layout_id: layout.layout_id }, operatorId);
+      const rawModel = typeof body?.model === 'string' ? body.model.trim() : '';
+      if (!rawModel) {
+        sendError(res, 'Dòng xe không được để trống', 'VALIDATION_ERROR', 400);
+        return;
+      }
+      if (rawModel.length > 80) {
+        sendError(res, 'Dòng xe tối đa 80 ký tự', 'VALIDATION_ERROR', 400);
+        return;
+      }
+      const model = rawModel;
+      const result = managerService.addVehicle({ plate_number: normalizedPlate, model, layout_id: layout.layout_id }, operatorId);
       const newVehicle = result.data;
       audit(req, managerService, { action: 'VEHICLE_CREATE', resource: newVehicle.vehicle_id, before: null, after: newVehicle });
       sendSuccess(res, newVehicle, 201);
@@ -468,8 +479,22 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     const tripIndex = parts.indexOf('trips');
     const tripId = tripIndex !== -1 ? parts[tripIndex + 1] : parts[4];
     parseJsonBody(req).then(body => {
+      const rawMinutes = body?.delayMinutes !== undefined ? body.delayMinutes : body?.delay_minutes;
+      if (typeof rawMinutes !== 'number' || !Number.isInteger(rawMinutes) || rawMinutes < 0 || rawMinutes > 600) {
+        sendError(res, 'Số phút trễ là số nguyên từ 0 đến 600', 'VALIDATION_ERROR', 400);
+        return;
+      }
+      const rawReason = body?.reason;
+      if (rawReason !== undefined && rawReason !== null) {
+        const trimmedReason = String(rawReason).trim();
+        if (trimmedReason.length > 200) {
+          sendError(res, 'Nội dung tối đa 200 ký tự', 'VALIDATION_ERROR', 400);
+          return;
+        }
+      }
+      const reason = (rawReason !== undefined && rawReason !== null && String(rawReason).trim()) ? String(rawReason).trim() : 'Kẹt xe đường bộ';
       const before = { delay_minutes: managerService.findTrip(tripId)?.delay_minutes ?? null };
-      const result = managerService.broadcastTripDelay(tripId, body.delayMinutes || body.delay_minutes || 15, body.reason, req.operatorId);
+      const result = managerService.broadcastTripDelay(tripId, rawMinutes, reason, req.operatorId);
       if (result.success) {
         audit(req, managerService, { action: 'TRIP_DELAY', resource: tripId, before, after: { delay_minutes: result.data.delay_minutes } });
         sendSuccess(res, result.data || result);

@@ -70,7 +70,7 @@ describe('Spec conformance: seat inventory by segment', () => {
     assert.strictEqual(h.status, 200, JSON.stringify(h.body));
     const order = await api('/api/v1/bookings/create', {
       method: 'POST', token: pax.token,
-      body: { tripId: TRIP, holdId: h.body.data.hold_id, seatCodes, payer: { full_name: 'Khach', phone: pax.phone, email: 'k@b.vn' }, passengers: seatCodes.map((s) => ({ full_name: `K ${s}`, phone: pax.phone, seat_code: s })) }
+      body: { tripId: TRIP, holdId: h.body.data.hold_id, seatCodes, payer: { full_name: 'Khach', phone: pax.phone, email: 'k@b.vn' }, passengers: seatCodes.map((s) => ({ full_name: 'Khach Ghe', phone: pax.phone, seat_code: s })) }
     });
     assert.strictEqual(order.status, 201, JSON.stringify(order.body));
     const ipn = await api('/api/v1/webhooks/vietqr/ipn', { method: 'POST', body: { transferMemo: order.body.data.payment.payment_details.transfer_memo, amountVnd: order.body.data.order.total_payment_vnd, bankRef: `FT${crypto.randomUUID()}` } });

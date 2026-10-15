@@ -18,6 +18,8 @@ import 'package:app/src/presentation/passenger/passenger_splash_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_ticket_qr_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_live_radar_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_route_map.dart';
+import 'package:app/src/presentation/passenger/passenger_widgets.dart';
+import 'package:app/src/presentation/passenger/passenger_profile_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:data/src/service/passenger_api_service.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -199,6 +201,53 @@ void main() {
 
   Map<String, dynamic> bodyOf(String suffix) => jsonDecode(sent.lastWhere((r) => r.url.path.endsWith(suffix)).body) as Map<String, dynamic>;
 
+  test('validPhone and normalizePhone accept Vietnamese mobile numbers and reject invalid prefixes', () {
+    expect(validPhone('+84 912 345 678'), isTrue);
+    expect(normalizePhone('+84 912 345 678'), '0912345678');
+    expect(validPhone('0912.345.678'), isTrue);
+    expect(normalizePhone('0912.345.678'), '0912345678');
+    expect(validPhone('0123456789'), isFalse);
+  });
+
+  test('nameError validates person name according to server rules', () {
+    expect(nameError('Lê Văn A'), isNull);
+    expect(nameError('A'), 'Họ tên cần 2-60 ký tự.');
+    expect(nameError('Nam 123'), 'Họ tên không được chứa số hoặc ký tự đặc biệt.');
+    expect(nameError('<b>'), 'Họ tên không được chứa số hoặc ký tự đặc biệt.');
+  });
+
+  testWidgets('the checkout screen shows the name error for "A"', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+
+    final store = await storeWithServer();
+    await store.verifyOtp('0987654321', '123456');
+    await store.loadTrips();
+    store.chooseTrip(store.trips.single);
+    await store.loadSeatMap();
+    store.toggleSeat('A02');
+    await store.holdSeats();
+
+    await tester.pumpWidget(MaterialApp(
+      builder: phoneColumnBuilder,
+      home: PassengerScope(store: store, child: const PassengerCheckoutScreen()),
+    ));
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField).first, 'A');
+    await tester.tap(find.text('Tạo mã thanh toán'));
+    await tester.pump();
+
+    expect(find.text('Họ tên cần 2-60 ký tự.'), findsOneWidget);
+    store.stopHold();
+  });
+
   test('OTP: the development code is kept for the field and the token logs in', () async {
     final store = await storeWithServer();
     expect(await store.requestOtp('0987654321'), isNull);
@@ -206,6 +255,24 @@ void main() {
     expect(await store.verifyOtp('0987654321', '123456'), isNull);
     expect(store.loggedIn, isTrue);
     expect(store.userName, isNull, reason: 'the placeholder name is not shown as the user name');
+  });
+
+  testWidgets('a logged-in passenger without a name sees "Khách BusGo", not "Chưa đăng nhập"', (tester) async {
+    final store = await storeWithServer();
+    await store.verifyOtp('0987654321', '123456');
+    expect(store.loggedIn, isTrue);
+    expect(store.userName, isNull);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PassengerScope(store: store, child: const PassengerProfileScreen()),
+      ),
+    ));
+    await tester.pump();
+
+    expect(find.text('Khách BusGo'), findsOneWidget);
+    expect(find.text('Chưa đăng nhập'), findsNothing);
+    expect(find.byIcon(Icons.person), findsOneWidget);
   });
 
   test('search maps trips and spreads stop times between departure and arrival', () async {
@@ -576,7 +643,7 @@ void main() {
     expect(store.serviceAreas.single.feeVnd, 50000);
     store.setPickup('stp_nb');
 
-    expect(await store.setHomeAddress(pickupSide: true, address: '  ', lat: 21.0, lng: 105.8), 'Nhập địa chỉ để tài xế tìm được bạn');
+    expect(await store.setHomeAddress(pickupSide: true, address: '  ', lat: 21.0, lng: 105.8), 'Địa chỉ cần 5-200 ký tự');
     expect(await store.setHomeAddress(pickupSide: true, address: 'Sóc Sơn', lat: 21.25, lng: 105.85), 'Địa chỉ nằm ngoài vùng phục vụ');
     expect(store.homePickup, isNull);
 

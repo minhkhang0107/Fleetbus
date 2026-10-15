@@ -371,7 +371,7 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
   it('TC-SYNC-09: Driver ending trip updates Manager trip status to COMPLETED', async () => {
     const endRes = await api(`/api/v1/driver/trips/${driverTripId}/end`, {
       method: 'POST',
-      body: { endOdometerKm: 142210, early_end_reason: 'Kết thúc sớm để kiểm thử đồng bộ ba bên' }
+      body: { early_end_reason: 'Kết thúc sớm để kiểm thử đồng bộ ba bên' }
     });
     assert.strictEqual(endRes.statusCode, 200);
     assert.strictEqual(endRes.body.data.status, 'COMPLETED');

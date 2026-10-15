@@ -236,11 +236,11 @@
           <div class="row" style="flex-wrap:wrap;align-items:flex-end">
             <div class="field" style="flex:1;min-width:160px;margin-bottom:0">
               <label for="vehPlate">Biển số xe</label>
-              <input id="vehPlate" name="plate_number" placeholder="Ví dụ: 29B-123.45" required>
+              <input id="vehPlate" name="plate_number" placeholder="Ví dụ: 29B-123.45" required pattern="[0-9]{2}[A-Za-z]{1,2}[0-9]?[- ]?(?:[0-9]{4,5}|[0-9]{2,3}\.[0-9]{2})" title="Định dạng: 2 số, 1-2 chữ cái, số tùy chọn, 4-5 số (VD: 29B-123.45)" maxlength="12" style="text-transform:uppercase">
             </div>
             <div class="field" style="flex:1;min-width:200px;margin-bottom:0">
               <label for="vehModel">Dòng xe</label>
-              <input id="vehModel" name="model" placeholder="Ví dụ: Limousine 34 Phòng VIP" required>
+              <input id="vehModel" name="model" placeholder="Ví dụ: Limousine 34 Phòng VIP" required maxlength="80">
             </div>
             <div class="field" style="flex:1;min-width:240px;margin-bottom:0">
               <label for="vehLayout">Sơ đồ ghế</label>
@@ -432,13 +432,13 @@
         <form class="card" id="operatorForm">
           <div class="section-title" style="margin-top:0">Thêm nhà xe</div>
           <div class="field"><label>Mã nhà xe (A-Z, 0-9)</label><input name="code" required maxlength="16" style="text-transform:uppercase"></div>
-          <div class="field"><label>Tên nhà xe</label><input name="name" required></div>
-          <div class="field"><label>Tên ngắn</label><input name="short_name"></div>
-          <div class="field"><label>Tổng đài</label><input name="hotline"></div>
-          <div class="field"><label>Mã BIN ngân hàng</label><input name="bin" required></div>
-          <div class="field"><label>Tên ngân hàng</label><input name="bank_name" required></div>
-          <div class="field"><label>Số tài khoản</label><input name="account_number" required></div>
-          <div class="field"><label>Chủ tài khoản</label><input name="account_name" required></div>
+          <div class="field"><label>Tên nhà xe</label><input name="name" required maxlength="200"></div>
+          <div class="field"><label>Tên ngắn</label><input name="short_name" maxlength="40"></div>
+          <div class="field"><label>Tổng đài</label><input name="hotline" maxlength="15" inputmode="tel"></div>
+          <div class="field"><label>Mã BIN ngân hàng</label><input name="bin" required maxlength="6"></div>
+          <div class="field"><label>Tên ngân hàng</label><input name="bank_name" required maxlength="200"></div>
+          <div class="field"><label>Số tài khoản</label><input name="account_number" required maxlength="20"></div>
+          <div class="field"><label>Chủ tài khoản</label><input name="account_name" required maxlength="200"></div>
           <div class="error" id="operatorError"></div>
           <button class="btn primary" type="submit">Tạo nhà xe</button>
         </form>
@@ -536,12 +536,32 @@ $('#logoutBtn').addEventListener('click', () => logout());
 async function enter() {
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
   const isPlatform = state.user?.role === 'PLATFORM_ADMIN';
+  const role = state.user?.role;
   $('#who').textContent = `${state.user?.full_name || ''} · ${state.user?.role || ''}`;
   $('#navPlatform').classList.toggle('hidden', !isPlatform);
+  const NAV_ROLES = {
+    bookings: ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER'],
+    fleet: ['FLEET_DIRECTOR', 'DISPATCHER'],
+    layouts: ['FLEET_DIRECTOR', 'DISPATCHER'],
+    schedules: ['FLEET_DIRECTOR', 'DISPATCHER'],
+    service: ['FLEET_DIRECTOR', 'DISPATCHER'],
+    homereq: ['FLEET_DIRECTOR', 'DISPATCHER'],
+    banners: ['FLEET_DIRECTOR'],
+    audit: ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'DISPATCHER']
+  };
+  document.querySelectorAll('nav button[data-view]').forEach(b => {
+    const v = b.dataset.view;
+    if (v === 'platform') return;
+    const allowed = isPlatform || !NAV_ROLES[v] || (role && NAV_ROLES[v].includes(role));
+    b.classList.toggle('hidden', !allowed);
+  });
+  if (state.view && document.querySelector(`nav button[data-view="${state.view}"]`)?.classList.contains('hidden')) {
+    state.view = 'overview';
+  }
   $('#platformBar').classList.toggle('hidden', !isPlatform);
   if (isPlatform) await loadPlatformOperatorPicker();
   $('#companyName').textContent = isPlatform ? 'Quản trị nền tảng' : (state.operator?.name || '');
-  show(isPlatform ? 'platform' : 'overview');
+  show(isPlatform ? 'platform' : (state.view || 'overview'));
 }
 
 document.querySelectorAll('nav button[data-view]').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
@@ -549,6 +569,10 @@ function stopTimers() { state.timers.forEach(clearInterval); state.timers = []; 
 function every(fn) { fn(); state.timers.push(setInterval(fn, POLL_MS)); }
 
 function show(view) {
+  const targetBtn = document.querySelector(`nav button[data-view="${view}"]`);
+  if (targetBtn && targetBtn.classList.contains('hidden')) {
+    view = 'overview';
+  }
   state.view = view;
   stopTimers();
   document.querySelectorAll('nav button[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === view));
@@ -628,18 +652,25 @@ async function openTrip(tripId) {
     : `<div>${stops.length ? stops.map(st => `<div class="row" style="padding:3px 0"><span class="mono muted">${esc(st.order)}</span><span class="grow">${esc(st.name)}</span></div>`).join('') : '<p class="muted">Chưa có dữ liệu điểm dừng.</p>'}</div>`}
     ${msgs?.ok ? messagesBlock(msgs.data) : ''}
     <div class="section-title">Báo trễ chính thức</div>
-    <form class="row" id="delayForm"><input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="minutes" type="number" min="5" max="600" value="15"> <input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="reason" placeholder="Lý do (khách nhận được)"><button class="btn" type="submit">Công bố</button></form>
+    <form id="delayForm">
+      <div class="row">
+        <input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="minutes" type="number" min="0" max="600" step="1" value="15" placeholder="Số phút trễ (0 = đúng giờ trở lại)" title="0 = đúng giờ trở lại">
+        <input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="reason" placeholder="Lý do (khách nhận được)" maxlength="200">
+        <button class="btn" type="submit">Công bố</button>
+      </div>
+      <div class="error" id="delayError" style="margin-top:4px"></div>
+    </form>
     ${saleBlock(t)}
     <div ${t.status === 'CANCELLED' ? 'class="hidden"' : ''}>
     <div class="section-title">Giữ chỗ qua tổng đài</div>
     <form id="holdForm">
-      <div class="row"><div class="field grow"><label>Họ tên khách</label><input name="name" required></div><div class="field grow"><label>Số điện thoại</label><input name="phone" required inputmode="tel"></div></div>
-      <div class="row"><div class="field grow"><label>Ghế (VD: A05)</label><input name="seat" required style="text-transform:uppercase"></div>
+      <div class="row"><div class="field grow"><label>Họ tên khách</label><input name="name" required maxlength="60"></div><div class="field grow"><label>Số điện thoại</label><input name="phone" required inputmode="tel" maxlength="15"></div></div>
+      <div class="row"><div class="field grow"><label>Ghế (VD: A05)</label><input name="seat" required style="text-transform:uppercase" maxlength="4" pattern="[A-Za-z0-9]+" title="Mã ghế gồm chữ và số (VD: A05)"></div>
         <div class="field grow"><label>Điểm đón</label><select name="pickup">${stops.map(st => `<option value="${esc(st.stop_id)}">${esc(st.name)}</option>`).join('')}</select></div>
         <div class="field grow"><label>Điểm trả</label><select name="dropoff">${stops.slice().reverse().map(st => `<option value="${esc(st.stop_id)}">${esc(st.name)}</option>`).join('')}</select></div></div>
       <label class="row" style="margin:6px 0"><input type="checkbox" name="home"> Đón tận nhà (khách đọc địa chỉ qua điện thoại)</label>
       <div id="homeFields" class="hidden">
-        <div class="row"><div class="field grow"><label>Địa chỉ đón</label><input name="address" placeholder="Số nhà, ngõ, đường, quận"></div><div class="field grow"><label>Ghi chú cho tài xế</label><input name="note" placeholder="VD: cổng sắt xanh, gọi khi tới đầu ngõ"></div></div>
+        <div class="row"><div class="field grow"><label>Địa chỉ đón</label><input name="address" placeholder="Số nhà, ngõ, đường, quận" maxlength="200"></div><div class="field grow"><label>Ghi chú cho tài xế</label><input name="note" placeholder="VD: cổng sắt xanh, gọi khi tới đầu ngõ" maxlength="200"></div></div>
         <div class="muted" style="margin-bottom:4px">Bấm lên bản đồ để ghim đúng chỗ nhà khách. Khách nhận tin nhắn có link theo dõi xe và giờ hẹn khi tài xế lên đường.</div>
         <div id="homePinMap" class="map" style="height:220px"></div>
         <div class="muted mono" id="homePinText">Chưa ghim vị trí</div>
@@ -662,17 +693,44 @@ async function openTrip(tripId) {
   $('#delayForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
-    const r = await api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/delay`, { method: 'POST', idempotent: true, body: { delayMinutes: Number(f.minutes.value), reason: f.reason.value.trim() || 'Điều chỉnh vận hành' } });
-    toast(r.ok ? 'Đã công bố giờ chạy mới cho khách' : r.message);
+    const errEl = $('#delayError');
+    if (errEl) errEl.textContent = '';
+    const rawMins = f.minutes.value.trim();
+    const mins = Number(rawMins);
+    if (!rawMins || !Number.isInteger(mins) || mins < 0 || mins > 600) {
+      if (errEl) errEl.textContent = 'Số phút trễ phải là số nguyên từ 0 đến 600 (0 = đúng giờ trở lại)';
+      return;
+    }
+    const r = await api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/delay`, { method: 'POST', idempotent: true, body: { delayMinutes: mins, reason: f.reason.value.trim() || 'Điều chỉnh vận hành' } });
+    if (!r.ok) {
+      if (errEl) errEl.textContent = r.message;
+      return;
+    }
+    toast('Đã công bố giờ chạy mới cho khách');
     if (r.ok) loadBoard();
   });
   $('#holdForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
     $('#holdError').textContent = '';
+    const name = f.name.value.trim();
+    if (name.length < 2 || name.length > 60 || /[0-9<>{}@[\]#$%^*=_|\\/~]/u.test(name) || !/\p{L}/u.test(name)) {
+      $('#holdError').textContent = 'Họ tên cần 2-60 ký tự, không chứa số hoặc ký tự đặc biệt';
+      return;
+    }
+    const cleanPhone = f.phone.value.replace(/[\s.-]/g, '');
+    if (!/^(?:\+84|84|0)(3|5|7|8|9)\d{8}$/.test(cleanPhone)) {
+      $('#holdError').textContent = 'Số điện thoại không hợp lệ (VD: 0912 345 678)';
+      return;
+    }
+    const seat = f.seat.value.trim().toUpperCase();
+    if (!seat || !/^[A-Z0-9]{1,4}$/.test(seat)) {
+      $('#holdError').textContent = 'Mã ghế không hợp lệ (VD: A05)';
+      return;
+    }
     const home = f.home.checked;
     if (home && (!f.address.value.trim() || !homePin)) { $('#holdError').textContent = 'Đón tận nhà cần địa chỉ và vị trí ghim trên bản đồ'; return; }
-    const body = { tripId, passengerName: f.name.value.trim(), phone: f.phone.value.trim(), seatCodes: [f.seat.value.trim().toUpperCase()], pickupStopId: f.pickup.value, dropoffStopId: f.dropoff.value };
+    const body = { tripId, passengerName: name, phone: cleanPhone, seatCodes: [seat], pickupStopId: f.pickup.value, dropoffStopId: f.dropoff.value };
     if (home) body.homePickup = { address: f.address.value.trim(), note: f.note.value.trim(), lat: homePin.lat, lng: homePin.lng };
     const r = await api('/api/v1/ops/pos/hotline-hold', { method: 'POST', idempotent: true, body });
     if (!r.ok) { $('#holdError').textContent = r.message; return; }
@@ -725,7 +783,7 @@ function saleBlock(t) {
   return `<div class="section-title">Bán vé và hủy chuyến</div>
     <div class="row" style="margin-bottom:8px"><span class="grow">${t.sales_closed ? `<span class="pill warn">Đang ngừng bán trực tuyến</span>${t.sales_closed_reason ? ` <span class="muted">${esc(t.sales_closed_reason)}</span>` : ''}` : '<span class="pill ok">Đang bán trực tuyến</span>'}</span>
       <button class="btn" type="button" id="salesToggle">${t.sales_closed ? 'Mở bán lại' : 'Ngừng bán trực tuyến'}</button></div>
-    <form class="row" id="cancelTripForm"><input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="reason" placeholder="Lý do hủy chuyến (khách nhận được)"><button class="btn danger" type="submit">Hủy chuyến</button></form>
+    <form class="row" id="cancelTripForm"><input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="reason" placeholder="Lý do hủy chuyến (khách nhận được)" maxlength="200"><button class="btn danger" type="submit">Hủy chuyến</button></form>
     <div class="error" id="cancelTripError"></div>`;
 }
 function bindSaleBlock(tripId, t) {
@@ -769,7 +827,7 @@ async function loadHomeRequests() {
       <td><span class="pill ${q.side === 'PICKUP' ? 'info' : ''}">${q.side === 'PICKUP' ? 'Đón' : 'Trả'}</span> ${esc(q.address)}${q.note ? `<div class="muted" style="font-size:12px">${esc(q.note)}</div>` : ''}<div class="muted" style="font-size:12px">${esc(q.area_name)}${q.window_from ? ` · khung đón ${esc(hhmm(q.window_from))}–${esc(hhmm(q.window_to))}` : ''} · <a href="https://www.openstreetmap.org/?mlat=${esc(q.lat)}&mlon=${esc(q.lng)}#map=17/${esc(q.lat)}/${esc(q.lng)}" target="_blank" rel="noopener">xem bản đồ</a></div></td>
       <td class="mono" style="white-space:nowrap">${esc(vnd(q.fee_vnd))}</td>
       <td style="white-space:nowrap"><span class="pill ${kind}">${esc(label)}</span>${late ? ' <span class="pill danger">Quá hạn duyệt</span>' : ''}${q.reject_reason ? `<div class="muted" style="font-size:12px">${esc(q.reject_reason)}</div>` : ''}</td>
-      <td>${q.status === 'PENDING_REVIEW' ? `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><button class="btn primary" data-hr-ok="${esc(q.order_id)}" data-side="${esc(q.side)}">Xác nhận</button><input data-hr-reason="${esc(q.request_id)}" placeholder="Lý do từ chối" style="border:1px solid var(--line-strong);border-radius:8px;padding:6px 8px;width:160px"><button class="btn danger" data-hr-no="${esc(q.order_id)}" data-side="${esc(q.side)}" data-req="${esc(q.request_id)}">Từ chối</button></div>` : ''}</td></tr>`;
+      <td>${q.status === 'PENDING_REVIEW' ? `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><button class="btn primary" data-hr-ok="${esc(q.order_id)}" data-side="${esc(q.side)}">Xác nhận</button><input data-hr-reason="${esc(q.request_id)}" placeholder="Lý do từ chối" style="border:1px solid var(--line-strong);border-radius:8px;padding:6px 8px;width:160px" maxlength="200"><button class="btn danger" data-hr-no="${esc(q.order_id)}" data-side="${esc(q.side)}" data-req="${esc(q.request_id)}">Từ chối</button></div>` : ''}</td></tr>`;
   }).join('')}</tbody></table>` : '<p class="muted" style="padding:16px;margin:0">Không có yêu cầu.</p>';
   const box = $('#homeReqBox');
   box.querySelectorAll('button[data-hr-ok]').forEach(b => b.addEventListener('click', async () => {
@@ -921,7 +979,7 @@ async function loadService() {
         <div id="areaList" style="margin-top:10px"></div>
         <form id="areaForm" style="margin-top:12px">
           <div class="muted" style="margin-bottom:8px">Bấm lên bản đồ để chấm các đỉnh của vùng mới (ít nhất 3 điểm).</div>
-          <div class="row"><div class="field grow"><label>Tên vùng</label><input name="name" required></div>
+          <div class="row"><div class="field grow"><label>Tên vùng</label><input name="name" required maxlength="200"></div>
             <div class="field"><label>Loại</label><select name="kind"><option value="PICKUP">Đón</option><option value="DROPOFF">Trả</option></select></div></div>
           <div class="row"><div class="field grow"><label>Phụ phí (đ)</label><input name="fee" type="number" min="0" value="0"></div>
             <div class="field grow"><label>Đặt trước tối thiểu (phút)</label><input name="lead" type="number" min="0" value="60"></div>
@@ -1400,9 +1458,9 @@ async function loadFleet() {
           <td>${esc(v.model)}</td>
           <td>${esc(layoutName)} <span class="muted mono">(${esc(seatCount)} chỗ)</span></td>
           <td>${pill(v.status)}</td>
-          <td>
+          <td style="white-space:nowrap">
             <div class="row" style="gap:6px">
-              <select data-veh-select="${esc(v.vehicle_id)}" style="max-width:220px">
+              <select data-veh-select="${esc(v.vehicle_id)}" style="min-width:260px">
                 ${fleetState.layouts.map(lay => `
                   <option value="${esc(lay.layout_id)}" ${lay.layout_id === v.layout_id ? 'selected' : ''}>
                     ${esc(lay.name)} (${esc(lay.total_seats || lay.seats?.length || 0)} chỗ)
@@ -1441,14 +1499,23 @@ async function loadFleet() {
   });
 }
 
+$('#vehPlate')?.addEventListener('input', (e) => {
+  e.target.value = e.target.value.toUpperCase();
+});
+
 $('#fleetAddForm')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
-  const plate = f.plate_number.value.trim();
+  const plate = f.plate_number.value.trim().toUpperCase();
   const model = f.model.value.trim();
   const layout_id = f.layout_id.value;
   $('#fleetAddError').textContent = '';
   if (!plate) { $('#fleetAddError').textContent = 'Vui lòng nhập biển số xe'; return; }
+  const plateRe = /^[0-9]{2}[A-Z]{1,2}[0-9]?[- ]?(?:[0-9]{4,5}|[0-9]{2,3}\.[0-9]{2})$/;
+  if (!plateRe.test(plate)) {
+    $('#fleetAddError').textContent = $('#vehPlate')?.title || 'Biển số xe không đúng định dạng (VD: 29B-123.45)';
+    return;
+  }
   if (!model) { $('#fleetAddError').textContent = 'Vui lòng nhập dòng xe'; return; }
   $('#vehAddBtn').disabled = true;
   const r = await api('/api/v1/ops/vehicles', {
@@ -1905,8 +1972,8 @@ async function loadLayouts() {
     <thead>
       <tr>
         <th>Sơ đồ</th>
-        <th>Thông số</th>
-        <th style="text-align:right">Thao tác</th>
+        <th style="white-space:nowrap">Thông số</th>
+        <th style="text-align:right;white-space:nowrap">Thao tác</th>
       </tr>
     </thead>
     <tbody>
@@ -1918,15 +1985,15 @@ async function loadLayouts() {
             <b>${esc(l.name)}</b> ${l.builtin ? '<span class="pill info">Có sẵn</span>' : ''}
             <div class="muted" style="font-size:12px">đang dùng: ${plates}</div>
           </td>
-          <td class="mono" style="font-size:12px">
+          <td class="mono" style="font-size:12px;white-space:nowrap">
             ${esc(l.total_decks || 1)} tầng · ${esc(l.total_seats || l.seats?.length || 0)} chỗ
           </td>
-          <td style="text-align:right">
+          <td style="text-align:right;white-space:nowrap">
             <div class="row" style="gap:4px;justify-content:flex-end">
-              <button class="btn" style="padding:3px 8px;font-size:12px" data-layout-clone="${esc(l.layout_id)}">Nhân bản</button>
+              <button class="btn" style="padding:3px 8px;font-size:12px;white-space:nowrap" data-layout-clone="${esc(l.layout_id)}">Nhân bản</button>
               ${!l.builtin ? `
-                <button class="btn" style="padding:3px 8px;font-size:12px" data-layout-edit="${esc(l.layout_id)}">Sửa</button>
-                <button class="btn danger" style="padding:3px 8px;font-size:12px" data-layout-del="${esc(l.layout_id)}">Xóa</button>
+                <button class="btn" style="padding:3px 8px;font-size:12px;white-space:nowrap" data-layout-edit="${esc(l.layout_id)}">Sửa</button>
+                <button class="btn danger" style="padding:3px 8px;font-size:12px;white-space:nowrap" data-layout-del="${esc(l.layout_id)}">Xóa</button>
               ` : ''}
             </div>
           </td>

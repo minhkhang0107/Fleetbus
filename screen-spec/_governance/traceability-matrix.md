@@ -189,7 +189,7 @@ Every rule of the master matrix exists in a screen file and every spec test id i
 
 | Rule | Screen | Summary | Named in an automated test |
 | :--- | :--- | :--- | :--- |
-| `BR-READINESS-001` | `DRI-004` | All 6 checklist items must be checked and valid odometer reading entered before the Continue CTA unlocks. | by screen tests only |
+| `BR-READINESS-001` | `DRI-004` | All 6 checklist items must be checked before the Continue CTA unlocks. | by screen tests only |
 | `BR-START-001` | `DRI-005` | Starting a trip requires Android Foreground Service notification with permission `ACCESS_FINE_LOCATION` and `A | by screen tests only |
 | `BR-COCKPIT-003` | `DRI-006` | The server accepts a telemetry ping only for a trip in `IN_TRANSIT` (`400 TRIP_NOT_ACTIVE`) and only with a la | by screen tests only |
 | `BR-COCKPIT-001` | `DRI-006` | If cellular network is lost, the native Android service automatically diverts MQTT payloads into a local SQLit | by screen tests only |

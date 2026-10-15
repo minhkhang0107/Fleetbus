@@ -92,6 +92,8 @@ function stopLifecycle(trip, stop, index) {
   return 'UPCOMING';
 }
 
+const text = (v) => (v == null ? '' : String(v).trim());
+
 export class DriverCockpitService {
   constructor(options = {}) {
     this.secretKey = options.secretKey || getTicketSecret();
@@ -1429,19 +1431,23 @@ export class DriverCockpitService {
    * and, when the driver gives one, where to meet; the office gets an alert to arrange it. Recorded once.
    */
   reportInaccessibleAddress(tripId, ticketId, { reason, meetingPoint = null } = {}, mockNow = Date.now()) {
+    const reasonText = text(reason);
+    if (reasonText.length > 200) return { success: false, error: 'Nội dung tối đa 200 ký tự', code: 'VALIDATION_ERROR' };
+    const meetText = text(meetingPoint);
+    if (meetText.length > 200) return { success: false, error: 'Nội dung tối đa 200 ký tự', code: 'VALIDATION_ERROR' };
+
     const trip = this.activeTrips.get(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
     const item = trip.manifest.find(m => m.ticket_id === ticketId);
     if (!item) return { success: false, error: 'Không tìm thấy vé trong danh sách', code: 'TICKET_NOT_FOUND' };
     if (!homeConfirmed(item.home_pickup)) return { success: false, error: 'Vé này không đón tận nhà', code: 'NOT_HOME_PICKUP' };
     if (item.boarding_status === 'BOARDED') return { success: false, error: 'Khách đã lên xe', code: 'ALREADY_BOARDED' };
-    const text = typeof reason === 'string' ? reason.trim() : '';
-    if (text.length < 5 || text.length > 200) return { success: false, error: 'Ghi lý do không vào được (5-200 ký tự)', code: 'VALIDATION_ERROR' };
-    const meet = typeof meetingPoint === 'string' && meetingPoint.trim() ? meetingPoint.trim().slice(0, 200) : null;
+    if (reasonText.length < 5) return { success: false, error: 'Ghi lý do không vào được (5-200 ký tự)', code: 'VALIDATION_ERROR' };
+    const meet = meetText || null;
     if (item.home_pickup.inaccessible_at) return { success: true, data: this._publicPassenger(item) };
-    item.home_pickup = { ...item.home_pickup, inaccessible_at: new Date(mockNow).toISOString(), inaccessible_reason: text, meeting_point: meet };
-    this._event(trip, 'HOME_ADDRESS_INACCESSIBLE', { ticket_id: ticketId, seat_code: item.seat_code, reason: text, meeting_point: meet }, mockNow);
-    this.eventBridge?.emit?.('HOME_PICKUP_INACCESSIBLE', { tripId, ticketId, seatCode: item.seat_code, phone: item.passenger_phone || null, address: item.home_pickup.address, reason: text, meetingPoint: meet, vehiclePlate: trip.vehicle_plate, now: mockNow });
+    item.home_pickup = { ...item.home_pickup, inaccessible_at: new Date(mockNow).toISOString(), inaccessible_reason: reasonText, meeting_point: meet };
+    this._event(trip, 'HOME_ADDRESS_INACCESSIBLE', { ticket_id: ticketId, seat_code: item.seat_code, reason: reasonText, meeting_point: meet }, mockNow);
+    this.eventBridge?.emit?.('HOME_PICKUP_INACCESSIBLE', { tripId, ticketId, seatCode: item.seat_code, phone: item.passenger_phone || null, address: item.home_pickup.address, reason: reasonText, meetingPoint: meet, vehiclePlate: trip.vehicle_plate, now: mockNow });
     return { success: true, data: this._publicPassenger(item) };
   }
 
@@ -1472,6 +1478,10 @@ export class DriverCockpitService {
         lat = maybeLoc.lat || 20.98;
         lng = maybeLoc.lng || 105.84;
       }
+    }
+
+    if (text(description).length > 200) {
+      return { success: false, error: 'Nội dung tối đa 200 ký tự', code: 'VALIDATION_ERROR' };
     }
 
     const trip = this.activeTrips.get(tripId);
@@ -1637,7 +1647,14 @@ export class DriverCockpitService {
     // written reason, kept in the end report (BR-END-005, design review 2).
     const lastStop = (trip.stops || [])[(trip.stops || []).length - 1];
     const atFinalStop = !lastStop || lastStop.status === 'ARRIVED';
-    const reason = typeof earlyEndReason === 'string' ? earlyEndReason.trim() : '';
+    const reason = text(earlyEndReason);
+    if (reason.length > 200) {
+      return {
+        success: false,
+        error: 'Nội dung tối đa 200 ký tự',
+        code: 'VALIDATION_ERROR'
+      };
+    }
     if (!atFinalStop && reason.length < 5) {
       return {
         success: false,

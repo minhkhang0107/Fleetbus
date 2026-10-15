@@ -6,22 +6,8 @@ import 'main_shell_screen.dart';
 
 /// DRI-017: end report computed from the manifest: passengers, cash to hand over, debt receipts,
 /// unsynced actions; unresolved passengers are passed to the depot (BR-END-004), an early end shows its reason.
-class DriverEndTripScreen extends StatefulWidget {
+class DriverEndTripScreen extends StatelessWidget {
   const DriverEndTripScreen({super.key});
-
-  @override
-  State<DriverEndTripScreen> createState() => _DriverEndTripScreenState();
-}
-
-class _DriverEndTripScreenState extends State<DriverEndTripScreen> {
-  final _odo = TextEditingController();
-  String? _error;
-
-  @override
-  void dispose() {
-    _odo.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -36,14 +22,10 @@ class _DriverEndTripScreenState extends State<DriverEndTripScreen> {
       subtitle: open.isEmpty ? null : 'Khách chưa xử lý chuyển cho bến theo dõi',
       height: 72,
       onPressed: () async {
-        if (!RegExp(r'^\d{4,7}$').hasMatch(_odo.text.trim())) {
-          setState(() => _error = 'Nhập số km trên đồng hồ xe.');
-          return;
-        }
         final error = await store.endTrip();
         if (!context.mounted) return;
         if (error != null) {
-          setState(() => _error = error);
+          dToast(context, error);
           return;
         }
         Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const MainShellScreen()), (_) => false);
@@ -101,16 +83,9 @@ class _DriverEndTripScreenState extends State<DriverEndTripScreen> {
         Panel(border: DTokens.line, child: Text('Đang có ${store.queue.length} thao tác chưa đồng bộ. Sẽ tự gửi khi có mạng.', style: dsans(size: 14))),
       ],
     ];
-    final odometer = <Widget>[
-      Text('SỐ KM ĐỒNG HỒ CUỐI CHUYẾN', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.sub)),
-      const SizedBox(height: 6),
-      TextField(controller: _odo, keyboardType: TextInputType.number, style: dmono(size: 18, weight: FontWeight.w600), decoration: InputDecoration(hintText: 'Ví dụ 143015', errorText: _error), onChanged: (_) {
-        if (_error != null) setState(() => _error = null);
-      }),
-    ];
     final header = DHeader(title: 'Kết thúc chuyến', subtitle: '${store.lastStop ? 'Về ${store.stop.short}' : 'Kết thúc tại ${store.stop.short}'} ${hhmm(store.clock)} · ${store.plate}');
     if (dWide(context)) {
-      // Tablet: the report on the left, odometer and the hand-over button on the right.
+      // Tablet: the report on the left, the hand-over button on the right.
       return Scaffold(
         appBar: header,
         body: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -118,8 +93,6 @@ class _DriverEndTripScreenState extends State<DriverEndTripScreen> {
           Expanded(
             flex: 2,
             child: ListView(padding: const EdgeInsets.fromLTRB(0, 20, 20, 20), children: [
-              ...odometer,
-              const SizedBox(height: 16),
               endButton,
               ...queueNote,
             ]),
@@ -132,8 +105,6 @@ class _DriverEndTripScreenState extends State<DriverEndTripScreen> {
       body: ListView(padding: const EdgeInsets.all(16), children: [
         ...report,
         ...queueNote,
-        const SizedBox(height: 16),
-        ...odometer,
       ]),
       bottomNavigationBar: SafeArea(
         child: Padding(

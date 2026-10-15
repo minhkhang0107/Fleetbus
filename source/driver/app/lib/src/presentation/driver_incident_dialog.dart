@@ -49,7 +49,7 @@ class _DriverIncidentScreenState extends State<DriverIncidentScreen> {
       ]),
     ];
     final note = <Widget>[
-      TextField(controller: _note, maxLines: 3, style: dsans(size: 15), decoration: const InputDecoration(labelText: 'Ghi chú (không bắt buộc)')),
+      TextField(controller: _note, maxLines: 3, maxLength: 200, style: dsans(size: 15), decoration: const InputDecoration(labelText: 'Ghi chú (không bắt buộc)')),
       const SizedBox(height: 16),
       Text('Điều hành nhận ngay cùng vị trí xe. Khách trên chuyến chỉ thấy giờ mới khi điều hành công bố.', style: dsans(size: 13, color: DTokens.muted, height: 1.5)),
     ];
