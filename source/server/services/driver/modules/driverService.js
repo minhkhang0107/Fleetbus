@@ -38,6 +38,7 @@ export const MOCK_DRIVERS_DB = [
     is_license_expired: false,
     assigned_vehicle_plate: '29B-123.45',
     status: 'ACTIVE',
+    must_change_pin: false,
     operator_id: 'op_saomai'
   },
   {
@@ -51,6 +52,7 @@ export const MOCK_DRIVERS_DB = [
     is_license_expired: true,
     assigned_vehicle_plate: '29B-678.90',
     status: 'LICENSE_EXPIRED',
+    must_change_pin: false,
     operator_id: 'op_saomai'
   },
   {
@@ -64,6 +66,7 @@ export const MOCK_DRIVERS_DB = [
     is_license_expired: false,
     assigned_vehicle_plate: '29B-444.11',
     status: 'ACTIVE',
+    must_change_pin: false,
     operator_id: 'op_saomai'
   },
   {
@@ -77,6 +80,7 @@ export const MOCK_DRIVERS_DB = [
     is_license_expired: false,
     assigned_vehicle_plate: '30H-246.80',
     status: 'ACTIVE',
+    must_change_pin: false,
     operator_id: 'op_xuyenviet'
   }
 ];
@@ -261,6 +265,14 @@ export class DriverCockpitService {
     }
     this.loginGuard.succeed(loginKey);
 
+    if (driver.status === 'LOCKED') {
+      return {
+        success: false,
+        error: 'Tài khoản đã bị nhà xe khóa. Liên hệ điều độ.',
+        code: 'DRIVER_LOCKED'
+      };
+    }
+
     // BR-DRI-001: Commercial License check
     if (driver.is_license_expired || new Date(driver.license_valid_until) < new Date()) {
       return {
@@ -288,7 +300,8 @@ export class DriverCockpitService {
           phone: driver.phone,
           license_class: driver.license_class,
           license_valid_until: driver.license_valid_until,
-          assigned_vehicle_plate: driver.assigned_vehicle_plate
+          assigned_vehicle_plate: driver.assigned_vehicle_plate,
+          must_change_pin: Boolean(driver.must_change_pin)
         },
         operator: publicOperatorProfile(op),
         token,
@@ -299,6 +312,53 @@ export class DriverCockpitService {
         }
       }
     };
+  }
+
+  /**
+   * DRI-001: Driver PIN Change
+   */
+  changePin(driverId, { currentPin, newPin } = {}, operatorId = DEFAULT_OPERATOR_ID) {
+    const driver = MOCK_DRIVERS_DB.find(d =>
+      d.driver_id === driverId &&
+      (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId
+    );
+    if (!driver) {
+      return { success: false, error: 'Không tìm thấy tài xế', code: 'DRIVER_NOT_FOUND', status: 404 };
+    }
+    if (driver.status === 'LOCKED') {
+      return { success: false, error: 'Tài khoản đã bị nhà xe khóa. Liên hệ điều độ.', code: 'DRIVER_LOCKED', status: 403 };
+    }
+
+    const cur = String(currentPin ?? '');
+    const next = String(newPin ?? '');
+
+    if (!/^[0-9]{6}$/.test(next)) {
+      return { success: false, error: 'Mã PIN mới phải gồm đúng 6 chữ số', code: 'WEAK_PIN', status: 400 };
+    }
+    if (next === cur) {
+      return { success: false, error: 'Mã PIN mới không được trùng với mã PIN hiện tại', code: 'WEAK_PIN', status: 400 };
+    }
+    const isAllSame = new Set(next.split('')).size === 1;
+    const RUNS = ['012345', '123456', '234567', '345678', '456789', '987654', '876543', '765432', '654321', '543210'];
+    if (isAllSame || next === '000000' || RUNS.includes(next)) {
+      return { success: false, error: 'Mã PIN mới quá yếu hoặc dễ đoán', code: 'WEAK_PIN', status: 400 };
+    }
+
+    const loginKey = `${driver.operator_id || operatorId}:${driver.staff_id}`;
+    const phoneKey = `${driver.operator_id || operatorId}:${driver.phone}`;
+
+    if (!verifySecret(cur, driver.pin)) {
+      this.loginGuard.fail(loginKey);
+      this.loginGuard.fail(phoneKey);
+      return { success: false, error: 'Mã PIN hiện tại không chính xác', code: 'INVALID_CREDENTIALS', status: 400 };
+    }
+
+    driver.pin = hashSecret(next);
+    driver.must_change_pin = false;
+    this.loginGuard.succeed(loginKey);
+    this.loginGuard.succeed(phoneKey);
+
+    return { success: true };
   }
 
   /**

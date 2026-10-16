@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:app/src/presentation/driver_change_pin_screen.dart';
 import 'package:app/src/presentation/driver_cockpit_dashboard.dart';
 import 'package:app/src/presentation/driver_end_trip_screen.dart';
 import 'package:app/src/presentation/driver_home_run_screen.dart';
@@ -25,9 +26,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Rules of the driver app state against a fake FleetBus server that keeps the trip like the real one.
 void main() {
   driverMapTiles = false;
+  late bool serverForcesPinChange;
+  late bool tempDriverMustChangePin;
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     driverPermissions = FakePermissions(LocationAccess.always);
+    serverForcesPinChange = false;
+    tempDriverMustChangePin = true;
   });
   late Map<String, dynamic> trip;
   late List<http.Request> sent;
@@ -65,18 +70,57 @@ void main() {
       sent.add(req);
       final path = req.url.path;
       final body = req.body.isEmpty ? <String, dynamic>{} : jsonDecode(req.body) as Map<String, dynamic>;
+      if (serverForcesPinChange && !path.endsWith('/change-pin')) {
+        return fail(403, 'PIN_CHANGE_REQUIRED', 'Đổi mã PIN tạm trước khi dùng app');
+      }
       if (path.endsWith('/auth/driver/login')) {
         final op = req.headers['x-operator-code'] ?? 'SAOMAI';
+        if (body['staffIdOrPhone'] == 'TX_LOCKED') {
+          return fail(403, 'DRIVER_LOCKED', 'Tài khoản đã bị nhà xe khóa. Liên hệ điều độ.');
+        }
         if (op == 'XUYENVIET') {
           if (body['pin'] != '246810' || body['staffIdOrPhone'] != 'TX7701') return fail(401, 'INVALID_CREDENTIALS', 'Mã nhân viên hoặc mã PIN không chính xác');
           return ok({'token': 'tok', 'driver': {'full_name': 'Lê Văn Bảy', 'staff_id': 'TX7701'}, 'operator': {'code': 'XUYENVIET', 'name': 'Xuyên Việt Lines', 'hotline': '1900 1234'}});
         } else if (op == 'SAOMAI') {
+          if (body['staffIdOrPhone'] == 'TX_TEMP') {
+            if (body['pin'] != '654321') return fail(401, 'INVALID_CREDENTIALS', 'Mã nhân viên hoặc mã PIN không chính xác');
+            return ok({
+              'token': 'tok_temp',
+              'driver': {'full_name': 'Nguyễn Văn Mới', 'staff_id': 'TX_TEMP', 'must_change_pin': tempDriverMustChangePin},
+              'operator': {'code': 'SAOMAI', 'name': 'Sao Mai Bus', 'hotline': '1900 6868'}
+            });
+          }
           if (body['pin'] != '123456') return fail(401, 'INVALID_CREDENTIALS', 'Mã nhân viên hoặc mã PIN không chính xác');
           return ok({'token': 'tok', 'driver': {'full_name': 'Trần Văn Bình', 'staff_id': 'TX8821'}, 'operator': {'code': 'SAOMAI', 'name': 'Sao Mai Bus', 'hotline': '1900 6868'}});
         }
         return fail(404, 'OPERATOR_NOT_FOUND', 'Mã nhà xe không đúng');
       }
-      if (path.endsWith('/trips/today')) return ok({'trips': [trip]});
+      if (path.endsWith('/driver/auth/change-pin')) {
+        final cur = body['current_pin']?.toString();
+        final next = body['new_pin']?.toString();
+        if (cur != '654321' && cur != '123456') {
+          return fail(400, 'INVALID_CREDENTIALS', 'Mã PIN hiện tại không chính xác');
+        }
+        if (next == null || !RegExp(r'^\d{6}$').hasMatch(next)) {
+          return fail(400, 'WEAK_PIN', 'Mã PIN mới phải gồm đúng 6 chữ số');
+        }
+        if (next == cur) {
+          return fail(400, 'WEAK_PIN', 'Mã PIN mới không được trùng với mã PIN hiện tại');
+        }
+        final isAllSame = Set.from(next.split('')).length == 1;
+        const runs = ['012345', '123456', '234567', '345678', '456789', '987654', '876543', '765432', '654321', '543210'];
+        if (isAllSame || next == '000000' || runs.contains(next)) {
+          return fail(400, 'WEAK_PIN', 'Mã PIN mới quá yếu hoặc dễ đoán');
+        }
+        tempDriverMustChangePin = false;
+        return ok({'success': true});
+      }
+      if (path.endsWith('/trips/today')) {
+        if (tempDriverMustChangePin && req.headers['authorization'] == 'Bearer tok_temp') {
+          return fail(403, 'PIN_CHANGE_REQUIRED', 'Đổi mã PIN tạm trước khi dùng app');
+        }
+        return ok({'trips': [trip]});
+      }
       if (path.endsWith('/inaccessible')) {
         final ticket = pax(path.split('/')[path.split('/').length - 2]);
         ticket['home_pickup'] = {...ticket['home_pickup'] as Map, 'inaccessible_at': '2026-08-28T00:10:00Z', 'meeting_point': body['meeting_point']};
@@ -381,7 +425,7 @@ void main() {
       await tester.runAsync(() async {
         expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
       });
-      const screens = <Widget>[DriverLoginScreen(), MainShellScreen(), DriverReadinessScreen(), DriverHomeRunScreen(), DriverCockpitDashboard(), DriverManifestScreen(), DriverQrScannerScreen(), DriverEndTripScreen(), DriverIncidentScreen()];
+      const screens = <Widget>[DriverLoginScreen(), DriverChangePinScreen(), MainShellScreen(), DriverReadinessScreen(), DriverHomeRunScreen(), DriverCockpitDashboard(), DriverManifestScreen(), DriverQrScannerScreen(), DriverEndTripScreen(), DriverIncidentScreen()];
       for (final screen in screens) {
         await tester.pumpWidget(DriverScope(store: store, child: MaterialApp(home: screen)));
         await tester.pump();
@@ -544,6 +588,128 @@ void main() {
     await tester.pumpAndSettle();
     expect(refused.asked, ['settings']);
     expect(allowed, isFalse);
+  });
+
+  testWidgets('a login with must_change_pin: true lands on the change-PIN screen', (tester) async {
+    final store = storeWithServer();
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverLoginScreen()),
+    ));
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField).at(0), 'SAOMAI');
+    await tester.enterText(find.byType(TextField).at(1), 'TX_TEMP');
+    await tester.enterText(find.byType(TextField).at(2), '654321');
+    await tester.tap(find.widgetWithText(BigButton, 'Vào ca'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DriverChangePinScreen), findsOneWidget);
+    expect(find.text('Đặt mã PIN mới'), findsOneWidget);
+    expect(store.mustChangePin, isTrue);
+    expect(store.shift, isEmpty, reason: 'did not load shift yet');
+    store.dispose();
+  });
+
+  testWidgets('weak PIN 123456 and mismatch are refused client-side without a request', (tester) async {
+    final store = storeWithServer();
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverChangePinScreen()),
+    ));
+    await tester.pump();
+
+    final countBefore = sent.length;
+
+    // Weak PIN 123456
+    await tester.enterText(find.byType(TextField).at(0), '654321');
+    await tester.enterText(find.byType(TextField).at(1), '123456');
+    await tester.enterText(find.byType(TextField).at(2), '123456');
+    await tester.tap(find.widgetWithText(BigButton, 'Đổi mã PIN'));
+    await tester.pump();
+
+    expect(find.text('Mã PIN mới quá yếu hoặc dễ đoán'), findsOneWidget);
+    expect(sent.length, countBefore, reason: 'weak PIN refused client-side');
+
+    // Mismatch
+    await tester.enterText(find.byType(TextField).at(1), '284719');
+    await tester.enterText(find.byType(TextField).at(2), '284710');
+    await tester.tap(find.widgetWithText(BigButton, 'Đổi mã PIN'));
+    await tester.pump();
+
+    expect(find.text('Hai mã PIN mới không khớp'), findsOneWidget);
+    expect(sent.length, countBefore, reason: 'mismatch refused client-side');
+
+    store.dispose();
+  });
+
+  testWidgets('a valid change posts current_pin/new_pin, then the shift loads', (tester) async {
+    final store = storeWithServer();
+    expect(await store.login('SAOMAI', 'TX_TEMP', '654321'), isNull);
+    expect(store.mustChangePin, isTrue);
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverChangePinScreen()),
+    ));
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField).at(0), '654321');
+    await tester.enterText(find.byType(TextField).at(1), '284719');
+    await tester.enterText(find.byType(TextField).at(2), '284719');
+    await tester.tap(find.widgetWithText(BigButton, 'Đổi mã PIN'));
+    await tester.pumpAndSettle();
+
+    final changeReq = sent.lastWhere((r) => r.url.path.endsWith('/change-pin'));
+    final body = jsonDecode(changeReq.body) as Map<String, dynamic>;
+    expect(body['current_pin'], '654321');
+    expect(body['new_pin'], '284719');
+
+    expect(store.mustChangePin, isFalse);
+    expect(store.shift, isNotEmpty);
+    expect(find.byType(MainShellScreen), findsOneWidget);
+    expect(find.text('Đã đổi mã PIN'), findsOneWidget);
+
+    store.dispose();
+  });
+
+  testWidgets('a 403 DRIVER_LOCKED login shows the lock message', (tester) async {
+    final store = storeWithServer();
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverLoginScreen()),
+    ));
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField).at(0), 'SAOMAI');
+    await tester.enterText(find.byType(TextField).at(1), 'TX_LOCKED');
+    await tester.enterText(find.byType(TextField).at(2), '123456');
+    await tester.tap(find.widgetWithText(BigButton, 'Vào ca'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tài khoản đã bị nhà xe khóa. Liên hệ điều độ.'), findsOneWidget);
+    expect(store.loggedIn, isFalse);
+    store.dispose();
+  });
+
+  testWidgets('PIN_CHANGE_REQUIRED on later call redirects driver to DriverChangePinScreen', (tester) async {
+    final store = storeWithServer();
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: MainShellScreen()),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byType(MainShellScreen), findsOneWidget);
+
+    serverForcesPinChange = true;
+    await store.loadShift();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DriverChangePinScreen), findsOneWidget);
+    expect(store.mustChangePin, isTrue);
+    store.dispose();
   });
 }
 

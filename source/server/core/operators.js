@@ -1,4 +1,9 @@
 // Bus companies on the platform. Mutable: the platform admin creates, edits and (de)activates them.
+import crypto from 'crypto';
+import { hashSecret } from './passwords.js';
+import { validatePersonName } from '../services/passenger/core/formatters.js';
+import { MOCK_MANAGERS_DB } from '../services/manager/modules/managerService.js';
+
 const SEED_CREATED_AT = '2026-10-01T00:00:00.000Z';
 
 /** Pickup / drop-off offer of a company that only serves its fixed stops (spec 3). */
@@ -114,6 +119,19 @@ function cleanBank(bank) {
   return Object.fromEntries(BANK_FIELDS.map(key => [key, text(bank[key])]));
 }
 
+const EMAIL_RE = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/;
+const TEMPORARY_PW_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+export function generateTemporaryPassword(length = 12) {
+  while (true) {
+    let pw = '';
+    for (let i = 0; i < length; i++) {
+      pw += TEMPORARY_PW_CHARS[crypto.randomInt(0, TEMPORARY_PW_CHARS.length)];
+    }
+    if (/[a-zA-Z]/.test(pw) && /[0-9]/.test(pw)) return pw;
+  }
+}
+
 export function listOperators() {
   return OPERATORS.map(op => structuredClone(op));
 }
@@ -125,6 +143,19 @@ export function createOperator(input = {}, now = Date.now()) {
   const fields = { ...input, memo_prefix: input.memo_prefix === undefined ? code : normalizeOperatorCode(input.memo_prefix) };
   const error = validateFields(fields);
   if (error) return error;
+
+  const rawEmail = typeof input.director_email === 'string' ? input.director_email.trim() : '';
+  if (!rawEmail) return invalid('Cần email giám đốc nhà xe');
+  if (!EMAIL_RE.test(rawEmail)) return invalid('Email giám đốc không hợp lệ');
+  const directorEmail = rawEmail.toLowerCase();
+  const emailTaken = MOCK_MANAGERS_DB.some(m => (m.username || '').toLowerCase() === directorEmail);
+  if (emailTaken) return { ok: false, status: 409, code: 'STAFF_EXISTS', message: 'Email này đã có tài khoản' };
+
+  const nameCheck = validatePersonName(input.director_name);
+  if (!nameCheck.isValid) return invalid(nameCheck.message);
+
+  const temporary_password = generateTemporaryPassword(12);
+
   const op = {
     operator_id: `op_${code.toLowerCase()}`,
     code,
@@ -139,7 +170,30 @@ export function createOperator(input = {}, now = Date.now()) {
     service_config: defaultServiceConfig()
   };
   OPERATORS.push(op);
-  return { ok: true, operator: op };
+
+  const director = {
+    user_id: `mgr_${code.toLowerCase()}_dir_${crypto.randomBytes(3).toString('hex')}`,
+    username: directorEmail,
+    password_hash: hashSecret(temporary_password),
+    full_name: nameCheck.normalized,
+    role: 'FLEET_DIRECTOR',
+    permissions: ['ALL'],
+    operator_id: op.operator_id,
+    must_change_password: true,
+    totp_enrolled: false
+  };
+  MOCK_MANAGERS_DB.push(director);
+
+  return {
+    ok: true,
+    operator: op,
+    director: {
+      user_id: director.user_id,
+      username: director.username,
+      full_name: director.full_name
+    },
+    temporary_password
+  };
 }
 
 /** Updates an operator; the code and id never change (they are in tokens, links and memos). */

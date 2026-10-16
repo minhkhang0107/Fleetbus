@@ -24,7 +24,7 @@ describe('Platform admin: bus companies, activation, onboarding page', () => {
   };
   const totp = () => generateTotp(DEV_TOTP_SECRET, Date.now());
   const staffLogin = (username, password, code) => request('/api/v1/ops/auth/login', { method: 'POST', body: { username, password, totp: code } });
-  const HAIAU = { code: 'haiau', name: 'Nhà xe Hải Âu', hotline: '1900 1122', bank: { bin: '970422', bank_name: 'MB Bank', account_number: '0123456789', account_name: 'NHA XE HAI AU' } };
+  const HAIAU = { code: 'haiau', name: 'Nhà xe Hải Âu', hotline: '1900 1122', director_name: 'Nguyễn Hải Âu', director_email: 'haiau@haiau.vn', bank: { bin: '970422', bank_name: 'MB Bank', account_number: '0123456789', account_name: 'NHA XE HAI AU' } };
 
   before(async () => {
     ({ server, services } = createFleetBusServer());
@@ -135,7 +135,7 @@ describe('Platform admin: bus companies, activation, onboarding page', () => {
     assert.ok(page.text.includes('qrcode-generator@1.4.4'));
     assert.strictEqual((await request('/o/NOPE')).status, 404);
 
-    await request('/api/v1/platform/operators', { method: 'POST', token: rootToken, body: { ...HAIAU, code: 'XSS1', name: '<script>alert(1)</script>' } });
+    await request('/api/v1/platform/operators', { method: 'POST', token: rootToken, body: { ...HAIAU, code: 'XSS1', name: '<script>alert(1)</script>', director_email: 'xss1@haiau.vn' } });
     const xss = await request('/o/XSS1');
     assert.strictEqual(xss.text.includes('<script>alert(1)</script>'), false);
     assert.ok(xss.text.includes('&lt;script&gt;'));

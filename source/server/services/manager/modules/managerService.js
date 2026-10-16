@@ -5,18 +5,19 @@
 
 import crypto from 'crypto';
 import { createShareToken } from '../../passenger/core/cryptoEngine.js';
-import { DEMO_DATE, vnDate } from '../../../core/serviceDate.js';
+import { DEMO_DATE, vnDate, parseServiceDate } from '../../../core/serviceDate.js';
 import { validateVietnamPhone, validatePersonName } from '../../passenger/core/formatters.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
-import { verifyTotp } from '../../../core/totp.js';
+import { verifyTotp, generateSecret } from '../../../core/totp.js';
 import { getStaffTotpSecret } from '../../../config.js';
-import { DEFAULT_OPERATOR_ID, OPERATOR_INACTIVE, findOperatorById, publicOperatorProfile } from '../../../core/operators.js';
+import { DEFAULT_OPERATOR_ID, OPERATOR_INACTIVE, findOperatorById, publicOperatorProfile, generateTemporaryPassword } from '../../../core/operators.js';
 import { DEFAULT_LAYOUT_ID, findLayout } from '../../../core/seatLayouts.js';
+import { MOCK_DRIVERS_DB } from '../../driver/modules/driverService.js';
 
 const POS_PAYMENT_METHODS = ['CASH_POS', 'CARD_POS', 'BANK_TRANSFER'];
 // BR-MGR-AUTH-001: these roles need a TOTP code on every login (ROLE_OPS_ADMIN and ROLE_FINANCE of the spec)
-const TOTP_ROLES = ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'PLATFORM_ADMIN'];
+export const TOTP_ROLES = ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'PLATFORM_ADMIN'];
 const HOLD_POLICIES = ['UNTIL_DEPARTURE_OFFSET', 'CUSTOM_EXPIRY_MINUTES'];
 // BR-POS-006: one phone number holds at most this many seats at once across all trips
 const HOTLINE_MAX_SEATS_PER_PHONE = 4;
@@ -36,7 +37,8 @@ export const MOCK_MANAGERS_DB = [
     full_name: 'Nguyễn Tiến Dũng',
     role: 'FLEET_DIRECTOR', // FLEET_DIRECTOR | DISPATCHER | CASHIER | FINANCIAL_CONTROLLER
     permissions: ['ALL'],
-    operator_id: 'op_saomai'
+    operator_id: 'op_saomai',
+    must_change_password: false
   },
   {
     user_id: 'mgr_02',
@@ -45,7 +47,8 @@ export const MOCK_MANAGERS_DB = [
     full_name: 'Phạm Hồng Quân',
     role: 'DISPATCHER',
     permissions: ['DISPATCH_MANAGE', 'TRIP_EDIT', 'INCIDENT_BROADCAST', 'RADAR_VIEW'],
-    operator_id: 'op_saomai'
+    operator_id: 'op_saomai',
+    must_change_password: false
   },
   {
     user_id: 'mgr_03',
@@ -54,7 +57,8 @@ export const MOCK_MANAGERS_DB = [
     full_name: 'Đỗ Thu Hà',
     role: 'CASHIER',
     permissions: ['POS_ISSUE', 'BOOKING_SEARCH'],
-    operator_id: 'op_saomai'
+    operator_id: 'op_saomai',
+    must_change_password: false
   },
   {
     user_id: 'mgr_xv_01',
@@ -63,7 +67,8 @@ export const MOCK_MANAGERS_DB = [
     full_name: 'Vũ Thị Lan',
     role: 'DISPATCHER',
     permissions: ['DISPATCH_MANAGE', 'TRIP_EDIT', 'INCIDENT_BROADCAST', 'RADAR_VIEW'],
-    operator_id: 'op_xuyenviet'
+    operator_id: 'op_xuyenviet',
+    must_change_password: false
   },
   {
     user_id: 'mgr_xv_02',
@@ -72,7 +77,8 @@ export const MOCK_MANAGERS_DB = [
     full_name: 'Hoàng Văn Tú',
     role: 'CASHIER',
     permissions: ['POS_ISSUE', 'BOOKING_SEARCH'],
-    operator_id: 'op_xuyenviet'
+    operator_id: 'op_xuyenviet',
+    must_change_password: false
   },
   {
     // Platform owner: belongs to no bus company (spec 2.3).
@@ -82,7 +88,8 @@ export const MOCK_MANAGERS_DB = [
     full_name: 'Quản trị nền tảng',
     role: 'PLATFORM_ADMIN',
     permissions: ['PLATFORM_ALL'],
-    operator_id: null
+    operator_id: null,
+    must_change_password: false
   }
 ];
 
@@ -100,10 +107,10 @@ export class ManagerOperationsService {
 
     this.drivers = [
       // Same people, ids and licences as the driver app (DRI-001), so a driver named here can sign in and see the trip
-      { driver_id: 'drv_8821a', staff_id: 'TX8821', full_name: 'Trần Văn Bình', phone: '0912348821', license_class: 'FC', license_expiry: '2028-12-31', safety_score: 98.5, status: 'ON_DUTY', operator_id: 'op_saomai' },
-      { driver_id: 'drv_9912b', staff_id: 'TX9912', full_name: 'Phạm Quốc Huy', phone: '0988776655', license_class: 'FC', license_expiry: '2028-06-30', safety_score: 96.0, status: 'ON_DUTY', operator_id: 'op_saomai' },
-      { driver_id: 'drv_9902b', staff_id: 'TX9902', full_name: 'Lê Hoàng Nam', phone: '0987654321', license_class: 'FC', license_expiry: '2025-01-01', safety_score: 91.0, status: 'LICENSE_EXPIRED', operator_id: 'op_saomai' },
-      { driver_id: 'drv_xv_7701', staff_id: 'TX7701', full_name: 'Đỗ Minh Khoa', phone: '0901777001', license_class: 'FC', license_expiry: '2029-03-31', safety_score: 100, status: 'ON_DUTY', operator_id: 'op_xuyenviet' }
+      { driver_id: 'drv_8821a', staff_id: 'TX8821', full_name: 'Trần Văn Bình', phone: '0912348821', license_class: 'FC', license_expiry: '2028-12-31', safety_score: 98.5, status: 'ACTIVE', operator_id: 'op_saomai' },
+      { driver_id: 'drv_9912b', staff_id: 'TX9912', full_name: 'Phạm Quốc Huy', phone: '0988776655', license_class: 'FC', license_expiry: '2028-06-30', safety_score: 96.0, status: 'ACTIVE', operator_id: 'op_saomai' },
+      { driver_id: 'drv_9902b', staff_id: 'TX9902', full_name: 'Lê Hoàng Nam', phone: '0987654321', license_class: 'FC', license_expiry: '2025-01-01', safety_score: 91.0, status: 'ACTIVE', operator_id: 'op_saomai' },
+      { driver_id: 'drv_xv_7701', staff_id: 'TX7701', full_name: 'Đỗ Minh Khoa', phone: '0901777001', license_class: 'FC', license_expiry: '2029-03-31', safety_score: 100, status: 'ACTIVE', operator_id: 'op_xuyenviet' }
     ];
 
     this.routes = [
@@ -197,11 +204,12 @@ export class ManagerOperationsService {
     }
 
     // Second factor: asked only after the password is right, so it never tells whether a password is valid.
-    if (TOTP_ROLES.includes(user.role)) {
+    // An account not enrolled yet is let in with password alone because it can only reach the enrollment endpoints.
+    if (TOTP_ROLES.includes(user.role) && user.totp_enrolled !== false) {
       if (totp === null || totp === undefined || totp === '') {
         return { success: false, error: 'Cần mã xác thực 2 bước (6 số) từ ứng dụng Authenticator', code: 'TOTP_REQUIRED' };
       }
-      const secret = getStaffTotpSecret(user.user_id);
+      const secret = getStaffTotpSecret(user.user_id, user);
       if (!secret) {
         return { success: false, error: 'Tài khoản chưa được cấp khóa xác thực 2 bước. Liên hệ quản trị hệ thống', code: 'TOTP_NOT_CONFIGURED' };
       }
@@ -236,7 +244,9 @@ export class ManagerOperationsService {
           username: user.username,
           full_name: user.full_name,
           role: user.role,
-          permissions: user.permissions
+          permissions: user.permissions,
+          must_change_password: Boolean(user.must_change_password),
+          must_enroll_totp: Boolean(TOTP_ROLES.includes(user.role) && user.totp_enrolled === false)
         },
         operator: publicOperatorProfile(operator),
         token
@@ -246,6 +256,162 @@ export class ManagerOperationsService {
 
   authenticateStaff(username, password, totp = null) {
     return this.authenticateManager(username, password, totp);
+  }
+
+  /**
+   * MGR-001: Change password for staff
+   */
+  changePassword(userId, { current_password, new_password } = {}, mockNow = Date.now()) {
+    const user = MOCK_MANAGERS_DB.find(u => u.user_id === userId);
+    if (!user) {
+      return { success: false, error: 'Không tìm thấy người dùng', code: 'USER_NOT_FOUND', status: 404 };
+    }
+    const key = (user.username || '').trim().toLowerCase();
+
+    const lockedFor = this.loginGuard.isLocked(key, mockNow);
+    if (lockedFor > 0) {
+      return {
+        success: false,
+        error: `Tài khoản tạm khóa do nhập sai nhiều lần. Thử lại sau ${Math.ceil(lockedFor / 60)} phút`,
+        code: 'ACCOUNT_LOCKED',
+        retry_after_seconds: lockedFor,
+        status: 429
+      };
+    }
+
+    if (!current_password || typeof current_password !== 'string') {
+      return { success: false, error: 'Cần mật khẩu hiện tại', code: 'VALIDATION_ERROR', status: 400 };
+    }
+    if (!new_password || typeof new_password !== 'string' || new_password.length < 10 || !/[a-zA-Z]/.test(new_password) || !/[0-9]/.test(new_password)) {
+      return { success: false, error: 'Mật khẩu mới phải có ít nhất 10 ký tự, bao gồm cả chữ và số', code: 'VALIDATION_ERROR', status: 400 };
+    }
+
+    if (!verifySecret(String(current_password), user.password_hash)) {
+      this.loginGuard.fail(key, mockNow);
+      const nowLocked = this.loginGuard.isLocked(key, mockNow);
+      if (nowLocked > 0) {
+        return {
+          success: false,
+          error: `Tài khoản tạm khóa do nhập sai nhiều lần. Thử lại sau ${Math.ceil(nowLocked / 60)} phút`,
+          code: 'ACCOUNT_LOCKED',
+          retry_after_seconds: nowLocked,
+          status: 429
+        };
+      }
+      // 400, not 401: a wrong current password must not end the session the page is using.
+      return { success: false, error: 'Mật khẩu hiện tại không chính xác', code: 'INVALID_CREDENTIALS', status: 400 };
+    }
+
+    if (new_password === current_password) {
+      return { success: false, error: 'Mật khẩu mới phải khác mật khẩu hiện tại', code: 'VALIDATION_ERROR', status: 400 };
+    }
+
+    this.loginGuard.succeed(key);
+    user.password_hash = hashSecret(new_password);
+    user.must_change_password = false;
+    user.totp_last_step = -1;
+    return {
+      success: true,
+      username: user.username
+    };
+  }
+
+  /**
+   * Platform admin resets temporary password for a company's first FLEET_DIRECTOR
+   */
+  resetDirectorPassword(operatorId) {
+    const director = MOCK_MANAGERS_DB.find(m => m.operator_id === operatorId && m.role === 'FLEET_DIRECTOR');
+    if (!director) {
+      return { success: false, error: 'Không tìm thấy giám đốc nhà xe', code: 'DIRECTOR_NOT_FOUND', status: 404 };
+    }
+    const temporary_password = generateTemporaryPassword(12);
+    director.password_hash = hashSecret(temporary_password);
+    director.must_change_password = true;
+    director.totp_enrolled = false;
+    delete director.totp_secret;
+    delete director.pending_totp_secret;
+    director.totp_last_step = -1;
+    this.loginGuard.succeed((director.username || '').trim().toLowerCase());
+    return {
+      success: true,
+      director: {
+        user_id: director.user_id,
+        username: director.username,
+        full_name: director.full_name
+      },
+      temporary_password
+    };
+  }
+
+  /**
+   * MGR-001: Set up TOTP two-factor authentication (creates or replaces pending secret)
+   */
+  setupTotp(userId) {
+    const user = MOCK_MANAGERS_DB.find(u => u.user_id === userId);
+    if (!user) {
+      return { success: false, error: 'Không tìm thấy người dùng', code: 'USER_NOT_FOUND', status: 404 };
+    }
+    if (user.totp_enrolled === true) {
+      return { success: false, error: 'Tài khoản đã cài đặt xác thực 2 bước', code: 'TOTP_ALREADY_ENROLLED', status: 400 };
+    }
+    const secret = generateSecret();
+    user.pending_totp_secret = secret;
+    const email = user.username;
+    const otpauth_uri = `otpauth://totp/BusGo:${email}?secret=${secret}&issuer=BusGo&digits=6&period=30`;
+    return {
+      success: true,
+      data: {
+        secret,
+        otpauth_uri
+      }
+    };
+  }
+
+  /**
+   * MGR-001: Confirm and activate TOTP two-factor authentication
+   */
+  confirmTotp(userId, code, mockNow = Date.now()) {
+    const user = MOCK_MANAGERS_DB.find(u => u.user_id === userId);
+    if (!user) {
+      return { success: false, error: 'Không tìm thấy người dùng', code: 'USER_NOT_FOUND', status: 404 };
+    }
+    const key = (user.username || '').trim().toLowerCase();
+    const lockedFor = this.loginGuard.isLocked(key, mockNow);
+    if (lockedFor > 0) {
+      return {
+        success: false,
+        error: `Tài khoản tạm khóa do nhập sai nhiều lần. Thử lại sau ${Math.ceil(lockedFor / 60)} phút`,
+        code: 'ACCOUNT_LOCKED',
+        retry_after_seconds: lockedFor,
+        status: 429
+      };
+    }
+    if (user.totp_enrolled === true) {
+      return { success: false, error: 'Tài khoản đã cài đặt xác thực 2 bước', code: 'TOTP_ALREADY_ENROLLED', status: 400 };
+    }
+    const pendingSecret = user.pending_totp_secret;
+    if (!pendingSecret) {
+      return { success: false, error: 'Chưa khởi tạo khóa xác thực 2 bước', code: 'TOTP_SETUP_REQUIRED', status: 400 };
+    }
+    const check = verifyTotp(pendingSecret, code, { now: mockNow, window: 1 });
+    if (!check.valid) {
+      this.loginGuard.fail(key, mockNow);
+      return {
+        success: false,
+        error: check.reason === 'REPLAYED' ? 'Mã xác thực này đã được dùng. Đợi mã mới' : 'Mã xác thực 2 bước không đúng',
+        code: 'INVALID_TOTP',
+        status: 400
+      };
+    }
+    this.loginGuard.succeed(key);
+    user.totp_secret = pendingSecret;
+    user.totp_enrolled = true;
+    user.totp_last_step = -1;
+    delete user.pending_totp_secret;
+    return {
+      success: true,
+      username: user.username
+    };
   }
 
   /**
@@ -432,9 +598,29 @@ export class ManagerOperationsService {
    * MGR-008: Crew Directory
    */
   getCrewDrivers(operatorId = DEFAULT_OPERATOR_ID) {
+    const today = vnDate();
+    const list = this.drivers
+      .filter(d => (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId)
+      .map(d => {
+        const acc = MOCK_DRIVERS_DB.find(a => a.driver_id === d.driver_id);
+        const status = d.status === 'LOCKED' ? 'LOCKED' : 'ACTIVE';
+        const licenseExpired = Boolean(d.license_expiry && d.license_expiry <= today);
+        const mustChangePin = acc ? Boolean(acc.must_change_pin) : false;
+        return {
+          driver_id: d.driver_id,
+          staff_id: d.staff_id,
+          full_name: d.full_name,
+          phone: d.phone,
+          license_class: d.license_class,
+          license_expiry: d.license_expiry,
+          status,
+          must_change_pin: mustChangePin,
+          license_expired: licenseExpired
+        };
+      });
     return {
       success: true,
-      data: this.drivers.filter(d => d.operator_id === operatorId)
+      data: list
     };
   }
 
@@ -442,20 +628,254 @@ export class ManagerOperationsService {
     return this.getCrewDrivers(operatorId);
   }
 
-  addDriver({ staff_id, full_name, phone, license_class = 'FC' }, operatorId = DEFAULT_OPERATOR_ID) {
-    const newDriver = {
-      driver_id: `drv_${Date.now()}`,
-      staff_id,
-      full_name,
-      phone,
-      license_class,
-      license_expiry: '2028-12-31',
-      safety_score: 98.0,
-      status: 'ON_DUTY',
+  addDriver({ full_name, phone, staff_id, license_class, license_expiry } = {}, operatorId = DEFAULT_OPERATOR_ID) {
+    const nameCheck = validatePersonName(full_name);
+    if (!nameCheck.isValid) {
+      return { success: false, error: nameCheck.message, code: 'VALIDATION_ERROR', status: 400 };
+    }
+    const phoneCheck = validateVietnamPhone(phone);
+    if (!phoneCheck.isValid) {
+      return { success: false, error: phoneCheck.message, code: 'VALIDATION_ERROR', status: 400 };
+    }
+    const ALLOWED_LICENSE_CLASSES = ['B2', 'C', 'D', 'E', 'FC'];
+    const licClass = String(license_class || '').trim().toUpperCase();
+    if (!ALLOWED_LICENSE_CLASSES.includes(licClass)) {
+      return { success: false, error: 'Hạng bằng lái phải là một trong các hạng: B2, C, D, E, FC', code: 'VALIDATION_ERROR', status: 400 };
+    }
+    const parsedExpiry = parseServiceDate(license_expiry);
+    if (!parsedExpiry) {
+      return { success: false, error: 'Ngày hết hạn bằng lái không hợp lệ (định dạng YYYY-MM-DD)', code: 'VALIDATION_ERROR', status: 400 };
+    }
+    const today = vnDate();
+    if (parsedExpiry <= today) {
+      return { success: false, error: 'Ngày hết hạn bằng lái phải sau ngày hôm nay', code: 'VALIDATION_ERROR', status: 400 };
+    }
+
+    let sid = null;
+    if (staff_id != null && String(staff_id).trim() !== '') {
+      const candidateSid = String(staff_id).trim().toUpperCase();
+      if (!/^[A-Z0-9]{3,12}$/.test(candidateSid)) {
+        return { success: false, error: 'Mã nhân viên không hợp lệ (3-12 ký tự chữ và số)', code: 'VALIDATION_ERROR', status: 400 };
+      }
+      sid = candidateSid;
+    } else {
+      const existingStaffIds = new Set([
+        ...this.drivers.filter(d => (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId).map(d => d.staff_id),
+        ...MOCK_DRIVERS_DB.filter(d => (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId).map(d => d.staff_id)
+      ]);
+      for (let attempts = 0; attempts < 10000; attempts++) {
+        const candidate = `TX${String(crypto.randomInt(1000, 10000))}`;
+        if (!existingStaffIds.has(candidate)) {
+          sid = candidate;
+          break;
+        }
+      }
+      if (!sid) {
+        return { success: false, error: 'Không thể tạo mã nhân viên tự động', code: 'STAFF_ID_GENERATION_FAILED', status: 500 };
+      }
+    }
+
+    const existingPhone = this.drivers.some(d => (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId && d.phone === phoneCheck.normalized) ||
+      MOCK_DRIVERS_DB.some(d => (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId && d.phone === phoneCheck.normalized);
+    const existingSid = this.drivers.some(d => (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId && d.staff_id === sid) ||
+      MOCK_DRIVERS_DB.some(d => (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId && d.staff_id === sid);
+    if (existingPhone || existingSid) {
+      return { success: false, error: 'Số điện thoại hoặc mã nhân viên đã tồn tại trong công ty', code: 'DRIVER_EXISTS', status: 409 };
+    }
+
+    const driver_id = `drv_${crypto.randomBytes(4).toString('hex')}`;
+    const temporary_pin = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+
+    const driver = {
+      driver_id,
+      staff_id: sid,
+      full_name: nameCheck.normalized,
+      phone: phoneCheck.normalized,
+      license_class: licClass,
+      license_expiry: parsedExpiry,
+      status: 'ACTIVE',
       operator_id: operatorId
     };
-    this.drivers.push(newDriver);
-    return { success: true, data: newDriver };
+    this.drivers.push(driver);
+
+    const driverAccount = {
+      driver_id,
+      staff_id: sid,
+      phone: phoneCheck.normalized,
+      pin: hashSecret(temporary_pin),
+      full_name: nameCheck.normalized,
+      license_class: licClass,
+      license_valid_until: parsedExpiry,
+      is_license_expired: false,
+      assigned_vehicle_plate: null,
+      status: 'ACTIVE',
+      must_change_pin: true,
+      operator_id: operatorId
+    };
+    MOCK_DRIVERS_DB.push(driverAccount);
+
+    const data = {
+      driver: {
+        ...driver,
+        must_change_pin: true,
+        license_expired: false
+      },
+      temporary_pin
+    };
+
+    return { success: true, data };
+  }
+
+  updateDriver(driverId, updates = {}, operatorId = DEFAULT_OPERATOR_ID) {
+    const driver = this.drivers.find(d => d.driver_id === driverId && (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
+    if (!driver) {
+      return { success: false, error: 'Không tìm thấy tài xế', code: 'DRIVER_NOT_FOUND', status: 404 };
+    }
+    const acc = MOCK_DRIVERS_DB.find(a => a.driver_id === driverId && (a.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
+
+    const before = {
+      driver_id: driver.driver_id,
+      staff_id: driver.staff_id,
+      full_name: driver.full_name,
+      phone: driver.phone,
+      license_class: driver.license_class,
+      license_expiry: driver.license_expiry,
+      status: driver.status,
+      must_change_pin: acc ? Boolean(acc.must_change_pin) : false,
+      license_expired: Boolean(driver.license_expiry && driver.license_expiry <= vnDate()),
+      operator_id: driver.operator_id
+    };
+
+    let nameNormalized = null;
+    if (updates.full_name !== undefined) {
+      const nameCheck = validatePersonName(updates.full_name);
+      if (!nameCheck.isValid) {
+        return { success: false, error: nameCheck.message, code: 'VALIDATION_ERROR', status: 400 };
+      }
+      nameNormalized = nameCheck.normalized;
+    }
+
+    let phoneNormalized = null;
+    if (updates.phone !== undefined) {
+      const phoneCheck = validateVietnamPhone(updates.phone);
+      if (!phoneCheck.isValid) {
+        return { success: false, error: phoneCheck.message, code: 'VALIDATION_ERROR', status: 400 };
+      }
+      phoneNormalized = phoneCheck.normalized;
+      const phoneExists = this.drivers.some(d => d.driver_id !== driverId && (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId && d.phone === phoneNormalized) ||
+        MOCK_DRIVERS_DB.some(d => d.driver_id !== driverId && (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId && d.phone === phoneNormalized);
+      if (phoneExists) {
+        return { success: false, error: 'Số điện thoại đã tồn tại trong công ty', code: 'DRIVER_EXISTS', status: 409 };
+      }
+    }
+
+    let licClass = null;
+    if (updates.license_class !== undefined) {
+      const ALLOWED_LICENSE_CLASSES = ['B2', 'C', 'D', 'E', 'FC'];
+      licClass = String(updates.license_class || '').trim().toUpperCase();
+      if (!ALLOWED_LICENSE_CLASSES.includes(licClass)) {
+        return { success: false, error: 'Hạng bằng lái phải là một trong các hạng: B2, C, D, E, FC', code: 'VALIDATION_ERROR', status: 400 };
+      }
+    }
+
+    let parsedExpiry = null;
+    if (updates.license_expiry !== undefined) {
+      parsedExpiry = parseServiceDate(updates.license_expiry);
+      if (!parsedExpiry) {
+        return { success: false, error: 'Ngày hết hạn bằng lái không hợp lệ (định dạng YYYY-MM-DD)', code: 'VALIDATION_ERROR', status: 400 };
+      }
+      const today = vnDate();
+      if (parsedExpiry <= today) {
+        return { success: false, error: 'Ngày hết hạn bằng lái phải sau ngày hôm nay', code: 'VALIDATION_ERROR', status: 400 };
+      }
+    }
+
+    let newStatus = null;
+    if (updates.status !== undefined) {
+      const s = String(updates.status).trim().toUpperCase();
+      if (s !== 'ACTIVE' && s !== 'LOCKED') {
+        return { success: false, error: 'Trạng thái phải là ACTIVE hoặc LOCKED', code: 'VALIDATION_ERROR', status: 400 };
+      }
+      newStatus = s;
+    }
+
+    if (nameNormalized !== null) {
+      driver.full_name = nameNormalized;
+      if (acc) acc.full_name = nameNormalized;
+    }
+    if (phoneNormalized !== null) {
+      driver.phone = phoneNormalized;
+      if (acc) acc.phone = phoneNormalized;
+    }
+    if (licClass !== null) {
+      driver.license_class = licClass;
+      if (acc) acc.license_class = licClass;
+    }
+    if (parsedExpiry !== null) {
+      driver.license_expiry = parsedExpiry;
+      if (acc) {
+        acc.license_valid_until = parsedExpiry;
+        acc.is_license_expired = parsedExpiry <= vnDate();
+      }
+    }
+    let lockChanged = null;
+    if (newStatus !== null) {
+      const oldStatus = driver.status;
+      driver.status = newStatus;
+      if (acc) acc.status = newStatus;
+      if (oldStatus !== 'LOCKED' && newStatus === 'LOCKED') lockChanged = 'LOCK';
+      else if (oldStatus === 'LOCKED' && newStatus === 'ACTIVE') lockChanged = 'UNLOCK';
+    }
+
+    const updated = {
+      driver_id: driver.driver_id,
+      staff_id: driver.staff_id,
+      full_name: driver.full_name,
+      phone: driver.phone,
+      license_class: driver.license_class,
+      license_expiry: driver.license_expiry,
+      status: driver.status,
+      must_change_pin: acc ? Boolean(acc.must_change_pin) : false,
+      license_expired: Boolean(driver.license_expiry && driver.license_expiry <= vnDate()),
+      operator_id: driver.operator_id
+    };
+
+    return {
+      success: true,
+      data: {
+        driver: updated,
+        before,
+        lockChanged
+      }
+    };
+  }
+
+  resetDriverPin(driverId, operatorId = DEFAULT_OPERATOR_ID, { loginGuard } = {}) {
+    const driver = this.drivers.find(d => d.driver_id === driverId && (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
+    const acc = MOCK_DRIVERS_DB.find(a => a.driver_id === driverId && (a.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
+    if (!driver && !acc) {
+      return { success: false, error: 'Không tìm thấy tài xế', code: 'DRIVER_NOT_FOUND', status: 404 };
+    }
+
+    const temporary_pin = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    if (acc) {
+      acc.pin = hashSecret(temporary_pin);
+      acc.must_change_pin = true;
+    }
+
+    const staffId = acc?.staff_id || driver?.staff_id;
+    const phone = acc?.phone || driver?.phone;
+    if (loginGuard) {
+      if (staffId) loginGuard.succeed(`${operatorId}:${staffId}`);
+      if (phone) loginGuard.succeed(`${operatorId}:${phone}`);
+    }
+
+    return {
+      success: true,
+      data: {
+        temporary_pin
+      }
+    };
   }
 
   /**
@@ -565,7 +985,8 @@ export class ManagerOperationsService {
     });
     const drivers = this.drivers.filter(d => d.operator_id === operatorId).map(d => {
       const busy = clash('driver_id', d.driver_id);
-      const reason = d.status === 'LICENSE_EXPIRED' || (d.license_expiry && d.license_expiry < day) ? 'Bằng lái hết hạn vào ngày chạy'
+      const reason = d.status === 'LOCKED' ? 'Tài xế đã bị khóa'
+        : d.status === 'LICENSE_EXPIRED' || (d.license_expiry && d.license_expiry < day) ? 'Bằng lái hết hạn vào ngày chạy'
         : d.status === 'OFF_DUTY' || d.status === 'SUSPENDED' ? 'Tài xế không làm việc'
           : busy ? `Đang chạy chuyến ${busy.trip_id} trùng giờ` : null;
       return { driver_id: d.driver_id, staff_id: d.staff_id, full_name: d.full_name, license_expiry: d.license_expiry, assigned: d.driver_id === trip.driver_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
@@ -1068,7 +1489,7 @@ export class ManagerOperationsService {
       return { success: false, error: 'Không tìm thấy tài xế thay thế', code: 'DRIVER_NOT_FOUND' };
     }
     // DRI-001 refuses a driver whose licence has expired; a replacement must be someone who can sign in
-    if (newDriver && (newDriver.status !== 'ON_DUTY' || new Date(`${newDriver.license_expiry}T23:59:59+07:00`).getTime() < Date.now())) {
+    if (newDriver && (newDriver.status === 'LOCKED' || (newDriver.status !== 'ON_DUTY' && newDriver.status !== 'ACTIVE') || new Date(`${newDriver.license_expiry}T23:59:59+07:00`).getTime() < Date.now())) {
       return { success: false, error: `Tài xế ${newDriver.full_name} không đủ điều kiện nhận chuyến (giấy phép lái xe hoặc trạng thái ca)`, code: 'DRIVER_UNAVAILABLE' };
     }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'driver_change_pin_screen.dart';
 import 'driver_store.dart';
 import 'driver_widgets.dart';
 import 'main_shell_screen.dart';
@@ -15,7 +16,7 @@ class DriverLoginScreen extends StatefulWidget {
 
 class _DriverLoginScreenState extends State<DriverLoginScreen> {
   final _operator = TextEditingController();
-  final _id = TextEditingController(text: 'TX8821');
+  final _id = TextEditingController();
   final _pin = TextEditingController();
   String? _error;
 
@@ -48,7 +49,9 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
       setState(() => _error = error);
       return;
     }
-    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const MainShellScreen()));
+    final store = DriverScope.read(context);
+    final target = store.mustChangePin ? const DriverChangePinScreen() : const MainShellScreen();
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => target));
   }
 
   Widget _brand({bool large = false}) {

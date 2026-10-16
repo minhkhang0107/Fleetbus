@@ -96,6 +96,23 @@ class DriverApiClientService {
     return json;
   }
 
+  /// DRI-001: replaces the temporary PIN the company gave (D150).
+  Future<Map<String, dynamic>> changePin({
+    required String currentPin,
+    required String newPin,
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/api/v1/driver/auth/change-pin',
+      body: {
+        'current_pin': currentPin,
+        'new_pin': newPin,
+      },
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
   /**
    * DRI-002: Trips assigned to the signed-in driver for today
    */

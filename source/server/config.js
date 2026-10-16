@@ -55,8 +55,11 @@ export function getAuthMode() {
  */
 export const DEV_TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
 
-export function getStaffTotpSecret(userId) {
-  const fromEnv = process.env[`FLEETBUS_TOTP_SECRET_${String(userId).toUpperCase().replace(/[^A-Z0-9]/g, '_')}`];
+export function getStaffTotpSecret(userId, account = null) {
+  if (account?.totp_enrolled && account?.totp_secret) {
+    return account.totp_secret;
+  }
+  const fromEnv = userId ? process.env[`FLEETBUS_TOTP_SECRET_${String(userId).toUpperCase().replace(/[^A-Z0-9]/g, '_')}`] : null;
   if (fromEnv) return fromEnv;
   return isProduction() ? null : DEV_TOTP_SECRET;
 }

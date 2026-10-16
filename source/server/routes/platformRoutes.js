@@ -3,10 +3,11 @@
  * The gateway lets only PLATFORM_ADMIN tokens through and requires an Idempotency-Key on POSTs.
  */
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
-import { createOperator, findOperatorById, listOperators, setOperatorActive, updateOperator } from '../core/operators.js';
+import { createOperator, findOperatorByCode, findOperatorById, listOperators, setOperatorActive, updateOperator } from '../core/operators.js';
 
 const OPERATOR_RE = /^\/api\/v1\/platform\/operators\/([^/]+)$/;
 const ACTIVE_RE = /^\/api\/v1\/platform\/operators\/([^/]+)\/(activate|deactivate)$/;
+const RESET_DIR_RE = /^\/api\/v1\/platform\/operators\/([^/]+)\/director\/reset-password$/;
 
 function audit(req, managerService, entry) {
   managerService.recordAudit({
@@ -40,9 +41,34 @@ export function handlePlatformRoutes(req, res, pathname, parsedUrl, services) {
   if (pathname === '/api/v1/platform/operators' && req.method === 'POST') {
     parseJsonBody(req).then(body => {
       const result = createOperator(body);
-      if (result.ok) audit(req, managerService, { action: 'OPERATOR_CREATE', resource: result.operator.code, after: result.operator, operator_id: result.operator.operator_id });
-      reply(res, result, 201);
+      if (result.ok) {
+        audit(req, managerService, { action: 'OPERATOR_CREATE', resource: result.operator.code, after: result.operator, operator_id: result.operator.operator_id });
+        sendSuccess(res, {
+          ...result.operator,
+          director: result.director,
+          temporary_password: result.temporary_password
+        }, 201);
+      } else {
+        sendError(res, result.message, result.code, result.status);
+      }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  const resetDir = pathname.match(RESET_DIR_RE);
+  if (resetDir && req.method === 'POST') {
+    const op = findOperatorById(resetDir[1]) || findOperatorByCode(resetDir[1]);
+    if (!op) {
+      sendError(res, 'Không tìm thấy nhà xe', 'OPERATOR_NOT_FOUND', 404);
+      return true;
+    }
+    const result = managerService.resetDirectorPassword(op.operator_id);
+    if (result.success) {
+      audit(req, managerService, { action: 'DIRECTOR_PASSWORD_RESET', resource: result.director.username, operator_id: op.operator_id });
+      sendSuccess(res, { temporary_password: result.temporary_password });
+    } else {
+      sendError(res, result.error, result.code, result.status || 400);
+    }
     return true;
   }
 

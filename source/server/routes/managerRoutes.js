@@ -87,6 +87,45 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // POST /api/v1/ops/auth/change-password (MGR-001)
+  if (pathname === '/api/v1/ops/auth/change-password' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const result = managerService.changePassword(req.identity?.sub, body);
+      if (result.success) {
+        audit(req, managerService, { action: 'PASSWORD_CHANGE', resource: result.username });
+        sendSuccess(res, { message: 'Đổi mật khẩu thành công' });
+      } else {
+        sendError(res, result.error, result.code, result.status || 400);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/ops/auth/totp/setup (MGR-001)
+  if (pathname === '/api/v1/ops/auth/totp/setup' && req.method === 'POST') {
+    const result = managerService.setupTotp(req.identity?.sub);
+    if (result.success) {
+      sendSuccess(res, result.data);
+    } else {
+      sendError(res, result.error, result.code, result.status || 400);
+    }
+    return true;
+  }
+
+  // POST /api/v1/ops/auth/totp/confirm (MGR-001)
+  if (pathname === '/api/v1/ops/auth/totp/confirm' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const result = managerService.confirmTotp(req.identity?.sub, body?.code);
+      if (result.success) {
+        audit(req, managerService, { action: 'TOTP_ENROLLED', resource: result.username });
+        sendSuccess(res, { message: 'Cài đặt xác thực 2 bước thành công' });
+      } else {
+        sendError(res, result.error, result.code, result.status || 400);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
   // GET /api/v1/ops/dashboard/kpis (MGR-002)
   if (pathname === '/api/v1/ops/dashboard/kpis' && req.method === 'GET') {
     const kpis = managerService.getOperationsDashboardKPIs(req.operatorId);
@@ -348,6 +387,62 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   if (CREW_PATHS.includes(pathname) && req.method === 'GET') {
     const crew = managerService.getCrewDrivers(req.operatorId);
     sendSuccess(res, crew.data || crew);
+    return true;
+  }
+
+  // POST /api/v1/ops/drivers (MGR-016)
+  if (pathname === '/api/v1/ops/drivers' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+      const result = managerService.addDriver(body, operatorId);
+      if (!result.success) {
+        sendError(res, result.error, result.code, result.status || 400);
+        return;
+      }
+      const { driver, temporary_pin } = result.data;
+      audit(req, managerService, { action: 'DRIVER_CREATE', resource: driver.driver_id, before: null, after: driver });
+      sendSuccess(res, { driver, temporary_pin }, 201);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/ops/drivers/:driverId/reset-pin (MGR-016)
+  const resetDriverPinMatch = pathname.match(/^\/api\/v1\/ops\/drivers\/([^/]+)\/reset-pin$/);
+  if (resetDriverPinMatch && req.method === 'POST') {
+    const driverId = decodeURIComponent(resetDriverPinMatch[1]);
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const result = managerService.resetDriverPin(driverId, operatorId, { loginGuard: services.driverService?.loginGuard });
+    if (!result.success) {
+      sendError(res, result.error, result.code, result.status || 400);
+      return true;
+    }
+    audit(req, managerService, { action: 'DRIVER_PIN_RESET', resource: driverId, before: null, after: null });
+    sendSuccess(res, { temporary_pin: result.data.temporary_pin });
+    return true;
+  }
+
+  // PATCH /api/v1/ops/drivers/:driverId (MGR-016)
+  const driverOne = pathname.match(/^\/api\/v1\/ops\/drivers\/([^/]+)$/);
+  if (driverOne && req.method === 'PATCH') {
+    const driverId = decodeURIComponent(driverOne[1]);
+    parseJsonBody(req).then(body => {
+      const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+      const result = managerService.updateDriver(driverId, body, operatorId);
+      if (!result.success) {
+        sendError(res, result.error, result.code, result.status || 400);
+        return;
+      }
+      const { driver, before, lockChanged } = result.data;
+      if (lockChanged === 'LOCK') {
+        audit(req, managerService, { action: 'DRIVER_LOCK', resource: driver.driver_id, before, after: driver });
+      } else if (lockChanged === 'UNLOCK') {
+        audit(req, managerService, { action: 'DRIVER_UNLOCK', resource: driver.driver_id, before, after: driver });
+      }
+      if (!lockChanged || Object.keys(body).some(k => k !== 'status')) {
+        audit(req, managerService, { action: 'DRIVER_UPDATE', resource: driver.driver_id, before, after: driver });
+      }
+      sendSuccess(res, { ...driver, driver });
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 

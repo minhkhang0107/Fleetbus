@@ -40,10 +40,10 @@
   th { font-size: 12px; color: var(--muted); font-weight: 600; background: #f8fafc; position: sticky; top: 0; }
   tr.click { cursor: pointer; } tr.click:hover td { background: #f8fafc; } tr.sel td { background: var(--primary-soft); }
 
-  /* Login */
-  #login { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
-  #login .card { width: 100%; max-width: 380px; }
-  #login h1 { margin: 0 0 4px; font-size: 22px; }
+  /* Login, Password Change & TOTP Enrollment */
+  #login, #changePassword, #enrollTotp { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+  #login .card, #changePassword .card, #enrollTotp .card { width: 100%; max-width: 380px; }
+  #login h1, #changePassword h1, #enrollTotp h1 { margin: 0 0 4px; font-size: 22px; }
 
   /* Shell */
   #app { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
@@ -148,6 +148,45 @@
   </form>
 </section>
 
+<!-- Password change (MGR-001) -->
+<section id="changePassword" class="hidden">
+  <form class="card" id="changePasswordForm" novalidate>
+    <h1>Đổi mật khẩu</h1>
+    <p class="muted" style="margin:0 0 16px">Tài khoản cần đổi mật khẩu trước khi tiếp tục.</p>
+    <div class="field"><label for="cpCurrent">Mật khẩu hiện tại</label><input id="cpCurrent" name="current_password" type="password" required></div>
+    <div class="field"><label for="cpNew">Mật khẩu mới</label><input id="cpNew" name="new_password" type="password" required placeholder="Ít nhất 10 ký tự, gồm cả chữ và số"></div>
+    <div class="field"><label for="cpRepeat">Nhập lại mật khẩu mới</label><input id="cpRepeat" name="repeat_password" type="password" required></div>
+    <div class="error" id="changePasswordError"></div>
+    <button class="btn primary" style="width:100%" type="submit" id="changePasswordBtn">Đổi mật khẩu</button>
+    <button class="btn" style="width:100%;margin-top:8px" type="button" id="changePasswordLogoutBtn">Đăng xuất</button>
+  </form>
+</section>
+
+<!-- TOTP enrollment (MGR-001) -->
+<section id="enrollTotp" class="hidden">
+  <form class="card" id="enrollTotpForm" novalidate>
+    <h1>Cài xác thực 2 bước</h1>
+    <p class="muted" style="margin:0 0 16px">Tài khoản giám đốc cần mã 6 số từ ứng dụng xác thực (Google Authenticator, Microsoft Authenticator...) mỗi lần đăng nhập.</p>
+    <div class="field">
+      <label>1. Mở ứng dụng xác thực, chọn thêm tài khoản bằng khóa</label>
+      <div style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:4px 0 8px">
+        <div id="enrollTotpSecretDisplay" class="mono" style="font-size:14px;font-weight:700;word-break:break-all;user-select:all;letter-spacing:0.5px"></div>
+      </div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button class="btn" type="button" id="enrollTotpCopyBtn">Sao chép khóa</button>
+        <a id="enrollTotpUriLink" href="#" style="font-size:13px;color:var(--primary)">Mở trong ứng dụng xác thực</a>
+      </div>
+    </div>
+    <div class="field" style="margin-top:16px">
+      <label for="enrollTotpCode">2. Nhập mã 6 số từ ứng dụng</label>
+      <input id="enrollTotpCode" name="code" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]*" autocomplete="one-time-code" required placeholder="6 số" class="mono" style="font-size:16px;letter-spacing:2px">
+    </div>
+    <div class="error" id="enrollTotpError"></div>
+    <button class="btn primary" style="width:100%" type="submit" id="enrollTotpBtn">Xác nhận</button>
+    <button class="btn" style="width:100%;margin-top:8px" type="button" id="enrollTotpLogoutBtn">Đăng xuất</button>
+  </form>
+</section>
+
 <!-- App shell -->
 <section id="app" class="hidden">
   <nav>
@@ -157,6 +196,7 @@
     <button data-view="dispatch">Điều độ chuyến</button>
     <button data-view="schedules">Lịch chạy</button>
     <button data-view="fleet">Đội xe</button>
+    <button data-view="drivers">Tài xế</button>
     <button data-view="layouts">Sơ đồ ghế</button>
     <button data-view="live">Bản đồ xe</button>
     <button data-view="bookings">Đặt chỗ</button>
@@ -255,6 +295,58 @@
       </div>
 
       <div class="card scroll" style="padding:0" id="fleetBox"></div>
+    </div>
+
+    <!-- Drivers Management (MGR-015, MGR-016) -->
+    <div data-panel="drivers" class="hidden">
+      <h2>Tài xế</h2>
+      <p class="muted" style="margin:-6px 0 14px">Quản lý đội ngũ tài xế, cấp mã PIN đăng nhập ứng dụng BusGo Driver.</p>
+
+      <div id="driverPinBox" class="card hidden" style="background:var(--warn-soft);border:1px solid var(--warn);margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div id="driverPinContent"></div>
+        <button class="btn" id="driverPinAckBtn" type="button">Đã ghi lại</button>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="section-title" style="margin-top:0" id="driverFormTitle">Thêm tài xế</div>
+        <form id="driverForm" novalidate>
+          <div class="row" style="flex-wrap:wrap;align-items:flex-end;gap:12px">
+            <div class="field" style="flex:2;min-width:180px;margin-bottom:0">
+              <label for="drvName">Họ và tên</label>
+              <input id="drvName" name="full_name" required maxlength="60" placeholder="Ví dụ: Nguyễn Văn A">
+            </div>
+            <div class="field" style="flex:1.5;min-width:140px;margin-bottom:0">
+              <label for="drvPhone">Số điện thoại</label>
+              <input id="drvPhone" name="phone" type="tel" inputmode="tel" required maxlength="15" placeholder="Ví dụ: 0912 345 678">
+            </div>
+            <div class="field" style="flex:1.5;min-width:140px;margin-bottom:0">
+              <label for="drvStaffId">Mã nhân viên</label>
+              <input id="drvStaffId" name="staff_id" maxlength="12" placeholder="Để trống: tự tạo TXxxxx" style="text-transform:uppercase">
+            </div>
+            <div class="field" style="flex:1;min-width:100px;margin-bottom:0">
+              <label for="drvClass">Hạng bằng</label>
+              <select id="drvClass" name="license_class" required>
+                <option value="B2">B2</option>
+                <option value="C">C</option>
+                <option value="D">D</option>
+                <option value="E">E</option>
+                <option value="FC">FC</option>
+              </select>
+            </div>
+            <div class="field" style="flex:1.5;min-width:140px;margin-bottom:0">
+              <label for="drvExpiry">Hạn bằng lái</label>
+              <input id="drvExpiry" name="license_expiry" type="date" required>
+            </div>
+            <div class="row" style="margin-bottom:0;gap:8px">
+              <button class="btn primary" type="submit" id="drvSubmitBtn">Thêm tài xế</button>
+              <button class="btn hidden" type="button" id="drvCancelBtn">Hủy</button>
+            </div>
+          </div>
+          <div class="error" id="driverError" style="margin-top:8px"></div>
+        </form>
+      </div>
+
+      <div class="card scroll" style="padding:0" id="driversBox"></div>
     </div>
 
     <!-- Seat Layouts (MGR-007) -->
@@ -427,6 +519,10 @@
     <!-- Platform admin -->
     <div data-panel="platform" class="hidden">
       <h2>Nhà xe trên nền tảng</h2>
+      <div id="platformNoticeBox" class="card hidden" style="background:var(--warn-soft);border:1px solid var(--warn);margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div id="platformNoticeContent"></div>
+        <button class="btn" id="platformNoticeAckBtn" type="button">Đã ghi lại</button>
+      </div>
       <div class="split">
         <div class="card scroll" style="padding:0" id="operatorsBox"></div>
         <form class="card" id="operatorForm">
@@ -435,6 +531,8 @@
           <div class="field"><label>Tên nhà xe</label><input name="name" required maxlength="200"></div>
           <div class="field"><label>Tên ngắn</label><input name="short_name" maxlength="40"></div>
           <div class="field"><label>Tổng đài</label><input name="hotline" maxlength="15" inputmode="tel"></div>
+          <div class="field"><label>Email giám đốc</label><input name="director_email" type="email" required></div>
+          <div class="field"><label>Tên giám đốc</label><input name="director_name" required maxlength="60"></div>
           <div class="field"><label>Mã BIN ngân hàng</label><input name="bin" required maxlength="6"></div>
           <div class="field"><label>Tên ngân hàng</label><input name="bank_name" required maxlength="200"></div>
           <div class="field"><label>Số tài khoản</label><input name="account_number" required maxlength="20"></div>
@@ -483,6 +581,20 @@ async function api(path, { method = 'GET', body, idempotent = false } = {}) {
   let json = {};
   try { json = await res.json(); } catch (_) {}
   if (res.status === 401 && state.token) { logout('Phiên đăng nhập đã hết hạn'); }
+  if (res.status === 403 && json.code === 'PASSWORD_CHANGE_REQUIRED') {
+    if (state.user) {
+      state.user.must_change_password = true;
+      store('busgo_ops_session', JSON.stringify({ token: state.token, user: state.user, operator: state.operator }));
+    }
+    showPasswordChange();
+  }
+  if (res.status === 403 && json.code === 'TOTP_ENROLLMENT_REQUIRED') {
+    if (state.user) {
+      state.user.must_enroll_totp = true;
+      store('busgo_ops_session', JSON.stringify({ token: state.token, user: state.user, operator: state.operator }));
+    }
+    showEnrollTotp();
+  }
   return res.ok ? { ok: true, data: json.data, raw: json } : { ok: false, status: res.status, code: json.code, message: json.message || 'Có lỗi xảy ra' };
 }
 // Public passenger endpoints scoped by company (trip route, stops, bus) for the trip map.
@@ -510,7 +622,185 @@ function newMap(el, center = [20.6, 105.85], zoom = 8) {
   return map;
 }
 
-// ---------- session ----------
+// ---------- session, password change & totp enrollment ----------
+function showPasswordChange() {
+  stopTimers();
+  $('#login').classList.add('hidden');
+  $('#enrollTotp').classList.add('hidden');
+  $('#app').classList.add('hidden');
+  $('#changePassword').classList.remove('hidden');
+  $('#changePasswordError').textContent = '';
+  $('#changePasswordForm').reset();
+  clearEnrollTotp();
+}
+
+let enrollTotpSecret = null;
+let enrollTotpLoading = false;
+
+function clearEnrollTotp() {
+  enrollTotpSecret = null;
+  enrollTotpLoading = false;
+  const display = $('#enrollTotpSecretDisplay');
+  if (display) display.textContent = '';
+  const uriLink = $('#enrollTotpUriLink');
+  if (uriLink) uriLink.removeAttribute('href');
+  const codeInput = $('#enrollTotpCode');
+  if (codeInput) codeInput.value = '';
+  const errEl = $('#enrollTotpError');
+  if (errEl) errEl.textContent = '';
+}
+
+function showEnrollTotp() {
+  stopTimers();
+  $('#login').classList.add('hidden');
+  $('#changePassword').classList.add('hidden');
+  $('#app').classList.add('hidden');
+  $('#enrollTotp').classList.remove('hidden');
+  $('#enrollTotpError').textContent = '';
+  const codeInput = $('#enrollTotpCode');
+  if (codeInput) codeInput.value = '';
+  loadEnrollTotpSetup();
+}
+
+async function loadEnrollTotpSetup() {
+  if (enrollTotpSecret || enrollTotpLoading) return;
+  enrollTotpLoading = true;
+  const display = $('#enrollTotpSecretDisplay');
+  if (display) display.textContent = 'Đang tải...';
+  const btn = $('#enrollTotpBtn');
+  if (btn) btn.disabled = true;
+  const r = await api('/api/v1/ops/auth/totp/setup', { method: 'POST', idempotent: true });
+  enrollTotpLoading = false;
+  if (btn) btn.disabled = false;
+  if (!r.ok) {
+    $('#enrollTotpError').textContent = r.message || 'Không thể tạo khóa xác thực 2 bước';
+    if (display) display.textContent = '—';
+    return;
+  }
+  const secret = r.data?.secret || '';
+  enrollTotpSecret = secret;
+  const grouped = secret.match(/.{1,4}/g)?.join(' ') || secret;
+  if (display) display.textContent = grouped;
+  const uriLink = $('#enrollTotpUriLink');
+  if (uriLink && r.data?.otpauth_uri) {
+    uriLink.href = r.data.otpauth_uri;
+  }
+}
+
+$('#enrollTotpCode')?.addEventListener('input', (e) => {
+  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
+});
+
+$('#enrollTotpCopyBtn')?.addEventListener('click', async () => {
+  const displayEl = $('#enrollTotpSecretDisplay');
+  const textToCopy = enrollTotpSecret || (displayEl?.textContent || '').replace(/\s+/g, '');
+  if (!textToCopy) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(textToCopy);
+      toast('Đã sao chép khóa');
+      return;
+    }
+  } catch (_) {}
+  if (displayEl) {
+    const range = document.createRange();
+    range.selectNodeContents(displayEl);
+    const sel = window.getSelection();
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    try {
+      if (document.execCommand('copy')) {
+        toast('Đã sao chép khóa');
+        return;
+      }
+    } catch (_) {}
+  }
+  toast('Đã chọn khóa');
+});
+
+$('#enrollTotpUriLink')?.addEventListener('click', (e) => {
+  const href = e.currentTarget.getAttribute('href');
+  if (!href || href === '#') {
+    e.preventDefault();
+  }
+});
+
+$('#enrollTotpForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = $('#enrollTotpError');
+  errEl.textContent = '';
+  const code = ($('#enrollTotpCode')?.value || '').trim();
+  if (code.length !== 6 || !/^\d{6}$/.test(code)) {
+    errEl.textContent = 'Mã xác thực gồm 6 chữ số';
+    return;
+  }
+  const btn = $('#enrollTotpBtn');
+  btn.disabled = true;
+  const r = await api('/api/v1/ops/auth/totp/confirm', {
+    method: 'POST',
+    idempotent: true,
+    body: { code }
+  });
+  btn.disabled = false;
+  if (!r.ok) {
+    errEl.textContent = r.message || 'Mã xác thực 2 bước không đúng';
+    return;
+  }
+  if (state.user) state.user.must_enroll_totp = false;
+  store('busgo_ops_session', JSON.stringify({ token: state.token, user: state.user, operator: state.operator }));
+  clearEnrollTotp();
+  $('#enrollTotp').classList.add('hidden');
+  enter();
+  toast('Đã bật xác thực 2 bước. Lần sau đăng nhập cần mã 6 số.');
+});
+
+$('#enrollTotpLogoutBtn')?.addEventListener('click', () => logout());
+
+$('#changePasswordForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const current = f.current_password.value;
+  const newPw = f.new_password.value;
+  const repeatPw = f.repeat_password.value;
+  const errEl = $('#changePasswordError');
+  errEl.textContent = '';
+  if (!current) {
+    errEl.textContent = 'Cần mật khẩu hiện tại';
+    return;
+  }
+  if (!newPw || newPw.length < 10 || !/[a-zA-Z]/.test(newPw) || !/[0-9]/.test(newPw)) {
+    errEl.textContent = 'Mật khẩu mới phải có ít nhất 10 ký tự, bao gồm cả chữ và số';
+    return;
+  }
+  if (newPw === current) {
+    errEl.textContent = 'Mật khẩu mới phải khác mật khẩu hiện tại';
+    return;
+  }
+  if (newPw !== repeatPw) {
+    errEl.textContent = 'Hai mật khẩu mới không khớp';
+    return;
+  }
+  $('#changePasswordBtn').disabled = true;
+  const r = await api('/api/v1/ops/auth/change-password', {
+    method: 'POST',
+    idempotent: true,
+    body: { current_password: current, new_password: newPw }
+  });
+  $('#changePasswordBtn').disabled = false;
+  if (!r.ok) {
+    errEl.textContent = r.message;
+    return;
+  }
+  if (state.user) state.user.must_change_password = false;
+  store('busgo_ops_session', JSON.stringify({ token: state.token, user: state.user, operator: state.operator }));
+  $('#changePassword').classList.add('hidden');
+  enter();
+  toast('Đã đổi mật khẩu');
+});
+$('#changePasswordLogoutBtn')?.addEventListener('click', () => logout());
+
 $('#loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('#loginError').textContent = '';
@@ -528,13 +818,28 @@ function logout(msg) {
   state.token = null; state.user = null; state.operator = null; state.platformCode = '';
   store('busgo_ops_session', null);
   stopTimers();
-  $('#app').classList.add('hidden'); $('#login').classList.remove('hidden');
+  $('#app').classList.add('hidden');
+  $('#changePassword').classList.add('hidden');
+  $('#enrollTotp').classList.add('hidden');
+  clearEnrollTotp();
+  $('#login').classList.remove('hidden');
   if (msg) $('#loginError').textContent = msg;
 }
 $('#logoutBtn').addEventListener('click', () => logout());
 
 async function enter() {
-  $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
+  if (state.user?.must_change_password) {
+    showPasswordChange();
+    return;
+  }
+  if (state.user?.must_enroll_totp) {
+    showEnrollTotp();
+    return;
+  }
+  $('#changePassword').classList.add('hidden');
+  $('#enrollTotp').classList.add('hidden');
+  $('#login').classList.add('hidden');
+  $('#app').classList.remove('hidden');
   const isPlatform = state.user?.role === 'PLATFORM_ADMIN';
   const role = state.user?.role;
   $('#who').textContent = `${state.user?.full_name || ''} · ${state.user?.role || ''}`;
@@ -542,6 +847,7 @@ async function enter() {
   const NAV_ROLES = {
     bookings: ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER'],
     fleet: ['FLEET_DIRECTOR', 'DISPATCHER'],
+    drivers: ['FLEET_DIRECTOR', 'DISPATCHER'],
     layouts: ['FLEET_DIRECTOR', 'DISPATCHER'],
     schedules: ['FLEET_DIRECTOR', 'DISPATCHER'],
     service: ['FLEET_DIRECTOR', 'DISPATCHER'],
@@ -580,7 +886,7 @@ function show(view) {
   if (state.user?.role === 'PLATFORM_ADMIN' && view !== 'platform' && !state.platformCode) {
     toast('Chọn nhà xe ở thanh trên để xem dữ liệu điều hành');
   }
-  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, fleet: loadFleet, layouts: loadLayouts, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, audit: loadAudit, platform: loadOperators })[view]();
+  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, fleet: loadFleet, drivers: loadDrivers, layouts: loadLayouts, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, audit: loadAudit, platform: loadOperators })[view]?.();
 }
 
 // ---------- overview ----------
@@ -1533,6 +1839,322 @@ $('#fleetAddForm')?.addEventListener('submit', async (e) => {
   loadFleet();
 });
 
+// ---------- drivers (MGR-015, MGR-016) ----------
+const driversState = { drivers: [], editingId: null };
+
+function setDriverMinExpiry() {
+  const tomorrow = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(Date.now() + 86400000));
+  const el = $('#drvExpiry');
+  if (el) el.min = tomorrow;
+}
+
+function showDriverPinNotice(name, staffId, pin) {
+  const code = state.platformCode || state.operator?.code || '';
+  const box = $('#driverPinBox');
+  const content = $('#driverPinContent');
+  if (!box || !content) return;
+  content.innerHTML = `Mã PIN tạm của ${esc(name)} (${esc(staffId)}): <b>${esc(pin)}</b> — đưa cho tài xế, mã chỉ hiện một lần. Tài xế đăng nhập app BusGo Driver bằng mã nhà xe ${esc(code)}, mã NV và mã này, rồi đặt mã mới.`;
+  box.classList.remove('hidden');
+}
+
+$('#driverPinAckBtn')?.addEventListener('click', () => {
+  const box = $('#driverPinBox');
+  const content = $('#driverPinContent');
+  if (content) content.innerHTML = '';
+  if (box) box.classList.add('hidden');
+});
+
+function resetDriverForm() {
+  driversState.editingId = null;
+  const f = $('#driverForm');
+  if (f) f.reset();
+  $('#driverFormTitle').textContent = 'Thêm tài xế';
+  $('#drvSubmitBtn').textContent = 'Thêm tài xế';
+  $('#drvCancelBtn').classList.add('hidden');
+  const sidEl = $('#drvStaffId');
+  if (sidEl) {
+    sidEl.readOnly = false;
+    sidEl.style.background = '';
+  }
+  $('#driverError').textContent = '';
+  setDriverMinExpiry();
+}
+
+$('#drvCancelBtn')?.addEventListener('click', () => {
+  resetDriverForm();
+});
+
+$('#drvStaffId')?.addEventListener('input', (e) => {
+  e.target.value = e.target.value.toUpperCase();
+});
+
+async function loadDrivers() {
+  setDriverMinExpiry();
+  const box = $('#driversBox');
+  if (!box) return;
+  const r = await api('/api/v1/ops/drivers');
+  if (!r.ok) {
+    box.innerHTML = `<p class="error" style="padding:16px">${esc(r.message)}</p>`;
+    return;
+  }
+  const drivers = Array.isArray(r.data) ? r.data : (r.data?.drivers || []);
+  driversState.drivers = drivers;
+  if (!drivers.length) {
+    box.innerHTML = '<p class="muted" style="padding:16px;margin:0">Chưa có tài xế nào.</p>';
+    return;
+  }
+  box.innerHTML = `<table>
+    <thead>
+      <tr>
+        <th>Mã NV</th>
+        <th>Họ và tên</th>
+        <th>Số điện thoại</th>
+        <th>Hạng bằng</th>
+        <th>Hạn bằng lái</th>
+        <th>Trạng thái</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      ${drivers.map(d => {
+        let statusHtml = '';
+        if (d.status === 'LOCKED') {
+          statusHtml = '<span class="pill danger">Đã khóa</span>';
+        } else if (d.must_change_pin) {
+          statusHtml = '<span class="pill warn">Chờ đổi PIN</span>';
+        } else {
+          statusHtml = '<span class="pill ok">Đang làm</span>';
+        }
+        const expiryHtml = `${esc(d.license_expiry)}${d.license_expired ? ' <span class="pill danger">Hết hạn</span>' : ''}`;
+        const isLocked = d.status === 'LOCKED';
+        return `<tr>
+          <td><span class="mono"><b>${esc(d.staff_id)}</b></span></td>
+          <td>${esc(d.full_name)}</td>
+          <td><span class="mono">${esc(d.phone)}</span></td>
+          <td><span class="mono">${esc(d.license_class)}</span></td>
+          <td>${expiryHtml}</td>
+          <td>${statusHtml}</td>
+          <td style="white-space:nowrap">
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn" data-edit-drv="${esc(d.driver_id)}">Sửa</button>
+              ${isLocked
+                ? `<button class="btn" data-unlock-drv="${esc(d.driver_id)}">Mở khóa</button>`
+                : `<button class="btn danger" data-lock-drv="${esc(d.driver_id)}">Khóa</button>`
+              }
+              <button class="btn" data-reset-pin="${esc(d.driver_id)}" data-drv-name="${esc(d.full_name)}" data-drv-sid="${esc(d.staff_id)}">Cấp lại PIN</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+
+  box.querySelectorAll('button[data-edit-drv]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const drvId = btn.dataset.editDrv;
+      const d = driversState.drivers.find(x => x.driver_id === drvId);
+      if (!d) return;
+      driversState.editingId = d.driver_id;
+      $('#driverFormTitle').textContent = 'Sửa tài xế';
+      $('#drvName').value = d.full_name;
+      $('#drvPhone').value = d.phone;
+      const sidEl = $('#drvStaffId');
+      sidEl.value = d.staff_id;
+      sidEl.readOnly = true;
+      sidEl.style.background = '#f1f5f9';
+      $('#drvClass').value = d.license_class;
+      $('#drvExpiry').value = d.license_expiry;
+      $('#drvSubmitBtn').textContent = 'Lưu thay đổi';
+      $('#drvCancelBtn').classList.remove('hidden');
+      $('#driverError').textContent = '';
+      $('#drvName').focus();
+    });
+  });
+
+  box.querySelectorAll('button[data-lock-drv]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const drvId = btn.dataset.lockDrv;
+      if (!btn.dataset.armed) {
+        btn.dataset.armed = '1';
+        btn.textContent = 'Khóa hẳn?';
+        setTimeout(() => {
+          if (btn.isConnected) {
+            delete btn.dataset.armed;
+            btn.textContent = 'Khóa';
+          }
+        }, 4000);
+        return;
+      }
+      delete btn.dataset.armed;
+      btn.textContent = 'Khóa';
+      btn.disabled = true;
+      const r = await api(`/api/v1/ops/drivers/${encodeURIComponent(drvId)}`, {
+        method: 'PATCH',
+        body: { status: 'LOCKED' }
+      });
+      btn.disabled = false;
+      if (!r.ok) {
+        toast(r.message);
+        return;
+      }
+      toast('Đã khóa tài xế');
+      loadDrivers();
+    });
+  });
+
+  box.querySelectorAll('button[data-unlock-drv]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const drvId = btn.dataset.unlockDrv;
+      btn.disabled = true;
+      const r = await api(`/api/v1/ops/drivers/${encodeURIComponent(drvId)}`, {
+        method: 'PATCH',
+        body: { status: 'ACTIVE' }
+      });
+      btn.disabled = false;
+      if (!r.ok) {
+        toast(r.message);
+        return;
+      }
+      toast('Đã mở khóa tài xế');
+      loadDrivers();
+    });
+  });
+
+  box.querySelectorAll('button[data-reset-pin]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const drvId = btn.dataset.resetPin;
+      const drvName = btn.dataset.drvName;
+      const drvSid = btn.dataset.drvSid;
+      if (!btn.dataset.armed) {
+        btn.dataset.armed = '1';
+        btn.textContent = 'Cấp lại hẳn?';
+        setTimeout(() => {
+          if (btn.isConnected) {
+            delete btn.dataset.armed;
+            btn.textContent = 'Cấp lại PIN';
+          }
+        }, 4000);
+        return;
+      }
+      delete btn.dataset.armed;
+      btn.textContent = 'Cấp lại PIN';
+      btn.disabled = true;
+      const r = await api(`/api/v1/ops/drivers/${encodeURIComponent(drvId)}/reset-pin`, {
+        method: 'POST',
+        idempotent: true
+      });
+      btn.disabled = false;
+      if (!r.ok) {
+        toast(r.message);
+        return;
+      }
+      showDriverPinNotice(drvName, drvSid, r.data.temporary_pin);
+      toast('Đã cấp lại mã PIN');
+      loadDrivers();
+    });
+  });
+}
+
+$('#driverForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const nameRaw = f.full_name.value;
+  const phoneRaw = f.phone.value;
+  const staffIdRaw = f.staff_id.value;
+  const licClass = f.license_class.value;
+  const expiry = f.license_expiry.value;
+  const errEl = $('#driverError');
+  errEl.textContent = '';
+
+  const normalizedName = typeof nameRaw === 'string' ? nameRaw.trim().replace(/\s+/g, ' ') : '';
+  if (normalizedName.length < 2 || normalizedName.length > 60) {
+    errEl.textContent = 'Họ tên cần 2-60 ký tự';
+    return;
+  }
+  if (/[0-9<>{}@[\]#$%^*=_|\\/~]/u.test(normalizedName) || !/\p{L}/u.test(normalizedName)) {
+    errEl.textContent = 'Họ tên không được chứa số hoặc ký tự đặc biệt';
+    return;
+  }
+
+  const cleanedPhone = phoneRaw.replace(/[\s\-\.]/g, '');
+  const vnPhoneRegex = /^(?:\+84|84|0)(3|5|7|8|9)\d{8}$/;
+  if (!vnPhoneRegex.test(cleanedPhone)) {
+    errEl.textContent = 'Số điện thoại không hợp lệ (VD: 0912 345 678)';
+    return;
+  }
+  let normalizedPhone = cleanedPhone;
+  if (normalizedPhone.startsWith('+84')) normalizedPhone = '0' + normalizedPhone.slice(3);
+  else if (normalizedPhone.startsWith('84')) normalizedPhone = '0' + normalizedPhone.slice(2);
+
+  if (!['B2', 'C', 'D', 'E', 'FC'].includes(licClass)) {
+    errEl.textContent = 'Hạng bằng lái phải là một trong các hạng: B2, C, D, E, FC';
+    return;
+  }
+  if (!expiry) {
+    errEl.textContent = 'Ngày hết hạn bằng lái không được để trống';
+    return;
+  }
+  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date());
+  if (expiry <= todayStr) {
+    errEl.textContent = 'Ngày hết hạn bằng lái phải sau ngày hôm nay';
+    return;
+  }
+
+  const isEdit = !!driversState.editingId;
+  const btn = $('#drvSubmitBtn');
+  btn.disabled = true;
+
+  if (isEdit) {
+    const drvId = driversState.editingId;
+    const body = {
+      full_name: normalizedName,
+      phone: normalizedPhone,
+      license_class: licClass,
+      license_expiry: expiry
+    };
+    const r = await api(`/api/v1/ops/drivers/${encodeURIComponent(drvId)}`, {
+      method: 'PATCH',
+      body
+    });
+    btn.disabled = false;
+    if (!r.ok) {
+      errEl.textContent = r.message;
+      return;
+    }
+    toast('Đã cập nhật tài xế');
+    resetDriverForm();
+    loadDrivers();
+  } else {
+    const sid = staffIdRaw.trim().toUpperCase();
+    if (sid && !/^[A-Z0-9]{3,12}$/.test(sid)) {
+      btn.disabled = false;
+      errEl.textContent = 'Mã nhân viên không hợp lệ (3-12 ký tự chữ và số)';
+      return;
+    }
+    const body = {
+      full_name: normalizedName,
+      phone: normalizedPhone,
+      license_class: licClass,
+      license_expiry: expiry
+    };
+    if (sid) body.staff_id = sid;
+    const r = await api('/api/v1/ops/drivers', {
+      method: 'POST',
+      body,
+      idempotent: true
+    });
+    btn.disabled = false;
+    if (!r.ok) {
+      errEl.textContent = r.message;
+      return;
+    }
+    toast(`Đã thêm tài xế ${r.data.driver.full_name}`);
+    showDriverPinNotice(r.data.driver.full_name, r.data.driver.staff_id, r.data.temporary_pin);
+    resetDriverForm();
+    loadDrivers();
+  }
+});
+
 // ---------- seat layouts (MGR-007) ----------
 const layoutsState = {
   list: [],
@@ -2044,6 +2666,25 @@ async function loadLayouts() {
 }
 
 // ---------- platform admin ----------
+const directorEmails = {
+  op_saomai: 'admin@busgo.vn'
+};
+
+function showPlatformDirectorNotice(email, tempPassword) {
+  const box = $('#platformNoticeBox');
+  const content = $('#platformNoticeContent');
+  if (!box || !content) return;
+  content.innerHTML = `Tài khoản giám đốc ${esc(email)}, mật khẩu tạm: <b>${esc(tempPassword)}</b> — gửi cho giám đốc, chỉ hiện một lần; đăng nhập lần đầu phải đổi mật khẩu.`;
+  box.classList.remove('hidden');
+}
+
+$('#platformNoticeAckBtn')?.addEventListener('click', () => {
+  const box = $('#platformNoticeBox');
+  const content = $('#platformNoticeContent');
+  if (content) content.innerHTML = '';
+  if (box) box.classList.add('hidden');
+});
+
 async function loadPlatformOperatorPicker() {
   const r = await api('/api/v1/platform/operators');
   const list = r.ok ? (r.data.operators || r.data || []) : [];
@@ -2055,19 +2696,71 @@ async function loadOperators() {
   const r = await api('/api/v1/platform/operators');
   if (!r.ok) { $('#operatorsBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.status === 404 ? 'Máy chủ chưa hỗ trợ quản trị nhà xe.' : r.message)}</p>`; return; }
   const list = r.data.operators || r.data || [];
-  $('#operatorsBox').innerHTML = `<table><thead><tr><th>Nhà xe</th><th>Mã</th><th>Tài khoản nhận tiền</th><th>Trạng thái</th><th></th></tr></thead><tbody>${list.map(o => `<tr><td>${esc(o.name)}<div class="muted" style="font-size:12px">Tổng đài ${esc(o.hotline || '—')}</div></td><td class="mono">${esc(o.code)}<div><a href="/o/${encodeURIComponent(o.code)}" target="_blank" rel="noopener">Link + QR</a></div></td><td class="mono">${esc(o.bank?.bank_name || '')}<div>${esc(o.bank?.account_number || '')}</div></td><td>${o.active ? '<span class="pill ok">Hoạt động</span>' : '<span class="pill">Tạm ngừng</span>'}</td><td><button class="btn ${o.active ? 'danger' : ''}" data-op="${esc(o.operator_id)}" data-active="${o.active ? 1 : 0}">${o.active ? 'Tạm ngừng' : 'Kích hoạt'}</button></td></tr>`).join('')}</tbody></table>`;
+  $('#operatorsBox').innerHTML = `<table><thead><tr><th>Nhà xe</th><th>Mã</th><th>Tài khoản nhận tiền</th><th>Trạng thái</th><th></th></tr></thead><tbody>${list.map(o => `<tr><td>${esc(o.name)}<div class="muted" style="font-size:12px">Tổng đài ${esc(o.hotline || '—')}</div></td><td class="mono">${esc(o.code)}<div><a href="/o/${encodeURIComponent(o.code)}" target="_blank" rel="noopener">Link + QR</a></div></td><td class="mono">${esc(o.bank?.bank_name || '')}<div>${esc(o.bank?.account_number || '')}</div></td><td>${o.active ? '<span class="pill ok">Hoạt động</span>' : '<span class="pill">Tạm ngừng</span>'}</td><td style="white-space:nowrap"><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn ${o.active ? 'danger' : ''}" data-op="${esc(o.operator_id)}" data-active="${o.active ? 1 : 0}">${o.active ? 'Tạm ngừng' : 'Kích hoạt'}</button><button class="btn" data-reset-dir="${esc(o.operator_id)}" data-op-code="${esc(o.code)}">Cấp lại mật khẩu giám đốc</button></div></td></tr>`).join('')}</tbody></table>`;
   document.querySelectorAll('#operatorsBox button[data-op]').forEach(b => b.addEventListener('click', async () => {
     const r2 = await api(`/api/v1/platform/operators/${encodeURIComponent(b.dataset.op)}/${b.dataset.active === '1' ? 'deactivate' : 'activate'}`, { method: 'POST', idempotent: true });
     toast(r2.ok ? 'Đã cập nhật nhà xe' : r2.message); if (r2.ok) { loadOperators(); loadPlatformOperatorPicker(); }
+  }));
+  document.querySelectorAll('#operatorsBox button[data-reset-dir]').forEach(b => b.addEventListener('click', async () => {
+    if (!b.dataset.armed) {
+      b.dataset.armed = '1';
+      b.textContent = 'Cấp lại hẳn?';
+      setTimeout(() => {
+        if (b.isConnected) {
+          delete b.dataset.armed;
+          b.textContent = 'Cấp lại mật khẩu giám đốc';
+        }
+      }, 4000);
+      return;
+    }
+    delete b.dataset.armed;
+    b.textContent = 'Cấp lại mật khẩu giám đốc';
+    b.disabled = true;
+    const opId = b.dataset.resetDir;
+    const opCode = b.dataset.opCode;
+    const r2 = await api(`/api/v1/platform/operators/${encodeURIComponent(opId)}/director/reset-password`, { method: 'POST', idempotent: true });
+    b.disabled = false;
+    if (!r2.ok) {
+      toast(r2.message);
+      return;
+    }
+    const email = directorEmails[opId] || opCode;
+    showPlatformDirectorNotice(email, r2.data.temporary_password);
+    toast('Đã cấp lại mật khẩu giám đốc');
   }));
 }
 $('#operatorForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
-  const body = { code: f.code.value.trim().toUpperCase(), name: f.name.value.trim(), short_name: f.short_name.value.trim() || undefined, hotline: f.hotline.value.trim() || undefined, bank: { bin: f.bin.value.trim(), bank_name: f.bank_name.value.trim(), account_number: f.account_number.value.trim(), account_name: f.account_name.value.trim() } };
+  const dirEmail = f.director_email.value.trim();
+  const dirName = f.director_name.value.trim();
+  const body = {
+    code: f.code.value.trim().toUpperCase(),
+    name: f.name.value.trim(),
+    short_name: f.short_name.value.trim() || undefined,
+    hotline: f.hotline.value.trim() || undefined,
+    director_email: dirEmail,
+    director_name: dirName,
+    bank: {
+      bin: f.bin.value.trim(),
+      bank_name: f.bank_name.value.trim(),
+      account_number: f.account_number.value.trim(),
+      account_name: f.account_name.value.trim()
+    }
+  };
   const r = await api('/api/v1/platform/operators', { method: 'POST', idempotent: true, body });
   $('#operatorError').textContent = r.ok ? '' : r.message;
-  if (r.ok) { toast(`Đã tạo nhà xe ${body.code}`); f.reset(); loadOperators(); loadPlatformOperatorPicker(); }
+  if (r.ok) {
+    toast(`Đã tạo nhà xe ${body.code}`);
+    const email = r.data?.director?.username || dirEmail;
+    if (r.data?.operator_id) {
+      directorEmails[r.data.operator_id] = email;
+    }
+    showPlatformDirectorNotice(email, r.data?.temporary_password);
+    f.reset();
+    loadOperators();
+    loadPlatformOperatorPicker();
+  }
 });
 
 // ---------- start ----------

@@ -33,6 +33,7 @@ function withStopTimes(trip, services) {
 export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   const { driverService } = services;
 
+
   // With authentication enforced, a driver only reaches the trips assigned to them.
   if (req.identity && pathname.startsWith('/api/v1/driver/trips/')) {
     const tripId = pathname.split('/')[5];
@@ -50,7 +51,27 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
       if (result.success) {
         sendSuccess(res, result.data);
       } else {
-        sendError(res, result.error, result.code, { ACCOUNT_LOCKED: 429, LICENSE_EXPIRED: 403 }[result.code] || 401, result);
+        sendError(res, result.error, result.code, { ACCOUNT_LOCKED: 429, LICENSE_EXPIRED: 403, DRIVER_LOCKED: 403 }[result.code] || 401, result);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/driver/auth/change-pin (DRI-001)
+  if (pathname === '/api/v1/driver/auth/change-pin' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const driverId = req.identity?.sub;
+      if (!driverId) {
+        sendError(res, 'Cần đăng nhập để thực hiện thao tác này', 'UNAUTHORIZED', 401);
+        return;
+      }
+      const currentPin = body?.current_pin ?? body?.currentPin;
+      const newPin = body?.new_pin ?? body?.newPin;
+      const result = driverService.changePin(driverId, { currentPin, newPin }, req.operatorId);
+      if (result.success) {
+        sendSuccess(res, { success: true });
+      } else {
+        sendError(res, result.error, result.code, result.status || 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;

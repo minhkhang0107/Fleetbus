@@ -79,6 +79,49 @@ class ManagerApiService {
     return data;
   }
 
+  // MGR-001: Change temporary password
+  Future<Map<String, dynamic>> changePassword({
+    required String currentPassword,
+    required String newPassword,
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/auth/change-password',
+      body: {
+        'current_password': currentPassword,
+        'new_password': newPassword,
+      },
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  // MGR-001: Set up two-factor authentication (TOTP)
+  Future<Map<String, dynamic>> setupTotp({
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/auth/totp/setup',
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  // MGR-001: Confirm and activate two-factor authentication (TOTP)
+  Future<Map<String, dynamic>> confirmTotp({
+    required String code,
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/auth/totp/confirm',
+      body: {
+        'code': code,
+      },
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
   // MGR-002: Executive Operations KPIs
   /// D144: messages sent to passengers outside the app (push, SMS), newest first.
   Future<Map<String, dynamic>> getMessages({String? tripId}) {
@@ -136,6 +179,62 @@ class ManagerApiService {
   // MGR-015: Crew Directory
   Future<Map<String, dynamic>> getCrew() {
     return _get('/ops/drivers');
+  }
+
+  // MGR-016: Create driver
+  Future<Map<String, dynamic>> createDriver({
+    required String fullName,
+    required String phone,
+    String? staffId,
+    required String licenseClass,
+    required String licenseExpiry,
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/drivers',
+      body: {
+        'full_name': fullName,
+        'phone': phone,
+        if (staffId != null) 'staff_id': staffId,
+        'license_class': licenseClass,
+        'license_expiry': licenseExpiry,
+      },
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  // MGR-016: Update driver
+  Future<Map<String, dynamic>> updateDriver(
+    String driverId, {
+    String? fullName,
+    String? phone,
+    String? licenseClass,
+    String? licenseExpiry,
+    String? status,
+  }) {
+    return _patch(
+      '/ops/drivers/${Uri.encodeComponent(driverId)}',
+      body: {
+        if (fullName != null) 'full_name': fullName,
+        if (phone != null) 'phone': phone,
+        if (licenseClass != null) 'license_class': licenseClass,
+        if (licenseExpiry != null) 'license_expiry': licenseExpiry,
+        if (status != null) 'status': status,
+      },
+    );
+  }
+
+  // MGR-016: Reset driver PIN
+  Future<Map<String, dynamic>> resetDriverPin(
+    String driverId, {
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/drivers/${Uri.encodeComponent(driverId)}/reset-pin',
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
   }
 
   // MGR-008: Routes Corridors

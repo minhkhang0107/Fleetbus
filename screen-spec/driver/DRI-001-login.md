@@ -152,3 +152,21 @@ Exit Points:
 ## 9. Acceptance Criteria & Test Matrix
 - **AC-001:** Valid staff ID and 6-digit PIN authenticates within $<800\text{ms}$ and navigates to `DRI-002`.
 - **TC-DRI-001-01:** Expired license returns 403 with blocking contact alert.
+
+---
+
+## 10. First Login with a Temporary PIN (D150)
+A driver created by the company (MGR-016) or whose PIN was reset gets a temporary 6-digit PIN from the dispatcher.
+
+- The login response carries `driver.must_change_pin: true`; the app opens "Đặt mã PIN mới" instead of today's trips. Until the PIN is changed every other driver endpoint answers 403 `PIN_CHANGE_REQUIRED` (if the office resets the PIN during a shift, the next call sends the driver to this screen).
+- Fields: "Mã PIN tạm", "Mã PIN mới", "Nhập lại mã PIN mới" (6 digits each, obscured, digits only).
+- New PIN rules (app and server): exactly 6 digits, different from the current one, not six times the same digit, not an ascending or descending run (`123456`, `654321`...), not `000000`; the two new entries must match ("Hai mã PIN mới không khớp").
+- API: `POST /api/v1/driver/auth/change-pin` (`Idempotency-Key`) body `current_pin, new_pin`; a wrong current PIN counts as a failed login (BR-DRI-003 lockout).
+- A driver locked by the company gets 403 `DRIVER_LOCKED` "Tài khoản đã bị nhà xe khóa. Liên hệ điều độ." at login and on the next request.
+- The staff id field starts empty (no demo value).
+
+| Test ID | Condition | Expected |
+|---|---|---|
+| `TC-DRI-001-05` | Login with `must_change_pin` | change-PIN screen, trips not loaded |
+| `TC-DRI-001-06` | New PIN `123456` / mismatch | refused in the app, no request sent |
+| `TC-DRI-001-07` | Valid change | today's trips load; the temporary PIN no longer works |

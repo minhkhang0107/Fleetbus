@@ -285,6 +285,7 @@ class DriverStore extends ChangeNotifier {
   String operatorHotline = '';
   String driverName = '';
   String staffId = '';
+  bool mustChangePin = false;
 
   static Future<String> savedOperatorCode() async {
     final prefs = await SharedPreferences.getInstance();
@@ -431,8 +432,13 @@ class DriverStore extends ChangeNotifier {
     try {
       final json = await request();
       final error = _error(json);
+      final code = json['code']?.toString();
+      if (code == 'PIN_CHANGE_REQUIRED') {
+        mustChangePin = true;
+        notifyListeners();
+      }
       if (offline && error == null) offline = false;
-      return (data: json['data'] is Map<String, dynamic> ? json['data'] as Map<String, dynamic> : null, error: error, code: json['code']?.toString());
+      return (data: json['data'] is Map<String, dynamic> ? json['data'] as Map<String, dynamic> : null, error: error, code: code);
     } catch (_) {
       offline = true;
       if (label != null) queue.add(QueuedAction(label, clock));
@@ -457,6 +463,7 @@ class DriverStore extends ChangeNotifier {
 
       driverName = d['full_name'] ?? '';
       staffId = d['staff_id'] ?? staff.trim();
+      mustChangePin = d['must_change_pin'] == true;
 
       if (op != null) {
         operatorCode = op['code'] ?? api.operatorCode ?? '';
@@ -469,7 +476,18 @@ class DriverStore extends ChangeNotifier {
     } catch (_) {
       return 'Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.';
     }
-    await loadShift();
+    if (!mustChangePin) {
+      await loadShift();
+    }
+    return null;
+  }
+
+  /// DRI-001: Change driver PIN
+  Future<String?> changePin(String currentPin, String newPin) async {
+    final r = await _call(() => api.changePin(currentPin: currentPin, newPin: newPin));
+    if (r.error != null) return r.error;
+    mustChangePin = false;
+    notifyListeners();
     return null;
   }
 
@@ -480,6 +498,7 @@ class DriverStore extends ChangeNotifier {
     shift = [];
     manifest = [];
     _road = null;
+    mustChangePin = false;
     notifyListeners();
   }
 

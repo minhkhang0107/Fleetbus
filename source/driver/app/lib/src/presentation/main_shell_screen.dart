@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'driver_change_pin_screen.dart';
 import 'driver_login_screen.dart';
 import 'driver_offline_sync_screen.dart';
 import 'driver_store.dart';
@@ -17,9 +18,34 @@ class MainShellScreen extends StatefulWidget {
 
 class _MainShellScreenState extends State<MainShellScreen> {
   int _index = 0;
+  bool _redirecting = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkPinChange();
+  }
+
+  void _checkPinChange() {
+    final store = DriverScope.of(context);
+    if (store.mustChangePin && !_redirecting) {
+      _redirecting = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && store.mustChangePin) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const DriverChangePinScreen()),
+            (_) => false,
+          );
+        } else {
+          _redirecting = false;
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    _checkPinChange();
     const pages = [DriverTodayTripsScreen(), DriverOfflineSyncScreen(), _ProfileTab()];
     if (dWide(context)) {
       // Landscape tablet: the tabs move to a rail on the left and give the height back to the content.

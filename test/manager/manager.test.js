@@ -114,9 +114,9 @@ describe('Phase Manager: Operations Control Center Test Suite (MGR-001 to MGR-03
     assert.ok(managerService.getFleetVehicles().data.length >= 4);
 
     // Add driver
-    const addDrvRes = managerService.addDriver({ staff_id: 'TX7701', full_name: 'Vũ Đức Đam', phone: '0977112233' });
+    const addDrvRes = managerService.addDriver({ staff_id: 'TX8822', full_name: 'Vũ Đức Đam', phone: '0977112233', license_class: 'FC', license_expiry: '2028-12-31' });
     assert.strictEqual(addDrvRes.success, true);
-    assert.strictEqual(addDrvRes.data.staff_id, 'TX7701');
+    assert.strictEqual(addDrvRes.data.driver.staff_id, 'TX8822');
     assert.ok(managerService.getCrewDrivers().data.length >= 3);
 
     // Add route

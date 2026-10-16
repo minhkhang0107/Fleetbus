@@ -82,8 +82,8 @@
 | **MGR-012** | Manager | Trip Master Operational Detail | `/ops/trip/:id` | Trip List, Radar, Dispatch Board | `/ops/trip/:id/seat-inventory`, `/ops/trip/:id/replace-vehicle` | P0 | Draft | Source-backed |
 | **MGR-013** | Manager | Segment Seat Inventory Matrix | `/ops/trip/:id/seat-inventory` | Trip Detail, POS Screen | `/ops/trip/:id`, `/ops/booking/:id` | P0 | Draft | Source-backed |
 | **MGR-014** | Manager | Daily Fleet Dispatch Board | `/ops/dispatch` | Sidebar Nav | `/ops/trip/new`, `/ops/radar` | P0 | Draft | Source-backed |
-| **MGR-015** | Manager | Driver Roster Directory | `/ops/drivers` | Sidebar Nav | `/ops/driver/create`, `/ops/driver/:id` | P1 | Draft | Source-backed |
-| **MGR-016** | Manager | Driver Performance & Safety Detail | `/ops/driver/:id` | Driver Directory, Trip Detail | `/ops/drivers`, `/ops/audit` | P2 | Draft | Source-backed |
+| **MGR-015** | Manager | Drivers (Tài xế): list, lock, reset PIN | `/manager` → "Tài xế" | Sidebar Nav | `/manager` | P0 | Draft | Driver accounts 2026-10-15 (D150) |
+| **MGR-016** | Manager | Add / Edit a Driver, temporary PIN | `/manager` → "Tài xế" | Drivers | `/manager` | P0 | Draft | Driver accounts 2026-10-15 (D150) |
 | **MGR-017** | Manager | Global Booking & PNR Search | `/ops/bookings` | Sidebar Nav | `/ops/booking/:id`, `/ops/pos` | P0 | Draft | Source-backed |
 | **MGR-018** | Manager | Booking Master Detail & Ledger | `/ops/booking/:id` | Booking Search, Trip Manifest | `/ops/refund/new?bookingId=:id`, `/ops/payments` | P0 | Draft | Source-backed |
 | **MGR-019** | Manager | POS Counter & Hotline Search | `/ops/pos` | Sidebar Nav, Quick CTA | `/ops/pos/checkout`, `/ops/bookings` | P0 | Draft | Source-backed |
@@ -101,6 +101,7 @@
 | **MGR-031** | Manager | Promotion Banners of the Passenger App | `/manager` → "Quảng cáo" | Sidebar Nav | `/manager` | P2 | Draft | Product owner 2026-10-12 (D124, D125) |
 | **MGR-032** | Manager | Fixed Timetable (Lịch chạy) | `/manager` → "Lịch chạy" | Sidebar Nav | `/manager` | P1 | Draft | Product owner 2026-10-12 (D128, D129) |
 | **MGR-033** | Manager | Home Pickup / Drop-off Review | `/manager` → "Duyệt đón tận nhà" | Sidebar Nav | `/manager` | P1 | Draft | Fixed-route spec 2026-10-12 (D130) |
+| **MGR-034** | Manager | New Company and its Director Account | `/manager` → "Nhà xe (nền tảng)" | Platform | `/manager` | P0 | Draft | Driver accounts 2026-10-15 (D150) |
 
 ---
 
