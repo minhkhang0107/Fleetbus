@@ -3,26 +3,45 @@
  * each stop, pickup / drop-off allowed, hidden from passengers. Stops are never removed from the list, because
  * the seat inventory counts segments by stop position: a hidden stop simply allows no pickup and no drop-off.
  */
-import { projectOnShape, routeShape, stopCoords } from './geo.js';
+import { projectOnShape, routeShape, stopCoords, calculateHaversineDistance } from './geo.js';
 
 const MAX_OFFSET = 24 * 60;
 
 /** Minutes after departure at each stop: the company's figure, else the share of the road driven, else even. */
-function estimatedOffsets(trip) {
+export function estimatedOffsets(trip) {
   const stops = trip.stops || [];
   const duration = Math.max(0, (Date.parse(trip.arrival_time) - Date.parse(trip.departure_time)) / 60000) || trip.duration_minutes || 0;
   const n = stops.length;
   const even = stops.map((_, i) => (n > 1 ? Math.round((duration * i) / (n - 1)) : 0));
+  if (n <= 1) return even;
+
   const shape = routeShape(trip.schedule_id || trip.trip_id);
-  if (!shape || shape.length < 2) return even;
-  const along = stops.map(s => {
-    const c = stopCoords(s.stop_id) || (Number.isFinite(s.lat) && Number.isFinite(s.lng) ? s : null);
-    return c ? projectOnShape(shape, c.lat, c.lng).along_m : null;
-  });
-  const first = along[0];
-  const last = along[n - 1];
-  if (along.some(a => a === null) || !(last > first)) return even;
-  return along.map(a => Math.round((duration * (a - first)) / (last - first)));
+  if (shape && shape.length >= 2) {
+    const along = stops.map(s => {
+      const c = stopCoords(s.stop_id) || (Number.isFinite(s.lat) && Number.isFinite(s.lng) ? s : null);
+      return c ? projectOnShape(shape, c.lat, c.lng).along_m : null;
+    });
+    const first = along[0];
+    const last = along[n - 1];
+    if (!along.some(a => a === null) && last > first) {
+      return along.map(a => Math.round((duration * (a - first)) / (last - first)));
+    }
+  }
+
+  const coords = stops.map(s => stopCoords(s.stop_id) || (Number.isFinite(s.lat) && Number.isFinite(s.lng) ? s : null));
+  if (!coords.some(c => c === null)) {
+    const cum = [0];
+    for (let i = 1; i < n; i++) {
+      const dist = calculateHaversineDistance(coords[i - 1].lat, coords[i - 1].lng, coords[i].lat, coords[i].lng);
+      cum.push(cum[i - 1] + dist);
+    }
+    const totalDist = cum[n - 1];
+    if (totalDist > 0) {
+      return cum.map(d => Math.round((duration * d) / totalDist));
+    }
+  }
+
+  return even;
 }
 
 /** The trip's stops with planned_time, offset_minutes, time_source, hidden and the allowed flags of the route. */

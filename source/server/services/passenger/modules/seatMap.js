@@ -18,6 +18,8 @@ export class PassengerSeatMapService {
     this.stopsProvider = null;
     // (tripId) => layout template, set by the event bridge
     this.layoutProvider = null;
+    // (tripId) => base_fare_vnd, set by the event bridge
+    this.fareProvider = null;
     this.holdDurationSeconds = 600; // 10 minutes Redis lock standard
     this.maxSeatsPerBooking = 5;
 
@@ -32,10 +34,18 @@ export class PassengerSeatMapService {
     }
   }
 
+  _fareOf(tripId) {
+    const fromProvider = this.fareProvider ? this.fareProvider(tripId) : null;
+    if (typeof fromProvider === 'number' && Number.isFinite(fromProvider)) {
+      return fromProvider;
+    }
+    return MOCK_TRIPS_DATABASE.find(t => t.trip_id === tripId)?.base_fare_vnd ?? 220000;
+  }
+
   /** The seats of a trip; a schedule's run or rebuilt trip gets built the first time it is asked. */
   _layout(tripId) {
     if (!this.tripLayouts.has(tripId)) {
-      if (SEEDED_TRIPS.includes(tripId) || MOCK_TRIPS_DATABASE.some(t => t.trip_id === tripId) || this.layoutProvider?.(tripId)) {
+      if (SEEDED_TRIPS.includes(tripId) || MOCK_TRIPS_DATABASE.some(t => t.trip_id === tripId) || this.layoutProvider?.(tripId) || this.fareProvider?.(tripId)) {
         this._initMockTripLayout(tripId, { seedBookings: false });
       }
     }
@@ -46,7 +56,7 @@ export class PassengerSeatMapService {
     // The seats of the bus the trip runs with (D147), else the 22-cabin default.
     const template = this.layoutProvider?.(tripId) || findLayout(DEFAULT_LAYOUT_ID);
     // A seat costs the trip's base fare from the catalog (trips only on the ops boards keep 220.000 đ)
-    const fare = MOCK_TRIPS_DATABASE.find(t => t.trip_id === tripId)?.base_fare_vnd ?? 220000;
+    const fare = this._fareOf(tripId);
     const seats = template.seats.map(s => {
       const isDemo = seedBookings && (s.seat_code === 'A03' || s.seat_code === 'B06');
       return {
@@ -119,7 +129,7 @@ export class PassengerSeatMapService {
       };
     }
 
-    const fare = MOCK_TRIPS_DATABASE.find(t => t.trip_id === tripId)?.base_fare_vnd ?? 220000;
+    const fare = this._fareOf(tripId);
     const newSeats = template.seats.map(s => {
       const oldSeat = oldLayout?.seats.find(os => os.seat_code === s.seat_code);
       const seatObj = {

@@ -65,4 +65,34 @@ describe('COD boarding gate (DRI-010, DRI-012)', () => {
       await new Promise((r) => server.close(r));
     }
   });
+
+  it('TC-COD-01: exact-fare COD with no method succeeds', () => {
+    const { services } = createFleetBusServer();
+    const driver = services.driverService;
+    const res = driver.collectCod(TRIP, COD_TICKET, { amount_collected_vnd: 220000 });
+    assert.strictEqual(res.success, true, JSON.stringify(res));
+    const item = driver.activeTrips.get(TRIP).manifest.find((m) => m.ticket_id === COD_TICKET);
+    assert.strictEqual(item.boarding_status, 'BOARDED');
+    assert.strictEqual(item.cod_collected, true);
+    assert.strictEqual(item.change_settlement.change_due_vnd, 0);
+  });
+
+  it('TC-COD-02: change due with CASH_RETURNED succeeds', () => {
+    const { services } = createFleetBusServer();
+    const driver = services.driverService;
+    const res = driver.collectCod(TRIP, COD_TICKET, { amount_collected_vnd: 300000, change_settlement_method: 'CASH_RETURNED' });
+    assert.strictEqual(res.success, true, JSON.stringify(res));
+    const item = driver.activeTrips.get(TRIP).manifest.find((m) => m.ticket_id === COD_TICKET);
+    assert.strictEqual(item.boarding_status, 'BOARDED');
+    assert.strictEqual(item.change_settlement.change_due_vnd, 80000);
+    assert.strictEqual(item.change_settlement.method, 'CASH_RETURNED');
+  });
+
+  it('TC-COD-03: invalid method with change due still rejected', () => {
+    const { services } = createFleetBusServer();
+    const driver = services.driverService;
+    const res = driver.collectCod(TRIP, COD_TICKET, { amount_collected_vnd: 300000, change_settlement_method: 'INVALID_METHOD' });
+    assert.strictEqual(res.success, false);
+    assert.strictEqual(res.code, 'INVALID_SETTLEMENT_METHOD');
+  });
 });

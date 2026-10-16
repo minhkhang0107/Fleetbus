@@ -14,10 +14,19 @@ class DriverManifestScreen extends StatelessWidget {
   Future<void> _leave(BuildContext context, DriverStore store) async {
     final waiting = store.atStopPassengers.where((p) => p.status == PaxStatus.waiting).toList();
     if (waiting.isNotEmpty) {
+      final hotline = waiting.where((p) => p.isHotline).toList();
+      final paid = waiting.where((p) => !p.isHotline).toList();
+      final messages = <String>[];
+      if (hotline.isNotEmpty) {
+        messages.add('Ghế ${hotline.map((p) => p.seat).join(', ')} giữ qua tổng đài sẽ được nhả, điều hành được báo.');
+      }
+      if (paid.isNotEmpty) {
+        messages.add('Ghế ${paid.map((p) => p.seat).join(', ')}. Rời trạm thì các khách này vẫn ở trạng thái chưa xử lý; điều hành sẽ gọi cho họ.');
+      }
       final yes = await showDriverSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('Còn ${waiting.length} khách chưa lên xe', style: dsans(size: 18, weight: FontWeight.w700)),
             const SizedBox(height: 8),
-            Text('Ghế ${waiting.map((p) => p.seat).join(', ')}. Rời trạm thì các khách này vẫn ở trạng thái chưa xử lý; điều hành sẽ gọi cho họ.', style: dsans(size: 15, color: DTokens.sub, height: 1.5)),
+            Text(messages.join(' '), style: dsans(size: 15, color: DTokens.sub, height: 1.5)),
             const SizedBox(height: 14),
             SheetActions(
               primary: BigButton(label: 'Vẫn rời trạm', onPressed: () => Navigator.of(ctx).pop(true)),

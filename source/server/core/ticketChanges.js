@@ -47,7 +47,14 @@ export function changeTicketStops(services, ticket, { pickupStopId, dropoffStopI
   if (nextPickup === ticket.pickup_stop_id && nextDropoff === ticket.dropoff_stop_id) return fail(400, 'NO_CHANGE', 'Điểm đón và trả không đổi');
 
   const before = { pickup_stop_id: ticket.pickup_stop_id, pickup_stop: ticket.pickup_stop, dropoff_stop_id: ticket.dropoff_stop_id, dropoff_stop: ticket.dropoff_stop };
-  const after = { pickup_stop_id: nextPickup, pickup_stop: stops[from].name, dropoff_stop_id: nextDropoff, dropoff_stop: stops[to].name };
+  const after = {
+    pickup_stop_id: nextPickup,
+    pickup_stop: stops[from].name,
+    dropoff_stop_id: nextDropoff,
+    dropoff_stop: stops[to].name,
+    pickup_time: stops[from]?.planned_time || ticket.pickup_time,
+    pickup_time_estimated: stops[from]?.time_source === 'ESTIMATED'
+  };
   Object.assign(ticket, after, { stops_changed_at: new Date(now).toISOString() });
   const item = driverService?.activeTrips?.get(ticket.trip_id)?.manifest?.find(m => m.ticket_id === ticket.ticket_id);
   if (item) Object.assign(item, after);

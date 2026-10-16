@@ -21,7 +21,7 @@ import { stopCoords, routeShape } from '../../../core/geo.js';
 import { DEFAULT_OPERATOR_ID, findOperatorById, publicOperatorProfile } from '../../../core/operators.js';
 import { DEMO_DATE, vnDate } from '../../../core/serviceDate.js';
 
-const CHANGE_METHODS = ['CASH_RETURNED', 'REST_STOP_DEBT_RECEIPT', 'WALLET_CREDIT'];
+export const CHANGE_METHODS = ['CASH_RETURNED', 'REST_STOP_DEBT_RECEIPT', 'WALLET_CREDIT'];
 const NO_SHOW_GRACE_MINUTES = 10;
 // BR-COD-005: change owed to passengers as debt receipts may total at most this much per trip
 const DEBT_LIMIT_PER_TRIP_VND = 1000000;
@@ -33,7 +33,7 @@ export const MOCK_DRIVERS_DB = [
     phone: '0912345678',
     pin: hashSecret('123456'),
     full_name: 'Trần Văn Bình',
-    license_class: 'FC',
+    license_class: 'E',
     license_valid_until: '2028-12-31',
     is_license_expired: false,
     assigned_vehicle_plate: '29B-123.45',
@@ -47,7 +47,7 @@ export const MOCK_DRIVERS_DB = [
     phone: '0987654321',
     pin: hashSecret('654321'),
     full_name: 'Lê Hoàng Nam',
-    license_class: 'FC',
+    license_class: 'E',
     license_valid_until: '2025-01-01', // Expired license
     is_license_expired: true,
     assigned_vehicle_plate: '29B-678.90',
@@ -61,7 +61,7 @@ export const MOCK_DRIVERS_DB = [
     phone: '0988776655',
     pin: hashSecret('112233'),
     full_name: 'Phạm Quốc Huy',
-    license_class: 'FC',
+    license_class: 'E',
     license_valid_until: '2028-06-30',
     is_license_expired: false,
     assigned_vehicle_plate: '29B-444.11',
@@ -75,7 +75,7 @@ export const MOCK_DRIVERS_DB = [
     phone: '0901777001',
     pin: hashSecret('246810'),
     full_name: 'Đỗ Minh Khoa',
-    license_class: 'FC',
+    license_class: 'E',
     license_valid_until: '2029-03-31',
     is_license_expired: false,
     assigned_vehicle_plate: '30H-246.80',
@@ -92,6 +92,7 @@ function tripLifecycle(status) {
 
 function stopLifecycle(trip, stop, index) {
   if (stop.skipped_at) return 'SKIPPED';
+  if (stop.departed_at) return 'COMPLETED';
   if (stop.status === 'ARRIVED') return index < trip.current_stop_index || trip.status === 'COMPLETED' ? 'COMPLETED' : 'ARRIVED';
   return 'UPCOMING';
 }
@@ -368,7 +369,8 @@ export class DriverCockpitService {
   _publicPassenger(passenger) {
     const { passenger_phone: rawPhone, phone: rawPhone2, ...rest } = passenger;
     const phoneToMask = rawPhone || rawPhone2;
-    return { ...rest, phone_masked: rest.phone_masked || (phoneToMask ? maskPhone(phoneToMask) : null) };
+    const source = passenger.source || (passenger.reservation_id ? 'HOTLINE' : 'ONLINE');
+    return { ...rest, source, phone_masked: rest.phone_masked || (phoneToMask ? maskPhone(phoneToMask) : null) };
   }
 
   /**
@@ -377,7 +379,20 @@ export class DriverCockpitService {
    */
   _event(trip, type, fields = {}, at = Date.now()) {
     if (!trip.events) trip.events = [];
-    trip.events.push({ type, trip_id: trip.trip_id, actor: trip.driver_id || null, at: new Date(at).toISOString(), ...fields });
+    const stopId = fields.stop_id;
+    let stopName = fields.stop_name;
+    if (stopId && !stopName) {
+      const stop = (trip.stops || []).find(s => s.stop_id === stopId);
+      stopName = stop?.name || null;
+    }
+    trip.events.push({
+      type,
+      trip_id: trip.trip_id,
+      actor: trip.driver_id || null,
+      at: new Date(at).toISOString(),
+      ...fields,
+      ...(stopName ? { stop_name: stopName } : {})
+    });
     if (trip.events.length > 2000) trip.events.shift();
   }
 
@@ -428,7 +443,7 @@ export class DriverCockpitService {
         status: trip.status,
         lifecycle_status: pub.lifecycle_status,
         on_board_count: pub.on_board_count,
-        stops: pub.stops.map(({ stop_id, name, order, time, lifecycle_status, counts, arrived_at, skipped_at }) => ({ stop_id, name, order, time, lifecycle_status, counts, arrived_at: arrived_at || null, skipped_at: skipped_at || null })),
+        stops: pub.stops.map(({ stop_id, name, order, time, lifecycle_status, counts, arrived_at, departed_at, skipped_at }) => ({ stop_id, name, order, time, lifecycle_status, counts, arrived_at: arrived_at || null, departed_at: departed_at || null, skipped_at: skipped_at || null })),
         home_pickups: (() => {
           // D144: in collection order, with each passenger's time, answer and what happened at the door.
           const run = this._homeRunView(trip);
@@ -442,7 +457,13 @@ export class DriverCockpitService {
             inaccessible_at: p.home_pickup.inaccessible_at || null, source: p.source || null
           }));
         })(),
-        events: [...(trip.events || [])].reverse()
+        events: [...(trip.events || [])].reverse().map(ev => {
+          if (ev.stop_id && !ev.stop_name) {
+            const stop = (trip.stops || []).find(s => s.stop_id === ev.stop_id);
+            if (stop?.name) return { ...ev, stop_name: stop.name };
+          }
+          return ev;
+        })
       }
     };
   }
@@ -670,6 +691,38 @@ export class DriverCockpitService {
   }
 
   /**
+   * DRI-008: Confirm departure from a stop of a running trip. Repeating it is harmless.
+   */
+  departStop(tripId, stopId, mockNow = Date.now()) {
+    const trip = this.activeTrips.get(tripId);
+    if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+    if (trip.status !== 'IN_TRANSIT') {
+      return { success: false, error: 'Chuyến xe chưa chạy hoặc đã kết thúc', code: 'TRIP_NOT_ACTIVE' };
+    }
+    const index = trip.stops.findIndex(s => s.stop_id === stopId);
+    if (index === -1) return { success: false, error: 'Không tìm thấy điểm dừng', code: 'STOP_NOT_FOUND' };
+
+    const stop = trip.stops[index];
+    if (index < trip.current_stop_index) {
+      return { success: true, data: stop };
+    }
+    if (!stop.departed_at) {
+      if (stop.status !== 'ARRIVED') {
+        stop.status = 'ARRIVED';
+        stop.arrived_at = stop.arrived_at || new Date(mockNow).toISOString();
+      }
+      stop.departed_at = new Date(mockNow).toISOString();
+      // The bus now heads for the next stop; the app reads its position back from this index.
+      trip.current_stop_index = Math.max(trip.current_stop_index, Math.min(index + 1, trip.stops.length - 1));
+      this._event(trip, 'STOP_DEPARTED', { stop_id: stop.stop_id, stop_name: stop.name, message: `Rời trạm ${stop.name}` }, mockNow);
+      if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+        this.eventBridge.emit('STOP_DEPARTED', { tripId, stopId, index, stopName: stop.name });
+      }
+    }
+    return { success: true, data: stop };
+  }
+
+  /**
    * DRI-004: Submit Pre-Start Vehicle Readiness Inspection
    */
   submitReadinessChecklist(tripId, checklist = {}) {
@@ -875,7 +928,7 @@ export class DriverCockpitService {
    * Single place where a manifest passenger becomes BOARDED, so that every boarding path
    * (QR, group QR, PIN, offline ticket, manual) updates the passenger wallet and the manager through the bridge.
    */
-  _markBoarded(tripId, trip, passenger, mockNow, scanMethod = null) {
+  _markBoarded(tripId, trip, passenger, mockNow, scanMethod = null, options = {}) {
     passenger.boarding_status = 'BOARDED';
     passenger.boarded_at = new Date(mockNow).toISOString();
     if (scanMethod) passenger.scan_method = scanMethod;
@@ -894,9 +947,35 @@ export class DriverCockpitService {
         passenger,
         ticketId: passenger.ticket_id,
         pnr: passenger.pnr,
-        now: mockNow
+        now: mockNow,
+        seatCodes: options.seatCodes,
+        skipNotification: options.skipNotification
       });
     }
+  }
+
+  _boardTogether(tripId, trip, passengers, mockNow) {
+    const byPhone = new Map();
+    for (const p of passengers) {
+      const phone = p.passenger_phone || p.phone;
+      const list = byPhone.get(phone) || [];
+      list.push(p);
+      byPhone.set(phone, list);
+    }
+
+    const boardedList = [];
+    for (const p of passengers) {
+      const phone = p.passenger_phone || p.phone;
+      const phonePax = byPhone.get(phone) || [p];
+      const isFirst = phonePax[0] === p;
+      const seatCodes = phonePax.map(x => x.seat_code).filter(Boolean);
+      this._markBoarded(tripId, trip, p, mockNow, null, {
+        seatCodes,
+        skipNotification: !isFirst
+      });
+      boardedList.push(p);
+    }
+    return boardedList;
   }
 
   /**
@@ -925,7 +1004,7 @@ export class DriverCockpitService {
         return { success: false, error: 'Vé không thuộc chuyến xe này', code: 'TICKET_WRONG_TRIP' };
       }
 
-      const boardedList = [];
+      const toBoard = [];
       const codPending = [];
       const revokedList = [];
       for (const { member, passenger } of onTrip) {
@@ -938,9 +1017,10 @@ export class DriverCockpitService {
           codPending.push(passenger);
           continue;
         }
-        this._markBoarded(tripId, trip, passenger, mockNow);
-        boardedList.push(passenger);
+        toBoard.push(passenger);
       }
+
+      const boardedList = this._boardTogether(tripId, trip, toBoard, mockNow);
 
       return {
         success: true,
@@ -962,10 +1042,63 @@ export class DriverCockpitService {
       if (!passenger) {
         return { success: false, error: 'Vé không thuộc chuyến xe này', code: 'TICKET_WRONG_TRIP' };
       }
-      if (!verifyTicketPin(ticketId, pin, this.secretKey, versionOf(passenger)).isValid) {
+
+      const pnr = passenger.pnr;
+      const groupPassengers = pnr
+        ? trip.manifest.filter(m => m.pnr === pnr)
+        : [passenger];
+
+      const isPinValid = groupPassengers.some(t =>
+        verifyTicketPin(t.ticket_id, pin, this.secretKey, versionOf(t)).isValid
+      );
+      if (!isPinValid) {
         return { success: false, error: 'Mã PIN vé không chính xác', code: 'INVALID_PIN' };
       }
-      return this._boardOne(tripId, trip, passenger, mockNow, 'Xác thực PIN thành công');
+
+      if (groupPassengers.every(p => p.boarding_status === 'BOARDED')) {
+        return {
+          success: false,
+          error: `Khách ${passenger.passenger_name} (Ghế ${passenger.seat_code}) đã lên xe trước đó!`,
+          code: 'ALREADY_BOARDED'
+        };
+      }
+
+      const toBoard = [];
+      const codPending = [];
+      const revokedList = [];
+      for (const p of groupPassengers) {
+        if (p.boarding_status === 'BOARDED') continue;
+        if (p.boarding_status === 'CANCELLED') {
+          revokedList.push(p);
+          continue;
+        }
+        if (this._codPaymentRequired(p)) {
+          codPending.push(p);
+          continue;
+        }
+        toBoard.push(p);
+      }
+
+      const boardedList = this._boardTogether(tripId, trip, toBoard, mockNow);
+
+      const targetPassenger = boardedList.find(p => p.ticket_id === passenger.ticket_id) || boardedList[0] || passenger;
+
+      return {
+        success: true,
+        isGroup: groupPassengers.length > 1,
+        message: boardedList.length > 1
+          ? `Xác thực PIN thành công: ${boardedList.length} khách đã lên xe`
+          : (boardedList.length === 1
+            ? `Xác thực PIN thành công: ${targetPassenger.passenger_name} · Ghế ${targetPassenger.seat_code}`
+            : 'Xác thực PIN thành công'),
+        data: {
+          ...this._publicPassenger(targetPassenger),
+          pnr,
+          boarded_passengers: boardedList.map(p => this._publicPassenger(p)),
+          cod_pending_passengers: codPending.map(p => this._publicPassenger(p)),
+          revoked_passengers: revokedList.map(p => this._publicPassenger(p))
+        }
+      };
     }
 
     // Single boarding QR (BUSGO|pnr|ticket|v<n>|hmac)
@@ -1196,11 +1329,13 @@ export class DriverCockpitService {
    * Debt receipt codes are unique per ticket (DR-<ticket>-<thousands>K) and are listed at trip end.
    */
   _settleChange(trip, { ticketId, changeDue, method, phone }) {
-    if (!CHANGE_METHODS.includes(method)) {
-      return { success: false, error: 'Hình thức xử lý tiền thừa không hợp lệ', code: 'INVALID_SETTLEMENT_METHOD' };
-    }
-    if (method === 'WALLET_CREDIT' && changeDue > 0 && !phone) {
-      return { success: false, error: 'Cần số điện thoại của khách để cộng tiền thừa vào ví', code: 'WALLET_PHONE_REQUIRED' };
+    if (changeDue > 0) {
+      if (!CHANGE_METHODS.includes(method)) {
+        return { success: false, error: 'Hình thức xử lý tiền thừa không hợp lệ', code: 'INVALID_SETTLEMENT_METHOD' };
+      }
+      if (method === 'WALLET_CREDIT' && !phone) {
+        return { success: false, error: 'Cần số điện thoại của khách để cộng tiền thừa vào ví', code: 'WALLET_PHONE_REQUIRED' };
+      }
     }
 
     let debtReceiptCode = null;
@@ -1234,7 +1369,7 @@ export class DriverCockpitService {
 
     return {
       success: true,
-      data: { method, change_due_vnd: changeDue, debt_receipt_code: debtReceiptCode, payout_location: payoutLocation }
+      data: { method: method || null, change_due_vnd: changeDue, debt_receipt_code: debtReceiptCode, payout_location: payoutLocation }
     };
   }
 
@@ -1277,7 +1412,7 @@ export class DriverCockpitService {
     }
 
     const changeDue = collectedAmount - fareAmount;
-    const method = payload.change_settlement_method || 'CASH_RETURNED';
+    const method = payload.change_settlement_method !== undefined ? payload.change_settlement_method : (changeDue > 0 ? 'CASH_RETURNED' : null);
     const settlement = this._settleChange(trip, { ticketId, changeDue, method, phone: item.passenger_phone });
     if (!settlement.success) return settlement;
 
@@ -1754,10 +1889,13 @@ export class DriverCockpitService {
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
       this.eventBridge.emit('TRIP_COMPLETED', {
         tripId,
+        driverId: trip.driver_id,
+        operatorId: trip.operator_id,
         summary: {
           vehicle_plate: trip.vehicle_plate,
           total_passengers: trip.booked_passengers_count,
-          boarded_count: trip.boarded_count
+          boarded_count: trip.boarded_count,
+          total_cash_to_handover_vnd: summary.total_cash_to_handover_vnd
         }
       });
     }

@@ -134,7 +134,7 @@ function streamTracking(req, res, services, tripId, build) {
  * PAX-018: what the caller may see of the trip's bus, or null when the trip is not theirs to see. A ticket the
  * caller owns (or a share link) shows the bus and the ETA to its own stop; anyone else gets the public view.
  */
-function trackingFor(req, services, tripId, url) {
+export function trackingFor(req, services, tripId, url) {
   const { searchService, paymentService, trackingService } = services;
   if (!tripVisibleTo(services, tripId, req.operatorId)) return null;
   const ticketId = url.searchParams.get('ticket_id');
@@ -212,6 +212,7 @@ function trackingFor(req, services, tripId, url) {
     homePickup
   });
   const data = tracking.data || tracking;
+  data.boarded = Boolean(boarded);
   // D144: a home pickup is timed along the run (addresses before theirs, the wait at each door).
   return manifestId && !boarded ? applyHomeRun(data, services, tripId, manifestId) : data;
 }

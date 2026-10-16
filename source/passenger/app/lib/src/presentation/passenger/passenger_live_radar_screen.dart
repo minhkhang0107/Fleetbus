@@ -110,22 +110,27 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
   Widget build(BuildContext context) {
     final ticket = widget.ticket;
     final tr = _tracking;
+    final isCompleted = ticket.past || tr?.ended == true || tr?.tripStatus == 'COMPLETED';
     final signal = tr?.signal ?? GpsSignal.none;
     final live = signal == GpsSignal.live;
-    final pill = switch (signal) {
-      GpsSignal.live => const Pill('Trực tiếp', PillKind.ok),
-      GpsSignal.stale => const Pill('Mất tín hiệu', PillKind.warn),
-      GpsSignal.offline => const Pill('Ngoại tuyến', PillKind.mute),
-      GpsSignal.none => const Pill('Chưa có tín hiệu', PillKind.mute),
-    };
-    final banner = switch (signal) {
-      GpsSignal.live => null,
-      GpsSignal.stale => ('Mất tín hiệu. ', 'Vị trí dưới đây đã cũ; giờ đến chỉ là ước tính.'),
-      GpsSignal.offline => ('Xe ngoại tuyến. ', 'Vị trí dưới đây đã cũ; giờ đến chỉ là ước tính.'),
-      GpsSignal.none => tr?.target?.isHome == true
-          ? ('Chưa nhận tín hiệu từ xe. ', 'Vị trí sẽ hiện khi tài xế lên đường đón bạn.')
-          : ('Chưa nhận tín hiệu từ xe. ', 'Vị trí sẽ hiện khi xe bắt đầu chạy.'),
-    };
+    final pill = isCompleted
+        ? const Pill('Đã đi', PillKind.mute)
+        : switch (signal) {
+            GpsSignal.live => const Pill('Trực tiếp', PillKind.ok),
+            GpsSignal.stale => const Pill('Mất tín hiệu', PillKind.warn),
+            GpsSignal.offline => const Pill('Ngoại tuyến', PillKind.mute),
+            GpsSignal.none => const Pill('Chưa có tín hiệu', PillKind.mute),
+          };
+    final banner = isCompleted
+        ? null
+        : switch (signal) {
+            GpsSignal.live => null,
+            GpsSignal.stale => ('Mất tín hiệu. ', 'Vị trí dưới đây đã cũ; giờ đến chỉ là ước tính.'),
+            GpsSignal.offline => ('Xe ngoại tuyến. ', 'Vị trí dưới đây đã cũ; giờ đến chỉ là ước tính.'),
+            GpsSignal.none => tr?.target?.isHome == true
+                ? ('Chưa nhận tín hiệu từ xe. ', 'Vị trí sẽ hiện khi tài xế lên đường đón bạn.')
+                : ('Chưa nhận tín hiệu từ xe. ', 'Vị trí sẽ hiện khi xe bắt đầu chạy.'),
+          };
     final wide = pWide(context);
     final map = PassengerRouteMap(tracking: tr);
     final info = Container(
@@ -134,7 +139,17 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
       child: SafeArea(
         top: false,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          if (tr?.passedTarget == true)
+          if (isCompleted) ...[
+            Text(
+              'Chuyến đã kết thúc',
+              style: sans(size: 16, weight: FontWeight.w600, color: PTokens.ink),
+            ),
+            gap(12),
+            Row(children: [
+              const Expanded(child: _Metric('Trạng thái', 'Đã đi')),
+              Expanded(child: _Metric('Điểm trả', ticket.dropoff.isNotEmpty ? ticket.dropoff : ticket.route.split(' → ').last)),
+            ]),
+          ] else if (tr?.passedTarget == true)
             Text(
               tr!.text.isNotEmpty ? tr.text : 'Xe đã qua điểm đón',
               style: sans(size: 16, weight: FontWeight.w600, color: PTokens.ink),

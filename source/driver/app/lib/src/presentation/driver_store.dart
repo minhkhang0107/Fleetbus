@@ -104,6 +104,7 @@ class Passenger {
     this.inaccessible = false,
     this.meetingPoint,
     this.homeMissed = false,
+    this.isHotline = false,
   });
   final String ticketId;
   final String seat;
@@ -117,6 +118,7 @@ class Passenger {
   final PaxStatus status;
   final int? boardedAt;
   final bool hail;
+  final bool isHotline;
 
   /// Home pickup / drop-off address (spec 3.1); the passenger still rides from [from] to [to].
   final String? homePickup;
@@ -170,6 +172,7 @@ class Passenger {
       inaccessible: j['home_pickup']?['inaccessible_at'] != null,
       meetingPoint: j['home_pickup']?['meeting_point'],
       homeMissed: j['home_pickup']?['missed_at'] != null,
+      isHotline: j['source'] == 'HOTLINE',
     );
   }
 }
@@ -286,6 +289,7 @@ class DriverStore extends ChangeNotifier {
   String driverName = '';
   String staffId = '';
   bool mustChangePin = false;
+  String? temporaryPin;
 
   static Future<String> savedOperatorCode() async {
     final prefs = await SharedPreferences.getInstance();
@@ -302,6 +306,16 @@ class DriverStore extends ChangeNotifier {
   String route = '';
   String plate = '';
   String depTime = '--:--';
+  int delayMinutes = 0;
+  String? estimatedDepTime;
+
+  String get depTimeLabel {
+    if (delayMinutes > 0 && depTime != '--:--') {
+      final est = estimatedDepTime ?? hhmm(toMinutes(depTime) + delayMinutes);
+      return '$depTime → $est (trễ $delayMinutes phút)';
+    }
+    return depTime;
+  }
   int fare = 0;
   TripState trip = TripState.readyCheck;
   List<DriverStop> stops = const [];
@@ -376,7 +390,7 @@ class DriverStore extends ChangeNotifier {
             intervalDuration: const Duration(seconds: 5),
             foregroundNotificationConfig: ForegroundNotificationConfig(
               notificationTitle: 'BusGo Driver đang gửi vị trí xe',
-              notificationText: 'Khách và điều hành đang theo dõi chuyến $depTime',
+              notificationText: 'Khách và điều hành đang theo dõi chuyến $depTimeLabel',
               enableWakeLock: true,
               setOngoing: true,
             ),
@@ -464,6 +478,7 @@ class DriverStore extends ChangeNotifier {
       driverName = d['full_name'] ?? '';
       staffId = d['staff_id'] ?? staff.trim();
       mustChangePin = d['must_change_pin'] == true;
+      temporaryPin = pin.trim();
 
       if (op != null) {
         operatorCode = op['code'] ?? api.operatorCode ?? '';
@@ -487,6 +502,7 @@ class DriverStore extends ChangeNotifier {
     final r = await _call(() => api.changePin(currentPin: currentPin, newPin: newPin));
     if (r.error != null) return r.error;
     mustChangePin = false;
+    temporaryPin = null;
     notifyListeners();
     return null;
   }
@@ -499,6 +515,7 @@ class DriverStore extends ChangeNotifier {
     manifest = [];
     _road = null;
     mustChangePin = false;
+    temporaryPin = null;
     notifyListeners();
   }
 
@@ -519,7 +536,7 @@ class DriverStore extends ChangeNotifier {
     shift = [
       for (final t in trips)
         ShiftTrip(
-            t['trip_id'], _depOf(t), routeLabel(t['route_name'] ?? ''), t['vehicle_plate'] ?? '', (t['manifest'] as List? ?? []).length, t['status'] ?? ''),
+            t['trip_id'], _depLabelOf(t), routeLabel(t['route_name'] ?? ''), t['vehicle_plate'] ?? '', (t['manifest'] as List? ?? []).length, t['status'] ?? ''),
     ];
     final live = trips.where((t) => t['status'] != 'CANCELLED').toList();
     final current = live.where((t) => t['status'] != 'COMPLETED').firstOrNull ?? live.lastOrNull;
@@ -545,11 +562,34 @@ class DriverStore extends ChangeNotifier {
     return dep == null ? '--:--' : hhmm(dep.hour * 60 + dep.minute);
   }
 
+  static String? _estimatedDepOf(dynamic estimatedIso, String depTime, int delay) {
+    if (estimatedIso != null) {
+      final estDt = DateTime.tryParse('$estimatedIso')?.toUtc().add(const Duration(hours: 7));
+      if (estDt != null) return hhmm(estDt.hour * 60 + estDt.minute);
+    }
+    if (delay > 0 && depTime != '--:--') {
+      return hhmm(toMinutes(depTime) + delay);
+    }
+    return null;
+  }
+
+  String _depLabelOf(Map<String, dynamic> t) {
+    final dep = _depOf(t);
+    final delay = (t['delay_minutes'] as num?)?.toInt() ?? 0;
+    final est = _estimatedDepOf(t['estimated_departure_time'], dep, delay);
+    if (delay > 0 && dep != '--:--' && est != null) {
+      return '$dep → $est (trễ $delay phút)';
+    }
+    return dep;
+  }
+
   void _apply(Map<String, dynamic> t, {bool fresh = false}) {
     tripId = t['trip_id'];
     route = routeLabel(t['route_name'] ?? '');
     plate = t['vehicle_plate'] ?? '';
     depTime = _depOf(t);
+    delayMinutes = (t['delay_minutes'] as num?)?.toInt() ?? 0;
+    estimatedDepTime = _estimatedDepOf(t['estimated_departure_time'], depTime, delayMinutes);
     final depAt = DateTime.tryParse('${t['planned_departure_time']}')?.toUtc().add(const Duration(hours: 7));
     final today = _vnNow();
     realClock = depAt != null && depAt.year == today.year && depAt.month == today.month && depAt.day == today.day;
@@ -808,9 +848,13 @@ class DriverStore extends ChangeNotifier {
   }
 
   void leaveStop() {
-    if (!realClock) clock = clock < toMinutes(stop.time) + 1 ? toMinutes(stop.time) + 1 : clock;
+    final current = stops.isNotEmpty ? stop : null;
+    if (!realClock && current != null) clock = clock < toMinutes(current.time) + 1 ? toMinutes(current.time) + 1 : clock;
     atStop = false;
     moving = true;
+    if (tripId != null && current != null) {
+      unawaited(_act('Rời ${current.name}', () => api.departStop(tripId!, current.id)));
+    }
     stopIndex = (stopIndex + 1).clamp(0, stops.length - 1);
     final nextStop = stops.isNotEmpty ? stops[stopIndex] : null;
     final now = DateTime.now();
@@ -865,10 +909,10 @@ class DriverStore extends ChangeNotifier {
   Future<String?> board(Passenger p) => _act('Cho lên xe ghế ${p.seat}', () => api.boardManually(tripId!, ticketId: p.ticketId));
 
   /// DRI-010: the backup PIN is checked by the server against the ticket's current QR version.
-  Future<({String? error, String? code})> boardWithPin(Passenger p, String pin) async {
+  Future<({String? error, String? code, Map<String, dynamic>? data})> boardWithPin(Passenger p, String pin) async {
     final r = await _call(() => api.boardWithQr(tripId!, 'PIN:${p.ticketId}:$pin'), label: 'PIN ghế ${p.seat}');
     if (r.error == null) await refreshTrip();
-    return (error: r.error, code: r.code);
+    return (error: r.error, code: r.code, data: r.data);
   }
 
   /// DRI-009: a scanned boarding QR (BUSGO|pnr|ticket|v<n>|hmac).
@@ -884,9 +928,15 @@ class DriverStore extends ChangeNotifier {
 
   Future<String?> markNoShow(Passenger p) => _act('Vắng mặt ghế ${p.seat}', () => api.markNoShow(tripId!, p.ticketId));
 
+  static const changeSettlementMethods = {
+    'CASH': 'CASH_RETURNED',
+    'DEBT': 'REST_STOP_DEBT_RECEIPT',
+    'WALLET': 'WALLET_CREDIT',
+  };
+
   /// DRI-012: collect the fare; change returned in cash, credited to the wallet, or as a debt receipt.
   Future<String?> collectCod(Passenger p, {required int given, required String method}) =>
-      _act('Thu COD ghế ${p.seat}', () => api.collectCod(tripId!, p.ticketId, given, changeSettlementMethod: method));
+      _act('Thu COD ghế ${p.seat}', () => api.collectCod(tripId!, p.ticketId, given, changeSettlementMethod: changeSettlementMethods[method]!));
 
   /// DRI-006: free seats for a hailing passenger, from the seat map minus the manifest.
   Future<void> loadFreeSeats() async {

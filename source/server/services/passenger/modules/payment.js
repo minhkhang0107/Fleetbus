@@ -18,9 +18,27 @@ import { findOperatorById, DEFAULT_OPERATOR_ID } from '../../../core/operators.j
 // PAX-025: a delay longer than this waives the cancellation fee
 const DELAY_WAIVER_AFTER_MINUTES = 30;
 
+function resolveStopTime(trip, pickupStopId, searchService) {
+  if (searchService && trip?.trip_id && pickupStopId) {
+    const times = searchService.stopTimes?.(trip.trip_id);
+    const stop = times?.[pickupStopId];
+    if (stop?.planned_time) {
+      return {
+        pickup_time: stop.planned_time,
+        pickup_time_estimated: stop.time_source === 'ESTIMATED'
+      };
+    }
+  }
+  return {
+    pickup_time: trip?.departure_time || null,
+    pickup_time_estimated: false
+  };
+}
+
 export class PassengerPaymentService {
   constructor(options = {}) {
     this.secretKey = options.secretKey || getTicketSecret();
+    this.searchService = options.searchService || null;
     this.orders = new Map(); // orderId -> Order
     this.tickets = new Map(); // ticketId -> Ticket
     this.pnrIndex = new Map(); // PNR -> orderId
@@ -97,6 +115,8 @@ export class PassengerPaymentService {
       memo: transferMemo
     });
 
+    const timeInfo = resolveStopTime(trip, pickupStopId, this.searchService);
+
     const order = {
       order_id: orderId,
       pnr,
@@ -105,6 +125,8 @@ export class PassengerPaymentService {
       operator_id: operatorId,
       route_name: trip.route_name,
       departure_time: trip.departure_time,
+      pickup_time: timeInfo.pickup_time,
+      pickup_time_estimated: timeInfo.pickup_time_estimated,
       seat_codes: seatCodes,
       pickup_stop: pickupStop,
       dropoff_stop: dropoffStop,
@@ -178,6 +200,8 @@ export class PassengerPaymentService {
         operator_id: order.operator_id || DEFAULT_OPERATOR_ID,
         route_name: order.route_name,
         departure_time: order.departure_time,
+        pickup_time: order.pickup_time || order.departure_time,
+        pickup_time_estimated: Boolean(order.pickup_time_estimated),
         seat_code: seatCode,
         deck: seatInfo?.deck || 1,
         fare_vnd: Math.round(order.amount_vnd / order.seat_codes.length),
@@ -283,6 +307,16 @@ export class PassengerPaymentService {
     };
   }
 
+  _enrichTicket(ticket) {
+    if (!ticket) return ticket;
+    if (ticket.pickup_time === undefined) {
+      const timeInfo = resolveStopTime({ trip_id: ticket.trip_id, departure_time: ticket.departure_time }, ticket.pickup_stop_id, this.searchService);
+      ticket.pickup_time = timeInfo.pickup_time;
+      ticket.pickup_time_estimated = timeInfo.pickup_time_estimated;
+    }
+    return ticket;
+  }
+
   /**
    * PAX-016: Get passenger ticket wallet with tab filters (UPCOMING, COMPLETED, CANCELLED).
    * The phone must be a complete, valid number and is matched exactly.
@@ -329,7 +363,7 @@ export class PassengerPaymentService {
     return {
       success: true,
       total_count: filtered.length,
-      data: filtered
+      data: filtered.map(t => this._enrichTicket(t))
     };
   }
 
@@ -341,6 +375,7 @@ export class PassengerPaymentService {
     if (!ticket) {
       return { success: false, error: 'Không tìm thấy vé', code: 'TICKET_NOT_FOUND' };
     }
+    this._enrichTicket(ticket);
 
     // PAX-017: a boarded or absent ticket still opens, with its status and no QR to show or share
     if (['BOARDED', 'NO_SHOW'].includes(ticket.status)) {
@@ -424,7 +459,7 @@ export class PassengerPaymentService {
       is_settled: order.payment_status === 'PAID',
       reconciliation_mode: 'ACTIVE_POLL',
       data: order,
-      tickets: order.ticket_ids ? order.ticket_ids.map(id => this.tickets.get(id)).filter(Boolean) : []
+      tickets: order.ticket_ids ? order.ticket_ids.map(id => this._enrichTicket(this.tickets.get(id))).filter(Boolean) : []
     };
   }
 
@@ -448,7 +483,7 @@ export class PassengerPaymentService {
         amount_vnd: order.amount_vnd,
         payment_status: order.payment_status,
         expires_at: order.expires_at,
-        tickets: (order.ticket_ids || []).map(id => this.tickets.get(id)).filter(Boolean)
+        tickets: (order.ticket_ids || []).map(id => this._enrichTicket(this.tickets.get(id))).filter(Boolean)
       }
     };
   }

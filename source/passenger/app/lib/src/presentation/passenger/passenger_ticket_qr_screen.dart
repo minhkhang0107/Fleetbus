@@ -220,7 +220,13 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
                   child: Column(children: [
                     Text('Mã PIN dự phòng', style: sans(size: 13, color: const Color(0xFF1E3A8A))),
                     Text('${t.pin!.substring(0, 3)} ${t.pin!.substring(3)}', style: mono(size: 20, weight: FontWeight.w700, color: const Color(0xFF1E3A8A))),
-                    Text('Đọc mã này cho tài xế nếu không quét được.', style: sans(size: 12, color: const Color(0xFF1E3A8A))),
+                    Text(
+                      t.seat.contains(',')
+                          ? 'Đọc mã này cho tài xế nếu không quét được. Mã dùng cho cả ghế ${t.seat}.'
+                          : 'Đọc mã này cho tài xế nếu không quét được.',
+                      textAlign: TextAlign.center,
+                      style: sans(size: 12, color: const Color(0xFF1E3A8A)),
+                    ),
                   ]),
                 ),
               ],
@@ -239,7 +245,7 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
             ]),
             gap(12),
             Row(children: [
-              Expanded(child: KeyValue('Đón', '${t.pickup} · ${t.departure}')),
+              Expanded(child: KeyValue('Đón', '${t.pickup} · ${t.pickupTimeLabel}')),
               Expanded(child: KeyValue('Ngày', t.date)),
             ]),
             if (t.homePickup != null) ...[

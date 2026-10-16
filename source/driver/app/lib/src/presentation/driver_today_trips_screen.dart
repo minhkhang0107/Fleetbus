@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'driver_cockpit_dashboard.dart';
+import 'driver_passenger_list_screen.dart';
 import 'driver_readiness_screen.dart';
 import 'driver_store.dart';
 import 'driver_widgets.dart';
@@ -56,7 +57,7 @@ class DriverTodayTripsScreen extends StatelessWidget {
         ]),
         const SizedBox(height: 14),
         Wrap(crossAxisAlignment: WrapCrossAlignment.end, spacing: 10, children: [
-          Text(store.depTime, style: dmono(size: 32)),
+          Text(store.depTimeLabel, style: dmono(size: store.delayMinutes > 0 ? 20 : 32)),
           Text(store.route, style: dsans(size: 18, weight: FontWeight.w600)),
         ]),
         const SizedBox(height: 14),
@@ -70,8 +71,22 @@ class DriverTodayTripsScreen extends StatelessWidget {
         const SizedBox(height: 14),
         Text('Xuất phát ${store.firstStopName} · có mặt trước ${hhmm(toMinutes(store.depTime == '--:--' ? '00:30' : store.depTime) - 30)}', style: dsans(size: 14, color: DTokens.sub)),
         const SizedBox(height: 14),
-        if (cta != null) cta,
-        if (store.endedCash != null) Panel(color: DTokens.bg, child: Text('Đã nộp ${vnd(store.endedCash!)} · ${store.boardedCount} khách lên xe', style: dsans(size: 14))),
+        if (cta != null) ...[
+          cta,
+          const SizedBox(height: 10),
+        ],
+        BigButton(
+          label: 'Danh sách khách',
+          outline: true,
+          color: const Color(0xFFE2E8F0),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const DriverPassengerListScreen()),
+          ),
+        ),
+        if (store.endedCash != null) ...[
+          const SizedBox(height: 10),
+          Panel(color: DTokens.bg, child: Text('Đã nộp ${vnd(store.endedCash!)} · ${store.boardedCount} khách lên xe', style: dsans(size: 14))),
+        ],
       ]),
     );
     final next = store.nextTrip == null

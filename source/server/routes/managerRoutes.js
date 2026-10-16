@@ -416,7 +416,8 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       sendError(res, result.error, result.code, result.status || 400);
       return true;
     }
-    audit(req, managerService, { action: 'DRIVER_PIN_RESET', resource: driverId, before: null, after: null });
+    const drv = managerService.drivers.find(d => d.driver_id === driverId);
+    audit(req, managerService, { action: 'DRIVER_PIN_RESET', resource: driverId, before: null, after: drv ? { driver_id: driverId, staff_id: drv.staff_id, full_name: drv.full_name } : null });
     sendSuccess(res, { temporary_pin: result.data.temporary_pin });
     return true;
   }
@@ -534,12 +535,36 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       });
 
       if (result.success) {
-        audit(req, managerService, { action: 'HOTLINE_HOLD', resource: result.data.reservation_id, after: { trip_id: result.data.trip_id, seats: result.data.seat_codes, hold_until: result.data.hold_until } });
+        audit(req, managerService, { action: 'HOTLINE_HOLD', resource: result.data.pnr || result.data.reservation_id, after: { pnr: result.data.pnr, reservation_id: result.data.reservation_id, trip_id: result.data.trip_id, seats: result.data.seat_codes, total_fare_vnd: result.data.total_fare_vnd, hold_until: result.data.hold_until } });
         sendSuccess(res, result.data || result, 201);
       } else {
         sendError(res, result.error, result.code, inventoryErrorStatus(result.code));
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/ops/pos/hotline-holds/:reservationId/cancel (MGR-020)
+  const cancelHoldMatch = pathname.match(/^\/api\/v1\/ops\/pos\/hotline-holds\/([^/]+)\/cancel$/);
+  if (cancelHoldMatch && req.method === 'POST') {
+    const reservationId = decodeURIComponent(cancelHoldMatch[1]);
+    const result = managerService.cancelHotlineHold(reservationId, 'Hủy bởi nhân viên điều hành');
+    if (!result.success) {
+      sendError(res, result.error, result.code || 'RESERVATION_NOT_FOUND', result.code === 'RESERVATION_NOT_FOUND' ? 404 : 400);
+      return true;
+    }
+    audit(req, managerService, {
+      action: 'HOTLINE_HOLD_CANCELLED',
+      resource: result.data.pnr || `hotline:${reservationId}`,
+      after: {
+        pnr: result.data.pnr,
+        reservation_id: reservationId,
+        trip_id: result.data.trip_id,
+        seats: result.data.seat_codes,
+        hold_status: 'CANCELLED_BY_STAFF'
+      }
+    });
+    sendSuccess(res, result.data);
     return true;
   }
 
@@ -591,7 +616,18 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       const before = { delay_minutes: managerService.findTrip(tripId)?.delay_minutes ?? null };
       const result = managerService.broadcastTripDelay(tripId, rawMinutes, reason, req.operatorId);
       if (result.success) {
-        audit(req, managerService, { action: 'TRIP_DELAY', resource: tripId, before, after: { delay_minutes: result.data.delay_minutes } });
+        const tripObj = managerService.findTrip(tripId);
+        audit(req, managerService, {
+          action: 'TRIP_DELAY',
+          resource: tripId,
+          before,
+          after: {
+            delay_minutes: result.data.delay_minutes,
+            trip_id: tripId,
+            departure_time: tripObj?.departure_time,
+            route_name: tripObj?.route_name
+          }
+        });
         sendSuccess(res, result.data || result);
       } else {
         sendError(res, result.error, result.code, (result.code === "TRIP_NOT_FOUND" || result.code === "REFUND_NOT_FOUND") ? 404 : 400);
@@ -725,7 +761,20 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         sendError(res, result.error, result.code, status(result.code), result.conflict_trip_id ? { conflict_trip_id: result.conflict_trip_id } : null);
         return;
       }
-      audit(req, managerService, { action: 'TRIP_ASSIGN', resource: tripId, before: snapshot, after: { vehicle_id: result.data.vehicle_id, driver_id: result.data.driver_id, scope: result.data.scope } });
+      const tripObj = managerService.findTrip(tripId);
+      audit(req, managerService, {
+        action: 'TRIP_ASSIGN',
+        resource: tripId,
+        before: snapshot,
+        after: {
+          vehicle_id: result.data.vehicle_id,
+          driver_id: result.data.driver_id,
+          scope: result.data.scope,
+          trip_id: tripId,
+          departure_time: tripObj?.departure_time,
+          route_name: tripObj?.route_name
+        }
+      });
       sendSuccess(res, result.data);
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -741,6 +790,41 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       return true;
     }
     sendSuccess(res, result.data);
+    return true;
+  }
+
+  // GET /api/v1/ops/trips/:tripId/hotline-holds (MGR-014)
+  const tripHoldsMatch = pathname.match(/^\/api\/v1\/ops\/trips\/([^/]+)\/hotline-holds$/);
+  if (tripHoldsMatch && req.method === 'GET') {
+    const tripId = decodeURIComponent(tripHoldsMatch[1]);
+    if (!tripVisibleTo(services, tripId, req.operatorId)) {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+      return true;
+    }
+    managerService.releaseExpiredHotlineHolds();
+    const trip = managerService.findTrip(tripId);
+    const detail = services.searchService?.getTripDetail?.(tripId, req.operatorId);
+    const tripStops = trip?.stops || detail?.data?.stops || [];
+    const holds = managerService.hotlineReservations
+      .filter(r => r.trip_id === tripId && (!req.operatorId || r.operator_id === req.operatorId))
+      .map(r => {
+        const stop = tripStops.find(s => s.stop_id === r.pickup_stop_id);
+        const stopName = stop?.name || r.pickup_stop || (r.pickup_stop_id ? `Trạm ${r.pickup_stop_id}` : 'Điểm đón');
+        return {
+          reservation_id: r.reservation_id,
+          pnr: r.pnr,
+          name: r.passenger_name,
+          passenger_name: r.passenger_name,
+          phone: maskPhone(r.phone),
+          seats: r.seat_codes,
+          seat_codes: r.seat_codes,
+          total_fare_vnd: r.total_fare_vnd,
+          pickup_stop_name: stopName,
+          hold_until: r.hold_until,
+          status: r.hold_status
+        };
+      });
+    sendSuccess(res, { trip_id: tripId, holds });
     return true;
   }
 

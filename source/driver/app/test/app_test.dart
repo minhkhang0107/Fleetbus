@@ -2,16 +2,19 @@ import 'dart:convert';
 
 import 'package:app/src/presentation/driver_change_pin_screen.dart';
 import 'package:app/src/presentation/driver_cockpit_dashboard.dart';
+import 'package:app/src/presentation/driver_cod_dialog.dart';
 import 'package:app/src/presentation/driver_end_trip_screen.dart';
 import 'package:app/src/presentation/driver_home_run_screen.dart';
 import 'package:app/src/presentation/driver_incident_dialog.dart';
 import 'package:app/src/presentation/driver_login_screen.dart';
 import 'package:app/src/presentation/driver_manifest_screen.dart';
+import 'package:app/src/presentation/driver_passenger_list_screen.dart';
 import 'package:app/src/presentation/driver_permissions.dart';
 import 'package:app/src/presentation/driver_qr_scanner_screen.dart';
 import 'package:app/src/presentation/driver_readiness_screen.dart';
 import 'package:app/src/presentation/driver_route_map.dart';
 import 'package:app/src/presentation/driver_store.dart';
+import 'package:app/src/presentation/driver_today_trips_screen.dart';
 import 'package:app/src/presentation/driver_widgets.dart';
 import 'package:app/src/presentation/main_shell_screen.dart';
 import 'package:app/src/service/driver_api_service.dart';
@@ -163,6 +166,13 @@ void main() {
         trip['current_stop_index'] = stops.indexWhere((s) => s['stop_id'] == id);
         return ok({});
       }
+      if (path.contains('/stops/') && path.endsWith('/depart')) {
+        final id = path.split('/')[path.split('/').length - 2];
+        final stops = (trip['stops'] as List).cast<Map<String, dynamic>>();
+        final st = stops.firstWhere((s) => s['stop_id'] == id);
+        st['departed_at'] = DateTime.now().toIso8601String();
+        return ok(st);
+      }
       if (path.endsWith('/boarding/manual')) {
         final p = pax(body['ticket_id']);
         if (p['payment_method'] == 'COD' && p['cod_collected'] != true) return fail(409, 'COD_PAYMENT_REQUIRED', 'Vé COD chưa thu tiền');
@@ -171,9 +181,40 @@ void main() {
         return ok(p);
       }
       if (path.endsWith('/boarding')) {
-        final parts = '${body['qrPayload']}'.split(':');
-        if (parts[2] != '482107') return fail(422, 'INVALID_PIN', 'Mã PIN vé không chính xác');
-        pax(parts[1])['boarding_status'] = 'BOARDED';
+        final payload = '${body['qrPayload'] ?? body['qrString'] ?? ''}';
+        if (payload.startsWith('PIN:')) {
+          final parts = payload.split(':');
+          final tktId = parts[1];
+          final pin = parts.length > 2 ? parts[2] : '';
+          final manifestList = (trip['manifest'] as List).cast<Map<String, dynamic>>();
+          final p = manifestList.firstWhere((m) => m['ticket_id'] == tktId, orElse: () => <String, dynamic>{});
+          if (p.isEmpty) return fail(404, 'TICKET_WRONG_TRIP', 'Vé không thuộc chuyến xe này');
+          final pnr = p['pnr'];
+          final group = pnr != null
+              ? manifestList.where((m) => m['pnr'] == pnr).toList()
+              : [p];
+          if (pin != '482107') return fail(422, 'INVALID_PIN', 'Mã PIN vé không chính xác');
+          final boarded = <Map<String, dynamic>>[];
+          final codPending = <Map<String, dynamic>>[];
+          for (final item in group) {
+            if (item['boarding_status'] == 'BOARDED') continue;
+            if (item['payment_method'] == 'COD' && item['cod_collected'] != true) {
+              codPending.add(item);
+              continue;
+            }
+            item['boarding_status'] = 'BOARDED';
+            boarded.add(item);
+          }
+          final target = boarded.firstWhere((item) => item['ticket_id'] == tktId, orElse: () => p);
+          return ok({
+            ...target,
+            'pnr': pnr,
+            'boarded_passengers': boarded,
+            'cod_pending_passengers': codPending,
+            'revoked_passengers': <Map<String, dynamic>>[],
+          });
+        }
+        pax(payload)['boarding_status'] = 'BOARDED';
         return ok({});
       }
       if (path.endsWith('/payments/cod-collect')) {
@@ -182,7 +223,7 @@ void main() {
         p['cod_collected'] = true;
         p['boarding_status'] = 'BOARDED';
         trip['total_cod_collected_vnd'] = 220000;
-        if (change > 0 && body['change_settlement_method'] == 'DEBT') {
+        if (change > 0 && (body['change_settlement_method'] == 'REST_STOP_DEBT_RECEIPT' || body['change_settlement_method'] == 'DEBT')) {
           (trip['debts'] as List).add({'receipt_code': 'DR-t_a02-${change ~/ 1000}K', 'amount_vnd': change});
         }
         return ok(p);
@@ -216,6 +257,17 @@ void main() {
     expect(store.stops.map((s) => s.time), ['07:00', '07:45', '08:30']);
     expect(store.manifest, hasLength(2));
     expect(store.readyToStart, isTrue, reason: 'the server already holds a complete checklist');
+    store.dispose();
+  });
+
+  test('delayed departure shows delay and estimated time in depTimeLabel', () async {
+    final store = storeWithServer();
+    trip['planned_departure_time'] = '2026-08-28T14:00:00+07:00';
+    trip['delay_minutes'] = 15;
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    expect(store.depTime, '14:00');
+    expect(store.delayMinutes, 15);
+    expect(store.depTimeLabel, '14:00 → 14:15 (trễ 15 phút)');
     store.dispose();
   });
 
@@ -297,6 +349,102 @@ void main() {
     expect((await store.boardWithPin(p, '000000')).code, 'INVALID_PIN');
     expect((await store.boardWithPin(p, '482107')).error, isNull);
     expect(store.manifest.firstWhere((p) => p.seat == 'A01').status, PaxStatus.boarded);
+    store.dispose();
+  });
+
+  test('the backup PIN boards all seats of the same booking and refreshes manifest', () async {
+    final store = storeWithServer();
+    trip['manifest'] = <Map<String, dynamic>>[
+      {
+        'ticket_id': 't_a05',
+        'pnr': 'BG-829527',
+        'seat_code': 'A05',
+        'passenger_name': 'Trần Văn Hùng',
+        'phone_masked': '098***112',
+        'pickup_stop_id': 'stp_hn_gb',
+        'dropoff_stop_id': 'stp_th_pb',
+        'boarding_status': 'ISSUED',
+        'payment_method': 'VIETQR',
+        'cod_amount_vnd': 0
+      },
+      {
+        'ticket_id': 't_b04',
+        'pnr': 'BG-829527',
+        'seat_code': 'B04',
+        'passenger_name': 'Trần Văn Hùng',
+        'phone_masked': '098***112',
+        'pickup_stop_id': 'stp_hn_gb',
+        'dropoff_stop_id': 'stp_th_pb',
+        'boarding_status': 'ISSUED',
+        'payment_method': 'VIETQR',
+        'cod_amount_vnd': 0
+      },
+    ];
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    final pA05 = store.manifest.firstWhere((p) => p.seat == 'A05');
+    final pB04 = store.manifest.firstWhere((p) => p.seat == 'B04');
+    expect(pA05.status, PaxStatus.waiting);
+    expect(pB04.status, PaxStatus.waiting);
+
+    final res = await store.boardWithPin(pB04, '482107');
+    expect(res.error, isNull);
+    final boarded = (res.data?['boarded_passengers'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    expect(boarded.map((m) => m['seat_code']), containsAll(['A05', 'B04']));
+    expect(store.manifest.firstWhere((p) => p.seat == 'A05').status, PaxStatus.boarded);
+    expect(store.manifest.firstWhere((p) => p.seat == 'B04').status, PaxStatus.boarded);
+    store.dispose();
+  });
+
+  testWidgets('DriverQrScannerScreen PIN sheet displays all boarded seats for multi-seat booking', (tester) async {
+    driverPermissions = FakePermissions(LocationAccess.always, cameraOk: true);
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final store = storeWithServer();
+    trip['manifest'] = <Map<String, dynamic>>[
+      {
+        'ticket_id': 't_a05',
+        'pnr': 'BG-829527',
+        'seat_code': 'A05',
+        'passenger_name': 'Trần Văn Hùng',
+        'phone_masked': '098***112',
+        'pickup_stop_id': 'stp_hn_gb',
+        'dropoff_stop_id': 'stp_th_pb',
+        'boarding_status': 'ISSUED',
+        'payment_method': 'VIETQR',
+        'cod_amount_vnd': 0
+      },
+      {
+        'ticket_id': 't_b04',
+        'pnr': 'BG-829527',
+        'seat_code': 'B04',
+        'passenger_name': 'Trần Văn Hùng',
+        'phone_masked': '098***112',
+        'pickup_stop_id': 'stp_hn_gb',
+        'dropoff_stop_id': 'stp_th_pb',
+        'boarding_status': 'ISSUED',
+        'payment_method': 'VIETQR',
+        'cod_amount_vnd': 0
+      },
+    ];
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    await store.arrive();
+
+    await tester.pumpWidget(MaterialApp(
+      home: DriverScope(store: store, child: const DriverQrScannerScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Khách không có vé trên máy: nhập PIN'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Lên xe bằng mã PIN'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '482107');
+    await tester.tap(find.widgetWithText(BigButton, 'Kiểm tra'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Đã lên xe 2 ghế: A05, B04'), findsOneWidget);
     store.dispose();
   });
 
@@ -425,7 +573,7 @@ void main() {
       await tester.runAsync(() async {
         expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
       });
-      const screens = <Widget>[DriverLoginScreen(), DriverChangePinScreen(), MainShellScreen(), DriverReadinessScreen(), DriverHomeRunScreen(), DriverCockpitDashboard(), DriverManifestScreen(), DriverQrScannerScreen(), DriverEndTripScreen(), DriverIncidentScreen()];
+      const screens = <Widget>[DriverLoginScreen(), DriverChangePinScreen(), MainShellScreen(), DriverTodayTripsScreen(), DriverPassengerListScreen(), DriverReadinessScreen(), DriverHomeRunScreen(), DriverCockpitDashboard(), DriverManifestScreen(), DriverQrScannerScreen(), DriverEndTripScreen(), DriverIncidentScreen()];
       for (final screen in screens) {
         await tester.pumpWidget(DriverScope(store: store, child: MaterialApp(home: screen)));
         await tester.pump();
@@ -606,6 +754,7 @@ void main() {
 
     expect(find.byType(DriverChangePinScreen), findsOneWidget);
     expect(find.text('Đặt mã PIN mới'), findsOneWidget);
+    expect(tester.widget<TextField>(find.byType(TextField).first).controller?.text, '654321');
     expect(store.mustChangePin, isTrue);
     expect(store.shift, isEmpty, reason: 'did not load shift yet');
     store.dispose();
@@ -654,7 +803,8 @@ void main() {
     ));
     await tester.pump();
 
-    await tester.enterText(find.byType(TextField).at(0), '654321');
+    // Temporary PIN is prefilled from login; driver does not retype it
+    expect(tester.widget<TextField>(find.byType(TextField).at(0)).controller?.text, '654321');
     await tester.enterText(find.byType(TextField).at(1), '284719');
     await tester.enterText(find.byType(TextField).at(2), '284719');
     await tester.tap(find.widgetWithText(BigButton, 'Đổi mã PIN'));
@@ -709,6 +859,209 @@ void main() {
 
     expect(find.byType(DriverChangePinScreen), findsOneWidget);
     expect(store.mustChangePin, isTrue);
+    store.dispose();
+  });
+
+  test('codPresets derives exact fare first and round amounts above it without duplicates', () {
+    expect(codPresets(220000), [220000, 300000, 500000]);
+    expect(codPresets(180000), [180000, 200000, 500000]);
+    expect(codPresets(300000), [300000, 400000, 500000]);
+    expect(codPresets(500000), [500000, 600000, 1000000]);
+  });
+
+  testWidgets('COD sheet defaults to exact fare, no change, and supports custom amount typing', (tester) async {
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final store = await started();
+    final codPax = store.manifest.firstWhere((p) => p.codDue);
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (ctx) => ElevatedButton(
+              onPressed: () => showCodSheet(ctx, codPax),
+              child: const Text('Mở COD'),
+            ),
+          ),
+        ),
+      ),
+    ));
+
+    await tester.tap(find.text('Mở COD'));
+    await tester.pumpAndSettle();
+
+    // 1. Presets and exact fare defaults
+    expect(find.text('220k'), findsOneWidget);
+    expect(find.text('300k'), findsOneWidget);
+    expect(find.text('500k'), findsOneWidget);
+    expect(find.text('Đủ tiền, không có tiền thừa'), findsOneWidget);
+    expect(find.text('Đã nhận 220.000 đ · Cho lên xe'), findsOneWidget);
+    expect(find.text('Trả tiền mặt ngay'), findsNothing);
+
+    // 2. Select 500k preset -> change due
+    await tester.tap(find.text('500k'));
+    await tester.pumpAndSettle();
+    expect(find.text('Trả lại khách 280.000 đ'), findsOneWidget);
+    expect(find.text('Đã nhận 500.000 đ · Cho lên xe'), findsOneWidget);
+    expect(find.text('Trả tiền mặt ngay'), findsOneWidget);
+
+    // 3. Custom amount: typing amount less than fare shows error and disables submit
+    await tester.enterText(find.byType(TextField), '100000');
+    await tester.pumpAndSettle();
+    expect(find.text('Số tiền phải từ 220.000 đ trở lên'), findsOneWidget);
+    expect(tester.widget<BigButton>(find.byType(BigButton)).onPressed, isNull);
+
+    // 4. Custom amount: typing amount >= fare succeeds and updates button
+    await tester.enterText(find.byType(TextField), '300000');
+    await tester.pumpAndSettle();
+    expect(find.text('Số tiền phải từ 220.000 đ trở lên'), findsNothing);
+    expect(find.text('Đã nhận 300.000 đ · Cho lên xe'), findsOneWidget);
+    expect(find.text('Trả lại khách 80.000 đ'), findsOneWidget);
+    expect(tester.widget<BigButton>(find.byType(BigButton)).onPressed, isNotNull);
+
+    // 5. Submit collection
+    await tester.tap(find.byType(BigButton));
+    await tester.pumpAndSettle();
+
+    expect(store.codCash, 220000);
+    final after = store.manifest.firstWhere((p) => p.seat == 'A02');
+    expect(after.status, PaxStatus.boarded);
+    expect(after.paid, isTrue);
+    store.dispose();
+  });
+
+  test('leaveStop calls departStop on server and sets bus moving', () async {
+    final store = await started();
+    expect(sent.any((r) => r.url.path.endsWith('/depart')), isFalse);
+    store.leaveStop();
+    await Future.delayed(const Duration(milliseconds: 50));
+    expect(sent.any((r) => r.url.path.contains('/stops/stp_hn_gb/depart')), isTrue);
+    expect(store.moving, isTrue);
+    store.dispose();
+  });
+
+  testWidgets('departure warning distinguishes hotline hold from paid ticket', (tester) async {
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+    addTearDown(() {
+      tester.view.reset();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    final store = await started();
+    final p = Passenger(
+      ticketId: 'hl_rsv_1_A01',
+      seat: 'A01',
+      name: 'Khách Hotline',
+      phone: '098***111',
+      pay: 'Thu tiền khi lên xe',
+      from: 'stp_hn_gb',
+      to: 'stp_th_pb',
+      isHotline: true,
+      status: PaxStatus.waiting,
+    );
+    store.manifest.add(p);
+    await tester.pumpWidget(MaterialApp(
+      home: DriverScope(
+        store: store,
+        child: const DriverManifestScreen(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(BigButton, 'Rời trạm'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Ghế A01 giữ qua tổng đài sẽ được nhả, điều hành được báo.'), findsOneWidget);
+    store.dispose();
+  });
+
+  testWidgets('Danh sách khách opens read-only list grouped by pickup stop before departure (F13)', (tester) async {
+    final store = storeWithServer();
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+
+    store.manifest.clear();
+    store.manifest.addAll([
+      Passenger(
+        ticketId: 'tkt_01',
+        seat: 'A01',
+        name: 'Nguyễn Văn A',
+        phone: '098***123',
+        pay: 'VietQR',
+        from: 'stp_hn_gb',
+        to: 'stp_th_pb',
+        cod: 220000,
+        status: PaxStatus.waiting,
+      ),
+      Passenger(
+        ticketId: 'tkt_02',
+        seat: 'A02',
+        name: 'Trần Thị B',
+        phone: '091***456',
+        pay: 'Đã trả trước',
+        from: 'stp_hn_gb',
+        to: 'stp_nb',
+        cod: 0,
+        status: PaxStatus.waiting,
+      ),
+      Passenger(
+        ticketId: 'tkt_03',
+        seat: 'B01',
+        name: 'Lê Văn C',
+        phone: '097***789',
+        pay: 'COD',
+        from: 'stp_nb',
+        to: 'stp_th_pb',
+        cod: 150000,
+        status: PaxStatus.waiting,
+      ),
+    ]);
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(
+        home: DriverTodayTripsScreen(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(BigButton, 'Danh sách khách'), findsOneWidget);
+    await tester.tap(find.widgetWithText(BigButton, 'Danh sách khách'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DriverPassengerListScreen), findsOneWidget);
+    expect(find.text('Danh sách khách'), findsOneWidget);
+
+    expect(find.text('Bến xe Giáp Bát'), findsOneWidget);
+    expect(find.text('2 khách'), findsOneWidget);
+    expect(find.text('Bến xe Ninh Bình'), findsOneWidget);
+    expect(find.text('1 khách'), findsOneWidget);
+
+    expect(find.text('A01'), findsOneWidget);
+    expect(find.text('Nguyễn Văn A'), findsOneWidget);
+    expect(find.text('098***123'), findsOneWidget);
+    expect(find.text('COD: 220.000 đ'), findsOneWidget);
+    expect(find.text('Bến xe Giáp Bát → Bến xe Phía Bắc Thanh Hóa'), findsOneWidget);
+
+    expect(find.text('A02'), findsOneWidget);
+    expect(find.text('Trần Thị B'), findsOneWidget);
+    expect(find.text('091***456'), findsOneWidget);
+    expect(find.text('Bến xe Giáp Bát → Bến xe Ninh Bình'), findsOneWidget);
+
+    expect(find.text('B01'), findsOneWidget);
+    expect(find.text('Lê Văn C'), findsOneWidget);
+    expect(find.text('097***789'), findsOneWidget);
+    expect(find.text('COD: 150.000 đ'), findsOneWidget);
+    expect(find.text('Bến xe Ninh Bình → Bến xe Phía Bắc Thanh Hóa'), findsOneWidget);
+
+    expect(find.widgetWithText(BigButton, 'Cho lên xe'), findsNothing);
+    expect(find.text('Vắng mặt'), findsNothing);
+    expect(find.widgetWithText(BigButton, 'Quét vé'), findsNothing);
+
     store.dispose();
   });
 }

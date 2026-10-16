@@ -25,6 +25,27 @@ const HOTLINE_MAX_SEATS_PER_PHONE = 4;
 const GPS_STALE_AFTER_MS = 60 * 1000;
 const GPS_OFFLINE_AFTER_MS = 180 * 1000;
 
+export const LICENSE_MAX_CAPACITY = {
+  B2: 9,
+  C: 0,
+  FC: 0,
+  D: 30,
+  E: null
+};
+
+export function driverLicenseCapacityReason(licenseClass, capacity, plateNumber = '') {
+  const max = LICENSE_MAX_CAPACITY[licenseClass];
+  if (max === undefined || max === null) return null;
+  const vehicleText = plateNumber ? `xe ${plateNumber} ` : '';
+  if (max === 0) {
+    return `Bằng ${licenseClass} không được lái xe chở khách; ${vehicleText}có ${capacity} chỗ (gồm lái)`;
+  }
+  if (capacity > max) {
+    return `Bằng ${licenseClass} chỉ lái xe tối đa ${max} chỗ; ${vehicleText}có ${capacity} chỗ (gồm lái)`;
+  }
+  return null;
+}
+
 function auditHash(body) {
   return crypto.createHash('sha256').update(JSON.stringify(body)).digest('hex');
 }
@@ -107,10 +128,10 @@ export class ManagerOperationsService {
 
     this.drivers = [
       // Same people, ids and licences as the driver app (DRI-001), so a driver named here can sign in and see the trip
-      { driver_id: 'drv_8821a', staff_id: 'TX8821', full_name: 'Trần Văn Bình', phone: '0912348821', license_class: 'FC', license_expiry: '2028-12-31', safety_score: 98.5, status: 'ACTIVE', operator_id: 'op_saomai' },
-      { driver_id: 'drv_9912b', staff_id: 'TX9912', full_name: 'Phạm Quốc Huy', phone: '0988776655', license_class: 'FC', license_expiry: '2028-06-30', safety_score: 96.0, status: 'ACTIVE', operator_id: 'op_saomai' },
-      { driver_id: 'drv_9902b', staff_id: 'TX9902', full_name: 'Lê Hoàng Nam', phone: '0987654321', license_class: 'FC', license_expiry: '2025-01-01', safety_score: 91.0, status: 'ACTIVE', operator_id: 'op_saomai' },
-      { driver_id: 'drv_xv_7701', staff_id: 'TX7701', full_name: 'Đỗ Minh Khoa', phone: '0901777001', license_class: 'FC', license_expiry: '2029-03-31', safety_score: 100, status: 'ACTIVE', operator_id: 'op_xuyenviet' }
+      { driver_id: 'drv_8821a', staff_id: 'TX8821', full_name: 'Trần Văn Bình', phone: '0912348821', license_class: 'E', license_expiry: '2028-12-31', safety_score: 98.5, status: 'ACTIVE', operator_id: 'op_saomai' },
+      { driver_id: 'drv_9912b', staff_id: 'TX9912', full_name: 'Phạm Quốc Huy', phone: '0988776655', license_class: 'E', license_expiry: '2028-06-30', safety_score: 96.0, status: 'ACTIVE', operator_id: 'op_saomai' },
+      { driver_id: 'drv_9902b', staff_id: 'TX9902', full_name: 'Lê Hoàng Nam', phone: '0987654321', license_class: 'E', license_expiry: '2025-01-01', safety_score: 91.0, status: 'ACTIVE', operator_id: 'op_saomai' },
+      { driver_id: 'drv_xv_7701', staff_id: 'TX7701', full_name: 'Đỗ Minh Khoa', phone: '0901777001', license_class: 'E', license_expiry: '2029-03-31', safety_score: 100, status: 'ACTIVE', operator_id: 'op_xuyenviet' }
     ];
 
     this.routes = [
@@ -943,6 +964,37 @@ export class ManagerOperationsService {
     return this.trips.find(t => t.trip_id === tripId) || this.runResolver?.(tripId) || undefined;
   }
 
+  _resolveFareForSeats(tripId, trip, seatCodes = []) {
+    const catalogTrip = this.eventBridge?.services?.searchService?.getTripDetail?.(tripId)?.data;
+    const route = this.routes.find(r => r.route_id === (trip?.route_id || catalogTrip?.route_id));
+    const routeFare = route ? route.base_fare_vnd : 220000;
+    const catalogFare = (catalogTrip?.base_fare_vnd !== undefined && Number.isFinite(catalogTrip.base_fare_vnd))
+      ? catalogTrip.base_fare_vnd
+      : ((trip?.base_fare_vnd !== undefined && Number.isFinite(trip.base_fare_vnd)) ? trip.base_fare_vnd : routeFare);
+
+    const inventory = this._inventory();
+    const seatFares = {};
+    let totalSeatsFare = 0;
+
+    for (const code of seatCodes) {
+      const seatInfo = inventory?.getSeatInfo?.(tripId, code);
+      const price = (seatInfo && typeof seatInfo.price_vnd === 'number' && Number.isFinite(seatInfo.price_vnd))
+        ? seatInfo.price_vnd
+        : catalogFare;
+      seatFares[code] = price;
+      totalSeatsFare += price;
+    }
+
+    const farePerSeat = seatCodes.length > 0 ? seatFares[seatCodes[0]] : catalogFare;
+
+    return {
+      farePerSeat,
+      unitPrice: farePerSeat,
+      seatFares,
+      totalSeatsFare
+    };
+  }
+
   /** Start and end (ms) of a trip, from the passenger catalog when it is there, else 3 h from departure. */
   _tripWindow(trip) {
     const start = Date.parse(trip.departure_time);
@@ -981,7 +1033,7 @@ export class ManagerOperationsService {
         : seatCount < sold ? `Xe ${seatCount} chỗ, chuyến đã bán ${sold} ghế`
           : missing.length > 0 ? `Xe thiếu ghế đã bán: ${missing.join(', ')}`
             : busy ? `Đang chạy chuyến ${busy.trip_id} trùng giờ` : null;
-      return { vehicle_id: v.vehicle_id, plate_number: v.plate_number, model: v.model, total_seats: seatCount, assigned: v.vehicle_id === trip.vehicle_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
+      return { vehicle_id: v.vehicle_id, plate_number: v.plate_number, model: v.model, total_seats: seatCount, capacity: seatCount + 1, assigned: v.vehicle_id === trip.vehicle_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
     });
     const drivers = this.drivers.filter(d => d.operator_id === operatorId).map(d => {
       const busy = clash('driver_id', d.driver_id);
@@ -989,7 +1041,7 @@ export class ManagerOperationsService {
         : d.status === 'LICENSE_EXPIRED' || (d.license_expiry && d.license_expiry < day) ? 'Bằng lái hết hạn vào ngày chạy'
         : d.status === 'OFF_DUTY' || d.status === 'SUSPENDED' ? 'Tài xế không làm việc'
           : busy ? `Đang chạy chuyến ${busy.trip_id} trùng giờ` : null;
-      return { driver_id: d.driver_id, staff_id: d.staff_id, full_name: d.full_name, license_expiry: d.license_expiry, assigned: d.driver_id === trip.driver_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
+      return { driver_id: d.driver_id, staff_id: d.staff_id, full_name: d.full_name, license_class: d.license_class, license_expiry: d.license_expiry, max_capacity: LICENSE_MAX_CAPACITY[d.license_class] !== undefined ? LICENSE_MAX_CAPACITY[d.license_class] : null, assigned: d.driver_id === trip.driver_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
     });
     return { success: true, data: { trip_id: tripId, departure_time: trip.departure_time, status: trip.status, sold_seats: sold, vehicle_id: trip.vehicle_id || null, driver_id: trip.driver_id || null, vehicles, drivers } };
   }
@@ -1028,6 +1080,26 @@ export class ManagerOperationsService {
 
     if (!vehicle.available && !vehicle.assigned) return { success: false, error: vehicle.reason, code: 'VEHICLE_UNAVAILABLE', conflict_trip_id: vehicle.conflict_trip_id };
     if (!driver.available && !driver.assigned) return { success: false, error: driver.reason, code: 'DRIVER_UNAVAILABLE', conflict_trip_id: driver.conflict_trip_id };
+
+    // D151: Licence validity and capacity check
+    const own = this._tripWindow(trip);
+    const day = vnDate(own.start);
+    const fullDriver = this.drivers.find(d => d.driver_id === driverId) || driver;
+    if (fullDriver.status === 'LICENSE_EXPIRED' || (fullDriver.license_expiry && fullDriver.license_expiry < day)) {
+      return { success: false, error: 'Bằng lái hết hạn vào ngày chạy', code: 'DRIVER_UNAVAILABLE' };
+    }
+
+    const vTemplate = this.layoutOfVehicle(vehicle.vehicle_id);
+    const passengerSeats = vTemplate?.seats?.length || vehicle.total_seats || 0;
+    const capacity = passengerSeats + 1;
+    const licReason = driverLicenseCapacityReason(fullDriver.license_class, capacity, vehicle.plate_number);
+    if (licReason) {
+      return {
+        success: false,
+        error: licReason,
+        code: 'DRIVER_LICENSE_INVALID'
+      };
+    }
 
     const previous = { vehicle_id: trip.vehicle_id || null, vehicle_plate: trip.vehicle_plate || null, driver_id: trip.driver_id || null };
     trip.vehicle_id = vehicle.vehicle_id;
@@ -1201,9 +1273,8 @@ export class ManagerOperationsService {
       return { success: false, error: 'Chuyến xe đã hết chỗ', code: 'TRIP_FULL' };
     }
 
-    const route = this.routes.find(r => r.route_id === trip.route_id);
-    const unitPrice = route ? route.base_fare_vnd : 220000;
-    const totalFare = seatCodes.length * unitPrice + (homePickup ? homeFeeVnd : 0);
+    const { totalSeatsFare, unitPrice } = this._resolveFareForSeats(tripId, trip, seatCodes);
+    const totalFare = totalSeatsFare + (homePickup ? homeFeeVnd : 0);
 
     const pnr = `BG-POS${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -1340,6 +1411,9 @@ export class ManagerOperationsService {
     const holdUntil = new Date(holdUntilMs).toISOString();
     const reservationId = `rsv_pos_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`;
 
+    const { farePerSeat, totalSeatsFare, seatFares } = this._resolveFareForSeats(tripId, trip, seatCodes);
+    const totalFare = totalSeatsFare + (homePickup ? homeFeeVnd : 0);
+
     const reservation = {
       reservation_id: reservationId,
       pnr: `BG-RSV-${Math.floor(100 + Math.random() * 900)}`,
@@ -1358,6 +1432,9 @@ export class ManagerOperationsService {
       notes,
       home_pickup: homePickup || null,
       home_fee_vnd: homePickup ? homeFeeVnd : 0,
+      total_fare_vnd: totalFare,
+      fare_per_seat_vnd: farePerSeat,
+      seat_fares: seatFares,
       // The SMS link to follow the bus and answer "ready" (D144).
       share_token: createShareToken(),
       operator_id: operatorId
@@ -1368,8 +1445,6 @@ export class ManagerOperationsService {
     trip.held_seats = (trip.held_seats || 0) + seatCodes.length;
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
-      const route = this.routes.find(r => r.route_id === trip.route_id);
-      const farePerSeat = route ? route.base_fare_vnd : 220000;
       this.eventBridge.emit('HOTLINE_HOLD_CREATED', {
         tripId,
         reservation,
@@ -1397,17 +1472,22 @@ export class ManagerOperationsService {
         let shouldRelease = false;
         let releaseStatus = 'EXPIRED_RELEASED';
 
+        let driverTrip = this.eventBridge?.services?.driverService?.activeTrips?.get(rsv.trip_id);
+        if (!driverTrip && this.driverService?.activeTrips) {
+          driverTrip = this.driverService.activeTrips.get(rsv.trip_id);
+        }
+
         if (trip && trip.status === 'IN_TRANSIT') {
-          const driverTrip = this.eventBridge?.services?.driverService?.activeTrips?.get(rsv.trip_id);
           if (driverTrip) {
             const pickupIndex = driverTrip.stops.findIndex(s => s.stop_id === rsv.pickup_stop_id);
-            if (pickupIndex !== -1 && driverTrip.current_stop_index > pickupIndex) {
+            if (pickupIndex !== -1 && (driverTrip.current_stop_index > pickupIndex || driverTrip.stops[pickupIndex]?.departed_at)) {
               shouldRelease = true;
               releaseStatus = 'NO_SHOW_RELEASED';
             }
           }
         } else if (mockNow > new Date(rsv.hold_until).getTime()) {
           shouldRelease = true;
+          releaseStatus = 'EXPIRED_RELEASED';
         }
 
         if (shouldRelease) {
@@ -1418,9 +1498,63 @@ export class ManagerOperationsService {
           if (trip) {
             trip.held_seats = Math.max(0, (trip.held_seats || 0) - rsv.seat_codes.length);
           }
-          
+
+          const seatStr = rsv.seat_codes.join(', ');
+          const driverSvc = this.eventBridge?.services?.driverService || this.driverService;
+          const stop = (trip?.stops || driverTrip?.stops || []).find(s => s.stop_id === rsv.pickup_stop_id);
+          const stopName = stop?.name || rsv.pickup_stop || (rsv.pickup_stop_id ? `Trạm ${rsv.pickup_stop_id}` : 'điểm đón');
+          const readable = releaseStatus === 'NO_SHOW_RELEASED'
+            ? `Nhả ghế ${seatStr} giữ qua tổng đài (khách không lên xe tại ${stopName})`
+            : `Nhả ghế ${seatStr} giữ qua tổng đài (hết hạn giữ chỗ)`;
+
+          const eventData = {
+            reservation_id: rsv.reservation_id,
+            seat_code: seatStr,
+            stop_id: rsv.pickup_stop_id || null,
+            stop_name: stopName,
+            status: releaseStatus,
+            message: readable,
+            description: readable,
+            actor: 'system'
+          };
+
+          if (driverSvc && typeof driverSvc._event === 'function') {
+            if (driverTrip) {
+              driverSvc._event(driverTrip, 'HOTLINE_HOLD_RELEASED', eventData, mockNow);
+            }
+            if (trip && trip !== driverTrip) {
+              driverSvc._event(trip, 'HOTLINE_HOLD_RELEASED', eventData, mockNow);
+            }
+          } else {
+            const eventEntry = {
+              type: 'HOTLINE_HOLD_RELEASED',
+              trip_id: rsv.trip_id,
+              at: new Date(mockNow).toISOString(),
+              ...eventData
+            };
+            if (driverTrip) {
+              if (!driverTrip.events) driverTrip.events = [];
+              driverTrip.events.push(eventEntry);
+            }
+            if (trip && trip !== driverTrip) {
+              if (!trip.events) trip.events = [];
+              trip.events.push(eventEntry);
+            }
+          }
+
+          this.recordAudit({
+            actor: 'system',
+            role: 'SYSTEM',
+            action: releaseStatus === 'NO_SHOW_RELEASED' ? 'HOTLINE_HOLD_NO_SHOW_RELEASED' : 'HOTLINE_HOLD_EXPIRED_RELEASED',
+            resource: `hotline:${rsv.reservation_id}`,
+            before: { hold_status: 'HELD_HOTLINE' },
+            after: { hold_status: releaseStatus, released_at: rsv.released_at, message: readable, seat_codes: rsv.seat_codes },
+            operator_id: rsv.operator_id || DEFAULT_OPERATOR_ID,
+            now: mockNow
+          });
+
           if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
-            this.eventBridge.emit('HOTLINE_HOLD_RELEASED', { tripId: rsv.trip_id, reservationId: rsv.reservation_id });
+            this.eventBridge.emit('HOTLINE_HOLD_RELEASED', { tripId: rsv.trip_id, reservationId: rsv.reservation_id, releaseStatus, readable });
           }
 
           releasedList.push(rsv);
@@ -1440,10 +1574,10 @@ export class ManagerOperationsService {
    */
   cancelHotlineHold(reservationId, reason = 'Khách hủy yêu cầu qua điện thoại', mockNow = Date.now()) {
     const rsv = this.hotlineReservations.find(r => r.reservation_id === reservationId);
-    if (!rsv) return { success: false, error: 'Không tìm thấy thông tin giữ chỗ' };
+    if (!rsv) return { success: false, error: 'Không tìm thấy thông tin giữ chỗ', code: 'RESERVATION_NOT_FOUND' };
 
     if (rsv.hold_status === 'HELD_HOTLINE') {
-      rsv.hold_status = 'CANCELLED';
+      rsv.hold_status = 'CANCELLED_BY_STAFF';
       rsv.cancel_reason = reason;
       rsv.cancelled_at = new Date(mockNow).toISOString();
       this._inventory()?.unlockSeats(rsv.trip_id, rsv.seat_codes, `hotline:${rsv.reservation_id}`);

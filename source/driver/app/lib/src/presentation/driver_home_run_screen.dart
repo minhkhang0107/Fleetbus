@@ -80,7 +80,7 @@ class _DriverHomeRunScreenState extends State<DriverHomeRunScreen> {
     return Scaffold(
       appBar: DHeader(
         title: 'Đón khách tận nhà',
-        subtitle: '${homes.length} khách${window == null ? '' : ' · khung $window'} · xuất bến ${store.depTime}',
+        subtitle: '${homes.length} khách${window == null ? '' : ' · khung $window'} · xuất bến ${store.depTimeLabel}',
         trailing: Text('${homes.where((p) => p.status == PaxStatus.boarded).length}/${homes.length}', style: dmono(size: 16, color: DTokens.okInk)),
       ),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 16), children: [

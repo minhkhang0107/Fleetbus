@@ -266,6 +266,8 @@ class Ticket {
   Ticket({
     required this.id,
     required this.pnr,
+    this.orderId,
+    List<String>? ticketIds,
     required this.tripId,
     required this.route,
     required this.date,
@@ -286,9 +288,13 @@ class Ticket {
     this.homePickupReason,
     this.homeDropoffReason,
     this.past = false,
-  });
+    this.pickupTime,
+    this.pickupTimeEstimated = false,
+  }) : ticketIds = ticketIds ?? (id.isNotEmpty ? [id] : const []);
   final String id;
   final String pnr;
+  final String? orderId;
+  final List<String> ticketIds;
   final String tripId;
   final String route;
   final String date;
@@ -298,6 +304,9 @@ class Ticket {
   final String dropoff;
   final int paid;
   final String name;
+  /// Planned pickup stop time if different from first departure.
+  final String? pickupTime;
+  final bool pickupTimeEstimated;
   /// Home pickup / drop-off address (spec 3.1); the ticket still rides from [pickup] to [dropoff].
   final String? homePickup;
   final String? homeDropoff;
@@ -324,10 +333,25 @@ class Ticket {
   bool past;
 
   bool get active => status == TicketStatus.active || status == TicketStatus.boarded;
+  bool get isGroup => ticketIds.length > 1 || seat.contains(',');
   String get departure => delay == 0 ? dep : addMinutes(dep, delay);
+  String get effectivePickupTime {
+    final base = pickupTime ?? dep;
+    return delay == 0 ? base : addMinutes(base, delay);
+  }
+  String get pickupTimeLabel => '${pickupTimeEstimated ? 'khoảng ' : ''}$effectivePickupTime';
 
   factory Ticket.fromJson(Map<String, dynamic> j, {bool past = false}) {
     final dep = DateTime.parse(j['departure_time']).toUtc().add(const Duration(hours: 7));
+    String? pTime;
+    if (j['pickup_time'] != null) {
+      try {
+        final parsed = DateTime.parse(j['pickup_time']).toUtc().add(const Duration(hours: 7));
+        pTime = _hhmm(parsed);
+      } catch (_) {
+        pTime = j['pickup_time']?.toString();
+      }
+    }
     final status = switch (j['status']) {
       'ACTIVE' => TicketStatus.active,
       'BOARDED' => TicketStatus.boarded,
@@ -335,9 +359,13 @@ class Ticket {
       'REFUND_REQUESTED' || 'REFUNDED' => TicketStatus.refunding,
       _ => TicketStatus.cancelled,
     };
+    final tktIds = (j['ticket_ids'] as List?)?.map((e) => e.toString()).toList() ??
+        (j['ticket_id'] != null ? [j['ticket_id'].toString()] : const <String>[]);
     return Ticket(
-      id: j['ticket_id'],
-      pnr: j['pnr'],
+      id: j['ticket_id'] ?? (tktIds.isNotEmpty ? tktIds.first : ''),
+      pnr: j['pnr'] ?? '',
+      orderId: j['order_id']?.toString(),
+      ticketIds: tktIds,
       tripId: j['trip_id'],
       route: routeLabel(j['route_name'] ?? ''),
       date: '${const ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][dep.weekday % 7]} ${_two(dep.day)}/${_two(dep.month)}',
@@ -358,7 +386,9 @@ class Ticket {
       pickupNotice: j['home_pickup']?['inaccessible_at'] == null
           ? null
           : 'Xe không vào được địa chỉ (${j['home_pickup']['inaccessible_reason'] ?? ''})${j['home_pickup']['meeting_point'] != null ? '. Hẹn ở ${j['home_pickup']['meeting_point']}' : '. Tài xế sẽ gọi cho bạn'}',
-      past: past,
+      past: past || j['trip_completed'] == true,
+      pickupTime: pTime,
+      pickupTimeEstimated: j['pickup_time_estimated'] == true,
     )..refund = (j['refund_amount_vnd'] as num?)?.toInt();
   }
 }
@@ -500,6 +530,8 @@ class Tracking {
     this.readyMinutes,
     this.homeWaitMinutes,
     this.doorArrivedAt,
+    this.ended = false,
+    this.tripStatus,
   });
 
   final GpsSignal signal;
@@ -533,6 +565,8 @@ class Tracking {
   final int? readyMinutes;
   final int? homeWaitMinutes;
   final DateTime? doorArrivedAt;
+  final bool ended;
+  final String? tripStatus;
 }
 
 /// Result of a call: null message means success.
@@ -1204,7 +1238,27 @@ class PassengerStore extends ChangeNotifier {
     final issued = tickets.where((t) => t.pnr == orderPnr).toList();
     if (issued.isNotEmpty) {
       final first = issued.first;
-      lastTicket = Ticket(id: first.id, pnr: first.pnr, tripId: first.tripId, route: first.route, date: first.date, dep: first.dep, seat: issued.map((t) => t.seat).join(', '), pickup: first.pickup, paid: orderAmount, name: first.name, status: first.status, plate: trip?.plate ?? '', homePickup: first.homePickup, homeDropoff: first.homeDropoff, pickupWindow: first.pickupWindow);
+      lastTicket = Ticket(
+        id: first.id,
+        pnr: first.pnr,
+        orderId: first.orderId ?? orderId,
+        ticketIds: issued.expand((t) => t.ticketIds.isNotEmpty ? t.ticketIds : [t.id]).toList(),
+        tripId: first.tripId,
+        route: first.route,
+        date: first.date,
+        dep: first.dep,
+        pickupTime: first.pickupTime,
+        pickupTimeEstimated: first.pickupTimeEstimated,
+        seat: issued.map((t) => t.seat).join(', '),
+        pickup: first.pickup,
+        paid: orderAmount,
+        name: first.name,
+        status: first.status,
+        plate: trip?.plate ?? '',
+        homePickup: first.homePickup,
+        homeDropoff: first.homeDropoff,
+        pickupWindow: first.pickupWindow,
+      );
       for (final t in issued) {
         t.plate = trip?.plate ?? '';
       }
@@ -1283,17 +1337,43 @@ class PassengerStore extends ChangeNotifier {
     final r = await _call(() => api.getTicketQR(t.id));
     if (!r.ok) return r.error;
     final qr = r.value!['boarding_qr'] as Map<String, dynamic>?;
-    t.qrValue = qr?['qr_code_value'];
     t.qrVersion = (qr?['version'] as num?)?.toInt() ?? t.qrVersion;
     t.pin = r.value!['offline_pin']?.toString();
     final status = r.value!['ticket']?['status'];
     if (status == 'BOARDED') t.status = TicketStatus.boarded;
+
+    if (t.isGroup) {
+      if (t.status == TicketStatus.active) {
+        final orderId = t.orderId ?? '';
+        if (orderId.isNotEmpty) {
+          final grp = await _call(() => api.getGroupQr(orderId));
+          if (!grp.ok) return grp.error;
+          final groupQr = grp.value!['group_qr'] as Map<String, dynamic>?;
+          t.qrValue = groupQr?['qr_code_value']?.toString();
+        }
+      } else {
+        t.qrValue = null;
+      }
+    } else {
+      t.qrValue = qr?['qr_code_value'];
+    }
+
     notifyListeners();
     return null;
   }
 
   /// D104: a new QR version; the server refuses it once the trip has left (BOARDING_STARTED).
   Future<ApiResult<void>> reissueQr(Ticket t) async {
+    if (t.isGroup) {
+      final ids = t.ticketIds.isNotEmpty ? t.ticketIds : [t.id];
+      for (final id in ids) {
+        final r = await _call(() => api.reissueBoardingQr(id));
+        if (!r.ok) return ApiResult(null, r.error, r.code);
+      }
+      final err = await loadPass(t);
+      if (err != null) return ApiResult(null, err);
+      return const ApiResult(null);
+    }
     final r = await _call(() => api.reissueBoardingQr(t.id));
     if (!r.ok) return ApiResult(null, r.error, r.code);
     final qr = r.value!['boarding_qr'] as Map<String, dynamic>;
@@ -1428,6 +1508,8 @@ class PassengerStore extends ChangeNotifier {
       readyMinutes: (d['pickup_ready']?['minutes'] as num?)?.toInt(),
       homeWaitMinutes: (d['home_wait_minutes'] as num?)?.toInt(),
       doorArrivedAt: vn(d['door_arrived_at']),
+      ended: d['tracking_ended'] == true || d['trip_status'] == 'COMPLETED',
+      tripStatus: d['trip_status'] as String?,
       location: loc == null
           ? null
           : BusLocation(

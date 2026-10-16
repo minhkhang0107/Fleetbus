@@ -611,10 +611,87 @@ const STATUS = {
   COMPLETED: ['Hoàn thành', ''], CANCELLED: ['Đã hủy', 'danger'], ASSIGNED: ['Đã phân công', 'info'], STANDBY: ['Chờ', ''], MAINTENANCE: ['Bảo dưỡng', 'warn']
 };
 const STOP_STATUS = { UPCOMING: ['Sắp tới', ''], APPROACHING: ['Xe sắp tới', 'info'], ARRIVED: ['Xe đang ở trạm', 'ok'], COMPLETED: ['Đã rời', ''], SKIPPED: ['Bỏ qua', 'warn'] };
-const stopPill = (status) => { const [label, kind] = STOP_STATUS[status] || [status || '—', '']; return `<span class="pill ${kind}">${esc(label)}</span>`; };
-const EVENT_LABEL = { TRIP_STARTED: 'Xuất bến', STOP_ARRIVED: 'Tới trạm', STOP_SKIPPED: 'Bỏ qua trạm', BOARDED: 'Lên xe', NO_SHOW: 'Vắng mặt', ALIGHTED: 'Xuống xe', TRIP_COMPLETED: 'Kết thúc chuyến', HOME_RUN_STARTED: 'Đi đón tận nhà', HOME_ORDER_SET: 'Xếp thứ tự đón', HOME_ARRIVED: 'Tới nhà khách', HOME_MISSED: 'Khách không ra', PICKUP_READY: 'Khách báo sẵn sàng', PASSENGER_CALLED: 'Gọi khách', HOME_ADDRESS_INACCESSIBLE: 'Không vào được địa chỉ' };
+const stopPill = (status, departedAt) => { const [label, kind] = (status === 'COMPLETED' && departedAt) ? ['Đã rời ' + hhmm(departedAt), ''] : (STOP_STATUS[status] || [status || '—', '']); return `<span class="pill ${kind}">${esc(label)}</span>`; };
+const EVENT_LABEL = { TRIP_STARTED: 'Xuất bến', STOP_ARRIVED: 'Tới trạm', STOP_DEPARTED: 'Rời trạm', STOP_SKIPPED: 'Bỏ qua trạm', BOARDED: 'Lên xe', NO_SHOW: 'Vắng mặt', ALIGHTED: 'Xuống xe', TRIP_COMPLETED: 'Kết thúc chuyến', HOME_RUN_STARTED: 'Đi đón tận nhà', HOME_ORDER_SET: 'Xếp thứ tự đón', HOME_ARRIVED: 'Tới nhà khách', HOME_MISSED: 'Khách không ra', PICKUP_READY: 'Khách báo sẵn sàng', PASSENGER_CALLED: 'Gọi khách', HOME_ADDRESS_INACCESSIBLE: 'Không vào được địa chỉ', HOTLINE_HOLD_RELEASED: 'Nhả ghế giữ chỗ' };
 const pill = (status) => { const [label, kind] = STATUS[status] || [status || '—', '']; return `<span class="pill ${kind}">${esc(label)}</span>`; };
 const gpsPill = (g) => g === 'LIVE' ? '<span class="pill ok">Trực tiếp</span>' : g === 'STALE' ? '<span class="pill warn">Tín hiệu cũ</span>' : '<span class="pill">Mất tín hiệu</span>';
+
+const HOLD_STATUS = {
+  HELD_HOTLINE: ['Đang giữ', 'warn'],
+  CANCELLED_BY_STAFF: ['Đã hủy', 'danger'],
+  CANCELLED: ['Đã hủy', 'danger'],
+  EXPIRED: ['Hết hạn', 'danger'],
+  CONVERTED_TO_TICKET: ['Đã xuất vé', 'ok']
+};
+const holdPill = (status) => { const [label, kind] = HOLD_STATUS[status] || [status || '—', '']; return `<span class="pill ${kind}">${esc(label)}</span>`; };
+
+const AUDIT_ACTION_LABEL = {
+  DRIVER_CREATE: 'Thêm tài xế',
+  DRIVER_UPDATE: 'Cập nhật tài xế',
+  DRIVER_LOCK: 'Khóa tài xế',
+  DRIVER_UNLOCK: 'Mở khóa tài xế',
+  DRIVER_PIN_RESET: 'Cấp lại mã PIN tài xế',
+  TRIP_ASSIGN: 'Gán xe và tài xế',
+  TRIP_DELAY: 'Báo trễ chuyến',
+  TRIP_COMPLETE: 'Kết thúc chuyến',
+  HOTLINE_HOLD: 'Giữ chỗ tổng đài',
+  HOTLINE_HOLD_CANCELLED: 'Hủy giữ chỗ tổng đài',
+  LOGIN: 'Đăng nhập',
+  LOGIN_FAILED: 'Đăng nhập thất bại',
+  LOGIN_LOCKED: 'Tài khoản bị khóa',
+  PASSWORD_CHANGE: 'Đổi mật khẩu',
+  TOTP_ENROLLED: 'Kích hoạt 2 bước',
+  POS_ISSUE: 'Xuất vé tại quầy',
+  DEBT_REDEEMED: 'Thu hồi nợ',
+  VEHICLE_CREATE: 'Thêm xe',
+  VEHICLE_UPDATE: 'Cập nhật xe',
+  VEHICLE_SWAP: 'Đổi xe',
+  SEAT_LAYOUT_CREATE: 'Thêm sơ đồ ghế',
+  SEAT_LAYOUT_UPDATE: 'Cập nhật sơ đồ ghế',
+  SEAT_LAYOUT_DELETE: 'Xóa sơ đồ ghế',
+  REFUND_APPROVED: 'Duyệt hoàn tiền',
+  REFUND_REJECTED: 'Từ chối hoàn tiền',
+  SERVICE_CONFIG_UPDATE: 'Cập nhật cấu hình dịch vụ',
+  ROUTE_SERVICE_UPDATE: 'Cập nhật dịch vụ tuyến',
+  SERVICE_AREA_CREATE: 'Thêm vùng đón trả',
+  SERVICE_AREA_UPDATE: 'Cập nhật vùng đón trả',
+  FIXED_ENDPOINTS_UPDATE: 'Cập nhật điểm đón cố định',
+  OPERATOR_CREATE: 'Tạo nhà xe',
+  OPERATOR_UPDATE: 'Cập nhật nhà xe',
+  DIRECTOR_PASSWORD_RESET: 'Đặt lại mật khẩu giám đốc'
+};
+
+const AUDIT_ROLE_LABEL = {
+  FLEET_DIRECTOR: 'Giám đốc nhà xe',
+  DISPATCHER: 'Điều độ viên',
+  CASHIER: 'Thu ngân',
+  FINANCIAL_CONTROLLER: 'Kiểm soát tài chính',
+  PLATFORM_ADMIN: 'Quản trị nền tảng',
+  DRIVER: 'Tài xế'
+};
+
+function formatAuditResource(x) {
+  const a = x.after || {};
+  if (a.pnr) return a.pnr;
+  if (a.full_name) {
+    return a.staff_id ? `${a.full_name} (${a.staff_id})` : a.full_name;
+  }
+  const dep = a.departure_time;
+  const route = a.route_name;
+  if (dep && route) {
+    const extra = (x.action === 'TRIP_COMPLETE' && a.cash_handed_in_vnd !== undefined) ? ` · nộp ${vnd(a.cash_handed_in_vnd)}` : '';
+    return `${hhmm(dep)} ${dmy(dep)} · ${route}${extra}`;
+  }
+  if (typeof x.resource === 'string') {
+    if (/^(BG|FB)-/i.test(x.resource)) return x.resource;
+    const bt = (typeof boardTrips !== 'undefined' ? boardTrips : []).find(t => t.trip_id === x.resource);
+    if (bt && bt.departure_time && bt.route_name) {
+      const extra = (x.action === 'TRIP_COMPLETE' && a.cash_handed_in_vnd !== undefined) ? ` · nộp ${vnd(a.cash_handed_in_vnd)}` : '';
+      return `${hhmm(bt.departure_time)} ${dmy(bt.departure_time)} · ${bt.route_name}${extra}`;
+    }
+  }
+  return x.resource || '';
+}
 
 function newMap(el, center = [20.6, 105.85], zoom = 8) {
   const map = L.map(el, { zoomControl: true }).setView(center, zoom);
@@ -932,12 +1009,23 @@ async function loadBoard() {
 async function openTrip(tripId) {
   state.selectedTrip = tripId;
   document.querySelectorAll('#board tr[data-trip]').forEach(tr => tr.classList.toggle('sel', tr.dataset.trip === tripId));
-  const [trip, inv, track, ops, assignOpts, msgs] = await Promise.all([api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/seat-inventory`), publicApi(`/api/v1/trips/${encodeURIComponent(tripId)}/tracking`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/operations`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/assign-options`), api(`/api/v1/ops/messages?trip_id=${encodeURIComponent(tripId)}`)]);
+  const [trip, inv, track, ops, assignOpts, msgs, holdsRes] = await Promise.all([
+    api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}`),
+    api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/seat-inventory`),
+    publicApi(`/api/v1/trips/${encodeURIComponent(tripId)}/tracking`),
+    api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/operations`),
+    api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/assign-options`),
+    api(`/api/v1/ops/messages?trip_id=${encodeURIComponent(tripId)}`),
+    api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/hotline-holds`)
+  ]);
   const opsData = ops.ok ? ops.data : null;
+  const holds = holdsRes?.ok ? (holdsRes.data?.holds || []) : [];
+  const canDispatch = state.user?.role === 'PLATFORM_ADMIN' || ['FLEET_DIRECTOR', 'DISPATCHER'].includes(state.user?.role);
   if (!trip.ok) { $('#tripDetail').innerHTML = `<div class="error">${esc(trip.message)}</div>`; return; }
   // The board row has the route and driver names the trip record lacks.
   const t = { ...(boardTrips.find(b => b.trip_id === tripId) || {}), ...trip.data }; const s = inv.ok ? inv.data.summary || {} : {};
   const stops = track?.stops || [];
+  const stopsMap = Object.fromEntries([...stops, ...(opsData?.stops || [])].map(st => [st.stop_id, st.name]));
   $('#tripDetail').innerHTML = `
     <div class="row"><div class="grow"><div style="font-weight:700;font-size:16px">${esc(boardTrips.find(b => b.trip_id === tripId)?.route_name || t.route_name || t.route_id || '')}</div>
       <div class="muted mono">${esc(t.trip_id)} · ${esc(t.vehicle_plate)} · ${esc(hhmm(t.departure_time))} ${esc(dmy(t.departure_time))}</div></div>${pill(t.status)}</div>
@@ -951,12 +1039,13 @@ async function openTrip(tripId) {
     <div id="tripMap" class="map"></div>
     <div class="muted" id="tripTrack" style="margin-top:6px"></div>
     <div class="section-title">Điểm dừng</div>
-    ${opsData ? `<table><thead><tr><th>Trạm</th><th>Trạng thái</th><th title="Khách đón / đã lên / đã loại">Đón</th><th title="Khách xuống">Trả</th></tr></thead><tbody>${opsData.stops.map(st => `<tr><td>${esc(st.name)}${st.counts.home_pickups ? ` <span class="pill warn">${esc(st.counts.home_pickups)} tận nhà</span>` : ''}</td><td>${stopPill(st.lifecycle_status)}</td><td class="mono">${esc(st.counts.confirmed)} / ${esc(st.counts.boarded)} / ${esc(st.counts.excluded)}</td><td class="mono">${esc(st.counts.dropoffs + st.counts.alighted)}</td></tr>`).join('')}</tbody></table>
+    ${opsData ? `<table><thead><tr><th>Trạm</th><th>Trạng thái</th><th title="Khách đón / đã lên / đã loại">Đón</th><th title="Khách xuống">Trả</th></tr></thead><tbody>${opsData.stops.map(st => `<tr><td>${esc(st.name)}${st.counts.home_pickups ? ` <span class="pill warn">${esc(st.counts.home_pickups)} tận nhà</span>` : ''}</td><td>${stopPill(st.lifecycle_status, st.departed_at)}</td><td class="mono">${esc(st.counts.confirmed)} / ${esc(st.counts.boarded)} / ${esc(st.counts.excluded)}</td><td class="mono">${esc(st.counts.dropoffs + st.counts.alighted)}</td></tr>`).join('')}</tbody></table>
       ${opsData.home_pickups.length ? `<div class="section-title">Đón tận nhà (theo thứ tự xe đi đón)</div>${opsData.home_pickups.map(h => `<div class="row" style="padding:3px 0"><span class="mono muted">${h.position ? `#${esc(h.position)}` : ''}</span><span class="mono">${esc(h.seat_code)}</span><span class="grow">${esc(h.address)}${h.source === 'HOTLINE' ? ' <span class="pill">tổng đài</span>' : ''}</span><span class="mono muted">${h.appointment_at ? `hẹn ${esc(hhmm(h.appointment_at))}` : (h.window_from ? `${esc(hhmm(h.window_from))}–${esc(hhmm(h.window_to))}` : '')}</span>${homeStatePill(h)}</div>`).join('')}` : ''}
       <div class="section-title">Nhật ký chuyến</div>
-      <div style="max-height:180px;overflow:auto">${opsData.events.length ? opsData.events.slice(0, 50).map(ev => `<div class="row" style="padding:2px 0;font-size:13px"><span class="mono muted">${esc(hhmm(ev.at))}</span><span class="grow">${esc(ev.type === 'PICKUP_READY' && ev.minutes ? `Khách cần thêm ${ev.minutes} phút` : (EVENT_LABEL[ev.type] || ev.type))} ${esc(ev.seat_code || '')} ${esc(ev.stop_id || '')}${ev.manual ? ' <span class="pill warn">thủ công</span>' : ''}</span><span class="muted">${esc(ev.actor || '')}</span></div>`).join('') : '<p class="muted">Chưa có sự kiện.</p>'}</div>`
+      <div style="max-height:180px;overflow:auto">${opsData.events.length ? opsData.events.slice(0, 50).map(ev => `<div class="row" style="padding:2px 0;font-size:13px"><span class="mono muted">${esc(hhmm(ev.at))}</span><span class="grow">${esc(ev.message || (ev.type === 'PICKUP_READY' && ev.minutes ? `Khách cần thêm ${ev.minutes} phút` : (EVENT_LABEL[ev.type] || ev.type)))} ${esc(ev.message ? '' : ev.seat_code || '')} ${esc(ev.message ? '' : (ev.stop_name || stopsMap[ev.stop_id] || ev.stop_id || ''))}${ev.manual ? ' <span class="pill warn">thủ công</span>' : ''}</span><span class="muted">${esc(ev.actor || '')}</span></div>`).join('') : '<p class="muted">Chưa có sự kiện.</p>'}</div>`
     : `<div>${stops.length ? stops.map(st => `<div class="row" style="padding:3px 0"><span class="mono muted">${esc(st.order)}</span><span class="grow">${esc(st.name)}</span></div>`).join('') : '<p class="muted">Chưa có dữ liệu điểm dừng.</p>'}</div>`}
     ${msgs?.ok ? messagesBlock(msgs.data) : ''}
+    ${canDispatch ? `
     <div class="section-title">Báo trễ chính thức</div>
     <form id="delayForm">
       <div class="row">
@@ -965,7 +1054,7 @@ async function openTrip(tripId) {
         <button class="btn" type="submit">Công bố</button>
       </div>
       <div class="error" id="delayError" style="margin-top:4px"></div>
-    </form>
+    </form>` : ''}
     ${saleBlock(t)}
     <div ${t.status === 'CANCELLED' ? 'class="hidden"' : ''}>
     <div class="section-title">Giữ chỗ qua tổng đài</div>
@@ -984,8 +1073,20 @@ async function openTrip(tripId) {
       <div class="error" id="holdError"></div>
       <button class="btn primary" type="submit">Giữ chỗ (khách trả tiền mặt khi lên xe)</button>
     </form>
+    <div class="section-title">Đang giữ qua tổng đài</div>
+    <div id="hotlineHoldsList">
+      ${holds.length ? `<table><thead><tr><th>Mã giữ (PNR)</th><th>Hành khách</th><th>Ghế</th><th>Tiền vé</th><th>Điểm đón</th><th>Hạn giữ</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>${holds.map(h => `<tr><td class="mono font-semibold">${esc(h.pnr || h.reservation_id)}</td><td>${esc(h.name || h.passenger_name || '')}<div class="muted mono" style="font-size:12px">${esc(h.phone || '')}</div></td><td class="mono">${esc((h.seats || h.seat_codes || []).join(', '))}</td><td class="mono">${esc(vnd(h.total_fare_vnd || 0))}</td><td>${esc(h.pickup_stop_name || '—')}</td><td class="mono">${esc(hhmm(h.hold_until))}</td><td>${holdPill(h.status)}</td><td>${h.status === 'HELD_HOTLINE' ? `<button class="btn danger" style="padding:4px 8px;font-size:12px" data-cancel-hold="${esc(h.reservation_id)}">Hủy giữ chỗ</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Chưa có thông tin giữ chỗ qua tổng đài.</p>'}
+    </div>
     </div>`;
   drawTripMap(track);
+  $('#assignForm select[name=vehicle]')?.addEventListener('change', (e) => {
+    const chosenVeh = (assignOpts.data?.vehicles || []).find(v => v.vehicle_id === e.target.value);
+    const drvSelect = $('#assignForm select[name=driver]');
+    if (drvSelect) {
+      const currVal = drvSelect.value;
+      drvSelect.innerHTML = renderDriverOptions(assignOpts.data?.drivers || [], chosenVeh, currVal);
+    }
+  });
   $('#assignForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
@@ -996,7 +1097,29 @@ async function openTrip(tripId) {
     loadBoard(); openTrip(tripId);
   });
   bindSaleBlock(tripId, t);
-  $('#delayForm').addEventListener('submit', async (e) => {
+  document.querySelectorAll('#hotlineHoldsList button[data-cancel-hold]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const resId = btn.dataset.cancelHold;
+      if (!btn.dataset.armed) {
+        btn.dataset.armed = '1';
+        btn.textContent = 'Hủy giữ chỗ hẳn?';
+        setTimeout(() => {
+          if (btn.isConnected) {
+            delete btn.dataset.armed;
+            btn.textContent = 'Hủy giữ chỗ';
+          }
+        }, 4000);
+        return;
+      }
+      delete btn.dataset.armed;
+      btn.textContent = 'Đang hủy...';
+      btn.disabled = true;
+      const r = await api(`/api/v1/ops/pos/hotline-holds/${encodeURIComponent(resId)}/cancel`, { method: 'POST', idempotent: true });
+      toast(r.ok ? 'Đã hủy giữ chỗ' : r.message);
+      if (r.ok) { loadBoard(); openTrip(tripId); }
+    });
+  });
+  $('#delayForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
     const errEl = $('#delayError');
@@ -1040,7 +1163,7 @@ async function openTrip(tripId) {
     if (home) body.homePickup = { address: f.address.value.trim(), note: f.note.value.trim(), lat: homePin.lat, lng: homePin.lng };
     const r = await api('/api/v1/ops/pos/hotline-hold', { method: 'POST', idempotent: true, body });
     if (!r.ok) { $('#holdError').textContent = r.message; return; }
-    toast(home ? `Đã giữ chỗ ${r.data.pnr} đón tận nhà · khách đã nhận tin nhắn có link theo dõi` : `Đã giữ chỗ ${r.data.pnr} · hạn ${hhmm(r.data.hold_until)}`);
+    toast(`Đã giữ chỗ ${r.data.pnr} · ${(r.data.seat_codes || [seat]).join(', ')} · ${vnd(r.data.total_fare_vnd || 0)} · hạn ${hhmm(r.data.hold_until)}`);
     f.reset(); loadBoard(); openTrip(tripId);
   });
   // D144: a home address taken on the phone, pinned on the map by the office.
@@ -1085,7 +1208,8 @@ function messagesBlock(d) {
 // Online sale of this day's departure, and cancelling it (D131): every ticket refunded in full, passengers told.
 function saleBlock(t) {
   if (t.status === 'CANCELLED') return `<div class="section-title">Bán vé</div><p class="error" style="margin:0">Đã hủy chuyến${t.cancel_reason ? `: ${esc(t.cancel_reason)}` : ''}. Vé đã bán được hoàn 100%, chờ duyệt hoàn tiền.</p>`;
-  if (['IN_TRANSIT', 'COMPLETED'].includes(t.status)) return '';
+  const canDispatch = state.user?.role === 'PLATFORM_ADMIN' || ['FLEET_DIRECTOR', 'DISPATCHER'].includes(state.user?.role);
+  if (!canDispatch || ['IN_TRANSIT', 'COMPLETED'].includes(t.status)) return '';
   return `<div class="section-title">Bán vé và hủy chuyến</div>
     <div class="row" style="margin-bottom:8px"><span class="grow">${t.sales_closed ? `<span class="pill warn">Đang ngừng bán trực tuyến</span>${t.sales_closed_reason ? ` <span class="muted">${esc(t.sales_closed_reason)}</span>` : ''}` : '<span class="pill ok">Đang bán trực tuyến</span>'}</span>
       <button class="btn" type="button" id="salesToggle">${t.sales_closed ? 'Mở bán lại' : 'Ngừng bán trực tuyến'}</button></div>
@@ -1151,14 +1275,42 @@ async function loadHomeRequests() {
   }));
 }
 
+function getDriverFitReason(driver, vehicle) {
+  if (driver.reason) return driver.reason;
+  if (!vehicle) return null;
+  const max = driver.max_capacity;
+  if (max === undefined || max === null) return null;
+  const capacity = vehicle.capacity || (vehicle.total_seats + 1);
+  const vehicleText = vehicle.plate_number ? `xe ${vehicle.plate_number} ` : '';
+  if (max === 0) {
+    return `Bằng ${driver.license_class || 'lái'} không được lái xe chở khách; ${vehicleText}có ${capacity} chỗ (gồm lái)`;
+  }
+  if (capacity > max) {
+    return `Bằng ${driver.license_class || 'lái'} chỉ lái xe tối đa ${max} chỗ; ${vehicleText}có ${capacity} chỗ (gồm lái)`;
+  }
+  return null;
+}
+
+function renderDriverOptions(drivers, vehicle, selectedDriverId) {
+  return '<option value="">— Chọn tài xế —</option>' + (drivers || []).map(d => {
+    const fitReason = getDriverFitReason(d, vehicle);
+    const available = d.available && !fitReason;
+    const isSelected = selectedDriverId ? (d.driver_id === selectedDriverId) : d.assigned;
+    const reasonText = fitReason || d.reason;
+    const disabled = !available && !isSelected;
+    return `<option value="${esc(d.driver_id)}" ${isSelected ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${esc(d.full_name)} · ${esc(d.staff_id)}${reasonText ? ` — ${esc(reasonText)}` : ''}</option>`;
+  }).join('');
+}
+
 // Bus and driver of the trip: unavailable ones stay listed, greyed, with the reason.
 function assignBlock(o) {
   const locked = ['IN_TRANSIT', 'COMPLETED', 'CANCELLED'].includes(o.status);
   const opt = (value, label, x) => `<option value="${esc(value)}" ${x.assigned ? 'selected' : ''} ${!x.available && !x.assigned ? 'disabled' : ''}>${esc(label)}${x.reason && !x.assigned ? ` — ${esc(x.reason)}` : ''}</option>`;
+  const selectedVeh = (o.vehicles || []).find(v => v.assigned) || (o.vehicle_id ? (o.vehicles || []).find(v => v.vehicle_id === o.vehicle_id) : null);
   return `<div class="section-title">Xe và tài xế</div>
     <form id="assignForm" class="card" style="padding:12px;margin-bottom:12px">
-      <div class="row"><div class="field grow"><label>Xe</label><select name="vehicle" required ${locked ? 'disabled' : ''}><option value="">— Chọn xe —</option>${o.vehicles.map(v => opt(v.vehicle_id, `${v.plate_number} · ${v.model} · ${v.total_seats} chỗ`, v)).join('')}</select></div>
-        <div class="field grow"><label>Tài xế</label><select name="driver" required ${locked ? 'disabled' : ''}><option value="">— Chọn tài xế —</option>${o.drivers.map(d => opt(d.driver_id, `${d.full_name} · ${d.staff_id}`, d)).join('')}</select></div></div>
+      <div class="row"><div class="field grow"><label>Xe</label><select name="vehicle" required ${locked ? 'disabled' : ''}><option value="">— Chọn xe —</option>${(o.vehicles || []).map(v => opt(v.vehicle_id, `${v.plate_number} · ${v.model} · ${v.total_seats} chỗ`, v)).join('')}</select></div>
+        <div class="field grow"><label>Tài xế</label><select name="driver" required ${locked ? 'disabled' : ''}>${renderDriverOptions(o.drivers || [], selectedVeh, o.driver_id)}</select></div></div>
       <label class="row" style="gap:6px;margin-bottom:8px"><input type="checkbox" name="schedule" ${locked ? 'disabled' : ''}> Áp dụng cho các ngày sau của lịch chạy này</label>
       <div class="error" id="assignError"></div>
       ${locked ? '<p class="muted" style="margin:0">Chuyến đã chạy hoặc đã kết thúc, không đổi được xe và tài xế.</p>' : `<button class="btn primary" type="submit">${o.vehicle_id ? 'Đổi xe / tài xế' : 'Gán xe và tài xế'}</button>${o.sold_seats ? ` <span class="muted">Đã bán ${esc(o.sold_seats)} ghế: khách sẽ được báo nếu đổi.</span>` : ''}`}
@@ -1442,7 +1594,7 @@ async function loadAudit() {
   const chainNote = !chain ? '' : chain.intact
     ? `<p style="margin:0;padding:10px 16px;border-bottom:1px solid var(--line)"><span class="pill ok">Chuỗi nhật ký nguyên vẹn</span> <span class="muted">${esc(chain.checked)} dòng đã kiểm</span></p>`
     : `<p style="margin:0;padding:10px 16px;border-bottom:1px solid var(--line)"><span class="pill danger">Chuỗi nhật ký bị đứt</span> <span class="muted">tại ${esc(chain.broken_at)}: có dòng bị xóa hoặc sửa ngoài hệ thống</span></p>`;
-  $('#auditBox').innerHTML = chainNote + `<table><thead><tr><th>Thời điểm</th><th>Người làm</th><th>Thao tác</th><th>Đối tượng</th></tr></thead><tbody>${list.length ? list.map(x => `<tr><td class="mono">${esc(hhmm(x.at || x.timestamp))} ${esc(dmy(x.at || x.timestamp))}</td><td>${esc(x.actor || '')}<div class="muted" style="font-size:12px">${esc(x.role || '')}</div></td><td>${esc(x.action)}</td><td class="mono">${esc(x.resource || '')}</td></tr>`).join('') : '<tr><td colspan="4" class="muted">Chưa có thao tác.</td></tr>'}</tbody></table>`;
+  $('#auditBox').innerHTML = chainNote + `<table><thead><tr><th>Thời điểm</th><th>Người làm</th><th>Thao tác</th><th>Đối tượng</th></tr></thead><tbody>${list.length ? list.map(x => `<tr><td class="mono">${esc(hhmm(x.at || x.timestamp))} ${esc(dmy(x.at || x.timestamp))}</td><td>${esc(x.actor || '')}<div class="muted" style="font-size:12px">${esc(AUDIT_ROLE_LABEL[x.role] || x.role || '')}</div></td><td>${esc(AUDIT_ACTION_LABEL[x.action] || x.action)}</td><td class="mono">${esc(formatAuditResource(x))}</td></tr>`).join('') : '<tr><td colspan="4" class="muted">Chưa có thao tác.</td></tr>'}</tbody></table>`;
 }
 
 // ---------- fixed timetable (MGR-032, D129) ----------

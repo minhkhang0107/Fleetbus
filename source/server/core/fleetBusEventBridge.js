@@ -13,6 +13,10 @@ import { createShareToken } from '../services/passenger/core/cryptoEngine.js';
 
 /** "18:35" of an ISO instant, Vietnam time. */
 const vnClock = (iso) => new Date(Date.parse(iso) + 7 * 3600000).toISOString().slice(11, 16);
+const vnParts = (iso) => {
+  const s = new Date((Date.parse(iso) || Date.now()) + 7 * 3600000).toISOString();
+  return { time: s.slice(11, 16), day: `${s.slice(8, 10)}/${s.slice(5, 7)}` };
+};
 import { expireHomeRequests } from './homeReview.js';
 import { DEMO_DATE, addDays, parseRunId, serviceCalendar } from './serviceDate.js';
 
@@ -35,7 +39,7 @@ function addHotlineToManifest(driverTrip, reservation, farePerSeat) {
       home_pickup: homeConfirmed(reservation.home_pickup) ? reservation.home_pickup : null,
       boarding_status: 'ISSUED',
       payment_method: 'COD',
-      cod_amount_vnd: farePerSeat + feeEach,
+      cod_amount_vnd: (typeof reservation.seat_fares?.[seatCode] === 'number' ? reservation.seat_fares[seatCode] : farePerSeat) + feeEach,
       source: 'HOTLINE',
       reservation_id: reservation.reservation_id,
       boarded_at: null
@@ -111,6 +115,7 @@ export class FleetBusEventBridge extends EventEmitter {
     if (trackingService) trackingService.eventBridge = this;
     if (seatMapService) seatMapService.eventBridge = this;
     if (paymentService && seatMapService) paymentService.seatMapService = seatMapService;
+    if (paymentService && services.searchService) paymentService.searchService = services.searchService;
     // The stops of a trip, in order: the passenger trip (PAX-008) is the authority, a driver-only trip uses its own
     if (seatMapService) {
       seatMapService.stopsProvider = (tripId) => {
@@ -119,6 +124,20 @@ export class FleetBusEventBridge extends EventEmitter {
         return driverService?.activeTrips?.get(tripId)?.stops || null;
       };
       seatMapService.layoutProvider = (tripId) => managerService?.layoutOfTrip?.(tripId) || null;
+      seatMapService.fareProvider = (tripId) => {
+        const passengerTrip = services.searchService?.getTripDetail?.(tripId);
+        if (passengerTrip?.success && typeof passengerTrip.data?.base_fare_vnd === 'number') {
+          return passengerTrip.data.base_fare_vnd;
+        }
+        return null;
+      };
+    }
+    if (trackingService) {
+      trackingService.stopsProvider = (tripId) => {
+        const passengerTrip = services.searchService?.getTripDetail?.(tripId);
+        if (passengerTrip?.success) return passengerTrip.data.stops;
+        return driverService?.activeTrips?.get(tripId)?.stops || null;
+      };
     }
     // A schedule's run on another day gets its ops and driver trips the first time the office or a sale needs it.
     if (managerService) {
@@ -205,7 +224,7 @@ export class FleetBusEventBridge extends EventEmitter {
     // -------------------------------------------------------------------------
     // 2. PASSENGER_BOARDED: Driver QR Scan -> Passenger Ticket & Manager Boarded Count
     // -------------------------------------------------------------------------
-    this.on('PASSENGER_BOARDED', ({ tripId, passenger, ticketId, pnr, now = Date.now() }) => {
+    this.on('PASSENGER_BOARDED', ({ tripId, passenger, ticketId, pnr, now = Date.now(), seatCodes, skipNotification = false }) => {
       // Hoist ticket lookup so step B can use it
       let ticket = null;
       if (paymentService && paymentService.tickets) {
@@ -217,7 +236,7 @@ export class FleetBusEventBridge extends EventEmitter {
       }
 
       // B. Passenger Push Notification: Welcome aboard reminder
-      if (trackingService && typeof trackingService.sendNotification === 'function') {
+      if (!skipNotification && trackingService && typeof trackingService.sendNotification === 'function') {
         const phone = passenger?.passenger_phone || passenger?.phone;
         if (phone) {
           let tripDesc = 'chuyến của bạn';
@@ -233,13 +252,20 @@ export class FleetBusEventBridge extends EventEmitter {
               tripDesc = `chuyến ${route} khởi hành ${hh}:${mm} ngày ${dd}/${MM}`;
             }
           }
-          const seat = passenger?.seat_code || ticket?.seat_code || 'đã đặt';
+          const seat = Array.isArray(seatCodes) && seatCodes.length > 0
+            ? seatCodes.join(', ')
+            : (passenger?.seat_code || ticket?.seat_code || 'đã đặt');
 
           trackingService.sendNotification(phone, { operatorId: operatorOfTrip(this.services, tripId),
             title: 'Chào mừng quý khách lên xe!',
             body: `Bạn đã lên xe ${tripDesc} (Ghế ${seat}). Chúc bạn thượng lộ bình an!`,
             type: 'BOARDING_REMINDER',
-            payload: { trip_id: tripId, ticket_id: ticketId, seat_code: passenger?.seat_code }
+            payload: {
+              trip_id: tripId,
+              ticket_id: ticketId,
+              seat_code: passenger?.seat_code,
+              seat_codes: seatCodes || [passenger?.seat_code].filter(Boolean)
+            }
           });
         }
       }
@@ -429,6 +455,10 @@ export class FleetBusEventBridge extends EventEmitter {
       if (paymentService && paymentService.tickets) {
         const mgrTrip = managerService?.findTrip?.(tripId);
         const route = managerService?.routes?.find(r => r.route_id === mgrTrip?.route_id);
+        const stopTimes = this.services?.searchService?.stopTimes?.(tripId);
+        const pickupTimeInfo = stopTimes?.[booking.pickup_stop_id];
+        const pickupTime = pickupTimeInfo?.planned_time || mgrTrip?.departure_time || new Date().toISOString();
+        const pickupEstimated = pickupTimeInfo?.time_source === 'ESTIMATED';
         for (const seatCode of seatCodes) {
           const ticketId = `tkt_pos_${booking.pnr.replace('-', '')}_${seatCode}`;
           paymentService.tickets.set(ticketId, {
@@ -438,6 +468,8 @@ export class FleetBusEventBridge extends EventEmitter {
             trip_id: tripId,
             route_name: route?.name || tripId,
             departure_time: mgrTrip?.departure_time || new Date().toISOString(),
+            pickup_time: pickupTime,
+            pickup_time_estimated: pickupEstimated,
             fare_vnd: Math.round(booking.total_fare_vnd / seatCodes.length),
             owner_phone: booking.phone,
             seat_code: seatCode,
@@ -497,6 +529,10 @@ export class FleetBusEventBridge extends EventEmitter {
           }
         }
       }
+    });
+
+    this.on('STOP_DEPARTED', () => {
+      managerService?.releaseExpiredHotlineHolds?.();
     });
 
     // A phone hold whose pickup stop the bus has left is released (the passenger did not board).
@@ -629,9 +665,14 @@ export class FleetBusEventBridge extends EventEmitter {
         addToManifest(driverTrip, [...paymentService.tickets.values()].filter(t => t.trip_id === tripId && ['ACTIVE', 'BOARDED'].includes(t.status)));
       }
       if (driverTrip) {
-        const fare = managerService?.routes?.find(r => r.route_id === managerService.findTrip?.(tripId)?.route_id)?.base_fare_vnd || 220000;
         for (const r of managerService?.hotlineReservations || []) {
-          if (r.trip_id === tripId && r.hold_status === 'HELD_HOTLINE') addHotlineToManifest(driverTrip, r, fare);
+          if (r.trip_id === tripId && r.hold_status === 'HELD_HOTLINE') {
+            const fare = r.fare_per_seat_vnd
+              || managerService?._resolveFareForSeats?.(tripId, managerService.findTrip?.(tripId), r.seat_codes)?.farePerSeat
+              || managerService?.routes?.find(route => route.route_id === managerService.findTrip?.(tripId)?.route_id)?.base_fare_vnd
+              || 220000;
+            addHotlineToManifest(driverTrip, r, fare);
+          }
         }
       }
       const changed = (previous?.vehicle_plate && previous.vehicle_plate !== vehiclePlate) || (previous?.driver_id && previous.driver_id !== driverId);
@@ -692,10 +733,30 @@ export class FleetBusEventBridge extends EventEmitter {
     // 7. TRIP_DELAYED: Manager Delay Broadcast -> Driver & Passenger
     // -------------------------------------------------------------------------
     this.on('TRIP_DELAYED', ({ tripId, delayMinutes, reason }) => {
+      let routeName = null;
+      let plannedDeparture = null;
+
       if (driverService && driverService.activeTrips) {
         const trip = driverService.activeTrips.get(tripId);
         if (trip) {
           trip.delay_minutes = delayMinutes;
+          plannedDeparture = trip.planned_departure_time || trip.departure_time;
+          if (plannedDeparture && delayMinutes > 0) {
+            trip.estimated_departure_time = new Date(Date.parse(plannedDeparture) + delayMinutes * 60000).toISOString();
+          }
+          routeName = trip.route_name;
+        }
+      }
+
+      if (managerService) {
+        const mgrTrip = managerService.findTrip ? managerService.findTrip(tripId) : managerService.trips?.find(t => t.trip_id === tripId);
+        if (mgrTrip) {
+          mgrTrip.delay_minutes = delayMinutes;
+          if (!plannedDeparture) plannedDeparture = mgrTrip.departure_time || mgrTrip.planned_departure_time;
+          if (!routeName && mgrTrip.route_name) routeName = mgrTrip.route_name;
+          if (plannedDeparture && delayMinutes > 0) {
+            mgrTrip.estimated_departure_time = new Date(Date.parse(plannedDeparture) + delayMinutes * 60000).toISOString();
+          }
         }
       }
 
@@ -712,15 +773,60 @@ export class FleetBusEventBridge extends EventEmitter {
         if (driverService && driverService.activeTrips) {
           const trip = driverService.activeTrips.get(tripId);
           if (trip && trip.manifest) {
+            const byPhone = new Map();
             for (const p of trip.manifest) {
-              if (p.passenger_phone) {
-                trackingService.sendNotification(p.passenger_phone, { operatorId: operatorOfTrip(this.services, tripId),
-                  title: 'Thông báo trễ chuyến',
-                  body: `Chuyến đi bị hoãn ${delayMinutes} phút do ${reason}. Quý khách vui lòng theo dõi trên Radar trực tiếp.`,
-                  type: 'DELAY',
-                  payload: { trip_id: tripId, delay_minutes: delayMinutes }
-                });
+              const phone = p.passenger_phone || p.phone;
+              if (!phone) continue;
+              const list = byPhone.get(phone) || [];
+              list.push(p);
+              byPhone.set(phone, list);
+            }
+
+            let rawRoute = routeName || trip.route_name;
+            if (!rawRoute && this.services.paymentService?.tickets) {
+              for (const t of this.services.paymentService.tickets.values()) {
+                if (t.trip_id === tripId && t.route_name) { rawRoute = t.route_name; break; }
               }
+            }
+            let route = '';
+            if (rawRoute) {
+              const cleaned = rawRoute.replace(/\s*\([^)]*\)\s*$/, '').trim();
+              if (cleaned) route = cleaned.includes('—') ? cleaned.replace(/\s*—\s*/g, ' → ') : cleaned;
+            }
+
+            let depTimeStr = plannedDeparture;
+            if (!depTimeStr && this.services.paymentService?.tickets) {
+              for (const t of this.services.paymentService.tickets.values()) {
+                if (t.trip_id === tripId && t.departure_time) { depTimeStr = t.departure_time; break; }
+              }
+            }
+            const { time: origTime, day: depDay } = vnParts(depTimeStr);
+            const newDepIso = new Date((Date.parse(depTimeStr) || Date.now()) + delayMinutes * 60000).toISOString();
+            const newTime = vnClock(newDepIso);
+
+            const cleanReason = (reason || '').trim();
+            const routePart = route ? ` ${route}` : '';
+            const reasonPart = cleanReason ? ` Lý do: ${cleanReason}.` : '';
+
+            for (const [phone, passengers] of byPhone) {
+              const seatList = passengers.map(p => p.seat_code).filter(Boolean).join(', ');
+              const seatText = seatList ? ` (ghế ${seatList})` : '';
+              const body = `Chuyến ${origTime}${routePart} ngày ${depDay}${seatText} chạy trễ ${delayMinutes} phút, giờ chạy mới ${newTime}.${reasonPart}`;
+
+              trackingService.sendNotificationOnce?.(`${tripId}:${phone}:TRIP_DELAY:${delayMinutes}`, phone, {
+                operatorId: operatorOfTrip(this.services, tripId),
+                title: 'Thông báo trễ chuyến',
+                body,
+                type: 'TRIP_DELAY',
+                payload: {
+                  trip_id: tripId,
+                  delay_minutes: delayMinutes,
+                  new_departure_time: newTime,
+                  ticket_id: passengers[0].ticket_id,
+                  ticket_ids: passengers.map(p => p.ticket_id),
+                  seat_codes: passengers.map(p => p.seat_code).filter(Boolean)
+                }
+              });
             }
           }
         }
@@ -870,7 +976,7 @@ export class FleetBusEventBridge extends EventEmitter {
     // -------------------------------------------------------------------------
     // 9. TRIP_COMPLETED: Driver End Trip -> Manager Status
     // -------------------------------------------------------------------------
-    this.on('TRIP_COMPLETED', ({ tripId, summary }) => {
+    this.on('TRIP_COMPLETED', ({ tripId, summary, driverId, operatorId }) => {
       // PAX-016: tickets of a finished trip belong to the history tab
       if (paymentService && paymentService.tickets) {
         for (const ticket of paymentService.tickets.values()) {
@@ -878,8 +984,9 @@ export class FleetBusEventBridge extends EventEmitter {
         }
       }
       if (managerService) {
+        let trip = null;
         if (managerService.trips) {
-          const trip = managerService.findTrip(tripId);
+          trip = managerService.findTrip(tripId);
           if (trip) {
             trip.status = 'COMPLETED';
           }
@@ -891,6 +998,19 @@ export class FleetBusEventBridge extends EventEmitter {
             veh.speed_kmh = 0;
           }
         }
+        managerService.recordAudit({
+          actor: driverId || trip?.driver_id || 'driver',
+          role: 'DRIVER',
+          action: 'TRIP_COMPLETE',
+          resource: tripId,
+          after: {
+            trip_id: tripId,
+            cash_handed_in_vnd: summary?.total_cash_to_handover_vnd ?? 0,
+            departure_time: trip?.departure_time,
+            route_name: trip?.route_name
+          },
+          operator_id: operatorId || trip?.operator_id || DEFAULT_OPERATOR_ID
+        });
       }
     });
   }
@@ -925,13 +1045,30 @@ export class FleetBusEventBridge extends EventEmitter {
       const radar = trackingService.getTripRadar(tripId, { pickupStopId: stopId, stops: trip.stops, canSeeBus: true, view: 'TICKET', mockNow: now }).data;
       if (!radar?.has_position || radar.has_passed_target || radar.freshness?.state !== 'LIVE') continue;
       if (!Number.isFinite(radar.eta_minutes) || radar.eta_minutes > threshold) continue;
+      const byPhone = new Map();
       for (const p of passengers) {
-        trackingService.sendNotificationOnce(`${p.ticket_id}:PICKUP_APPROACHING`, p.passenger_phone, {
+        const phone = p.passenger_phone || p.phone;
+        if (!phone) continue;
+        const list = byPhone.get(phone) || [];
+        list.push(p);
+        byPhone.set(phone, list);
+      }
+      for (const [phone, phonePax] of byPhone) {
+        const seatList = phonePax.map(p => p.seat_code).filter(Boolean).join(', ');
+        const seatText = seatList ? `, ghế ${seatList}` : '';
+        trackingService.sendNotificationOnce(`${tripId}:${stopId}:${phone}:PICKUP_APPROACHING`, phone, {
           operatorId,
           title: 'Xe sắp tới điểm đón',
-          body: `Xe ${trip.vehicle_plate} còn khoảng ${radar.eta_minutes} phút nữa tới ${stop.name}. Bạn chuẩn bị ra điểm đón nhé.`,
+          body: `Xe ${trip.vehicle_plate} còn khoảng ${radar.eta_minutes} phút nữa tới ${stop.name}. Bạn chuẩn bị ra điểm đón nhé${seatText}.`,
           type: 'PICKUP_APPROACHING',
-          payload: { trip_id: tripId, ticket_id: p.ticket_id, stop_id: stopId, eta_minutes: radar.eta_minutes }
+          payload: {
+            trip_id: tripId,
+            ticket_id: phonePax[0].ticket_id,
+            ticket_ids: phonePax.map(p => p.ticket_id),
+            seat_codes: phonePax.map(p => p.seat_code).filter(Boolean),
+            stop_id: stopId,
+            eta_minutes: radar.eta_minutes
+          }
         });
       }
     }
@@ -962,7 +1099,8 @@ export class FleetBusEventBridge extends EventEmitter {
           link
         });
       } else if (q.eta_minutes <= threshold) {
-        trackingService.sendNotificationOnce(`${p.ticket_id}:PICKUP_APPROACHING`, p.passenger_phone, {
+        const stopId = p.pickup_stop_id || 'home';
+        trackingService.sendNotificationOnce(`${trip.trip_id}:${stopId}:${p.passenger_phone}:PICKUP_APPROACHING`, p.passenger_phone, {
           operatorId,
           title: 'Xe sắp tới đón bạn',
           body: `Bạn là điểm đón tiếp theo: xe ${trip.vehicle_plate} còn khoảng ${q.eta_minutes} phút nữa tới ${p.home_pickup.address}. Bạn chuẩn bị ra xe nhé.`,

@@ -219,6 +219,17 @@ class DriverApiClientService {
   }
 
   /**
+   * DRI-008: Confirm departure from a stop of the running trip
+   */
+  Future<Map<String, dynamic>> departStop(String tripId, String stopId, {String? idempotencyKey}) {
+    return _post(
+      '/api/v1/driver/trips/$tripId/stops/$stopId/depart',
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  /**
    * DRI-009: Board with a scanned QR (single, group or offline ticket). The server verifies the signature.
    */
   Future<Map<String, dynamic>> boardWithQr(String tripId, String qrPayload, {String? idempotencyKey}) {

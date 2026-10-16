@@ -128,12 +128,21 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
               Row(children: [
                 Container(width: 8, height: 8, decoration: const BoxDecoration(color: PTokens.primary, shape: BoxShape.circle)),
                 const SizedBox(width: 8),
-                Expanded(child: Text(_checking ? 'Đang kiểm tra với ngân hàng…' : (_notYet ?? 'Đang chờ ngân hàng xác nhận'), style: sans(size: 13, color: _notYet != null && !_checking ? PTokens.warnInk : PTokens.muted))),
+                Expanded(child: Text(_checking ? 'Đang kiểm tra với ngân hàng…' : 'Đang chờ ngân hàng xác nhận', style: sans(size: 13, color: PTokens.muted))),
               ]),
             ]),
           ),
         ]),
         bottomNavigationBar: BottomAction(column: true, children: [
+          if (_notYet != null && !_checking)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                _notYet!,
+                textAlign: TextAlign.center,
+                style: sans(size: 13, color: PTokens.warnInk, weight: FontWeight.w600, height: 1.4),
+              ),
+            ),
           PrimaryButton(label: _checking ? 'Đang kiểm tra…' : 'Tôi đã chuyển tiền, kiểm tra ngay', onPressed: _checking ? null : () => _check(manual: true)),
           LinkButton(label: 'Hủy đơn và nhả ghế', color: PTokens.danger, onPressed: () => _cancel(store)),
         ]),
@@ -222,7 +231,7 @@ class _PassengerBookingSuccessScreenState extends State<PassengerBookingSuccessS
                       mainAxisSpacing: 8,
                       children: [
                         KeyValue('Chuyến', ticket.route),
-                        KeyValue('Khởi hành', '${ticket.dep} · ${ticket.date.split(' ').last}', isMono: true),
+                        KeyValue('Khởi hành', '${ticket.pickupTimeLabel} · ${ticket.date.split(' ').last}', isMono: true),
                         KeyValue(ticket.homePickup != null ? 'Đón tận nhà${ticket.pickupWindow != null ? ' ${ticket.pickupWindow}' : ''}' : 'Điểm đón', ticket.homePickup ?? ticket.pickup),
                         KeyValue('Ghế', ticket.seat, isMono: true),
                         KeyValue('Xe', ticket.plate.isEmpty ? 'Nhà xe sẽ báo' : ticket.plate, isMono: ticket.plate.isNotEmpty),

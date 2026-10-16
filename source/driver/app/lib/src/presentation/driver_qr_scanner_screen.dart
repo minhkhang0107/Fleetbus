@@ -54,12 +54,17 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
     final store = DriverScope.read(context);
     final r = await store.boardWithQr(payload);
     if (!mounted) return;
+    final boardedList = (r.data?['boarded_passengers'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final seats = boardedList.map((p) => p['seat_code']?.toString()).whereType<String>().toList();
     final seat = r.data?['seat_code'] ?? r.data?['passenger']?['seat_code'];
     final name = r.data?['passenger_name'] ?? r.data?['passenger']?['passenger_name'];
+    final title = r.error == null
+        ? (seats.length > 1 ? 'Đã lên xe ${seats.length} ghế: ${seats.join(', ')}' : 'Hợp lệ${seat != null ? ' · Ghế $seat' : ''}')
+        : 'Không cho lên xe';
     await _result(
       context,
       r.error == null,
-      r.error == null ? 'Hợp lệ${seat != null ? ' · Ghế $seat' : ''}' : 'Không cho lên xe',
+      title,
       r.error == null ? (name != null ? '$name đã lên xe.' : 'Khách đã lên xe.') : r.error!,
     );
     if (!mounted) return;
@@ -77,7 +82,7 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
     var selected = waiting.first;
     final pin = TextEditingController();
     String? error;
-    final result = await showDriverSheet<Passenger>(context, builder: (ctx) => StatefulBuilder(
+    final result = await showDriverSheet<({Passenger passenger, List<String> boardedSeats})>(context, builder: (ctx) => StatefulBuilder(
           builder: (ctx, setSheet) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('Lên xe bằng mã PIN', style: dsans(size: 18, weight: FontWeight.w700)),
             const SizedBox(height: 8),
@@ -104,7 +109,7 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
                   return;
                 }
                 if (selected.codDue) {
-                  Navigator.of(ctx).pop(selected);
+                  Navigator.of(ctx).pop((passenger: selected, boardedSeats: <String>[]));
                   return;
                 }
                 final r = await store.boardWithPin(selected, pin.text.trim());
@@ -112,17 +117,29 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
                   setSheet(() => error = r.code == 'INVALID_PIN' ? 'Mã PIN không đúng với vé ghế ${selected.seat}.' : r.error);
                   return;
                 }
-                if (ctx.mounted) Navigator.of(ctx).pop(selected);
+                final boardedList = (r.data?['boarded_passengers'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+                final seats = boardedList.map((p) => p['seat_code']?.toString()).whereType<String>().toList();
+                final boardedSeats = seats.isNotEmpty ? seats : [selected.seat];
+                if (ctx.mounted) Navigator.of(ctx).pop((passenger: selected, boardedSeats: boardedSeats));
               },
             ),
           ]),
         ));
     if (result == null || !context.mounted) return;
-    if (result.codDue) {
-      await showCodSheet(context, result);
+    if (result.passenger.codDue) {
+      await showCodSheet(context, result.passenger);
       return;
     }
-    await _result(context, true, 'Hợp lệ · Ghế ${result.seat}', '${result.name} · ${result.phone}\nXuống tại ${store.stopById(result.to).name}');
+    final boardedSeats = result.boardedSeats;
+    final title = boardedSeats.length > 1
+        ? 'Đã lên xe ${boardedSeats.length} ghế: ${boardedSeats.join(', ')}'
+        : 'Hợp lệ · Ghế ${boardedSeats.firstOrNull ?? result.passenger.seat}';
+    await _result(
+      context,
+      true,
+      title,
+      '${result.passenger.name} · ${result.passenger.phone}\nXuống tại ${store.stopById(result.passenger.to).name}',
+    );
   }
 
   Future<void> _result(BuildContext context, bool ok, String title, String body) => showDriverSheet<void>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

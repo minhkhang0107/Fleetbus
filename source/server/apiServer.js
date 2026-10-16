@@ -20,7 +20,7 @@ import { DriverCockpitService } from './services/driver/modules/driverService.js
 import { ManagerOperationsService } from './services/manager/modules/managerService.js';
 
 import { setCorsHeaders, sendError, readRawBody } from './middleware/httpUtils.js';
-import { handlePassengerRoutes } from './routes/passengerRoutes.js';
+import { handlePassengerRoutes, trackingFor } from './routes/passengerRoutes.js';
 import { handleDriverRoutes } from './routes/driverRoutes.js';
 import { handleManagerRoutes } from './routes/managerRoutes.js';
 import { handleWebhookRoutes } from './routes/webhookRoutes.js';
@@ -255,8 +255,11 @@ export function createFleetBusServer(customServices = {}) {
         return;
       }
       
+      const shareUrl = new URL(`http://localhost/api/v1/trips/${ticketFound.trip_id}/tracking?share=${encodeURIComponent(token)}`);
+      const initialData = trackingFor({ operatorId: op.operator_id, headers: req.headers }, services, ticketFound.trip_id, shareUrl);
+
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(renderTripSharePage(token, ticketFound.trip_id, op.code));
+      res.end(renderTripSharePage(token, ticketFound.trip_id, op.code, initialData));
       return;
     }
 

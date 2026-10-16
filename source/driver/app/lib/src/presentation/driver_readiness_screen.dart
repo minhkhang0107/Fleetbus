@@ -20,12 +20,12 @@ class DriverReadinessScreen extends StatelessWidget {
     await store.refreshTrip();
     if (!context.mounted) return;
     final yes = await showDriverSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('Xuất bến chuyến ${store.depTime}?', style: dsans(size: 18, weight: FontWeight.w700)),
+          Text('Xuất bến chuyến ${store.depTimeLabel}?', style: dsans(size: 18, weight: FontWeight.w700)),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(child: Stat('Khách đã đặt', '${store.manifest.length}', size: 28)),
             const SizedBox(width: 10),
-            Expanded(child: Stat('Giờ chạy', store.depTime, size: 28)),
+            Expanded(child: Stat('Giờ chạy', store.depTimeLabel, size: store.delayMinutes > 0 ? 18 : 28)),
           ]),
           const SizedBox(height: 12),
           Text('App sẽ gửi vị trí xe liên tục cho điều hành và khách đến khi kết thúc chuyến.', style: dsans(size: 15, color: DTokens.sub, height: 1.5)),
@@ -112,7 +112,7 @@ class DriverReadinessScreen extends StatelessWidget {
         );
     final start = BigButton(
       label: done < 6 ? 'Còn ${6 - done} mục chưa kiểm tra' : 'Xuất bến',
-      subtitle: done < 6 ? null : '${store.manifest.length} khách · ${store.stops.isEmpty ? '' : store.stops.first.short} ${store.depTime}',
+      subtitle: done < 6 ? null : '${store.manifest.length} khách · ${store.stops.isEmpty ? '' : store.stops.first.short} ${store.depTimeLabel}',
       color: DTokens.ok,
       height: 72,
       onPressed: done < 6 ? null : () => _confirmStart(context, store),
@@ -123,7 +123,7 @@ class DriverReadinessScreen extends StatelessWidget {
       child: Text('Xe có vấn đề, báo điều hành', style: dsans(size: 15, weight: FontWeight.w600, color: DTokens.dangerInk)),
     );
     return Scaffold(
-      appBar: DHeader(title: 'Kiểm tra xe', subtitle: '${store.plate} · chuyến ${store.depTime}', trailing: Text('$done/6', style: dmono(size: 16, color: color))),
+      appBar: DHeader(title: 'Kiểm tra xe', subtitle: '${store.plate} · chuyến ${store.depTimeLabel}', trailing: Text('$done/6', style: dmono(size: 16, color: color))),
       body: Column(children: [
         LinearProgressIndicator(value: done / 6, minHeight: 4, color: color, backgroundColor: DTokens.panel),
         if (homePanel != null) homePanel,

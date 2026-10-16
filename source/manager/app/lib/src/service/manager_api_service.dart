@@ -262,6 +262,11 @@ class ManagerApiService {
     return _get('/ops/dispatch/matrix');
   }
 
+  // MGR-014: Holds of a trip kept through the hotline
+  Future<Map<String, dynamic>> getHotlineHolds(String tripId) {
+    return _get('/ops/trips/$tripId/hotline-holds');
+  }
+
   // MGR-017: Booking search (phones are masked unless the role is the admin)
   Future<Map<String, dynamic>> getBookings() {
     return _get('/ops/bookings');
@@ -321,6 +326,15 @@ class ManagerApiService {
         'customExpiryMinutes': customExpiryMinutes,
         if (notes != null) 'notes': notes,
       },
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  // MGR-020: Cancel a hotline seat hold, releasing its seats
+  Future<Map<String, dynamic>> cancelHotlineHold(String reservationId, {String? idempotencyKey}) {
+    return _post(
+      '/ops/pos/hotline-holds/$reservationId/cancel',
       idempotent: true,
       idempotencyKey: idempotencyKey,
     );

@@ -52,11 +52,60 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
     );
   }
 
+  List<Ticket> _groupTickets(List<Ticket> tickets) {
+    final map = <String, List<Ticket>>{};
+    for (final t in tickets) {
+      final key = '${t.pnr}_${t.tripId}';
+      map.putIfAbsent(key, () => []).add(t);
+    }
+    return map.values.map((group) {
+      if (group.length == 1) return group.first;
+      final first = group.first;
+      final seats = group.map((t) => t.seat).join(', ');
+      final totalPaid = group.fold<int>(0, (sum, t) => sum + t.paid);
+      final hasRefund = group.any((t) => t.refund != null);
+      final totalRefund = hasRefund ? group.fold<int>(0, (sum, t) => sum + (t.refund ?? 0)) : null;
+      return Ticket(
+        id: first.id,
+        pnr: first.pnr,
+        orderId: first.orderId,
+        ticketIds: group.expand((t) => t.ticketIds.isNotEmpty ? t.ticketIds : [t.id]).toList(),
+        tripId: first.tripId,
+        route: first.route,
+        date: first.date,
+        dep: first.dep,
+        seat: seats,
+        pickup: first.pickup,
+        dropoff: first.dropoff,
+        paid: totalPaid,
+        name: first.name,
+        status: first.status,
+        plate: first.plate,
+        homePickup: first.homePickup,
+        homeDropoff: first.homeDropoff,
+        pickupWindow: first.pickupWindow,
+        pickupNotice: first.pickupNotice,
+        homePickupStatus: first.homePickupStatus,
+        homeDropoffStatus: first.homeDropoffStatus,
+        homePickupReason: first.homePickupReason,
+        homeDropoffReason: first.homeDropoffReason,
+        past: first.past,
+        pickupTime: first.pickupTime,
+        pickupTimeEstimated: first.pickupTimeEstimated,
+      )
+        ..delay = first.delay
+        ..qrVersion = first.qrVersion
+        ..qrValue = first.qrValue
+        ..pin = first.pin
+        ..refund = totalRefund;
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = PassengerScope.of(context);
-    final upcoming = store.tickets.where((t) => !t.past).toList();
-    final past = store.tickets.where((t) => t.past).toList();
+    final upcoming = _groupTickets(store.tickets.where((t) => !t.past).toList());
+    final past = _groupTickets(store.tickets.where((t) => t.past).toList());
     final list = _history ? past : upcoming;
     return Column(children: [
       Container(

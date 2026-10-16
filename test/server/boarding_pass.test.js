@@ -174,4 +174,73 @@ describe('Boarding pass: static versioned QR (PAX-017, D104)', () => {
     const re = (await api(`/api/v1/passenger/tickets/${ticket.ticket_id}/qr/reissue`, { method: 'POST', body: {} })).body.data;
     assert.ok(re.offline_pin && re.offline_pin !== first.offline_pin, 'a reissue gives a new PIN');
   });
+
+  it('TC-PIN-01: PIN of seat 1 boards seat 1 and seat 2 of the same PNR, rejects another PNR, and returns COD ticket as cod_pending', async () => {
+    const hold = await api(`/api/v1/trips/${TRIP}/seats/hold`, { method: 'POST', body: { seatCodes: ['A07', 'A08'], userId: 'u_pin_multi' } });
+    assert.strictEqual(hold.status, 200, JSON.stringify(hold.body));
+    const created = await api('/api/v1/bookings/create', {
+      method: 'POST',
+      body: {
+        tripId: TRIP, userId: 'u_pin_multi', holdId: hold.body.data.hold_id, seatCodes: ['A07', 'A08'],
+        payer: { full_name: 'Nguyen Van Doan', phone: '0987111222' },
+        passengers: [{ seat_code: 'A07', full_name: 'Khach Mot' }, { seat_code: 'A08', full_name: 'Khach Hai' }]
+      }
+    });
+    assert.strictEqual(created.status, 201, JSON.stringify(created.body));
+    const order = created.body.data;
+    const paid = await api('/api/v1/webhooks/vietqr/ipn', {
+      method: 'POST',
+      body: { transferMemo: order.payment.payment_details.transfer_memo, amountVnd: order.payment.amount_vnd, bankRef: `bank_pin_${Date.now()}` }
+    });
+    assert.strictEqual(paid.status, 200, JSON.stringify(paid.body));
+    const [tkt1, tkt2] = paid.body.data.issued_tickets;
+
+    const tripManifest = ctx.services.driverService.activeTrips.get(TRIP).manifest;
+    const codTicket = {
+      ticket_id: 'tkt_cod_grp_01',
+      pnr: tkt1.pnr,
+      seat_code: 'A09',
+      deck: 1,
+      passenger_name: 'Khach COD',
+      phone_masked: '098***999',
+      pickup_stop_id: tkt1.pickup_stop_id || 'stp_hn_gb',
+      dropoff_stop_id: tkt1.dropoff_stop_id || 'stp_th_pb',
+      boarding_status: 'ISSUED',
+      payment_method: 'COD',
+      cod_amount_vnd: 220000
+    };
+    tripManifest.push(codTicket);
+
+    const pin1 = (await api(`/api/v1/tickets/${tkt1.ticket_id}`)).body.data.offline_pin;
+    assert.ok(/^\d{6}$/.test(pin1));
+
+    const otherTicket = await buyTicket('B01', 'u_other_pnr');
+    const otherPin = (await api(`/api/v1/tickets/${otherTicket.ticket_id}`)).body.data.offline_pin;
+
+    const badPinRes = await api(`/api/v1/driver/trips/${TRIP}/boarding/manual`, {
+      method: 'POST',
+      body: { ticket_id: tkt1.ticket_id, pin: otherPin }
+    });
+    assert.strictEqual(badPinRes.status, 400);
+    assert.strictEqual(badPinRes.body.code, 'INVALID_PIN');
+
+    const pinRes = await api(`/api/v1/driver/trips/${TRIP}/boarding/manual`, {
+      method: 'POST',
+      body: { ticket_id: tkt1.ticket_id, pin: pin1 }
+    });
+    assert.strictEqual(pinRes.status, 200, JSON.stringify(pinRes.body));
+    const resData = pinRes.body.data;
+    assert.strictEqual(resData.pnr, tkt1.pnr);
+    assert.strictEqual(resData.boarded_passengers.length, 2);
+    assert.deepStrictEqual(resData.boarded_passengers.map(p => p.seat_code).sort(), ['A07', 'A08']);
+    assert.strictEqual(resData.cod_pending_passengers.length, 1);
+    assert.strictEqual(resData.cod_pending_passengers[0].seat_code, 'A09');
+
+    const m1 = tripManifest.find(m => m.ticket_id === tkt1.ticket_id);
+    const m2 = tripManifest.find(m => m.ticket_id === tkt2.ticket_id);
+    const mCod = tripManifest.find(m => m.ticket_id === codTicket.ticket_id);
+    assert.strictEqual(m1.boarding_status, 'BOARDED');
+    assert.strictEqual(m2.boarding_status, 'BOARDED');
+    assert.strictEqual(mCod.boarding_status, 'ISSUED');
+  });
 });

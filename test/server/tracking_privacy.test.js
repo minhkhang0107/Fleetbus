@@ -213,12 +213,21 @@ describe('Tracking Privacy and GPS rules (Task S6)', () => {
     assert.strictEqual(track.status, 404);
   });
 
-  it('/t/<token> 200 and /t/bad 404', async () => {
+  it('/t/<token> 200 and /t/bad 404, including bus position when telemetry exists (F15)', async () => {
+    const dataRes = await request(`/api/v1/trips/${tripId}/tracking?share=${shareToken}`, { headers: { 'X-Operator-Code': 'SAOMAI' } });
+    assert.strictEqual(dataRes.status, 200);
+    assert.strictEqual(dataRes.body.data.has_position, true);
+    assert.ok(dataRes.body.data.bus_position);
+    assert.strictEqual(typeof dataRes.body.data.bus_position.lat, 'number');
+    assert.strictEqual(typeof dataRes.body.data.bus_position.lng, 'number');
+
     const page = await request(`/t/${shareToken}`);
     assert.strictEqual(page.status, 200);
     assert.ok(page.text.includes('leaflet'));
     assert.ok(page.text.includes(shareToken));
-    
+    assert.ok(page.text.includes('"bus_position"'));
+    assert.ok(page.text.includes(String(dataRes.body.data.bus_position.lat)));
+
     const bad = await request('/t/invalid_token');
     assert.strictEqual(bad.status, 404);
   });

@@ -109,6 +109,18 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // POST /api/v1/driver/trips/:tripId/stops/:stopId/depart (DRI-008)
+  if (req.method === 'POST' && /^\/api\/v1\/driver\/trips\/[^/]+\/stops\/[^/]+\/depart$/.test(pathname)) {
+    const parts = pathname.split('/');
+    const result = driverService.departStop(parts[5], parts[7]);
+    if (result.success) {
+      sendSuccess(res, result.data);
+    } else {
+      sendError(res, result.error, result.code, ['TRIP_NOT_FOUND', 'STOP_NOT_FOUND'].includes(result.code) ? 404 : (result.code === 'STOP_OUT_OF_ORDER' ? 409 : 400));
+    }
+    return true;
+  }
+
   // POST /api/v1/driver/trips/:tripId/readiness (DRI-004)
   if (pathname.startsWith('/api/v1/driver/trips/') && pathname.endsWith('/readiness') && req.method === 'POST') {
     const parts = pathname.split('/');

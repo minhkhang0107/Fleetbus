@@ -3,6 +3,7 @@
  */
 
 import { calculateHaversineDistance } from '../services/passenger/core/cryptoEngine.js';
+export { calculateHaversineDistance };
 
 export const STOP_COORDS = {
   stp_hn_gb: { lat: 20.9806, lng: 105.8413 },

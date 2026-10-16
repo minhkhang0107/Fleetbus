@@ -19,8 +19,10 @@ import 'package:app/src/presentation/passenger/passenger_ticket_qr_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_live_radar_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_route_map.dart';
 import 'package:app/src/presentation/passenger/passenger_widgets.dart';
+import 'package:app/src/presentation/passenger/passenger_promo_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_profile_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:data/src/service/passenger_api_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -67,6 +69,7 @@ void main() {
     'pickup_stop': 'Bến xe Giáp Bát',
     'dropoff_stop': 'Bến xe Phía Bắc Thanh Hóa',
     'status': 'ACTIVE',
+    'order_id': 'ord_1',
   };
 
   late List<http.Request> sent;
@@ -80,12 +83,21 @@ void main() {
   Map<String, dynamic>? seatMapAnswer;
   // History tickets for wallet tests; null = empty.
   List<Map<String, dynamic>>? historyTicketsAnswer;
+  // Tracking answer for radar tests; null = empty.
+  Map<String, dynamic>? trackingAnswer;
+  // Custom group QR answer for tests; null = default fake group QR.
+  Map<String, dynamic>? groupQrAnswer;
+  // Whether qr/reissue is allowed or refused with BOARDING_STARTED.
+  bool reissueAllowed = false;
 
   Future<PassengerStore> storeWithServer({bool selectOp = true}) async {
     sent = [];
     paid = false;
     ticketStatus = 'ACTIVE';
     historyTicketsAnswer = null;
+    trackingAnswer = null;
+    groupQrAnswer = null;
+    reissueAllowed = false;
     final client = MockClient((req) async {
       sent.add(req);
       Map<String, dynamic>? data;
@@ -184,12 +196,28 @@ void main() {
       }
       if (path.endsWith('/disruptions')) data = {'has_disruption': false};
       if (path.endsWith('/notifications')) list = [];
-      if (path.endsWith('/tickets/tkt_BG1_A02')) {
+      if (path.endsWith('/tickets/tkt_BG1_A02') || (path.contains('/tickets/') && !path.contains('/qr') && !path.contains('/share') && !path.contains('/delegate'))) {
         data = {'ticket': {...ticket, 'status': ticketStatus}, 'boarding_qr': {'qr_code_value': 'BUSGO|BG-000001|tkt_BG1_A02|v1|abc', 'version': 1}, 'offline_pin': '123456'};
       }
-      if (path.endsWith('/qr/reissue')) {
-        return http.Response(jsonEncode({'status': 'error', 'code': 'BOARDING_STARTED', 'message': 'Chuyến đã xuất bến'}), 409, headers: {'content-type': 'application/json; charset=utf-8'});
+      if (path.contains('/orders/') && path.endsWith('/group-qr')) {
+        data = groupQrAnswer ?? {
+          'pnr': 'BG-000001',
+          'order_id': 'ord_1',
+          'total_tickets': 2,
+          'active_tickets_count': 2,
+          'group_qr': {'qr_code_value': 'BUSGO_GRP|BG-000001|ord_1|2|members|sig'},
+        };
       }
+      if (path.endsWith('/qr/reissue')) {
+        if (!reissueAllowed) {
+          return http.Response(jsonEncode({'status': 'error', 'code': 'BOARDING_STARTED', 'message': 'Chuyến đã xuất bến'}), 409, headers: {'content-type': 'application/json; charset=utf-8'});
+        }
+        data = {
+          'boarding_qr': {'qr_code_value': 'BUSGO|BG-000001|tkt_reissued|v2|sig', 'version': 2},
+          'offline_pin': '123456',
+        };
+      }
+      if (path.contains('/tracking')) data = trackingAnswer ?? {};
       return http.Response(jsonEncode({'status': 'success', 'data': list ?? data ?? {}}), 200, headers: {'content-type': 'application/json; charset=utf-8'});
     });
     final store = PassengerStore(api: PassengerApiClientService(baseUrl: 'http://test', client: client));
@@ -824,6 +852,35 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('the ticket screen shows the backup PIN caption with all covered seats', (tester) async {
+    final store = await storeWithServer();
+    paid = true;
+    await store.verifyOtp('0987654321', '123456');
+    await store.loadTickets();
+    final singleTicket = store.tickets.single;
+
+    // Single seat
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(store: store, child: PassengerTicketQrScreen(ticket: singleTicket)),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Hiện mã PIN dự phòng'));
+    await tester.pumpAndSettle();
+    expect(find.text('Đọc mã này cho tài xế nếu không quét được.'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+
+    // Multiple seats
+    final multiTicket = Ticket.fromJson({...ticket, 'seat_code': 'A05, B04'});
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(store: store, child: PassengerTicketQrScreen(ticket: multiTicket)),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Hiện mã PIN dự phòng'));
+    await tester.pumpAndSettle();
+    expect(find.text('Đọc mã này cho tài xế nếu không quét được. Mã dùng cho cả ghế A05, B04.'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('the radar shows Đã lên xe for a boarded ticket', (tester) async {
     final store = await storeWithServer();
     paid = true;
@@ -857,6 +914,86 @@ void main() {
     expect(find.byType(PassengerRouteMap), findsOneWidget);
     
     // Cleanup pending timers
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('the ticket screen shows planned pickup time label (with khoảng when estimated)', (tester) async {
+    final store = await storeWithServer();
+
+    // 1. Estimated pickup stop time (e.g. Giáp Bát: 15:15 estimate)
+    final estimatedTicket = Ticket.fromJson({
+      ...ticket,
+      'pickup_stop': 'Bến xe Giáp Bát',
+      'departure_time': '2026-08-28T14:00:00+07:00',
+      'pickup_time': '2026-08-28T15:15:00+07:00',
+      'pickup_time_estimated': true,
+    });
+    expect(estimatedTicket.pickupTimeLabel, 'khoảng 15:15');
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(store: store, child: PassengerTicketQrScreen(ticket: estimatedTicket)),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Giáp Bát · khoảng 15:15'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+
+    // 2. Exact operator planned pickup time (e.g. Mỹ Đình: 14:00 exact)
+    final exactTicket = Ticket.fromJson({
+      ...ticket,
+      'pickup_stop': 'Bến xe Mỹ Đình',
+      'departure_time': '2026-08-28T14:00:00+07:00',
+      'pickup_time': '2026-08-28T14:00:00+07:00',
+      'pickup_time_estimated': false,
+    });
+    expect(exactTicket.pickupTimeLabel, '14:00');
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(store: store, child: PassengerTicketQrScreen(ticket: exactTicket)),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Mỹ Đình · 14:00'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+
+    // 3. Booking success screen shows pickup time label
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(store: store, child: PassengerBookingSuccessScreen(ticket: estimatedTicket, phone: '0987654321')),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('khoảng 15:15 · 28/08'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('radar screen shows Chuyến đã kết thúc, arrival info, and Đã đi status for a completed trip', (tester) async {
+    final store = await storeWithServer();
+    trackingAnswer = {
+      'trip_status': 'COMPLETED',
+      'tracking_ended': true,
+      'hud_status_text': 'Chuyến đã kết thúc',
+      'gps_signal': 'none',
+      'bus_location': null,
+    };
+
+    final completedTicket = Ticket.fromJson({
+      ...ticket,
+      'status': 'BOARDED',
+      'trip_completed': true,
+    }, past: true);
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(
+        store: store,
+        child: PassengerLiveRadarScreen(ticket: completedTicket),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Chuyến đã kết thúc'), findsOneWidget);
+    expect(find.text('Đã đi'), findsWidgets);
+    expect(find.text('Điểm trả'), findsOneWidget);
+    expect(find.text('Phía Bắc Thanh Hóa'), findsOneWidget);
+    expect(find.textContaining('Chưa nhận tín hiệu từ xe'), findsNothing);
+    expect(find.text('Đã lên xe'), findsNothing);
+
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -1037,4 +1174,231 @@ void main() {
       store.stopHold();
     });
   }
+
+  testWidgets('VietQR payment check failure is visible above the button without scrolling on 1080x2340 (F16)', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 3.0;
+
+    final store = await storeWithServer();
+    store.orderPnr = 'BG-000001';
+    store.orderAmount = 220000;
+    paid = false;
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(
+        store: store,
+        child: const PassengerPaymentProcessingScreen(name: 'Nguyễn An', phone: '0987654321'),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final checkBtn = find.text('Tôi đã chuyển tiền, kiểm tra ngay');
+    expect(checkBtn, findsOneWidget);
+    await tester.tap(checkBtn);
+    await tester.pumpAndSettle();
+
+    final notYetFinder = find.textContaining('Chưa nhận được tiền');
+    expect(notYetFinder, findsOneWidget);
+
+    final notYetRect = tester.getRect(notYetFinder);
+    final screenHeight = 2340 / 3.0;
+    expect(notYetRect.top, greaterThanOrEqualTo(0.0));
+    expect(notYetRect.bottom, lessThanOrEqualTo(screenHeight));
+
+    final btnRect = tester.getRect(checkBtn);
+    expect(notYetRect.bottom, lessThanOrEqualTo(btnRect.top + 4));
+    store.stopHold();
+  });
+
+  testWidgets('home promo slider first banner title is fully within screen bounds (F17)', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 3.0;
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PromoSlider(
+          banners: const [
+            PromoBanner(
+              id: 'promo_1',
+              title: 'Tết sum vầy 2027',
+              subtitle: 'Ưu đãi đặt vé sớm',
+            ),
+          ],
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final titleFinder = find.text('Tết sum vầy 2027');
+    expect(titleFinder, findsOneWidget);
+    final rect = tester.getRect(titleFinder);
+    expect(rect.left, greaterThanOrEqualTo(0.0));
+    expect(rect.right, lessThanOrEqualTo(1080 / 3.0));
+  });
+
+  testWidgets('Lịch sử groups seats of one booking into one card by PNR + trip (F20)', (tester) async {
+    final store = await storeWithServer();
+    await store.verifyOtp('0987654321', '123456');
+    historyTicketsAnswer = [
+      {
+        ...ticket,
+        'ticket_id': 'tkt_h1_a05',
+        'seat_code': 'A05',
+        'pnr': 'BG-888999',
+        'trip_id': 'trp_hn_th_01',
+        'fare_vnd': 220000,
+        'status': 'BOARDED',
+        'trip_completed': true,
+      },
+      {
+        ...ticket,
+        'ticket_id': 'tkt_h1_b04',
+        'seat_code': 'B04',
+        'pnr': 'BG-888999',
+        'trip_id': 'trp_hn_th_01',
+        'fare_vnd': 220000,
+        'status': 'BOARDED',
+        'trip_completed': true,
+      },
+    ];
+    await store.loadTickets();
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(
+        store: store,
+        child: const Scaffold(body: PassengerWalletScreen()),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // Switch to Lịch sử tab
+    await tester.tap(find.text('Lịch sử'));
+    await tester.pumpAndSettle();
+
+    // Expect single card with both seats grouped
+    expect(find.byType(TicketCard), findsOneWidget);
+    expect(find.textContaining('Ghế A05, B04'), findsOneWidget);
+    expect(find.text('BG-888999'), findsOneWidget);
+    store.stopHold();
+  });
+
+  testWidgets('single-seat card requests ticket QR and renders single-seat QR without calling group-qr (F22)', (tester) async {
+    final store = await storeWithServer();
+    paid = true;
+    await store.verifyOtp('0987654321', '123456');
+    await store.loadTickets();
+    final singleTicket = store.tickets.single;
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(store: store, child: PassengerTicketQrScreen(ticket: singleTicket)),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(singleTicket.isGroup, isFalse);
+    expect(singleTicket.qrValue, startsWith('BUSGO|'));
+    expect(singleTicket.pin, '123456');
+
+    // No group-qr request was made
+    expect(sent.any((r) => r.url.path.endsWith('/group-qr')), isFalse);
+
+    // QrImageView is rendered with semantics label
+    expect(find.byType(QrImageView), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is Semantics && w.properties.label == 'Mã QR lên xe của vé ${singleTicket.pnr}, ghế ${singleTicket.seat}'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.stopHold();
+  });
+
+  testWidgets('multi-seat card requests group QR and renders group QR value (F22)', (tester) async {
+    final store = await storeWithServer();
+    await store.verifyOtp('0987654321', '123456');
+
+    // Ticket covering two seats from wallet grouping
+    final multiTicket = Ticket(
+      id: 'tkt_BG1_A05',
+      pnr: 'BG-000001',
+      orderId: 'ord_1',
+      ticketIds: ['tkt_BG1_A05', 'tkt_BG1_B04'],
+      tripId: 'trp_hn_th_01',
+      route: 'Hà Nội — Thanh Hóa',
+      date: 'T6 28/08',
+      dep: '07:00',
+      seat: 'A05, B04',
+      pickup: 'Bến xe Giáp Bát',
+      paid: 440000,
+      name: 'Nguyễn An',
+      status: TicketStatus.active,
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(store: store, child: PassengerTicketQrScreen(ticket: multiTicket)),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(multiTicket.isGroup, isTrue);
+    // Group-qr request was sent to /api/v1/passenger/orders/ord_1/group-qr
+    expect(sent.any((r) => r.url.path == '/api/v1/passenger/orders/ord_1/group-qr'), isTrue);
+    expect(multiTicket.qrValue, startsWith('BUSGO_GRP|'));
+    expect(multiTicket.pin, '123456'); // Backup PIN preserved
+
+    // QrImageView renders the group QR with semantics label
+    expect(find.byType(QrImageView), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is Semantics && w.properties.label == 'Mã QR lên xe của vé ${multiTicket.pnr}, ghế ${multiTicket.seat}'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.stopHold();
+  });
+
+  test('multi-seat card "Đổi mã QR" reissues every ticket of the group and reloads group QR (F22)', () async {
+    final store = await storeWithServer();
+    reissueAllowed = true;
+    final multiTicket = Ticket(
+      id: 'tkt_1',
+      pnr: 'BG-000001',
+      orderId: 'ord_1',
+      ticketIds: ['tkt_1', 'tkt_2'],
+      tripId: 'trp_hn_th_01',
+      route: 'Hà Nội — Thanh Hóa',
+      date: 'T6 28/08',
+      dep: '07:00',
+      seat: 'A01, A02',
+      pickup: 'Bến xe Giáp Bát',
+      paid: 440000,
+      name: 'Nguyễn An',
+      status: TicketStatus.active,
+    );
+
+    // Initial load
+    await store.loadPass(multiTicket);
+    expect(multiTicket.qrValue, startsWith('BUSGO_GRP|'));
+
+    sent.clear();
+    final r = await store.reissueQr(multiTicket);
+    expect(r.ok, isTrue);
+
+    // Both tickets were reissued
+    final reissuedPaths = sent.where((req) => req.url.path.endsWith('/qr/reissue')).map((req) => req.url.path).toList();
+    expect(reissuedPaths, [
+      '/api/v1/passenger/tickets/tkt_1/qr/reissue',
+      '/api/v1/passenger/tickets/tkt_2/qr/reissue',
+    ]);
+
+    // Group QR was reloaded after reissue
+    expect(sent.any((req) => req.url.path == '/api/v1/passenger/orders/ord_1/group-qr'), isTrue);
+
+    // If any reissue is refused, server message/code is returned
+    reissueAllowed = false;
+    final rFailed = await store.reissueQr(multiTicket);
+    expect(rFailed.ok, isFalse);
+    expect(rFailed.code, 'BOARDING_STARTED');
+    expect(rFailed.error, 'Chuyến đã xuất bến');
+  });
 }

@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { API_CATALOG } from '../../source/server/core/apiCatalog.js';
 import { resolveAccess } from '../../source/server/core/gateway.js';
+import { CHANGE_METHODS } from '../../source/server/services/driver/modules/driverService.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -110,5 +111,30 @@ describe('Flutter API clients follow the server contract', () => {
     assert.ok(/authToken\s*=/.test(read('passenger')), 'passenger client must keep the token from verifyOtp');
     assert.ok(/authToken\s*=/.test(read('driver')), 'driver client must keep the token from login');
     assert.ok(/authToken\s*=/.test(read('manager')), 'manager client must keep the token from login');
+  });
+
+  it('TC-CLIENT-08: driver change-settlement methods match server CHANGE_METHODS', () => {
+    const storeSrc = fs.readFileSync(path.join(root, 'source/driver/app/lib/src/presentation/driver_store.dart'), 'utf8');
+    const apiSrc = read('driver');
+
+    // Extract mapped values from changeSettlementMethods in driver_store.dart
+    const mapMatch = storeSrc.match(/changeSettlementMethods\s*=\s*\{([^}]+)\}/);
+    assert.ok(mapMatch, 'driver_store.dart must define changeSettlementMethods mapping');
+    const mappedValues = [...mapMatch[1].matchAll(/:\s*'([^']+)'/g)].map(m => m[1]);
+    assert.ok(mappedValues.length > 0, 'must have mapped change settlement values');
+    for (const val of mappedValues) {
+      assert.ok(CHANGE_METHODS.includes(val), `Mapped method ${val} is not in server CHANGE_METHODS`);
+    }
+
+    // Default method parameters in driver_api_service.dart
+    const defaultMatches = [...apiSrc.matchAll(/changeSettlementMethod\s*=\s*'([^']+)'/g)].map(m => m[1]);
+    for (const val of defaultMatches) {
+      assert.ok(CHANGE_METHODS.includes(val), `Default method ${val} is not in server CHANGE_METHODS`);
+    }
+
+    // Ensure raw short codes 'DEBT', 'CASH', 'WALLET' are not sent directly as changeSettlementMethod defaults
+    for (const raw of ['DEBT', 'CASH', 'WALLET']) {
+      assert.ok(!apiSrc.includes(`changeSettlementMethod = '${raw}'`), `driver_api_service must not default to raw ${raw}`);
+    }
   });
 });

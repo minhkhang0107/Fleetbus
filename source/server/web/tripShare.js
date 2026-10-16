@@ -1,7 +1,8 @@
-export function renderTripSharePage(token, tripId, operatorCode) {
+export function renderTripSharePage(token, tripId, operatorCode, initialData = null) {
   const safeToken = JSON.stringify(token).replace(/</g, '\\u003c');
   const safeTripId = JSON.stringify(tripId).replace(/</g, '\\u003c');
   const safeOperatorCode = JSON.stringify(operatorCode).replace(/</g, '\\u003c');
+  const safeInitialData = JSON.stringify(initialData || null).replace(/</g, '\\u003c');
 
   return `<!DOCTYPE html>
 <html lang="vi">
@@ -55,8 +56,11 @@ export function renderTripSharePage(token, tripId, operatorCode) {
       const token = ${safeToken};
       const tripId = ${safeTripId};
       const operatorCode = ${safeOperatorCode};
+      const initialData = ${safeInitialData};
       
-      const map = L.map('map').setView([21.0285, 105.8542], 12); // Hanoi default
+      const hasInitialBusPos = initialData && initialData.has_position && initialData.bus_position && Number.isFinite(initialData.bus_position.lat) && Number.isFinite(initialData.bus_position.lng) && !initialData.position_hidden;
+      const initialCenter = hasInitialBusPos ? [initialData.bus_position.lat, initialData.bus_position.lng] : [21.0285, 105.8542];
+      const map = L.map('map').setView(initialCenter, hasInitialBusPos ? 14 : 12);
       L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: '&copy; OpenStreetMap contributors'
@@ -64,7 +68,8 @@ export function renderTripSharePage(token, tripId, operatorCode) {
 
       let busMarker = null;
       let homeMarker = null;
-      let framedHome = false;
+      let pickupMarker = null;
+      let framed = false;
       const homeBox = document.getElementById('home-box');
       const homeWhen = document.getElementById('home-when');
       const homeReady = document.getElementById('home-ready');
@@ -92,14 +97,28 @@ export function renderTripSharePage(token, tripId, operatorCode) {
 
       function updateMap(data) {
         if (data.tracking_ended) {
+          if (busMarker) {
+            map.removeLayer(busMarker);
+            busMarker = null;
+          }
+          if (pickupMarker) {
+            map.removeLayer(pickupMarker);
+            pickupMarker = null;
+          }
+          if (homeMarker) {
+            map.removeLayer(homeMarker);
+            homeMarker = null;
+          }
           endedOverlay.style.display = 'flex';
+          const finalMsg = data.hud_status_text || 'Chuyến xe đã hoàn thành. Cảm ơn quý khách.';
+          statusEl.textContent = finalMsg;
+          const endedP = endedOverlay.querySelector('p');
+          if (endedP) endedP.textContent = finalMsg;
           return;
         }
 
         if (data.route_shape && data.route_shape.length > 0 && !routeLine) {
           routeLine = L.polyline(data.route_shape, { color: '#3b82f6', weight: 4 }).addTo(map);
-          // A home pickup frames the address and the bus instead (below).
-          if (!(data.target_stop && data.target_stop.kind === 'HOME_PICKUP')) map.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
         }
 
         if (data.stops && data.stops.length > 0 && stopMarkers.length === 0) {
@@ -134,9 +153,37 @@ export function renderTripSharePage(token, tripId, operatorCode) {
           } else {
             busMarker.setLatLng(latlng);
           }
+
+          if (!framed) {
+            const notBoardedYet = !data.boarded && data.target_stop && (data.target_stop.kind === 'PICKUP' || data.target_stop.kind === 'HOME_PICKUP') && Number.isFinite(data.target_stop.lat) && Number.isFinite(data.target_stop.lng);
+            if (notBoardedYet) {
+              map.fitBounds(L.latLngBounds([latlng, [data.target_stop.lat, data.target_stop.lng]]).pad(0.35), { maxZoom: 15 });
+            } else {
+              map.setView(latlng, 14);
+            }
+            framed = true;
+          }
         } else if (busMarker && data.position_hidden) {
           map.removeLayer(busMarker);
           busMarker = null;
+        }
+
+        const notBoardedPickup = !data.boarded && data.target_stop && data.target_stop.kind === 'PICKUP' && Number.isFinite(data.target_stop.lat) && Number.isFinite(data.target_stop.lng);
+        if (notBoardedPickup && !pickupMarker) {
+          pickupMarker = L.circleMarker([data.target_stop.lat, data.target_stop.lng], {
+            radius: 8,
+            fillColor: '#16a34a',
+            color: '#ffffff',
+            weight: 2,
+            opacity: 1,
+            fillOpacity: 1
+          }).addTo(map);
+          pickupMarker.bindTooltip(data.target_stop.name ? 'Điểm đón: ' + data.target_stop.name : 'Điểm đón', { permanent: true, direction: 'top' });
+        }
+
+        if (!framed && routeLine) {
+          map.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
+          framed = true;
         }
 
         if (data.hud_status_text) {
@@ -158,11 +205,11 @@ export function renderTripSharePage(token, tripId, operatorCode) {
             homeMarker = L.circleMarker(at, { radius: 9, fillColor: '#16a34a', color: '#ffffff', weight: 3, fillOpacity: 1 }).addTo(map);
             homeMarker.bindTooltip('Chỗ đón bạn', { permanent: true, direction: 'top' });
           }
-          if (!framedHome) {
+          if (!framed) {
             const pts = [at];
             if (data.bus_position) pts.push([data.bus_position.lat, data.bus_position.lng]);
             map.fitBounds(L.latLngBounds(pts).pad(0.6), { maxZoom: 15 });
-            framedHome = true;
+            framed = true;
           }
         }
 
@@ -194,6 +241,9 @@ export function renderTripSharePage(token, tripId, operatorCode) {
         });
       }
 
+      if (initialData) {
+        updateMap(initialData);
+      }
       fetchTracking();
       setInterval(fetchTracking, 10000);
     })();

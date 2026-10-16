@@ -50,7 +50,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
       return;
     }
     final store = DriverScope.read(context);
-    final target = store.mustChangePin ? const DriverChangePinScreen() : const MainShellScreen();
+    final target = store.mustChangePin ? DriverChangePinScreen(initialCurrentPin: _pin.text.trim()) : const MainShellScreen();
     Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => target));
   }
 

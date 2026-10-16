@@ -362,7 +362,7 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
 
     const drvProfileRes = await makeRequest('/api/v1/driver/profile');
     assert.strictEqual(drvProfileRes.statusCode, 200);
-    assert.strictEqual(drvProfileRes.body.data.license_class, 'FC');
+    assert.strictEqual(drvProfileRes.body.data.license_class, 'E');
 
     // 4. Manager Bookings & Audit Logs (MGR-017, MGR-018, MGR-028)
     const mgrBookingsRes = await makeRequest('/api/v1/ops/bookings');

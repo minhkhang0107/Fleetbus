@@ -7,18 +7,36 @@ import 'main_shell_screen.dart';
 
 /// Screen for mandatory driver PIN change (DRI-001).
 class DriverChangePinScreen extends StatefulWidget {
-  const DriverChangePinScreen({super.key});
+  final String? initialCurrentPin;
+  const DriverChangePinScreen({super.key, this.initialCurrentPin});
 
   @override
   State<DriverChangePinScreen> createState() => _DriverChangePinScreenState();
 }
 
 class _DriverChangePinScreenState extends State<DriverChangePinScreen> {
-  final _currentPin = TextEditingController();
+  late final TextEditingController _currentPin;
   final _newPin = TextEditingController();
   final _confirmPin = TextEditingController();
   String? _error;
   bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentPin = TextEditingController(text: widget.initialCurrentPin ?? '');
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_currentPin.text.isEmpty) {
+      final pin = DriverScope.of(context).temporaryPin;
+      if (pin != null && pin.isNotEmpty) {
+        _currentPin.text = pin;
+      }
+    }
+  }
 
   @override
   void dispose() {
