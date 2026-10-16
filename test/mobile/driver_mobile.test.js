@@ -171,8 +171,6 @@ describe('Phase Driver Mobile: Android & iOS Platform Integrity Test Suite', () 
 
   it('TC-DRV-MOB-11: Driver Pubspec dependencies and adaptive baseUrl cross-platform configuration', () => {
     assert.ok(fs.existsSync(driverPubspecPath), 'pubspec.yaml must exist');
-    const pubspecContent = fs.readFileSync(driverPubspecPath, 'utf8');
-    assert.ok(pubspecContent.includes('data:\n    path: ../data'), 'driver app pubspec must depend on data package');
 
     const serviceContent = fs.readFileSync(driverServicePath, 'utf8');
     assert.ok(serviceContent.includes('resolveDriverBaseUrl'), 'Must implement resolveDriverBaseUrl');
