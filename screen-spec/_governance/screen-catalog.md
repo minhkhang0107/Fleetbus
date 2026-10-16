@@ -2,7 +2,7 @@
 
 **Document Version:** 1.0  
 **Status:** Approved Baseline  
-**Total Screens:** 79 Screens (25 Passenger, 19 Driver, 30 Manager, 5 Shared)
+**Total Screens:** 81 Screens (25 Passenger, 19 Driver, 32 Manager, 5 Shared)
 
 ---
 
@@ -33,7 +33,7 @@
 | **PAX-021** | Passenger | Booking Detail & Cancel / Refund | `/booking/:bookingId/cancel` | Ticket Detail, Booking History | `/tickets`, `/refund/:refundId/status` | P1 | Draft | Source-backed |
 | **PAX-022** | Passenger | User Profile & Settings | `/profile` | Bottom Nav | `/profile/saved-places`, `/login`, `/home` | P2 | Draft | Source-backed |
 | **PAX-023** | Passenger | Saved Stops & Frequent Travelers | `/profile/saved-contacts` | Profile, Passenger Info Form | `/profile`, `/checkout/passenger-info` | P2 | Draft | Source-backed |
-| **PAX-024** | Passenger | Vehicle Replacement Notice | `/notice/vehicle-replacement/:id` | Push Notification, In-App Banner | `/ticket/:ticketId`, `/seat-reselection` | P1 | Draft | Derived |
+| **PAX-024** | Passenger | Vehicle Replacement Notice | `/notice/vehicle-replacement/:incidentId` | Push Notification, In-App Banner | `/ticket/:ticketId`, `/seat-reselection` | P1 | Draft | Derived |
 | **PAX-025** | Passenger | Trip Delay & Disruption Alert | `/notice/trip-delay/:tripId` | Push Notification, Tracking Banner | `/tracking/:tripId`, `/booking/:bookingId/cancel` | P1 | Draft | Derived |
 
 ---
@@ -72,9 +72,9 @@
 | **MGR-002** | Manager | Operations Overview Dashboard | `/ops/dashboard` | Main Navigation | `/ops/radar`, `/ops/trips`, `/ops/alerts` | P0 | Draft | Source-backed |
 | **MGR-003** | Manager | Live Fleet Operations Radar | `/ops/radar` | Main Navigation, Dashboard Widget | `/ops/vehicle/:id/live`, `/ops/trip/:id` | P0 | Draft | Source-backed |
 | **MGR-004** | Manager | Vehicle Live Telemetry Inspector | `/ops/vehicle/:id/live` | Live Radar, Vehicle Directory | `/ops/radar`, `/ops/vehicle/:id/edit` | P0 | Draft | Source-backed |
-| **MGR-005** | Manager | Vehicle Fleet Directory | `/ops/vehicles` | Sidebar Nav | `/ops/vehicle/create`, `/ops/vehicle/:id` | P1 | Draft | Source-backed |
-| **MGR-006** | Manager | Vehicle Create & Edit | `/ops/vehicles/new`, `/:id/edit` | Vehicle Directory | `/ops/vehicles`, `/ops/seat-layouts` | P1 | Draft | Source-backed |
-| **MGR-007** | Manager | Visual Seat Layout Builder | `/ops/seat-layouts/builder` | Vehicle Edit, Layout Directory | `/ops/vehicles`, `/ops/seat-layouts` | P1 | Draft | Source-backed |
+| **MGR-005** | Manager | Fleet (Đội xe) with each bus's seat layout | `/manager` → "Đội xe" | Sidebar Nav | `/manager` | P1 | Draft | Seat layouts 2026-10-14 (D147) |
+| **MGR-006** | Manager | Add a Bus, Change its Seat Layout | `/manager` → "Đội xe" | Fleet | `/manager` | P1 | Draft | Seat layouts 2026-10-14 (D147) |
+| **MGR-007** | Manager | Seat Layouts (Sơ đồ ghế) and builder | `/manager` → "Sơ đồ ghế" | Sidebar Nav | `/manager` | P1 | Draft | Seat layouts 2026-10-14 (D147) |
 | **MGR-008** | Manager | Route & Corridor Directory | `/ops/routes` | Sidebar Nav | `/ops/route/create`, `/ops/route/:id` | P1 | Draft | Source-backed |
 | **MGR-009** | Manager | Route & Geofence Stop Builder | `/ops/routes/builder` | Route Directory | `/ops/routes`, `/ops/trips/new` | P1 | Draft | Source-backed |
 | **MGR-010** | Manager | Trip Schedule Directory | `/ops/trips` | Sidebar Nav | `/ops/trip/new`, `/ops/trip/:id` | P0 | Draft | Source-backed |
@@ -82,8 +82,8 @@
 | **MGR-012** | Manager | Trip Master Operational Detail | `/ops/trip/:id` | Trip List, Radar, Dispatch Board | `/ops/trip/:id/seat-inventory`, `/ops/trip/:id/replace-vehicle` | P0 | Draft | Source-backed |
 | **MGR-013** | Manager | Segment Seat Inventory Matrix | `/ops/trip/:id/seat-inventory` | Trip Detail, POS Screen | `/ops/trip/:id`, `/ops/booking/:id` | P0 | Draft | Source-backed |
 | **MGR-014** | Manager | Daily Fleet Dispatch Board | `/ops/dispatch` | Sidebar Nav | `/ops/trip/new`, `/ops/radar` | P0 | Draft | Source-backed |
-| **MGR-015** | Manager | Driver Roster Directory | `/ops/drivers` | Sidebar Nav | `/ops/driver/create`, `/ops/driver/:id` | P1 | Draft | Source-backed |
-| **MGR-016** | Manager | Driver Performance & Safety Detail | `/ops/driver/:id` | Driver Directory, Trip Detail | `/ops/drivers`, `/ops/audit` | P2 | Draft | Source-backed |
+| **MGR-015** | Manager | Drivers (Tài xế): list, lock, reset PIN | `/manager` → "Tài xế" | Sidebar Nav | `/manager` | P0 | Draft | Driver accounts 2026-10-15 (D150) |
+| **MGR-016** | Manager | Add / Edit a Driver, temporary PIN | `/manager` → "Tài xế" | Drivers | `/manager` | P0 | Draft | Driver accounts 2026-10-15 (D150) |
 | **MGR-017** | Manager | Global Booking & PNR Search | `/ops/bookings` | Sidebar Nav | `/ops/booking/:id`, `/ops/pos` | P0 | Draft | Source-backed |
 | **MGR-018** | Manager | Booking Master Detail & Ledger | `/ops/booking/:id` | Booking Search, Trip Manifest | `/ops/refund/new?bookingId=:id`, `/ops/payments` | P0 | Draft | Source-backed |
 | **MGR-019** | Manager | POS Counter & Hotline Search | `/ops/pos` | Sidebar Nav, Quick CTA | `/ops/pos/checkout`, `/ops/bookings` | P0 | Draft | Source-backed |
@@ -98,6 +98,10 @@
 | **MGR-028** | Manager | Immutable Audit Logs Directory | `/ops/audit` | Sidebar Nav | `/ops/audit/:logId` | P1 | Draft | Source-backed |
 | **MGR-029** | Manager | RBAC Roles & Permissions Matrix | `/ops/roles-permissions` | Settings Submenu | `/ops/settings` | P1 | Draft | Source-backed |
 | **MGR-030** | Manager | System Global Configuration | `/ops/settings` | Sidebar Nav | `/ops/dashboard` | P2 | Draft | Source-backed |
+| **MGR-031** | Manager | Promotion Banners of the Passenger App | `/manager` → "Quảng cáo" | Sidebar Nav | `/manager` | P2 | Draft | Product owner 2026-10-12 (D124, D125) |
+| **MGR-032** | Manager | Fixed Timetable (Lịch chạy) | `/manager` → "Lịch chạy" | Sidebar Nav | `/manager` | P1 | Draft | Product owner 2026-10-12 (D128, D129) |
+| **MGR-033** | Manager | Home Pickup / Drop-off Review | `/manager` → "Duyệt đón tận nhà" | Sidebar Nav | `/manager` | P1 | Draft | Fixed-route spec 2026-10-12 (D130) |
+| **MGR-034** | Manager | New Company and its Director Account | `/manager` → "Nhà xe (nền tảng)" | Platform | `/manager` | P0 | Draft | Driver accounts 2026-10-15 (D150) |
 
 ---
 

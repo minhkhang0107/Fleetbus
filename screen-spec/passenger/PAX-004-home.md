@@ -96,7 +96,16 @@ Next Screen:
 | `DateSelector` | DatePicker Pill | Yes | Search State | Today / Tomorrow / Custom | Tap opens native Bottom Sheet Calendar |
 | `SearchCTA` | Button | Yes | Form State | Enabled / Loading | Tap navigates to `PAX-006` Search Results |
 | `PopularCorridors` | Horizontal Scroll | Yes | Server API | Normal | Tap chips prefills origin/dest/date |
-| `PromoCarousel` | Image Carousel | No | Marketing CMS | Normal | Tap opens web promotion details |
+| `PromoCarousel` | PageView slider (zone 2) | No | `GET /api/v1/passenger/promo-banners` | Hidden when the list is empty or fails / Visible | Swipe or auto-advance every 5 s; tap opens the promotion page (HTML from `GET /api/v1/passenger/promo-banners/{id}`) |
+
+### 5.0. Travel day (D128)
+- Passengers book from today to 14 days ahead (D129). The bus company runs a fixed timetable (`MGR-032`). Quick picks and the calendar grey the days without a
+  departure on the chosen route (`GET /api/v1/trips/run-days`); if the chosen day has none, the app moves to the
+  next day that has one. There is no "Ngày chạy thử" pick any more.
+
+### 5.1. Two zones (D124)
+- **Zone 1 — Đặt xe:** greeting, search card, "Tìm lại gần đây" chips, "Chuyến sắp đi" card.
+- **Zone 2 — Ưu đãi từ nhà xe:** `PromoCarousel`. Left out entirely (title included) when the server returns no slide. Phones stack zone 2 under zone 1; wide screens put them side by side.
 
 ---
 
@@ -133,6 +142,12 @@ Next Screen:
 ```
 
 ---
+
+### 6.2. Promotion slides (D124)
+- **List:** `GET /api/v1/passenger/promo-banners` — public, scoped by `X-Operator-Code`. Only slides that are active and inside `starts_at`..`ends_at`, by `sort_order`. Response `data.banners[]`: `banner_id`, `title`, `subtitle`, `background_color` (`#RRGGBB`), `image_url` (null = the app draws the slide from title and color). No HTML in the list.
+- **Page:** `GET /api/v1/passenger/promo-banners/{banner_id}` → `banner_id`, `title`, `content_html`. Another company's, switched-off or ended slide: `404 BANNER_NOT_FOUND` (app: "Chương trình này đã kết thúc.").
+- Slides are written by the company's director on the operations page (`MGR-031`).
+- The app renders `content_html` as Flutter widgets (no JavaScript, no WebView); `http`, `https` and `tel` links open outside the app.
 
 ## 7. Business Rules
 - `BR-HOME-001`: If Origin and Destination are identical, the "Tìm chuyến xe" CTA is disabled with helper text *"Điểm đi và điểm đến không được trùng nhau"*.
@@ -192,3 +207,8 @@ Scenario: Live ticket card display
 | `TC-PAX-004-01` | Functional | Tap swap button | Swaps origin and destination values smoothly |
 | `TC-PAX-004-02` | Lifecycle | Passenger with active trip | Active card displayed prominently |
 | `TC-PAX-004-03` | Validation | Search with same origin & dest | Shows validation error, blocks search |
+| `TC-PAX-004-04` | Functional | Operator has slides; one ended, another company's | Only its live slides, in order, without HTML |
+| `TC-PAX-004-05` | API | List and page by operator header | Company without slides gets `[]` (slider hidden); page of another company is 404 |
+
+## Fixed origin and destination (D135)
+When the company set its origin and destination on the web portal (`fixed_endpoints` in `GET /api/v1/app/config`), the two fields show the city (one line) and the station (one line) and open no place picker; "Tìm lại gần đây" is hidden. The swap button sits on the divider between the two fields. It works when the company allows out-and-back swapping (`allow_swap`, default on, set on the web portal, D136); a one-way company turns it off and the button is greyed with the tooltip "Nhà xe chỉ chạy một chiều". Without a setting, passengers pick places as before. Test: Flutter "fixed origin and destination: shown as set, not picked, swap only when the company runs back (D135)", server `TC-FR-12`.

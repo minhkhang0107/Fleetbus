@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { PassengerSeatMapService } from '../../source/passenger-app/modules/seatMap.js';
+import { PassengerSeatMapService } from '../../source/server/services/passenger/modules/seatMap.js';
 
 describe('Phase 4: 2D VIP Seat Map & 10-Minute Seat Hold Test Suite', () => {
   it('TC-SEAT-01: Should generate complete 2D layout with Deck 1 and Deck 2', () => {

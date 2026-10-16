@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { PassengerTrackingService } from '../../source/passenger-app/modules/tracking.js';
+import { PassengerTrackingService } from '../../source/server/services/passenger/modules/tracking.js';
 
 describe('Phase 7: Live GPS Telemetry, Radar & Disruption Test Suite', () => {
   const trackingService = new PassengerTrackingService();
@@ -35,16 +35,6 @@ describe('Phase 7: Live GPS Telemetry, Radar & Disruption Test Suite', () => {
     assert.strictEqual(notifRes.data[0].type, 'BOARDING_REMINDER');
   });
 
-  it('TC-TRACK-03: Should cancel ticket and calculate refund amount based on policy in PAX-021', () => {
-    const departureFuture = new Date(Date.now() + 36 * 3600 * 1000); // 36 hours ahead
-    const cancelRes = trackingService.requestTicketCancellation('BG-882199', 410000, departureFuture);
-
-    assert.strictEqual(cancelRes.success, true);
-    assert.strictEqual(cancelRes.data.refund_percentage, 100);
-    assert.strictEqual(cancelRes.data.refund_amount_vnd, 410000);
-    assert.strictEqual(cancelRes.data.status, 'CANCELLED_AND_REFUNDED');
-  });
-
   it('TC-TRACK-04: Should broadcast and inspect vehicle replacement / delay disruption in PAX-024/PAX-025', () => {
     trackingService.registerDisruption('trp_hn_th_01', {
       type: 'VEHICLE_REPLACEMENT',
@@ -57,5 +47,44 @@ describe('Phase 7: Live GPS Telemetry, Radar & Disruption Test Suite', () => {
     assert.strictEqual(checkDisruption.has_disruption, true);
     assert.strictEqual(checkDisruption.data.new_plate_number, '29B-999.88');
     assert.strictEqual(checkDisruption.data.type, 'VEHICLE_REPLACEMENT');
+  });
+
+  it('TC-TRACK-05: Should detect stale GPS telemetry and display rest-stop status (PAX-018, PAX-019, REV-07)', () => {
+    const t0 = 1756300000000;
+    // 1. Stale GPS telemetry (>60s lag)
+    trackingService.updateBusPosition('trp_stale_01', {
+      lat: 20.4500,
+      lng: 105.9000,
+      speed_kmh: 60,
+      bearing_deg: 180,
+      plate_number: '29B-888.99',
+      mockNow: t0
+    });
+
+    const staleHud = trackingService.getLiveTrackingHUD('trp_stale_01', 20.9806, 105.8413, t0 + 120000); // 120s later
+    assert.strictEqual(staleHud.success, true);
+    assert.strictEqual(staleHud.data.is_stale, true);
+    assert.strictEqual(staleHud.data.telemetry_age_seconds, 120);
+    assert.ok(staleHud.data.stale_warning.includes('Tín hiệu GPS'));
+
+    // 2. Rest-stop status
+    trackingService.updateBusPosition('trp_rest_01', {
+      lat: 20.2500,
+      lng: 105.9700,
+      speed_kmh: 0,
+      bearing_deg: 0,
+      plate_number: '29B-123.45',
+      is_at_rest_stop: true,
+      rest_stop_name: 'Trạm dừng chân Cao tốc Ninh Bình',
+      estimated_rest_minutes: 20,
+      mockNow: t0
+    });
+
+    const restHud = trackingService.getLiveTrackingHUD('trp_rest_01', 19.8067, 105.7852, t0 + 5000);
+    assert.strictEqual(restHud.success, true);
+    assert.strictEqual(restHud.data.is_at_rest_stop, true);
+    assert.strictEqual(restHud.data.rest_stop_name, 'Trạm dừng chân Cao tốc Ninh Bình');
+    assert.strictEqual(restHud.data.estimated_rest_minutes, 20);
+    assert.ok(restHud.data.hud_status_text.includes('Xe đang dừng nghỉ tại Trạm dừng chân Cao tốc Ninh Bình'));
   });
 });

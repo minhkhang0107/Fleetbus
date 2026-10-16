@@ -1,0 +1,25 @@
+sequenceDiagram
+    autonumber
+    actor DRI as Tài xế gặp sự cố (DRI-019)
+    participant GW as API server
+    participant BR as Event Bridge
+    actor MGR as Điều hành (MGR-023, MGR-024)
+    actor NEW as Tài xế thay thế (DRI-002)
+    actor PAX as Hành khách (PAX-024, PAX-025)
+
+    DRI->>GW: POST /driver/trips/{id}/incidents {type, description, estimatedDelayMinutes}
+    GW->>BR: INCIDENT_ALERT
+    BR-->>MGR: cảnh báo RED trong danh sách
+    BR-->>PAX: thông báo sự cố
+    MGR->>GW: POST /ops/trips/{id}/replace-vehicle {newVehiclePlate, newDriverId, reason}
+    GW->>GW: xe STANDBY, đủ chỗ, tài xế ON_DUTY còn giấy phép
+    GW->>BR: VEHICLE_SWAPPED
+    BR-->>NEW: chuyến chuyển sang tài xế mới và xe mới
+    BR-->>DRI: không còn thấy chuyến
+    BR-->>PAX: SWAP, replacement-info, giữ nguyên mã ghế
+    MGR->>GW: POST /ops/trips/{id}/delay {delayMinutes: 45}
+    GW->>BR: TRIP_DELAYED
+    BR-->>PAX: thông báo DELAY
+    PAX->>GW: POST /passenger/tickets/{id}/cancel
+    GW->>GW: chậm trên 30 phút: hoàn 100%, tier DELAY_WAIVER
+    GW-->>PAX: 200 {refund_percentage: 100}

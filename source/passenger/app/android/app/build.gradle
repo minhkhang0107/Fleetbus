@@ -1,0 +1,119 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+}
+
+def localProperties = new Properties()
+def dartEnvironmentVariables = []
+if (project.hasProperty('dart-defines')) {
+    dartEnvironmentVariables = project.property('dart-defines')
+            .split(',')
+            .collectEntries { entry ->
+                def pair = new String(entry.decodeBase64(), 'UTF-8').split('=')
+                [(pair.first()): pair.last()]
+            }
+}
+
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader ->
+        localProperties.load(reader)
+    }
+}
+
+def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
+if (flutterVersionCode == null) {
+    flutterVersionCode = '1'
+}
+
+def flutterVersionName = localProperties.getProperty('flutter.versionName')
+if (flutterVersionName == null) {
+    flutterVersionName = '1.0'
+}
+
+android {
+    namespace "vn.busgo.passenger"
+    compileSdk flutter.compileSdkVersion
+    ndkVersion flutter.ndkVersion
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+
+    sourceSets {
+        main.java.srcDirs += 'src/main/kotlin'
+    }
+
+    defaultConfig {
+        applicationId "vn.busgo.passenger"
+        minSdkVersion flutter.minSdkVersion
+        targetSdkVersion flutter.targetSdkVersion
+        versionCode flutterVersionCode.toInteger()
+        versionName flutterVersionName
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.debug
+        }
+    }
+    flavorDimensions("flavor-type")
+    productFlavors {
+        develop {
+            dimension "flavor-type"
+            versionCode = 1
+            versionName = "1.0.0"
+            applicationId "vn.busgo.passenger.dev"
+            manifestPlaceholders["hostName"] = "vn.busgo.passenger.dev"
+            manifestPlaceholders["applicationIdSuffix"] = "Develop"
+        }
+
+        qa {
+            dimension "flavor-type"
+            versionCode = 1
+            versionName = "1.0.0"
+            applicationId "vn.busgo.passenger.qa"
+            manifestPlaceholders["host"] = "qa.busgo.vn"
+            manifestPlaceholders["applicationIdSuffix"] = "Qa"
+        }
+
+        staging {
+            dimension "flavor-type"
+            versionCode = 1
+            versionName = "1.0.0"
+            applicationId "vn.busgo.passenger.stg"
+            manifestPlaceholders["host"] = "stg.busgo.vn"
+            manifestPlaceholders["applicationIdSuffix"] = "Staging"
+        }
+
+        production {
+            dimension "flavor-type"
+            versionCode = 1
+            versionName = "1.0.0"
+            applicationId "vn.busgo.passenger"
+            manifestPlaceholders["host"] = "busgo.vn"
+            manifestPlaceholders["applicationIdSuffix"] = "Production"
+        }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+flutter {
+    source '../..'
+}
+
+dependencies {}
+
+// Push notifications (D145): Firebase is set up only when the project's google-services.json is in this folder,
+// so a build without it still works (the app then simply has no push).
+if (file("google-services.json").exists()) {
+    apply plugin: "com.google.gms.google-services"
+}

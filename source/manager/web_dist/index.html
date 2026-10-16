@@ -1,0 +1,2774 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BusGo Operations — Điều hành</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<style>
+  :root {
+    --bg: #f8fafc; --surface: #ffffff; --ink: #0f172a; --muted: #475569; --line: #e2e8f0; --line-strong: #cbd5e1;
+    --primary: #2563eb; --primary-soft: #eff6ff; --ok: #15803d; --ok-soft: #f0fdf4; --warn: #b45309; --warn-soft: #fef3c7;
+    --danger: #b91c1c; --danger-soft: #fee2e2; --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
+  button, input, select, textarea { font: inherit; }
+  .hidden { display: none !important; }
+  .mono { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .muted { color: var(--muted); }
+  .row { display: flex; gap: 12px; align-items: center; }
+  .grow { flex: 1; min-width: 0; }
+  .btn { border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 8px 14px; cursor: pointer; font-weight: 600; }
+  .btn:hover { background: #f1f5f9; }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn.primary:hover { background: #1d4ed8; }
+  .btn.danger { color: var(--danger); border-color: #fca5a5; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .field label { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .field input, .field select, .field textarea { border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 10px; background: #fff; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #f1f5f9; color: #334155; }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); } .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.danger { background: var(--danger-soft); color: var(--danger); } .pill.info { background: var(--primary-soft); color: var(--primary); }
+  .error { color: var(--danger); font-size: 13px; min-height: 18px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; background: #f8fafc; position: sticky; top: 0; }
+  tr.click { cursor: pointer; } tr.click:hover td { background: #f8fafc; } tr.sel td { background: var(--primary-soft); }
+
+  /* Login, Password Change & TOTP Enrollment */
+  #login, #changePassword, #enrollTotp { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+  #login .card, #changePassword .card, #enrollTotp .card { width: 100%; max-width: 380px; }
+  #login h1, #changePassword h1, #enrollTotp h1 { margin: 0 0 4px; font-size: 22px; }
+
+  /* Shell */
+  #app { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+  nav { background: #0f172a; color: #cbd5e1; padding: 16px 10px; display: flex; flex-direction: column; gap: 4px; }
+  nav .brand { color: #fff; font-weight: 700; font-size: 16px; padding: 4px 10px 2px; }
+  nav .company { color: #93c5fd; font-size: 12px; padding: 0 10px 14px; }
+  nav button { text-align: left; background: none; border: 0; color: inherit; padding: 9px 10px; border-radius: 8px; cursor: pointer; font-weight: 500; }
+  nav button:hover { background: #1e293b; color: #fff; }
+  nav button.active { background: #1e3a8a; color: #fff; }
+  nav .spacer { flex: 1; }
+  nav .who { font-size: 12px; padding: 8px 10px; color: #94a3b8; }
+  main { padding: 20px 24px; min-width: 0; }
+  main h2 { margin: 0 0 14px; font-size: 20px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .kpi .v { font-size: 26px; font-weight: 700; }
+  .kpi .l { font-size: 12px; color: var(--muted); }
+  .split { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, 1fr); gap: 16px; align-items: start; }
+  .scroll { max-height: calc(100vh - 160px); overflow: auto; }
+  .map { height: 360px; border-radius: var(--radius); border: 1px solid var(--line); }
+  .map.tall { height: calc(100vh - 150px); min-height: 420px; }
+  .stat { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
+  .stat div { background: #f8fafc; border-radius: 8px; padding: 8px; }
+  .stat b { display: block; font-size: 18px; }
+  .stat span { font-size: 11px; color: var(--muted); }
+  .section-title { font-weight: 700; margin: 14px 0 8px; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .toolbar select, .toolbar input { border: 1px solid var(--line-strong); border-radius: 8px; padding: 7px 10px; background: #fff; }
+  .list-fallback { max-height: calc(100vh - 150px); overflow: auto; }
+  .vehicle-dot { width: 18px; height: 18px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px #64748b; }
+  /* Promotion banners (MGR-031) */
+  .slide { position: relative; overflow: hidden; border-radius: 12px; color: #fff; padding: 14px 16px; height: 132px; display: flex; flex-direction: column; background-size: cover; background-position: center; }
+  .slide b { font-size: 17px; line-height: 1.25; } .slide span { font-size: 13px; opacity: .9; margin-top: 4px; }
+  .slide i { margin-top: auto; align-self: flex-start; background: #fff; border-radius: 999px; padding: 4px 12px; font-style: normal; font-weight: 600; font-size: 12px; }
+  .slide.mini { height: 44px; width: 72px; padding: 0; border-radius: 8px; }
+  .phone { max-width: 360px; }
+  .bannerSplit { grid-template-columns: minmax(0, 1.5fr) minmax(360px, 1fr); }
+  #bannersBox .pill { white-space: nowrap; }
+  #bannersBox .btn { padding: 4px 10px; font-size: 13px; white-space: nowrap; }
+  #bannersBox .acts { display: flex; gap: 6px; justify-content: flex-end; }
+  .htmlPreview { width: 100%; height: 260px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  .field textarea.code { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 13px; min-height: 180px; resize: vertical; }
+  /* Fixed timetable (MGR-032) */
+  .days { display: flex; gap: 3px; }
+  .days span { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 6px; background: #f1f5f9; color: #94a3b8; }
+  .days span.on { background: var(--primary-soft); color: var(--primary); }
+  .dayPick { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .dayPick label { display: flex; align-items: center; gap: 4px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 4px 8px; cursor: pointer; }
+  #schedulesBox .btn { padding: 4px 10px; font-size: 13px; white-space: nowrap; }
+  .toast { position: fixed; right: 16px; bottom: 16px; background: var(--ink); color: #fff; padding: 10px 14px; border-radius: 8px; z-index: 2000; }
+  /* Seat Layouts (MGR-007) & Fleet (MGR-005, MGR-006) */
+  .layoutsSplit { grid-template-columns: minmax(0, 1.1fr) minmax(340px, 1.4fr); }
+  .seat-box {
+    display: flex; align-items: center; justify-content: center;
+    height: 38px; min-width: 42px; border-radius: 6px;
+    font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+    font-size: 11px; font-weight: 700;
+    border: 1px solid var(--line-strong); user-select: none; box-sizing: border-box;
+    background: #f1f5f9; color: #334155;
+  }
+  .seat-box.seat-vip_cabin { background: #fae8ff; border-color: #d946ef; color: #86198f; }
+  .seat-box.seat-sleeper { background: #eff6ff; border-color: #60a5fa; color: #1d4ed8; }
+  .seat-box.seat-seat { background: #f0fdf4; border-color: #4ade80; color: #15803d; }
+  .aisle-cell { width: 22px; min-height: 38px; }
+  .empty-cell { height: 38px; min-width: 42px; border-radius: 6px; box-sizing: border-box; }
+  .editor-cell { cursor: pointer; transition: transform 0.08s; }
+  .editor-cell:hover { transform: scale(1.05); }
+  .empty-cell.editor-cell {
+    border: 1px dashed var(--line-strong); color: var(--muted);
+    display: flex; align-items: center; justify-content: center; font-size: 14px; opacity: .5;
+  }
+  .empty-cell.editor-cell:hover { background: #f1f5f9; opacity: 1; }
+  .deck-bus-frame {
+    background: #f8fafc; border: 2px solid var(--line-strong); border-radius: 12px;
+    padding: 12px; margin-bottom: 14px; display: inline-block; min-width: 180px; vertical-align: top;
+  }
+  .deck-front-label {
+    text-align: center; font-size: 11px; font-weight: 700; color: var(--muted);
+    padding: 3px 6px; margin-bottom: 10px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 6px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .deck-title { font-weight: 700; font-size: 13px; margin: 0 0 6px; color: var(--ink); }
+  .deck-grid { display: grid; gap: 6px; justify-content: center; }
+  @media (max-width: 900px) {
+    #app { grid-template-columns: 1fr; }
+    nav { flex-direction: row; flex-wrap: wrap; } nav .spacer, nav .who { display: none; }
+    .split, .layoutsSplit { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Login (MGR-001) -->
+<section id="login">
+  <form class="card" id="loginForm" autocomplete="on">
+    <h1>BusGo Điều hành</h1>
+    <p class="muted" style="margin:0 0 16px">Đăng nhập bằng tài khoản nhà xe cấp.</p>
+    <div class="field"><label for="u">Email</label><input id="u" type="email" required value="dispatcher@busgo.vn"></div>
+    <div class="field"><label for="p">Mật khẩu</label><input id="p" type="password" required></div>
+    <div class="field"><label for="t">Mã xác thực 2 bước (nếu có)</label><input id="t" inputmode="numeric" maxlength="6" placeholder="6 số"></div>
+    <div class="error" id="loginError"></div>
+    <button class="btn primary" style="width:100%" type="submit" id="loginBtn">Đăng nhập</button>
+  </form>
+</section>
+
+<!-- Password change (MGR-001) -->
+<section id="changePassword" class="hidden">
+  <form class="card" id="changePasswordForm" novalidate>
+    <h1>Đổi mật khẩu</h1>
+    <p class="muted" style="margin:0 0 16px">Tài khoản cần đổi mật khẩu trước khi tiếp tục.</p>
+    <div class="field"><label for="cpCurrent">Mật khẩu hiện tại</label><input id="cpCurrent" name="current_password" type="password" required></div>
+    <div class="field"><label for="cpNew">Mật khẩu mới</label><input id="cpNew" name="new_password" type="password" required placeholder="Ít nhất 10 ký tự, gồm cả chữ và số"></div>
+    <div class="field"><label for="cpRepeat">Nhập lại mật khẩu mới</label><input id="cpRepeat" name="repeat_password" type="password" required></div>
+    <div class="error" id="changePasswordError"></div>
+    <button class="btn primary" style="width:100%" type="submit" id="changePasswordBtn">Đổi mật khẩu</button>
+    <button class="btn" style="width:100%;margin-top:8px" type="button" id="changePasswordLogoutBtn">Đăng xuất</button>
+  </form>
+</section>
+
+<!-- TOTP enrollment (MGR-001) -->
+<section id="enrollTotp" class="hidden">
+  <form class="card" id="enrollTotpForm" novalidate>
+    <h1>Cài xác thực 2 bước</h1>
+    <p class="muted" style="margin:0 0 16px">Tài khoản giám đốc cần mã 6 số từ ứng dụng xác thực (Google Authenticator, Microsoft Authenticator...) mỗi lần đăng nhập.</p>
+    <div class="field">
+      <label>1. Mở ứng dụng xác thực, chọn thêm tài khoản bằng khóa</label>
+      <div style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:4px 0 8px">
+        <div id="enrollTotpSecretDisplay" class="mono" style="font-size:14px;font-weight:700;word-break:break-all;user-select:all;letter-spacing:0.5px"></div>
+      </div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button class="btn" type="button" id="enrollTotpCopyBtn">Sao chép khóa</button>
+        <a id="enrollTotpUriLink" href="#" style="font-size:13px;color:var(--primary)">Mở trong ứng dụng xác thực</a>
+      </div>
+    </div>
+    <div class="field" style="margin-top:16px">
+      <label for="enrollTotpCode">2. Nhập mã 6 số từ ứng dụng</label>
+      <input id="enrollTotpCode" name="code" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]*" autocomplete="one-time-code" required placeholder="6 số" class="mono" style="font-size:16px;letter-spacing:2px">
+    </div>
+    <div class="error" id="enrollTotpError"></div>
+    <button class="btn primary" style="width:100%" type="submit" id="enrollTotpBtn">Xác nhận</button>
+    <button class="btn" style="width:100%;margin-top:8px" type="button" id="enrollTotpLogoutBtn">Đăng xuất</button>
+  </form>
+</section>
+
+<!-- App shell -->
+<section id="app" class="hidden">
+  <nav>
+    <div class="brand">BusGo Điều hành</div>
+    <div class="company" id="companyName"></div>
+    <button data-view="overview">Tổng quan</button>
+    <button data-view="dispatch">Điều độ chuyến</button>
+    <button data-view="schedules">Lịch chạy</button>
+    <button data-view="fleet">Đội xe</button>
+    <button data-view="drivers">Tài xế</button>
+    <button data-view="layouts">Sơ đồ ghế</button>
+    <button data-view="live">Bản đồ xe</button>
+    <button data-view="bookings">Đặt chỗ</button>
+    <button data-view="service">Cấu hình đón trả</button>
+    <button data-view="homereq">Duyệt đón tận nhà <span class="pill warn hidden" id="homeReqCount"></span></button>
+    <button data-view="banners">Quảng cáo</button>
+    <button data-view="audit">Nhật ký thao tác</button>
+    <button data-view="platform" class="hidden" id="navPlatform">Nhà xe (nền tảng)</button>
+    <div class="spacer"></div>
+    <div class="who" id="who"></div>
+    <button id="logoutBtn">Đăng xuất</button>
+  </nav>
+  <main>
+    <div class="toolbar hidden" id="platformBar">
+      <span class="muted">Đang xem nhà xe:</span>
+      <select id="platformOperator"></select>
+    </div>
+
+    <!-- Overview -->
+    <div data-panel="overview">
+      <h2>Tổng quan ca trực</h2>
+      <div class="kpis" id="kpis"></div>
+      <div class="card"><div class="section-title" style="margin-top:0">Cảnh báo</div><div id="alerts"></div></div>
+    </div>
+
+    <!-- Dispatch board + trip detail -->
+    <div data-panel="dispatch" class="hidden">
+      <h2>Điều độ chuyến</h2>
+      <div class="toolbar"><label class="muted" for="boardDate">Ngày chạy</label><input type="date" id="boardDate"><button class="btn" id="boardToday">Hôm nay</button><span class="muted" id="boardInfo"></span></div>
+      <div class="split">
+        <div class="card scroll" style="padding:0"><table><thead><tr><th>Giờ chạy</th><th>Chuyến</th><th>Xe</th><th>Ghế</th><th>Trạng thái</th></tr></thead><tbody id="board"></tbody></table></div>
+        <div class="card" id="tripDetail"><p class="muted">Chọn một chuyến để xem chi tiết.</p></div>
+      </div>
+    </div>
+
+    <!-- Fixed timetable of the company (MGR-032, D128) -->
+    <div data-panel="schedules" class="hidden">
+      <h2>Lịch chạy cố định</h2>
+      <p class="muted" style="margin:-6px 0 8px">Mỗi dòng là một giờ xuất bến cố định của tuyến. Mỗi ngày lịch chạy có một chuyến để bán vé.</p>
+      <p style="margin:0 0 14px" id="scheduleRule"></p>
+      <div class="split bannerSplit">
+        <div class="card scroll" style="padding:0" id="schedulesBox"></div>
+        <form class="card" id="scheduleForm" novalidate>
+          <div class="section-title" style="margin-top:0" id="scheduleFormTitle">Thêm giờ chạy</div>
+          <div class="field"><label for="sRoute">Tuyến</label><select id="sRoute" name="route_id"></select></div>
+          <div class="row">
+            <div class="field grow"><label for="sTime">Giờ xuất bến</label><input id="sTime" name="departure" type="time" required></div>
+            <div class="field grow"><label for="sDur">Thời gian chạy (phút)</label><input id="sDur" name="duration_minutes" type="number" min="15" max="1440"></div>
+          </div>
+          <label class="row" style="margin:0 0 10px" id="sExtraField"><input type="checkbox" name="extra" id="sExtra"> Chuyến tăng cường (chạy một ngày, bán ngay)</label>
+          <div class="field hidden" id="sExtraDateField"><label for="sExtraDate">Ngày chạy tăng cường</label><input id="sExtraDate" name="extra_date" type="date"></div>
+          <div id="sRecurring">
+          <div class="field" style="margin-bottom:4px"><label>Ngày chạy trong tuần</label></div>
+          <div class="dayPick" id="sDays"></div>
+          <div class="row">
+            <div class="field grow" id="sFromField"><label for="sFrom">Áp dụng từ</label><input id="sFrom" name="valid_from" type="date"></div>
+            <div class="field grow hidden" id="sEffField"><label for="sEff">Thay đổi có hiệu lực từ</label><input id="sEff" name="effective_from" type="date"></div>
+            <div class="field grow"><label for="sTo">Chạy đến (trống = không hạn)</label><input id="sTo" name="valid_to" type="date"></div>
+          </div>
+          </div>
+          <div class="field"><label for="sFare">Giá vé (đ)</label><input id="sFare" name="base_fare_vnd" type="number" min="10000" step="1000"></div>
+          <label class="row" style="margin:0 0 12px"><input type="checkbox" name="active" checked> Đang chạy</label>
+          <div class="error" id="scheduleError"></div>
+          <div class="row"><button class="btn primary" type="submit" id="scheduleSave">Thêm giờ chạy</button><button class="btn hidden" type="button" id="scheduleCancel">Hủy sửa</button></div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Fleet Management (MGR-005, MGR-006) -->
+    <div data-panel="fleet" class="hidden">
+      <h2>Đội xe</h2>
+      <p class="muted" style="margin:-6px 0 14px">Quản lý danh sách phương tiện, phân bổ sơ đồ ghế cho từng xe.</p>
+      
+      <div class="card" style="margin-bottom:16px">
+        <div class="section-title" style="margin-top:0">Thêm xe</div>
+        <form id="fleetAddForm" novalidate>
+          <div class="row" style="flex-wrap:wrap;align-items:flex-end">
+            <div class="field" style="flex:1;min-width:160px;margin-bottom:0">
+              <label for="vehPlate">Biển số xe</label>
+              <input id="vehPlate" name="plate_number" placeholder="Ví dụ: 29B-123.45" required pattern="[0-9]{2}[A-Za-z]{1,2}[0-9]?[- ]?(?:[0-9]{4,5}|[0-9]{2,3}\.[0-9]{2})" title="Định dạng: 2 số, 1-2 chữ cái, số tùy chọn, 4-5 số (VD: 29B-123.45)" maxlength="12" style="text-transform:uppercase">
+            </div>
+            <div class="field" style="flex:1;min-width:200px;margin-bottom:0">
+              <label for="vehModel">Dòng xe</label>
+              <input id="vehModel" name="model" placeholder="Ví dụ: Limousine 34 Phòng VIP" required maxlength="80">
+            </div>
+            <div class="field" style="flex:1;min-width:240px;margin-bottom:0">
+              <label for="vehLayout">Sơ đồ ghế</label>
+              <select id="vehLayout" name="layout_id" required></select>
+            </div>
+            <div style="margin-bottom:0">
+              <button class="btn primary" type="submit" id="vehAddBtn">Thêm xe</button>
+            </div>
+          </div>
+          <div class="error" id="fleetAddError" style="margin-top:6px"></div>
+        </form>
+      </div>
+
+      <div class="card scroll" style="padding:0" id="fleetBox"></div>
+    </div>
+
+    <!-- Drivers Management (MGR-015, MGR-016) -->
+    <div data-panel="drivers" class="hidden">
+      <h2>Tài xế</h2>
+      <p class="muted" style="margin:-6px 0 14px">Quản lý đội ngũ tài xế, cấp mã PIN đăng nhập ứng dụng BusGo Driver.</p>
+
+      <div id="driverPinBox" class="card hidden" style="background:var(--warn-soft);border:1px solid var(--warn);margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div id="driverPinContent"></div>
+        <button class="btn" id="driverPinAckBtn" type="button">Đã ghi lại</button>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="section-title" style="margin-top:0" id="driverFormTitle">Thêm tài xế</div>
+        <form id="driverForm" novalidate>
+          <div class="row" style="flex-wrap:wrap;align-items:flex-end;gap:12px">
+            <div class="field" style="flex:2;min-width:180px;margin-bottom:0">
+              <label for="drvName">Họ và tên</label>
+              <input id="drvName" name="full_name" required maxlength="60" placeholder="Ví dụ: Nguyễn Văn A">
+            </div>
+            <div class="field" style="flex:1.5;min-width:140px;margin-bottom:0">
+              <label for="drvPhone">Số điện thoại</label>
+              <input id="drvPhone" name="phone" type="tel" inputmode="tel" required maxlength="15" placeholder="Ví dụ: 0912 345 678">
+            </div>
+            <div class="field" style="flex:1.5;min-width:140px;margin-bottom:0">
+              <label for="drvStaffId">Mã nhân viên</label>
+              <input id="drvStaffId" name="staff_id" maxlength="12" placeholder="Để trống: tự tạo TXxxxx" style="text-transform:uppercase">
+            </div>
+            <div class="field" style="flex:1;min-width:100px;margin-bottom:0">
+              <label for="drvClass">Hạng bằng</label>
+              <select id="drvClass" name="license_class" required>
+                <option value="B2">B2</option>
+                <option value="C">C</option>
+                <option value="D">D</option>
+                <option value="E">E</option>
+                <option value="FC">FC</option>
+              </select>
+            </div>
+            <div class="field" style="flex:1.5;min-width:140px;margin-bottom:0">
+              <label for="drvExpiry">Hạn bằng lái</label>
+              <input id="drvExpiry" name="license_expiry" type="date" required>
+            </div>
+            <div class="row" style="margin-bottom:0;gap:8px">
+              <button class="btn primary" type="submit" id="drvSubmitBtn">Thêm tài xế</button>
+              <button class="btn hidden" type="button" id="drvCancelBtn">Hủy</button>
+            </div>
+          </div>
+          <div class="error" id="driverError" style="margin-top:8px"></div>
+        </form>
+      </div>
+
+      <div class="card scroll" style="padding:0" id="driversBox"></div>
+    </div>
+
+    <!-- Seat Layouts (MGR-007) -->
+    <div data-panel="layouts" class="hidden">
+      <h2>Sơ đồ ghế</h2>
+      <p class="muted" style="margin:-6px 0 14px">Quản lý sơ đồ ghế mẫu và cấu hình sơ đồ ghế riêng của nhà xe.</p>
+      <div class="split layoutsSplit">
+        <div>
+          <div class="toolbar">
+            <button class="btn primary" id="layoutNewBtn">+ Tạo sơ đồ riêng</button>
+            <span class="muted" id="layoutCount"></span>
+          </div>
+          <div class="error" id="layoutsListError" style="margin-bottom:6px"></div>
+          <div class="card scroll" style="padding:0" id="layoutsListBox"></div>
+        </div>
+        <div id="layoutsRightView">
+          <div class="card" id="layoutPreviewCard">
+            <div id="layoutPreviewContent"><p class="muted">Chọn một sơ đồ ghế để xem chi tiết.</p></div>
+          </div>
+          <form class="card hidden" id="layoutEditorCard" novalidate>
+            <div class="section-title" style="margin-top:0" id="layoutEditorTitle">Tạo sơ đồ riêng</div>
+            <div class="field">
+              <label for="layoutName">Tên sơ đồ (tối đa 80 ký tự)</label>
+              <input id="layoutName" name="name" maxlength="80" placeholder="Ví dụ: Limousine VIP 24 phòng" required>
+            </div>
+            <div class="row" style="flex-wrap:wrap">
+              <div class="field grow" style="min-width:180px">
+                <label for="layoutVehicleType">Loại xe</label>
+                <select id="layoutVehicleType" name="vehicle_type">
+                  <option value="VIP_CABIN">Limousine VIP</option>
+                  <option value="SLEEPER">Giường nằm</option>
+                  <option value="SEATER">Ghế ngồi</option>
+                  <option value="OTHER">Xe khác</option>
+                </select>
+              </div>
+              <div class="field" style="width:110px">
+                <label for="layoutDecks">Số tầng (1–3)</label>
+                <input id="layoutDecks" name="total_decks" type="number" min="1" max="3" value="2" required>
+              </div>
+            </div>
+            <div class="row" style="flex-wrap:wrap">
+              <div class="field" style="width:110px">
+                <label for="layoutRows">Số hàng (1–20)</label>
+                <input id="layoutRows" name="rows" type="number" min="1" max="20" value="6" required>
+              </div>
+              <div class="field" style="width:110px">
+                <label for="layoutCols">Số cột (1–8)</label>
+                <input id="layoutCols" name="columns" type="number" min="1" max="8" value="3" required>
+              </div>
+              <div class="field grow" style="min-width:140px">
+                <label for="layoutAisles">Cột lối đi (phẩy, vd: 2)</label>
+                <input id="layoutAisles" name="aisle_columns" placeholder="Ví dụ: 2">
+              </div>
+            </div>
+            <div class="row" style="flex-wrap:wrap">
+              <div class="field grow" style="min-width:160px">
+                <label for="layoutSeatType">Loại ghế mặc định</label>
+                <select id="layoutSeatType" name="seat_type">
+                  <option value="VIP_CABIN">Phòng VIP</option>
+                  <option value="SLEEPER">Giường nằm</option>
+                  <option value="SEAT">Ghế ngồi</option>
+                </select>
+              </div>
+              <div class="field" style="width:80px">
+                <label for="layoutPrefix1">Tiền tố T1</label>
+                <input id="layoutPrefix1" name="prefix1" value="A" maxlength="2" style="text-transform:uppercase">
+              </div>
+              <div class="field" style="width:80px" id="layoutPrefix2Field">
+                <label for="layoutPrefix2">Tiền tố T2</label>
+                <input id="layoutPrefix2" name="prefix2" value="B" maxlength="2" style="text-transform:uppercase">
+              </div>
+              <div class="field hidden" style="width:80px" id="layoutPrefix3Field">
+                <label for="layoutPrefix3">Tiền tố T3</label>
+                <input id="layoutPrefix3" name="prefix3" value="C" maxlength="2" style="text-transform:uppercase">
+              </div>
+            </div>
+            <div class="row" style="margin-bottom:12px">
+              <button class="btn" type="button" id="layoutGenGridBtn">Tạo lưới</button>
+              <span class="muted" style="font-size:13px">Bấm vào ô để bật/tắt ghế. Mã ghế tự đánh số liên tục.</span>
+            </div>
+            <div class="row" style="margin-bottom:10px;justify-content:space-between">
+              <div class="section-title" style="margin:0">Xem trước lưới ghế</div>
+              <div>Số ghế: <b id="editorSeatCount" class="mono" style="color:var(--primary);font-size:16px">0</b> chỗ</div>
+            </div>
+            <div id="layoutEditorPreview" style="margin-bottom:12px;overflow-x:auto"></div>
+            <div class="error" id="layoutEditorError"></div>
+            <div class="row" style="margin-top:10px">
+              <button class="btn primary" type="submit" id="layoutSaveBtn">Lưu sơ đồ</button>
+              <button class="btn" type="button" id="layoutCancelEditBtn">Hủy</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live map with list fallback (spec 7.3, AC 13-14) -->
+    <div data-panel="live" class="hidden">
+      <h2>Bản đồ xe</h2>
+      <div class="toolbar">
+        <select id="liveStatus"><option value="">Mọi trạng thái</option><option value="IN_TRANSIT">Đang chạy</option><option value="ASSIGNED">Đã phân công</option><option value="STANDBY">Chờ</option></select>
+        <label><input type="checkbox" id="layerVehicles" checked> Lớp xe</label>
+        <label><input type="checkbox" id="layerCluster" checked> Gom cụm</label>
+        <span class="muted" id="liveUpdated"></span>
+      </div>
+      <div class="split">
+        <div id="liveMap" class="map tall"></div>
+        <div class="card list-fallback" style="padding:0"><table><thead><tr><th>Xe</th><th>Tài xế</th><th>Tín hiệu</th><th>Tốc độ</th></tr></thead><tbody id="liveList"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Bookings -->
+    <div data-panel="bookings" class="hidden">
+      <h2>Đặt chỗ</h2>
+      <div class="card scroll" style="padding:0" id="bookingsBox"></div>
+    </div>
+
+    <!-- Pickup / drop-off service configuration (spec 3, 12) -->
+    <div data-panel="service" class="hidden">
+      <h2>Cấu hình đón trả khách</h2>
+      <div id="serviceBox"></div>
+    </div>
+
+    <!-- Home pickup / drop-off requests the office reviews (MGR-033, D130) -->
+    <div data-panel="homereq" class="hidden">
+      <h2>Duyệt đón / trả tận nhà</h2>
+      <p class="muted" style="margin:-6px 0 8px">Địa chỉ trong vùng "nhà xe duyệt" chờ ở đây. Khi chưa xác nhận, khách lên xe ở bến và tài xế không thấy địa chỉ. Từ chối thì khách được hoàn phụ phí và được hủy vé không mất phí. Chưa duyệt khi xe xuất bến thì tự từ chối.</p>
+      <div class="toolbar"><select id="homeReqStatus"><option value="PENDING_REVIEW">Chờ duyệt</option><option value="CONFIRMED">Đã xác nhận</option><option value="REJECTED">Đã từ chối</option><option value="WITHDRAWN">Khách đã hủy</option><option value="ALL">Tất cả</option></select><span class="muted" id="homeReqInfo"></span></div>
+      <div class="card scroll" style="padding:0" id="homeReqBox"></div>
+    </div>
+
+    <!-- Promotion banners on the passenger home slider (MGR-031, D125) -->
+    <div data-panel="banners" class="hidden">
+      <h2>Quảng cáo trên app khách</h2>
+      <p class="muted" style="margin:-6px 0 14px">Hiện ở slider trang chủ app khách, theo thứ tự tăng dần. Không còn quảng cáo nào đang chạy thì app ẩn slider.</p>
+      <div class="split bannerSplit">
+        <div>
+          <div class="toolbar"><button class="btn primary" id="bannerNew">+ Thêm quảng cáo</button><span class="muted" id="bannerCount"></span></div>
+          <div class="card scroll" style="padding:0" id="bannersBox"></div>
+        </div>
+        <form class="card" id="bannerForm" novalidate>
+          <div class="section-title" style="margin-top:0" id="bannerFormTitle">Thêm quảng cáo</div>
+          <div class="field"><label for="bTitle">Tiêu đề (tối đa 80 ký tự)</label><input id="bTitle" name="title" maxlength="80" required></div>
+          <div class="field"><label for="bSubtitle">Mô tả ngắn</label><input id="bSubtitle" name="subtitle" maxlength="120"></div>
+          <div class="row">
+            <div class="field"><label for="bColor">Màu nền</label><input id="bColor" name="background_color" type="color" value="#2563eb" style="height:38px;width:64px;padding:2px"></div>
+            <div class="field grow"><label for="bImage">Ảnh banner (đường dẫn, không bắt buộc)</label><input id="bImage" name="image_url" placeholder="https://..."></div>
+            <div class="field"><label for="bOrder">Thứ tự</label><input id="bOrder" name="sort_order" type="number" min="0" max="999" value="1" style="width:80px"></div>
+          </div>
+          <div class="row">
+            <div class="field grow"><label for="bStart">Bắt đầu (trống = ngay)</label><input id="bStart" name="starts_at" type="datetime-local"></div>
+            <div class="field grow"><label for="bEnd">Kết thúc (trống = không hạn)</label><input id="bEnd" name="ends_at" type="datetime-local"></div>
+          </div>
+          <div class="field"><label for="bHtml">Nội dung trang chi tiết (HTML: h2, p, b, ul, li, img, a...; không script)</label><textarea id="bHtml" name="content_html" class="code" required></textarea></div>
+          <label class="row" style="margin:0 0 12px"><input type="checkbox" name="active" checked> Bật ngay khi lưu</label>
+          <div class="section-title">Xem trước</div>
+          <div class="phone" id="bannerSlidePreview"></div>
+          <iframe class="htmlPreview" id="bannerHtmlPreview" sandbox title="Xem trước trang chi tiết" style="margin-top:10px"></iframe>
+          <div class="error" id="bannerError"></div>
+          <div class="row"><button class="btn primary" type="submit" id="bannerSave">Tạo quảng cáo</button><button class="btn hidden" type="button" id="bannerCancel">Hủy sửa</button></div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Audit -->
+    <div data-panel="audit" class="hidden">
+      <h2>Nhật ký thao tác</h2>
+      <div class="card scroll" style="padding:0" id="auditBox"></div>
+    </div>
+
+    <!-- Platform admin -->
+    <div data-panel="platform" class="hidden">
+      <h2>Nhà xe trên nền tảng</h2>
+      <div id="platformNoticeBox" class="card hidden" style="background:var(--warn-soft);border:1px solid var(--warn);margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div id="platformNoticeContent"></div>
+        <button class="btn" id="platformNoticeAckBtn" type="button">Đã ghi lại</button>
+      </div>
+      <div class="split">
+        <div class="card scroll" style="padding:0" id="operatorsBox"></div>
+        <form class="card" id="operatorForm">
+          <div class="section-title" style="margin-top:0">Thêm nhà xe</div>
+          <div class="field"><label>Mã nhà xe (A-Z, 0-9)</label><input name="code" required maxlength="16" style="text-transform:uppercase"></div>
+          <div class="field"><label>Tên nhà xe</label><input name="name" required maxlength="200"></div>
+          <div class="field"><label>Tên ngắn</label><input name="short_name" maxlength="40"></div>
+          <div class="field"><label>Tổng đài</label><input name="hotline" maxlength="15" inputmode="tel"></div>
+          <div class="field"><label>Email giám đốc</label><input name="director_email" type="email" required></div>
+          <div class="field"><label>Tên giám đốc</label><input name="director_name" required maxlength="60"></div>
+          <div class="field"><label>Mã BIN ngân hàng</label><input name="bin" required maxlength="6"></div>
+          <div class="field"><label>Tên ngân hàng</label><input name="bank_name" required maxlength="200"></div>
+          <div class="field"><label>Số tài khoản</label><input name="account_number" required maxlength="20"></div>
+          <div class="field"><label>Chủ tài khoản</label><input name="account_name" required maxlength="200"></div>
+          <div class="error" id="operatorError"></div>
+          <button class="btn primary" type="submit">Tạo nhà xe</button>
+        </form>
+      </div>
+    </div>
+  </main>
+</section>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+'use strict';
+// BusGo operations dashboard: a thin client of the ops API (/api/v1/ops, /api/v1/platform).
+const TILE_URL = 'https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png'; // tile.openstreetmap.org is blocked by some Vietnamese ISPs
+const TILE_ATTR = '&copy; OpenStreetMap contributors';
+const POLL_MS = 10000;
+
+const state = { token: null, user: null, operator: null, platformCode: '', view: 'overview', selectedTrip: null, timers: [], maps: {} };
+
+// ---------- helpers ----------
+const $ = (s, root = document) => root.querySelector(s);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const vnd = (n) => (Number(n) || 0).toLocaleString('vi-VN') + ' đ';
+const hhmm = (iso) => { const d = new Date(iso); return isNaN(d) ? '—' : d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' }); };
+const dmy = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' }); };
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+function toast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 3500); }
+function store(key, value) { try { value === null ? sessionStorage.removeItem(key) : sessionStorage.setItem(key, value); } catch (_) {} }
+function load(key) { try { return sessionStorage.getItem(key); } catch (_) { return null; } }
+
+async function api(path, { method = 'GET', body, idempotent = false } = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  if (state.platformCode && path.startsWith('/api/v1/ops/')) headers['X-Operator-Code'] = state.platformCode;
+  if (idempotent) headers['Idempotency-Key'] = uuid();
+  let res;
+  try {
+    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  } catch (_) {
+    return { ok: false, status: 0, message: 'Không kết nối được máy chủ' };
+  }
+  let json = {};
+  try { json = await res.json(); } catch (_) {}
+  if (res.status === 401 && state.token) { logout('Phiên đăng nhập đã hết hạn'); }
+  if (res.status === 403 && json.code === 'PASSWORD_CHANGE_REQUIRED') {
+    if (state.user) {
+      state.user.must_change_password = true;
+      store('busgo_ops_session', JSON.stringify({ token: state.token, user: state.user, operator: state.operator }));
+    }
+    showPasswordChange();
+  }
+  if (res.status === 403 && json.code === 'TOTP_ENROLLMENT_REQUIRED') {
+    if (state.user) {
+      state.user.must_enroll_totp = true;
+      store('busgo_ops_session', JSON.stringify({ token: state.token, user: state.user, operator: state.operator }));
+    }
+    showEnrollTotp();
+  }
+  return res.ok ? { ok: true, data: json.data, raw: json } : { ok: false, status: res.status, code: json.code, message: json.message || 'Có lỗi xảy ra' };
+}
+// Public passenger endpoints scoped by company (trip route, stops, bus) for the trip map.
+async function publicApi(path) {
+  const code = state.platformCode || state.operator?.code;
+  // The staff token lets the office see the bus; anonymous callers only get the road and stops.
+  const headers = { Authorization: `Bearer ${state.token}` };
+  if (code) headers['X-Operator-Code'] = code;
+  try { const res = await fetch(path, { headers }); const json = await res.json(); return res.ok ? json.data : null; } catch (_) { return null; }
+}
+
+const STATUS = {
+  READY: ['Sẵn sàng', 'info'], DISPATCHED: ['Đã điều', 'info'], SCHEDULED: ['Chờ chạy', ''], IN_TRANSIT: ['Đang chạy', 'ok'],
+  COMPLETED: ['Hoàn thành', ''], CANCELLED: ['Đã hủy', 'danger'], ASSIGNED: ['Đã phân công', 'info'], STANDBY: ['Chờ', ''], MAINTENANCE: ['Bảo dưỡng', 'warn']
+};
+const STOP_STATUS = { UPCOMING: ['Sắp tới', ''], APPROACHING: ['Xe sắp tới', 'info'], ARRIVED: ['Xe đang ở trạm', 'ok'], COMPLETED: ['Đã rời', ''], SKIPPED: ['Bỏ qua', 'warn'] };
+const stopPill = (status) => { const [label, kind] = STOP_STATUS[status] || [status || '—', '']; return `<span class="pill ${kind}">${esc(label)}</span>`; };
+const EVENT_LABEL = { TRIP_STARTED: 'Xuất bến', STOP_ARRIVED: 'Tới trạm', STOP_SKIPPED: 'Bỏ qua trạm', BOARDED: 'Lên xe', NO_SHOW: 'Vắng mặt', ALIGHTED: 'Xuống xe', TRIP_COMPLETED: 'Kết thúc chuyến', HOME_RUN_STARTED: 'Đi đón tận nhà', HOME_ORDER_SET: 'Xếp thứ tự đón', HOME_ARRIVED: 'Tới nhà khách', HOME_MISSED: 'Khách không ra', PICKUP_READY: 'Khách báo sẵn sàng', PASSENGER_CALLED: 'Gọi khách', HOME_ADDRESS_INACCESSIBLE: 'Không vào được địa chỉ' };
+const pill = (status) => { const [label, kind] = STATUS[status] || [status || '—', '']; return `<span class="pill ${kind}">${esc(label)}</span>`; };
+const gpsPill = (g) => g === 'LIVE' ? '<span class="pill ok">Trực tiếp</span>' : g === 'STALE' ? '<span class="pill warn">Tín hiệu cũ</span>' : '<span class="pill">Mất tín hiệu</span>';
+
+function newMap(el, center = [20.6, 105.85], zoom = 8) {
+  const map = L.map(el, { zoomControl: true }).setView(center, zoom);
+  L.tileLayer(TILE_URL, { subdomains: 'abc', maxZoom: 18, attribution: TILE_ATTR }).addTo(map);
+  return map;
+}
+
+// ---------- session, password change & totp enrollment ----------
+function showPasswordChange() {
+  stopTimers();
+  $('#login').classList.add('hidden');
+  $('#enrollTotp').classList.add('hidden');
+  $('#app').classList.add('hidden');
+  $('#changePassword').classList.remove('hidden');
+  $('#changePasswordError').textContent = '';
+  $('#changePasswordForm').reset();
+  clearEnrollTotp();
+}
+
+let enrollTotpSecret = null;
+let enrollTotpLoading = false;
+
+function clearEnrollTotp() {
+  enrollTotpSecret = null;
+  enrollTotpLoading = false;
+  const display = $('#enrollTotpSecretDisplay');
+  if (display) display.textContent = '';
+  const uriLink = $('#enrollTotpUriLink');
+  if (uriLink) uriLink.removeAttribute('href');
+  const codeInput = $('#enrollTotpCode');
+  if (codeInput) codeInput.value = '';
+  const errEl = $('#enrollTotpError');
+  if (errEl) errEl.textContent = '';
+}
+
+function showEnrollTotp() {
+  stopTimers();
+  $('#login').classList.add('hidden');
+  $('#changePassword').classList.add('hidden');
+  $('#app').classList.add('hidden');
+  $('#enrollTotp').classList.remove('hidden');
+  $('#enrollTotpError').textContent = '';
+  const codeInput = $('#enrollTotpCode');
+  if (codeInput) codeInput.value = '';
+  loadEnrollTotpSetup();
+}
+
+async function loadEnrollTotpSetup() {
+  if (enrollTotpSecret || enrollTotpLoading) return;
+  enrollTotpLoading = true;
+  const display = $('#enrollTotpSecretDisplay');
+  if (display) display.textContent = 'Đang tải...';
+  const btn = $('#enrollTotpBtn');
+  if (btn) btn.disabled = true;
+  const r = await api('/api/v1/ops/auth/totp/setup', { method: 'POST', idempotent: true });
+  enrollTotpLoading = false;
+  if (btn) btn.disabled = false;
+  if (!r.ok) {
+    $('#enrollTotpError').textContent = r.message || 'Không thể tạo khóa xác thực 2 bước';
+    if (display) display.textContent = '—';
+    return;
+  }
+  const secret = r.data?.secret || '';
+  enrollTotpSecret = secret;
+  const grouped = secret.match(/.{1,4}/g)?.join(' ') || secret;
+  if (display) display.textContent = grouped;
+  const uriLink = $('#enrollTotpUriLink');
+  if (uriLink && r.data?.otpauth_uri) {
+    uriLink.href = r.data.otpauth_uri;
+  }
+}
+
+$('#enrollTotpCode')?.addEventListener('input', (e) => {
+  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
+});
+
+$('#enrollTotpCopyBtn')?.addEventListener('click', async () => {
+  const displayEl = $('#enrollTotpSecretDisplay');
+  const textToCopy = enrollTotpSecret || (displayEl?.textContent || '').replace(/\s+/g, '');
+  if (!textToCopy) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(textToCopy);
+      toast('Đã sao chép khóa');
+      return;
+    }
+  } catch (_) {}
+  if (displayEl) {
+    const range = document.createRange();
+    range.selectNodeContents(displayEl);
+    const sel = window.getSelection();
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    try {
+      if (document.execCommand('copy')) {
+        toast('Đã sao chép khóa');
+        return;
+      }
+    } catch (_) {}
+  }
+  toast('Đã chọn khóa');
+});
+
+$('#enrollTotpUriLink')?.addEventListener('click', (e) => {
+  const href = e.currentTarget.getAttribute('href');
+  if (!href || href === '#') {
+    e.preventDefault();
+  }
+});
+
+$('#enrollTotpForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = $('#enrollTotpError');
+  errEl.textContent = '';
+  const code = ($('#enrollTotpCode')?.value || '').trim();
+  if (code.length !== 6 || !/^\d{6}$/.test(code)) {
+    errEl.textContent = 'Mã xác thực gồm 6 chữ số';
+    return;
+  }
+  const btn = $('#enrollTotpBtn');
+  btn.disabled = true;
+  const r = await api('/api/v1/ops/auth/totp/confirm', {
+    method: 'POST',
+    idempotent: true,
+    body: { code }
+  });
+  btn.disabled = false;
+  if (!r.ok) {
+    errEl.textContent = r.message || 'Mã xác thực 2 bước không đúng';
+    return;
+  }
+  if (state.user) state.user.must_enroll_totp = false;
+  store('busgo_ops_session', JSON.stringify({ token: state.token, user: state.user, operator: state.operator }));
+  clearEnrollTotp();
+  $('#enrollTotp').classList.add('hidden');
+  enter();
+  toast('Đã bật xác thực 2 bước. Lần sau đăng nhập cần mã 6 số.');
+});
+
+$('#enrollTotpLogoutBtn')?.addEventListener('click', () => logout());
+
+$('#changePasswordForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const current = f.current_password.value;
+  const newPw = f.new_password.value;
+  const repeatPw = f.repeat_password.value;
+  const errEl = $('#changePasswordError');
+  errEl.textContent = '';
+  if (!current) {
+    errEl.textContent = 'Cần mật khẩu hiện tại';
+    return;
+  }
+  if (!newPw || newPw.length < 10 || !/[a-zA-Z]/.test(newPw) || !/[0-9]/.test(newPw)) {
+    errEl.textContent = 'Mật khẩu mới phải có ít nhất 10 ký tự, bao gồm cả chữ và số';
+    return;
+  }
+  if (newPw === current) {
+    errEl.textContent = 'Mật khẩu mới phải khác mật khẩu hiện tại';
+    return;
+  }
+  if (newPw !== repeatPw) {
+    errEl.textContent = 'Hai mật khẩu mới không khớp';
+    return;
+  }
+  $('#changePasswordBtn').disabled = true;
+  const r = await api('/api/v1/ops/auth/change-password', {
+    method: 'POST',
+    idempotent: true,
+    body: { current_password: current, new_password: newPw }
+  });
+  $('#changePasswordBtn').disabled = false;
+  if (!r.ok) {
+    errEl.textContent = r.message;
+    return;
+  }
+  if (state.user) state.user.must_change_password = false;
+  store('busgo_ops_session', JSON.stringify({ token: state.token, user: state.user, operator: state.operator }));
+  $('#changePassword').classList.add('hidden');
+  enter();
+  toast('Đã đổi mật khẩu');
+});
+$('#changePasswordLogoutBtn')?.addEventListener('click', () => logout());
+
+$('#loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('#loginError').textContent = '';
+  $('#loginBtn').disabled = true;
+  const body = { username: $('#u').value.trim(), password: $('#p').value };
+  if ($('#t').value.trim()) body.totp = $('#t').value.trim();
+  const r = await api('/api/v1/ops/auth/login', { method: 'POST', body });
+  $('#loginBtn').disabled = false;
+  if (!r.ok) { $('#loginError').textContent = r.message; return; }
+  state.token = r.data.token; state.user = r.data.user; state.operator = r.data.operator || null;
+  store('busgo_ops_session', JSON.stringify({ token: state.token, user: state.user, operator: state.operator }));
+  enter();
+});
+function logout(msg) {
+  state.token = null; state.user = null; state.operator = null; state.platformCode = '';
+  store('busgo_ops_session', null);
+  stopTimers();
+  $('#app').classList.add('hidden');
+  $('#changePassword').classList.add('hidden');
+  $('#enrollTotp').classList.add('hidden');
+  clearEnrollTotp();
+  $('#login').classList.remove('hidden');
+  if (msg) $('#loginError').textContent = msg;
+}
+$('#logoutBtn').addEventListener('click', () => logout());
+
+async function enter() {
+  if (state.user?.must_change_password) {
+    showPasswordChange();
+    return;
+  }
+  if (state.user?.must_enroll_totp) {
+    showEnrollTotp();
+    return;
+  }
+  $('#changePassword').classList.add('hidden');
+  $('#enrollTotp').classList.add('hidden');
+  $('#login').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+  const isPlatform = state.user?.role === 'PLATFORM_ADMIN';
+  const role = state.user?.role;
+  $('#who').textContent = `${state.user?.full_name || ''} · ${state.user?.role || ''}`;
+  $('#navPlatform').classList.toggle('hidden', !isPlatform);
+  const NAV_ROLES = {
+    bookings: ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER'],
+    fleet: ['FLEET_DIRECTOR', 'DISPATCHER'],
+    drivers: ['FLEET_DIRECTOR', 'DISPATCHER'],
+    layouts: ['FLEET_DIRECTOR', 'DISPATCHER'],
+    schedules: ['FLEET_DIRECTOR', 'DISPATCHER'],
+    service: ['FLEET_DIRECTOR', 'DISPATCHER'],
+    homereq: ['FLEET_DIRECTOR', 'DISPATCHER'],
+    banners: ['FLEET_DIRECTOR'],
+    audit: ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'DISPATCHER']
+  };
+  document.querySelectorAll('nav button[data-view]').forEach(b => {
+    const v = b.dataset.view;
+    if (v === 'platform') return;
+    const allowed = isPlatform || !NAV_ROLES[v] || (role && NAV_ROLES[v].includes(role));
+    b.classList.toggle('hidden', !allowed);
+  });
+  if (state.view && document.querySelector(`nav button[data-view="${state.view}"]`)?.classList.contains('hidden')) {
+    state.view = 'overview';
+  }
+  $('#platformBar').classList.toggle('hidden', !isPlatform);
+  if (isPlatform) await loadPlatformOperatorPicker();
+  $('#companyName').textContent = isPlatform ? 'Quản trị nền tảng' : (state.operator?.name || '');
+  show(isPlatform ? 'platform' : (state.view || 'overview'));
+}
+
+document.querySelectorAll('nav button[data-view]').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+function stopTimers() { state.timers.forEach(clearInterval); state.timers = []; }
+function every(fn) { fn(); state.timers.push(setInterval(fn, POLL_MS)); }
+
+function show(view) {
+  const targetBtn = document.querySelector(`nav button[data-view="${view}"]`);
+  if (targetBtn && targetBtn.classList.contains('hidden')) {
+    view = 'overview';
+  }
+  state.view = view;
+  stopTimers();
+  document.querySelectorAll('nav button[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  document.querySelectorAll('[data-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.panel !== view));
+  if (state.user?.role === 'PLATFORM_ADMIN' && view !== 'platform' && !state.platformCode) {
+    toast('Chọn nhà xe ở thanh trên để xem dữ liệu điều hành');
+  }
+  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, fleet: loadFleet, drivers: loadDrivers, layouts: loadLayouts, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, audit: loadAudit, platform: loadOperators })[view]?.();
+}
+
+// ---------- overview ----------
+async function loadOverview() {
+  const [k, a] = await Promise.all([api('/api/v1/ops/dashboard/kpis'), api('/api/v1/ops/alerts')]);
+  if (!k.ok) { $('#kpis').innerHTML = `<div class="error">${esc(k.message)}</div>`; return; }
+  const m = k.data.kpi_metrics || {};
+  const tiles = [
+    ['Xe đang chạy', `${m.active_vehicles_count ?? 0}/${m.total_fleet_count ?? 0}`],
+    ['Lấp đầy', `${m.overall_load_factor_pct ?? 0}%`],
+    ['Doanh thu thuần', vnd(m.net_revenue_vnd)],
+    ['Đúng giờ', `${m.on_time_departure_rate_pct ?? 0}%`],
+    ['Cảnh báo', m.active_alerts_count ?? 0]
+  ];
+  $('#kpis').innerHTML = tiles.map(([l, v]) => `<div class="card kpi"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`).join('');
+  const alerts = a.ok ? a.data.alerts : [];
+  $('#alerts').innerHTML = alerts.length ? alerts.map(x => `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><span class="pill ${x.severity === 'RED' ? 'danger' : x.severity === 'AMBER' ? 'warn' : 'ok'}">${esc(x.type)}</span><span class="grow">${esc(x.message)}</span><span class="muted mono">${esc(x.vehicle_plate || '')}</span></div>`).join('') : '<p class="muted">Không có cảnh báo.</p>';
+}
+
+// ---------- dispatch ----------
+let boardTrips = [];
+// Day of the board (Vietnam time); empty = today, plus the demo day outside production.
+$('#boardDate').addEventListener('change', () => { state.selectedTrip = null; loadBoard(); });
+$('#boardToday').addEventListener('click', () => { $('#boardDate').value = ''; state.selectedTrip = null; loadBoard(); });
+async function loadBoard() {
+  const day = $('#boardDate').value;
+  const r = await api(`/api/v1/ops/dispatch/board${day ? `?date=${day}` : ''}`);
+  if (r.ok) $('#boardInfo').textContent = `${r.data.total_trips} chuyến · ${r.data.shift_date.split('-').reverse().join('/')}`;
+  if (!r.ok) { $('#board').innerHTML = `<tr><td colspan="5" class="error">${esc(r.message)}</td></tr>`; return; }
+  boardTrips = r.data.trips || [];
+  $('#board').innerHTML = boardTrips.length ? boardTrips.map(t => `
+    <tr class="click ${state.selectedTrip === t.trip_id ? 'sel' : ''}" data-trip="${esc(t.trip_id)}">
+      <td class="mono">${esc(hhmm(t.departure_time))}<div class="muted" style="font-size:12px">${esc(dmy(t.departure_time))}</div></td>
+      <td>${esc(t.route_name || t.route_id)}<div class="muted mono" style="font-size:12px">${esc(t.trip_id)}</div></td>
+      <td class="mono">${t.vehicle_plate ? esc(t.vehicle_plate) : '<span class="pill warn">Chưa gán xe</span>'}<div class="muted" style="font-size:12px">${esc(t.driver_name || '')}</div></td>
+      <td class="mono">${esc(t.booked_seats)}/${esc(t.total_seats)}${t.held_seats ? `<div class="muted" style="font-size:12px">giữ ${esc(t.held_seats)}</div>` : ''}</td>
+      <td>${pill(t.status)}${t.delay_minutes ? ` <span class="pill warn">+${esc(t.delay_minutes)}p</span>` : ''}${t.sales_closed && t.status !== 'CANCELLED' ? ' <span class="pill warn">Ngừng bán</span>' : ''}</td>
+    </tr>`).join('') : '<tr><td colspan="5" class="muted">Không có chuyến trong ca.</td></tr>';
+  document.querySelectorAll('#board tr[data-trip]').forEach(tr => tr.addEventListener('click', () => openTrip(tr.dataset.trip)));
+  if (state.selectedTrip) refreshTripLive();
+}
+
+async function openTrip(tripId) {
+  state.selectedTrip = tripId;
+  document.querySelectorAll('#board tr[data-trip]').forEach(tr => tr.classList.toggle('sel', tr.dataset.trip === tripId));
+  const [trip, inv, track, ops, assignOpts, msgs] = await Promise.all([api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/seat-inventory`), publicApi(`/api/v1/trips/${encodeURIComponent(tripId)}/tracking`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/operations`), api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/assign-options`), api(`/api/v1/ops/messages?trip_id=${encodeURIComponent(tripId)}`)]);
+  const opsData = ops.ok ? ops.data : null;
+  if (!trip.ok) { $('#tripDetail').innerHTML = `<div class="error">${esc(trip.message)}</div>`; return; }
+  // The board row has the route and driver names the trip record lacks.
+  const t = { ...(boardTrips.find(b => b.trip_id === tripId) || {}), ...trip.data }; const s = inv.ok ? inv.data.summary || {} : {};
+  const stops = track?.stops || [];
+  $('#tripDetail').innerHTML = `
+    <div class="row"><div class="grow"><div style="font-weight:700;font-size:16px">${esc(boardTrips.find(b => b.trip_id === tripId)?.route_name || t.route_name || t.route_id || '')}</div>
+      <div class="muted mono">${esc(t.trip_id)} · ${esc(t.vehicle_plate)} · ${esc(hhmm(t.departure_time))} ${esc(dmy(t.departure_time))}</div></div>${pill(t.status)}</div>
+    <div class="stat">
+      <div><b>${esc(t.booked_seats ?? s.booked ?? 0)}</b><span>Đã bán</span></div>
+      <div><b>${esc(t.held_seats ?? s.hotline_hold ?? 0)}</b><span>Đang giữ</span></div>
+      <div><b>${esc(opsData ? opsData.stops.reduce((n, st) => n + st.counts.boarded, 0) : (t.boarded_passengers ?? 0))}</b><span>Đã lên xe</span></div>
+      <div><b>${esc(opsData?.on_board_count ?? t.on_board_count ?? '—')}</b><span>Còn trên xe</span></div>
+    </div>
+    ${assignOpts.ok ? assignBlock(assignOpts.data) : ''}
+    <div id="tripMap" class="map"></div>
+    <div class="muted" id="tripTrack" style="margin-top:6px"></div>
+    <div class="section-title">Điểm dừng</div>
+    ${opsData ? `<table><thead><tr><th>Trạm</th><th>Trạng thái</th><th title="Khách đón / đã lên / đã loại">Đón</th><th title="Khách xuống">Trả</th></tr></thead><tbody>${opsData.stops.map(st => `<tr><td>${esc(st.name)}${st.counts.home_pickups ? ` <span class="pill warn">${esc(st.counts.home_pickups)} tận nhà</span>` : ''}</td><td>${stopPill(st.lifecycle_status)}</td><td class="mono">${esc(st.counts.confirmed)} / ${esc(st.counts.boarded)} / ${esc(st.counts.excluded)}</td><td class="mono">${esc(st.counts.dropoffs + st.counts.alighted)}</td></tr>`).join('')}</tbody></table>
+      ${opsData.home_pickups.length ? `<div class="section-title">Đón tận nhà (theo thứ tự xe đi đón)</div>${opsData.home_pickups.map(h => `<div class="row" style="padding:3px 0"><span class="mono muted">${h.position ? `#${esc(h.position)}` : ''}</span><span class="mono">${esc(h.seat_code)}</span><span class="grow">${esc(h.address)}${h.source === 'HOTLINE' ? ' <span class="pill">tổng đài</span>' : ''}</span><span class="mono muted">${h.appointment_at ? `hẹn ${esc(hhmm(h.appointment_at))}` : (h.window_from ? `${esc(hhmm(h.window_from))}–${esc(hhmm(h.window_to))}` : '')}</span>${homeStatePill(h)}</div>`).join('')}` : ''}
+      <div class="section-title">Nhật ký chuyến</div>
+      <div style="max-height:180px;overflow:auto">${opsData.events.length ? opsData.events.slice(0, 50).map(ev => `<div class="row" style="padding:2px 0;font-size:13px"><span class="mono muted">${esc(hhmm(ev.at))}</span><span class="grow">${esc(ev.type === 'PICKUP_READY' && ev.minutes ? `Khách cần thêm ${ev.minutes} phút` : (EVENT_LABEL[ev.type] || ev.type))} ${esc(ev.seat_code || '')} ${esc(ev.stop_id || '')}${ev.manual ? ' <span class="pill warn">thủ công</span>' : ''}</span><span class="muted">${esc(ev.actor || '')}</span></div>`).join('') : '<p class="muted">Chưa có sự kiện.</p>'}</div>`
+    : `<div>${stops.length ? stops.map(st => `<div class="row" style="padding:3px 0"><span class="mono muted">${esc(st.order)}</span><span class="grow">${esc(st.name)}</span></div>`).join('') : '<p class="muted">Chưa có dữ liệu điểm dừng.</p>'}</div>`}
+    ${msgs?.ok ? messagesBlock(msgs.data) : ''}
+    <div class="section-title">Báo trễ chính thức</div>
+    <form id="delayForm">
+      <div class="row">
+        <input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="minutes" type="number" min="0" max="600" step="1" value="15" placeholder="Số phút trễ (0 = đúng giờ trở lại)" title="0 = đúng giờ trở lại">
+        <input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="reason" placeholder="Lý do (khách nhận được)" maxlength="200">
+        <button class="btn" type="submit">Công bố</button>
+      </div>
+      <div class="error" id="delayError" style="margin-top:4px"></div>
+    </form>
+    ${saleBlock(t)}
+    <div ${t.status === 'CANCELLED' ? 'class="hidden"' : ''}>
+    <div class="section-title">Giữ chỗ qua tổng đài</div>
+    <form id="holdForm">
+      <div class="row"><div class="field grow"><label>Họ tên khách</label><input name="name" required maxlength="60"></div><div class="field grow"><label>Số điện thoại</label><input name="phone" required inputmode="tel" maxlength="15"></div></div>
+      <div class="row"><div class="field grow"><label>Ghế (VD: A05)</label><input name="seat" required style="text-transform:uppercase" maxlength="4" pattern="[A-Za-z0-9]+" title="Mã ghế gồm chữ và số (VD: A05)"></div>
+        <div class="field grow"><label>Điểm đón</label><select name="pickup">${stops.map(st => `<option value="${esc(st.stop_id)}">${esc(st.name)}</option>`).join('')}</select></div>
+        <div class="field grow"><label>Điểm trả</label><select name="dropoff">${stops.slice().reverse().map(st => `<option value="${esc(st.stop_id)}">${esc(st.name)}</option>`).join('')}</select></div></div>
+      <label class="row" style="margin:6px 0"><input type="checkbox" name="home"> Đón tận nhà (khách đọc địa chỉ qua điện thoại)</label>
+      <div id="homeFields" class="hidden">
+        <div class="row"><div class="field grow"><label>Địa chỉ đón</label><input name="address" placeholder="Số nhà, ngõ, đường, quận" maxlength="200"></div><div class="field grow"><label>Ghi chú cho tài xế</label><input name="note" placeholder="VD: cổng sắt xanh, gọi khi tới đầu ngõ" maxlength="200"></div></div>
+        <div class="muted" style="margin-bottom:4px">Bấm lên bản đồ để ghim đúng chỗ nhà khách. Khách nhận tin nhắn có link theo dõi xe và giờ hẹn khi tài xế lên đường.</div>
+        <div id="homePinMap" class="map" style="height:220px"></div>
+        <div class="muted mono" id="homePinText">Chưa ghim vị trí</div>
+      </div>
+      <div class="error" id="holdError"></div>
+      <button class="btn primary" type="submit">Giữ chỗ (khách trả tiền mặt khi lên xe)</button>
+    </form>
+    </div>`;
+  drawTripMap(track);
+  $('#assignForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    $('#assignError').textContent = '';
+    const r = await api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/assign`, { method: 'POST', idempotent: true, body: { vehicleId: f.vehicle.value, driverId: f.driver.value, scope: f.schedule.checked ? 'SCHEDULE' : 'TRIP' } });
+    if (!r.ok) { $('#assignError').textContent = r.message; return; }
+    toast(`Đã gán xe ${r.data.vehicle_plate}, tài xế ${r.data.driver_name}`);
+    loadBoard(); openTrip(tripId);
+  });
+  bindSaleBlock(tripId, t);
+  $('#delayForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const errEl = $('#delayError');
+    if (errEl) errEl.textContent = '';
+    const rawMins = f.minutes.value.trim();
+    const mins = Number(rawMins);
+    if (!rawMins || !Number.isInteger(mins) || mins < 0 || mins > 600) {
+      if (errEl) errEl.textContent = 'Số phút trễ phải là số nguyên từ 0 đến 600 (0 = đúng giờ trở lại)';
+      return;
+    }
+    const r = await api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/delay`, { method: 'POST', idempotent: true, body: { delayMinutes: mins, reason: f.reason.value.trim() || 'Điều chỉnh vận hành' } });
+    if (!r.ok) {
+      if (errEl) errEl.textContent = r.message;
+      return;
+    }
+    toast('Đã công bố giờ chạy mới cho khách');
+    if (r.ok) loadBoard();
+  });
+  $('#holdForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    $('#holdError').textContent = '';
+    const name = f.name.value.trim();
+    if (name.length < 2 || name.length > 60 || /[0-9<>{}@[\]#$%^*=_|\\/~]/u.test(name) || !/\p{L}/u.test(name)) {
+      $('#holdError').textContent = 'Họ tên cần 2-60 ký tự, không chứa số hoặc ký tự đặc biệt';
+      return;
+    }
+    const cleanPhone = f.phone.value.replace(/[\s.-]/g, '');
+    if (!/^(?:\+84|84|0)(3|5|7|8|9)\d{8}$/.test(cleanPhone)) {
+      $('#holdError').textContent = 'Số điện thoại không hợp lệ (VD: 0912 345 678)';
+      return;
+    }
+    const seat = f.seat.value.trim().toUpperCase();
+    if (!seat || !/^[A-Z0-9]{1,4}$/.test(seat)) {
+      $('#holdError').textContent = 'Mã ghế không hợp lệ (VD: A05)';
+      return;
+    }
+    const home = f.home.checked;
+    if (home && (!f.address.value.trim() || !homePin)) { $('#holdError').textContent = 'Đón tận nhà cần địa chỉ và vị trí ghim trên bản đồ'; return; }
+    const body = { tripId, passengerName: name, phone: cleanPhone, seatCodes: [seat], pickupStopId: f.pickup.value, dropoffStopId: f.dropoff.value };
+    if (home) body.homePickup = { address: f.address.value.trim(), note: f.note.value.trim(), lat: homePin.lat, lng: homePin.lng };
+    const r = await api('/api/v1/ops/pos/hotline-hold', { method: 'POST', idempotent: true, body });
+    if (!r.ok) { $('#holdError').textContent = r.message; return; }
+    toast(home ? `Đã giữ chỗ ${r.data.pnr} đón tận nhà · khách đã nhận tin nhắn có link theo dõi` : `Đã giữ chỗ ${r.data.pnr} · hạn ${hhmm(r.data.hold_until)}`);
+    f.reset(); loadBoard(); openTrip(tripId);
+  });
+  // D144: a home address taken on the phone, pinned on the map by the office.
+  let homePin = null;
+  let pinMap = null;
+  let pinMarker = null;
+  $('#holdForm [name=home]').addEventListener('change', (e) => {
+    $('#homeFields').classList.toggle('hidden', !e.target.checked);
+    $('#holdForm [name=pickup]').disabled = e.target.checked;
+    if (e.target.checked && !pinMap) {
+      const first = stops[0];
+      pinMap = L.map('homePinMap').setView(first ? [first.lat, first.lng] : [21.0285, 105.8542], 13);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(pinMap);
+      pinMap.on('click', (ev) => {
+        homePin = { lat: Number(ev.latlng.lat.toFixed(6)), lng: Number(ev.latlng.lng.toFixed(6)) };
+        if (pinMarker) pinMarker.setLatLng(ev.latlng); else pinMarker = L.marker(ev.latlng).addTo(pinMap);
+        $('#homePinText').textContent = `Đã ghim ${homePin.lat}, ${homePin.lng}`;
+      });
+    }
+    if (e.target.checked) setTimeout(() => pinMap.invalidateSize(), 50);
+  });
+}
+
+// D144: what each home passenger answered and what happened at their door.
+function homeStatePill(h) {
+  if (h.boarding_status === 'BOARDED') return '<span class="pill ok">Đã lên xe</span>';
+  if (h.missed_at) return '<span class="pill warn">Lỡ đón · ra bến</span>';
+  if (h.inaccessible_at) return '<span class="pill warn">Không vào được</span>';
+  if (h.arrived_at) return '<span class="pill info">Xe đang chờ</span>';
+  if (h.ready?.status === 'READY') return '<span class="pill ok">Sẵn sàng</span>';
+  if (h.ready?.status === 'NEED_TIME') return `<span class="pill warn">Cần ${esc(h.ready.minutes)} phút</span>`;
+  return '<span class="pill">Chưa báo</span>';
+}
+const MESSAGE_LABEL = { PHONE_BOOKING_CONFIRMED: 'Xác nhận đặt chỗ', HOME_RUN_STARTED: 'Tài xế lên đường', PICKUP_APPROACHING: 'Xe sắp tới', PICKUP_ARRIVED: 'Xe tới bến', HOME_PICKUP_ARRIVED: 'Xe tới gần nhà', HOME_PICKUP_DOOR: 'Xe đang chờ', HOME_PICKUP_MISSED: 'Lỡ đón, ra bến', HOME_PICKUP_INACCESSIBLE: 'Không vào được', TRIP_CANCELLED: 'Hủy chuyến' };
+function messagesBlock(d) {
+  const list = d.messages || [];
+  const note = d.sms_provider ? '' : ' <span class="muted">(chưa nối nhà cung cấp SMS: tin chỉ được ghi lại, chưa gửi)</span>';
+  return `<div class="section-title">Tin đã gửi khách ngoài app${note}</div>
+    <div style="max-height:180px;overflow:auto">${list.length ? list.slice(0, 40).map(m => `<div class="row" style="padding:2px 0;font-size:13px"><span class="mono muted">${esc(hhmm(m.created_at))}</span><span class="pill">${esc(m.channel)}</span><span class="mono">${esc(String(m.to).replace(/^(\d{3})\d+(\d{3})$/, '$1***$2'))}</span><span class="grow">${esc(MESSAGE_LABEL[m.type] || m.type)}</span><span class="muted">${esc({ LOGGED: 'đã ghi', SENDING: 'đang gửi', SENT: 'đã gửi', FAILED: 'lỗi' }[m.status] || m.status)}</span></div>`).join('') : '<p class="muted">Chưa có tin nào.</p>'}</div>`;
+}
+
+// Online sale of this day's departure, and cancelling it (D131): every ticket refunded in full, passengers told.
+function saleBlock(t) {
+  if (t.status === 'CANCELLED') return `<div class="section-title">Bán vé</div><p class="error" style="margin:0">Đã hủy chuyến${t.cancel_reason ? `: ${esc(t.cancel_reason)}` : ''}. Vé đã bán được hoàn 100%, chờ duyệt hoàn tiền.</p>`;
+  if (['IN_TRANSIT', 'COMPLETED'].includes(t.status)) return '';
+  return `<div class="section-title">Bán vé và hủy chuyến</div>
+    <div class="row" style="margin-bottom:8px"><span class="grow">${t.sales_closed ? `<span class="pill warn">Đang ngừng bán trực tuyến</span>${t.sales_closed_reason ? ` <span class="muted">${esc(t.sales_closed_reason)}</span>` : ''}` : '<span class="pill ok">Đang bán trực tuyến</span>'}</span>
+      <button class="btn" type="button" id="salesToggle">${t.sales_closed ? 'Mở bán lại' : 'Ngừng bán trực tuyến'}</button></div>
+    <form class="row" id="cancelTripForm"><input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="reason" placeholder="Lý do hủy chuyến (khách nhận được)" maxlength="200"><button class="btn danger" type="submit">Hủy chuyến</button></form>
+    <div class="error" id="cancelTripError"></div>`;
+}
+function bindSaleBlock(tripId, t) {
+  $('#salesToggle')?.addEventListener('click', async () => {
+    const r = await api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/sales`, { method: 'POST', idempotent: true, body: { open: Boolean(t.sales_closed) } });
+    toast(r.ok ? (t.sales_closed ? 'Đã mở bán lại' : 'Đã ngừng bán trực tuyến; vé đã bán giữ nguyên') : r.message);
+    if (r.ok) { loadBoard(); openTrip(tripId); }
+  });
+  let armed = false;
+  $('#cancelTripForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const reason = e.target.reason.value.trim();
+    const btn = e.target.querySelector('button');
+    if (reason.length < 5) { $('#cancelTripError').textContent = 'Cần lý do (từ 5 ký tự) để báo khách'; return; }
+    // Two clicks, no browser dialog: cancelling refunds every ticket of the departure.
+    if (!armed) { armed = true; btn.textContent = `Bấm lần nữa: hủy và hoàn tiền ${t.booked_seats || 0} vé`; $('#cancelTripError').textContent = ''; return; }
+    const r = await api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/cancel`, { method: 'POST', idempotent: true, body: { reason } });
+    if (!r.ok) { $('#cancelTripError').textContent = r.message; armed = false; btn.textContent = 'Hủy chuyến'; return; }
+    toast(`Đã hủy chuyến: ${r.data.cancelled_tickets} vé chờ hoàn ${vnd(r.data.refund_total_vnd)}, khách đã được báo`);
+    loadBoard(); openTrip(tripId);
+  });
+}
+
+// ---------- home pickup / drop-off review (MGR-033, D130) ----------
+const HOME_STATUS = { PENDING_REVIEW: ['Chờ duyệt', 'warn'], CONFIRMED: ['Đã xác nhận', 'ok'], REJECTED: ['Đã từ chối', 'danger'], WITHDRAWN: ['Khách đã hủy', ''] };
+$('#homeReqStatus').addEventListener('change', () => loadHomeRequests());
+async function loadHomeRequests() {
+  const status = $('#homeReqStatus').value;
+  const r = await api(`/api/v1/ops/home-requests?status=${status}`);
+  if (!r.ok) { $('#homeReqBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.status === 403 ? 'Chỉ giám đốc và điều độ duyệt được.' : r.message)}</p>`; return; }
+  const list = r.data || [];
+  if (status === 'PENDING_REVIEW') { $('#homeReqCount').textContent = list.length || ''; $('#homeReqCount').classList.toggle('hidden', !list.length); }
+  $('#homeReqInfo').textContent = `${list.length} yêu cầu`;
+  // Keep a reason being typed across the 5-second refresh.
+  if (document.activeElement?.closest?.('#homeReqBox')) return;
+  $('#homeReqBox').innerHTML = list.length ? `<table><thead><tr><th>Chuyến</th><th>Khách</th><th>Địa chỉ</th><th>Phụ phí</th><th>Trạng thái</th><th></th></tr></thead><tbody>${list.map(q => {
+    const [label, kind] = HOME_STATUS[q.status] || [q.status, ''];
+    const late = q.status === 'PENDING_REVIEW' && q.review_deadline && Date.parse(q.review_deadline) < Date.now();
+    return `<tr><td class="mono">${esc(hhmm(q.departure_time))} ${esc(dmy(q.departure_time))}<div class="muted" style="font-size:12px">${esc(q.route_name || q.trip_id)}</div></td>
+      <td>${esc(q.passenger_name || '')}<div class="muted mono" style="font-size:12px">${esc(q.pnr)} · ${esc(q.passenger_phone || '')} · ghế ${esc(q.seat_codes.join(', '))}</div></td>
+      <td><span class="pill ${q.side === 'PICKUP' ? 'info' : ''}">${q.side === 'PICKUP' ? 'Đón' : 'Trả'}</span> ${esc(q.address)}${q.note ? `<div class="muted" style="font-size:12px">${esc(q.note)}</div>` : ''}<div class="muted" style="font-size:12px">${esc(q.area_name)}${q.window_from ? ` · khung đón ${esc(hhmm(q.window_from))}–${esc(hhmm(q.window_to))}` : ''} · <a href="https://www.openstreetmap.org/?mlat=${esc(q.lat)}&mlon=${esc(q.lng)}#map=17/${esc(q.lat)}/${esc(q.lng)}" target="_blank" rel="noopener">xem bản đồ</a></div></td>
+      <td class="mono" style="white-space:nowrap">${esc(vnd(q.fee_vnd))}</td>
+      <td style="white-space:nowrap"><span class="pill ${kind}">${esc(label)}</span>${late ? ' <span class="pill danger">Quá hạn duyệt</span>' : ''}${q.reject_reason ? `<div class="muted" style="font-size:12px">${esc(q.reject_reason)}</div>` : ''}</td>
+      <td>${q.status === 'PENDING_REVIEW' ? `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><button class="btn primary" data-hr-ok="${esc(q.order_id)}" data-side="${esc(q.side)}">Xác nhận</button><input data-hr-reason="${esc(q.request_id)}" placeholder="Lý do từ chối" style="border:1px solid var(--line-strong);border-radius:8px;padding:6px 8px;width:160px" maxlength="200"><button class="btn danger" data-hr-no="${esc(q.order_id)}" data-side="${esc(q.side)}" data-req="${esc(q.request_id)}">Từ chối</button></div>` : ''}</td></tr>`;
+  }).join('')}</tbody></table>` : '<p class="muted" style="padding:16px;margin:0">Không có yêu cầu.</p>';
+  const box = $('#homeReqBox');
+  box.querySelectorAll('button[data-hr-ok]').forEach(b => b.addEventListener('click', async () => {
+    const r2 = await api(`/api/v1/ops/home-requests/${encodeURIComponent(b.dataset.hrOk)}/${b.dataset.side}/confirm`, { method: 'POST', idempotent: true, body: {} });
+    toast(r2.ok ? 'Đã xác nhận, khách và tài xế đã nhận địa chỉ' : r2.message);
+    loadHomeRequests();
+  }));
+  box.querySelectorAll('button[data-hr-no]').forEach(b => b.addEventListener('click', async () => {
+    const reason = box.querySelector(`input[data-hr-reason="${CSS.escape(b.dataset.req)}"]`).value.trim();
+    if (reason.length < 5) { toast('Ghi lý do từ chối (từ 5 ký tự) để báo khách'); return; }
+    const r2 = await api(`/api/v1/ops/home-requests/${encodeURIComponent(b.dataset.hrNo)}/${b.dataset.side}/reject`, { method: 'POST', idempotent: true, body: { reason } });
+    toast(r2.ok ? 'Đã từ chối, phụ phí chờ hoàn cho khách' : r2.message);
+    document.activeElement?.blur?.();
+    loadHomeRequests();
+  }));
+}
+
+// Bus and driver of the trip: unavailable ones stay listed, greyed, with the reason.
+function assignBlock(o) {
+  const locked = ['IN_TRANSIT', 'COMPLETED', 'CANCELLED'].includes(o.status);
+  const opt = (value, label, x) => `<option value="${esc(value)}" ${x.assigned ? 'selected' : ''} ${!x.available && !x.assigned ? 'disabled' : ''}>${esc(label)}${x.reason && !x.assigned ? ` — ${esc(x.reason)}` : ''}</option>`;
+  return `<div class="section-title">Xe và tài xế</div>
+    <form id="assignForm" class="card" style="padding:12px;margin-bottom:12px">
+      <div class="row"><div class="field grow"><label>Xe</label><select name="vehicle" required ${locked ? 'disabled' : ''}><option value="">— Chọn xe —</option>${o.vehicles.map(v => opt(v.vehicle_id, `${v.plate_number} · ${v.model} · ${v.total_seats} chỗ`, v)).join('')}</select></div>
+        <div class="field grow"><label>Tài xế</label><select name="driver" required ${locked ? 'disabled' : ''}><option value="">— Chọn tài xế —</option>${o.drivers.map(d => opt(d.driver_id, `${d.full_name} · ${d.staff_id}`, d)).join('')}</select></div></div>
+      <label class="row" style="gap:6px;margin-bottom:8px"><input type="checkbox" name="schedule" ${locked ? 'disabled' : ''}> Áp dụng cho các ngày sau của lịch chạy này</label>
+      <div class="error" id="assignError"></div>
+      ${locked ? '<p class="muted" style="margin:0">Chuyến đã chạy hoặc đã kết thúc, không đổi được xe và tài xế.</p>' : `<button class="btn primary" type="submit">${o.vehicle_id ? 'Đổi xe / tài xế' : 'Gán xe và tài xế'}</button>${o.sold_seats ? ` <span class="muted">Đã bán ${esc(o.sold_seats)} ghế: khách sẽ được báo nếu đổi.</span>` : ''}`}
+    </form>`;
+}
+function drawTripMap(track) {
+  if (state.maps.trip) { state.maps.trip.remove(); state.maps.trip = null; }
+  const el = $('#tripMap'); if (!el) return;
+  const map = newMap(el); state.maps.trip = map;
+  const bounds = [];
+  if (track?.route_shape?.length) { const line = L.polyline(track.route_shape, { color: '#64748b', weight: 4 }).addTo(map); bounds.push(...line.getLatLngs()); }
+  (track?.stops || []).forEach(st => { L.circleMarker([st.lat, st.lng], { radius: 6, color: '#0f172a', fillColor: '#fff', fillOpacity: 1, weight: 2 }).bindTooltip(st.name).addTo(map); bounds.push([st.lat, st.lng]); });
+  state.maps.tripBus = null;
+  updateTripBus(track);
+  if (bounds.length) map.fitBounds(bounds, { padding: [20, 20] });
+}
+function updateTripBus(track) {
+  const map = state.maps.trip; if (!map) return;
+  const pos = track?.bus_position;
+  const info = $('#tripTrack');
+  if (!pos) { if (info) info.textContent = 'Chưa nhận tín hiệu GPS của xe.'; return; }
+  const latlng = [pos.lat, pos.lng];
+  if (state.maps.tripBus) state.maps.tripBus.setLatLng(latlng); // move only the marker, no map rebuild (spec 7.4)
+  else state.maps.tripBus = L.circleMarker(latlng, { radius: 9, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(map);
+  const stale = track.signal_status && track.signal_status !== 'LIVE';
+  if (info) info.innerHTML = `${gpsPill(track.signal_status)} ${esc(Math.round(pos.speed_kmh || 0))} km/h · cập nhật ${esc(hhmm(pos.timestamp))}${stale ? ' · <b>vị trí có thể đã cũ</b>' : ''}`;
+}
+async function refreshTripLive() {
+  if (!state.selectedTrip || !state.maps.trip) return;
+  updateTripBus(await publicApi(`/api/v1/trips/${encodeURIComponent(state.selectedTrip)}/tracking`));
+}
+
+// ---------- live map ----------
+const live = { markers: new Map(), cluster: null, plain: null, vehicles: [] };
+function openLive() {
+  if (!state.maps.live) {
+    state.maps.live = newMap($('#liveMap'));
+    live.cluster = L.markerClusterGroup({ maxClusterRadius: 50 });
+    live.plain = L.layerGroup();
+    state.maps.live.addLayer(live.cluster);
+  }
+  setTimeout(() => state.maps.live.invalidateSize(), 50);
+  every(loadLive);
+}
+['liveStatus', 'layerVehicles', 'layerCluster'].forEach(id => $('#' + id).addEventListener('change', renderLive));
+async function loadLive() {
+  const r = await api('/api/v1/ops/radar');
+  if (!r.ok) { $('#liveList').innerHTML = `<tr><td colspan="4" class="error">${esc(r.message)}</td></tr>`; return; }
+  live.vehicles = r.data.vehicles || [];
+  $('#liveUpdated').textContent = `Cập nhật ${hhmm(r.data.tracked_at)}`;
+  renderLive();
+}
+function renderLive() {
+  const filter = $('#liveStatus').value;
+  const vehicles = live.vehicles.filter(v => !filter || v.status === filter);
+  const useCluster = $('#layerCluster').checked;
+  const target = useCluster ? live.cluster : live.plain;
+  const other = useCluster ? live.plain : live.cluster;
+  const map = state.maps.live;
+  if (map.hasLayer(other)) map.removeLayer(other);
+  if ($('#layerVehicles').checked) { if (!map.hasLayer(target)) map.addLayer(target); } else if (map.hasLayer(target)) map.removeLayer(target);
+  const keep = new Set();
+  vehicles.forEach(v => {
+    if (!Number.isFinite(v.lat) || !Number.isFinite(v.lng)) return;
+    keep.add(v.vehicle_id);
+    const color = v.gps_health === 'LIVE' ? '#2563eb' : v.gps_health === 'STALE' ? '#b45309' : '#64748b';
+    let m = live.markers.get(v.vehicle_id);
+    if (!m) { m = L.circleMarker([v.lat, v.lng], { radius: 8, weight: 3, color: '#fff', fillOpacity: 1 }); live.markers.set(v.vehicle_id, m); }
+    m.setLatLng([v.lat, v.lng]); m.setStyle({ fillColor: color });
+    m.bindTooltip(`${v.plate_number} · ${v.driver_name || ''} · ${Math.round(v.speed_kmh || 0)} km/h`);
+    if (!target.hasLayer(m)) { other.removeLayer(m); target.addLayer(m); }
+  });
+  for (const [id, m] of live.markers) if (!keep.has(id)) { live.cluster.removeLayer(m); live.plain.removeLayer(m); live.markers.delete(id); }
+  $('#liveList').innerHTML = vehicles.length ? vehicles.map(v => `<tr class="click" data-v="${esc(v.vehicle_id)}"><td class="mono">${esc(v.plate_number)}<div class="muted" style="font-size:12px">${esc(v.model || '')}</div></td><td>${esc(v.driver_name || '')}</td><td>${gpsPill(v.gps_health)}</td><td class="mono">${esc(Math.round(v.speed_kmh || 0))} km/h</td></tr>`).join('') : '<tr><td colspan="4" class="muted">Không có xe.</td></tr>';
+  document.querySelectorAll('#liveList tr[data-v]').forEach(tr => tr.addEventListener('click', () => { const m = live.markers.get(tr.dataset.v); if (m) map.setView(m.getLatLng(), 12); }));
+}
+
+// ---------- bookings ----------
+async function loadBookings() {
+  const r = await api('/api/v1/ops/bookings');
+  if (!r.ok) { $('#bookingsBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.status === 403 ? 'Vai trò của bạn không xem được danh sách đặt chỗ.' : r.message)}</p>`; return; }
+  const list = r.data.bookings || [];
+  $('#bookingsBox').innerHTML = `<table><thead><tr><th>PNR</th><th>Chuyến</th><th>Khách</th><th>Ghế</th><th>Tiền</th><th>Thanh toán</th></tr></thead><tbody>${list.length ? list.map(b => `<tr><td class="mono">${esc(b.pnr)}</td><td class="mono">${esc(b.trip_id)}</td><td>${esc(b.passenger_name || '')}<div class="muted mono" style="font-size:12px">${esc(b.phone || '')}</div></td><td class="mono">${esc((b.seat_codes || []).join(', '))}</td><td class="mono">${esc(vnd(b.total_fare_vnd))}</td><td>${esc(b.payment_status || '')}</td></tr>`).join('') : '<tr><td colspan="6" class="muted">Chưa có đặt chỗ.</td></tr>'}</tbody></table>`;
+}
+
+// ---------- service configuration ----------
+const MODE_LABEL = { FIXED_STOP: 'Đón tại điểm cố định', HOME_PICKUP: 'Đón tận nhà', FIXED_LOCATION: 'Trả tại điểm cố định', HOME_DROPOFF: 'Trả tận nhà' };
+async function loadService() {
+  const r = await api('/api/v1/ops/service-config');
+  if (!r.ok) { $('#serviceBox').innerHTML = `<div class="card"><p class="error">${esc(r.status === 404 ? 'Máy chủ chưa hỗ trợ cấu hình đón trả.' : r.message)}</p></div>`; return; }
+  const c = r.data;
+  companyStopStyle = c.stop_style || 'STATIONS';
+  const box = (name, modes) => modes.map(m => `<label class="row" style="margin:4px 0"><input type="checkbox" name="${name}" value="${m}" ${(c[name] || []).includes(m) ? 'checked' : ''}> ${esc(MODE_LABEL[m])}</label>`).join('');
+  $('#serviceBox').innerHTML = `
+    <form class="card" id="endpointsForm" style="margin-bottom:16px">
+      <div class="section-title" style="margin-top:0">Điểm đi và điểm đến trên app khách</div>
+      <p class="muted" style="margin:0 0 8px">Khi cố định, app khách luôn hiện hai bến này và không cho chọn nơi khác.</p>
+      <label class="row" style="gap:6px;margin-bottom:8px"><input type="checkbox" name="fixed"> Cố định điểm đi và điểm đến</label>
+      <div class="row"><div class="field grow"><label>Điểm đi</label><select name="origin"></select></div><div class="field grow"><label>Điểm đến</label><select name="destination"></select></div></div>
+      <label class="row" style="gap:6px;margin-bottom:8px"><input type="checkbox" name="allow_swap"> Cho khách đổi chiều (chuyến đi, chuyến về)</label>
+      <div class="muted" id="endpointsInfo" style="margin-bottom:8px"></div>
+      <div class="error" id="endpointsError"></div>
+      <button class="btn primary" type="submit">Lưu điểm đi, điểm đến</button>
+    </form>
+    <div class="card" style="margin-bottom:16px">
+      <div class="section-title" style="margin-top:0">Theo từng tuyến</div>
+      <p class="muted" style="margin:0 0 8px">"Theo nhà xe" dùng cấu hình chung bên dưới. Tuyến kiểu xe buýt vẽ lộ trình với mọi điểm đón trả dọc đường; tuyến chỉ tại bến chỉ cho chọn bến.</p>
+      <div id="routeConfigs"></div>
+    </div>
+    <div class="split">
+      <form class="card" id="modesForm">
+        <div class="section-title" style="margin-top:0">Chế độ đón khách</div>${box('pickup_modes', ['FIXED_STOP', 'HOME_PICKUP'])}
+        <div class="section-title">Chế độ trả khách</div>${box('dropoff_modes', ['FIXED_LOCATION', 'HOME_DROPOFF'])}
+        <label class="row" style="margin:10px 0"><input type="checkbox" name="allow_home_to_home" ${c.allow_home_to_home ? 'checked' : ''}> Cho phép vừa đón tận nhà vừa trả tận nhà</label>
+        <div class="field"><label>Kiểu điểm đón trả mặc định</label><select name="stop_style">${Object.entries(STOP_STYLE_LABEL).map(([v, l]) => `<option value="${v}" ${c.stop_style === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+        <div class="field"><label>Báo khách khi xe còn cách (phút)</label><input name="approaching_threshold_minutes" type="number" min="1" max="120" value="${esc(c.approaching_threshold_minutes ?? 10)}"></div>
+        <div class="field"><label>Xe chờ khách đón tận nhà tối đa (phút)</label><input name="home_wait_minutes" type="number" min="1" max="30" value="${esc(c.home_wait_minutes ?? 5)}"></div>
+        <div class="error" id="modesError"></div>
+        <button class="btn primary" type="submit">Lưu chế độ</button>
+      </form>
+      <div class="card">
+        <div class="section-title" style="margin-top:0">Vùng phục vụ đón / trả tận nhà</div>
+        <div id="areaMap" class="map"></div>
+        <div id="areaList" style="margin-top:10px"></div>
+        <form id="areaForm" style="margin-top:12px">
+          <div class="muted" style="margin-bottom:8px">Bấm lên bản đồ để chấm các đỉnh của vùng mới (ít nhất 3 điểm).</div>
+          <div class="row"><div class="field grow"><label>Tên vùng</label><input name="name" required maxlength="200"></div>
+            <div class="field"><label>Loại</label><select name="kind"><option value="PICKUP">Đón</option><option value="DROPOFF">Trả</option></select></div></div>
+          <div class="row"><div class="field grow"><label>Phụ phí (đ)</label><input name="fee" type="number" min="0" value="0"></div>
+            <div class="field grow"><label>Đặt trước tối thiểu (phút)</label><input name="lead" type="number" min="0" value="60"></div>
+            <div class="field grow"><label>Xác nhận địa chỉ</label><select name="confirmation"><option value="AUTO">Tự động</option><option value="MANUAL">Nhà xe duyệt</option></select></div></div>
+          <div class="row"><div class="field grow"><label>Giờ phục vụ từ</label><input name="from" value="05:00"></div><div class="field grow"><label>đến</label><input name="to" value="21:00"></div></div>
+          <div class="error" id="areaError"></div>
+          <div class="row"><button class="btn primary" type="submit">Tạo vùng</button><button class="btn" type="button" id="areaClear">Xóa các điểm đã chấm</button><span class="muted" id="areaCount">0 điểm</span></div>
+        </form>
+      </div>
+    </div>`;
+  $('#modesForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const pick = (n) => [...f.querySelectorAll(`input[name="${n}"]:checked`)].map(i => i.value);
+    const r2 = await api('/api/v1/ops/service-config', { method: 'PUT', idempotent: true, body: { pickup_modes: pick('pickup_modes'), dropoff_modes: pick('dropoff_modes'), stop_style: f.stop_style.value, allow_home_to_home: f.allow_home_to_home.checked, approaching_threshold_minutes: Number(f.approaching_threshold_minutes.value), home_wait_minutes: Number(f.home_wait_minutes.value) } });
+    $('#modesError').textContent = r2.ok ? '' : r2.message;
+    if (r2.ok) { toast('Đã lưu chế độ đón trả'); loadRouteConfigs(); }
+  });
+  drawAreas(c.service_areas || []);
+  loadRouteConfigs();
+  loadEndpoints();
+}
+// Fixed origin and destination of the passenger app (D135).
+async function loadEndpoints() {
+  const f = $('#endpointsForm'); if (!f) return;
+  const r = await api('/api/v1/ops/service-config/endpoints');
+  if (!r.ok) { $('#endpointsError').textContent = r.message; return; }
+  const { fixed_endpoints: fe, resolved, stations } = r.data;
+  const options = (selected) => stations.map(st => `<option value="${esc(st.station_id)}" ${st.station_id === selected ? 'selected' : ''}>${esc(st.city)} · ${esc(st.name)}</option>`).join('');
+  f.origin.innerHTML = options(fe?.origin_station_id);
+  f.destination.innerHTML = options(fe?.destination_station_id || stations[stations.length - 1]?.station_id);
+  f.fixed.checked = Boolean(fe);
+  f.allow_swap.checked = fe ? fe.allow_swap !== false : true;
+  const sync = () => { f.origin.disabled = f.destination.disabled = f.allow_swap.disabled = !f.fixed.checked; };
+  sync();
+  f.fixed.onchange = sync;
+  $('#endpointsInfo').innerHTML = resolved
+    ? `App đang hiện <b>${esc(resolved.origin.city)} → ${esc(resolved.destination.city)}</b>${resolved.allow_swap ? ', khách đổi chiều được' : ', chỉ một chiều'}. ${resolved.forward_available ? '' : '<span class="pill warn">Chưa có lịch chạy chiều đi</span> '}${resolved.allow_swap && !resolved.reverse_available ? '<span class="pill warn">Chưa có lịch chạy chiều về: khách đổi chiều sẽ không thấy chuyến. Thêm ở "Lịch chạy".</span>' : ''}`
+    : 'Khách đang tự chọn điểm đi và điểm đến.';
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = f.fixed.checked ? { origin_station_id: f.origin.value, destination_station_id: f.destination.value, allow_swap: f.allow_swap.checked } : { fixed_endpoints: null };
+    const r2 = await api('/api/v1/ops/service-config/endpoints', { method: 'PUT', body });
+    $('#endpointsError').textContent = r2.ok ? '' : r2.message;
+    if (r2.ok) { toast('Đã lưu. App khách nhận khi mở lại trang chủ'); loadEndpoints(); }
+  };
+}
+let companyStopStyle = 'STATIONS';
+const STOP_STYLE_LABEL = { ROUTE_LINE: 'Tuyến kiểu xe buýt (điểm đón trả dọc đường)', STATIONS: 'Chỉ tại bến' };
+// Stops of a route: arrival time (empty = estimated from the road), pickup / drop-off, shown to passengers.
+function stopsEditor(rt) {
+  if (!rt.stops?.length) return '<p class="muted" style="margin:0">Tuyến chưa có chuyến trong lịch, chưa có điểm dừng.</p>';
+  const own = rt.own.stops || {};
+  return `<details><summary style="cursor:pointer;font-weight:600">Điểm dừng (${rt.stops.length}) · giờ đến, đón trả, ẩn hiện</summary>
+    <table style="margin-top:8px"><thead><tr><th>Điểm</th><th>Loại</th><th>Giờ đến (phút sau xuất bến)</th><th>Đón</th><th>Trả</th><th>Hiện với khách</th></tr></thead><tbody>
+    ${rt.stops.map((st, i) => `<tr data-stop="${esc(st.stop_id)}" data-route-id="${esc(rt.route_id)}">
+      <td>${esc(st.name)}</td><td>${st.kind === 'ROADSIDE' ? '<span class="pill">Dọc đường</span>' : '<span class="pill info">Bến xe</span>'}</td>
+      <td><input name="offset" inputmode="numeric" style="width:90px;border:1px solid var(--line-strong);border-radius:6px;padding:4px 6px" value="${Number.isInteger(own[st.stop_id]?.offset_minutes) ? own[st.stop_id].offset_minutes : ''}" placeholder="${esc(st.offset_minutes)}" ${i === 0 ? 'disabled title="Điểm xuất phát"' : ''}> ${st.time_source === 'ESTIMATED' ? '<span class="muted" style="font-size:12px">ước tính</span>' : ''}</td>
+      <td><input type="checkbox" name="pickup" ${(own[st.stop_id]?.pickup ?? st.base_pickup) ? 'checked' : ''}></td>
+      <td><input type="checkbox" name="dropoff" ${(own[st.stop_id]?.dropoff ?? st.base_dropoff) ? 'checked' : ''}></td>
+      <td><input type="checkbox" name="visible" ${st.hidden ? '' : 'checked'} ${i === 0 ? 'disabled' : ''}></td></tr>`).join('')}
+    </tbody></table>
+    <button class="btn primary" style="margin-top:8px" data-save-stops="${esc(rt.route_id)}">Lưu điểm dừng</button></details>`;
+}
+async function loadRouteConfigs() {
+  const box = $('#routeConfigs'); if (!box) return;
+  const r = await api('/api/v1/ops/service-config/routes');
+  if (!r.ok) { box.innerHTML = `<p class="error">${esc(r.message)}</p>`; return; }
+  const modeBoxes = (route, name, modes) => `<label class="row" style="gap:6px"><input type="checkbox" data-inherit="${name}" ${route.own[name] ? '' : 'checked'}> Theo nhà xe</label>` +
+    modes.map(m => `<label class="row" style="gap:6px"><input type="checkbox" name="${name}" value="${m}" ${route[name].includes(m) ? 'checked' : ''} ${route.own[name] ? '' : 'disabled'}> ${esc(MODE_LABEL[m])}</label>`).join('');
+  box.innerHTML = `<table><thead><tr><th>Tuyến</th><th>Kiểu điểm đón trả</th><th>Đón</th><th>Trả</th><th>Bán vé</th><th></th></tr></thead><tbody>${r.data.routes.map(rt => `
+    <tr data-route="${esc(rt.route_id)}"><td>${esc(rt.name)}<div class="muted mono" style="font-size:12px">${esc(rt.route_id)}</div></td>
+      <td><select name="stop_style"><option value="">Theo nhà xe (${esc(STOP_STYLE_LABEL[companyStopStyle])})</option>${Object.entries(STOP_STYLE_LABEL).map(([v, l]) => `<option value="${v}" ${rt.own.stop_style === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></td>
+      <td>${modeBoxes(rt, 'pickup_modes', ['FIXED_STOP', 'HOME_PICKUP'])}</td>
+      <td>${modeBoxes(rt, 'dropoff_modes', ['FIXED_LOCATION', 'HOME_DROPOFF'])}</td>
+      <td><label class="row" style="gap:6px" title="Vé đã bán giữ nguyên; muốn hủy chuyến của ngày nào thì hủy trên bảng điều độ"><input type="checkbox" name="sales_suspended" ${rt.own.sales_suspended ? 'checked' : ''}> Tạm ngừng bán</label></td>
+      <td><button class="btn" data-save>Lưu</button></td></tr>
+    <tr data-stops-of="${esc(rt.route_id)}"><td colspan="6" style="padding-top:0">${stopsEditor(rt)}</td></tr>`).join('')}</tbody></table>`;
+  box.querySelectorAll('button[data-save-stops]').forEach(b => b.addEventListener('click', async () => {
+    const routeId = b.dataset.saveStops;
+    const rows = [...box.querySelectorAll(`tr[data-stop][data-route-id="${routeId}"]`)];
+    const stops = {};
+    for (const row of rows) {
+      const raw = row.querySelector('input[name="offset"]').value.trim();
+      if (raw !== '' && !/^\d+$/.test(raw)) { toast('Giờ đến là số phút sau giờ xuất bến'); return; }
+      stops[row.dataset.stop] = {
+        offset_minutes: raw === '' ? null : Number(raw),
+        pickup: row.querySelector('input[name="pickup"]').checked,
+        dropoff: row.querySelector('input[name="dropoff"]').checked,
+        hidden: !row.querySelector('input[name="visible"]').checked
+      };
+    }
+    const r2 = await api(`/api/v1/ops/service-config/routes/${encodeURIComponent(routeId)}`, { method: 'PUT', body: { stops } });
+    toast(r2.ok ? 'Đã lưu điểm dừng' : r2.message);
+    if (r2.ok) loadRouteConfigs();
+  }));
+  box.querySelectorAll('input[data-inherit]').forEach(cb => cb.addEventListener('change', () => {
+    cb.closest('td').querySelectorAll(`input[name="${cb.dataset.inherit}"]`).forEach(i => { i.disabled = cb.checked; });
+  }));
+  box.querySelectorAll('button[data-save]').forEach(b => b.addEventListener('click', async () => {
+    const row = b.closest('tr');
+    if (!row.dataset.route) return;
+    const modes = (name) => row.querySelector(`input[data-inherit="${name}"]`).checked ? null : [...row.querySelectorAll(`input[name="${name}"]:checked`)].map(i => i.value);
+    const body = { stop_style: row.querySelector('select[name="stop_style"]').value || null, pickup_modes: modes('pickup_modes'), dropoff_modes: modes('dropoff_modes'), sales_suspended: row.querySelector('input[name="sales_suspended"]').checked || null };
+    const r2 = await api(`/api/v1/ops/service-config/routes/${encodeURIComponent(row.dataset.route)}`, { method: 'PUT', body });
+    toast(r2.ok ? 'Đã lưu cấu hình tuyến' : r2.message);
+    if (r2.ok) loadRouteConfigs();
+  }));
+}
+const draft = { points: [], layer: null };
+function drawAreas(areas) {
+  if (state.maps.area) { state.maps.area.remove(); }
+  const map = newMap($('#areaMap')); state.maps.area = map;
+  const bounds = [];
+  areas.forEach(a => {
+    const poly = L.polygon(a.polygon, { color: a.kind === 'PICKUP' ? '#2563eb' : '#15803d', weight: 2, fillOpacity: a.active ? 0.15 : 0.03, dashArray: a.active ? null : '6 4' }).bindTooltip(`${a.name} · ${a.kind === 'PICKUP' ? 'Đón' : 'Trả'} · ${vnd(a.fee_vnd)}`).addTo(map);
+    bounds.push(...poly.getLatLngs()[0]);
+  });
+  if (bounds.length) map.fitBounds(bounds, { padding: [20, 20] });
+  $('#areaList').innerHTML = areas.length ? `<table><thead><tr><th>Vùng</th><th>Loại</th><th>Phụ phí</th><th>Đặt trước</th><th>Giờ</th><th>Xác nhận</th><th></th></tr></thead><tbody>${areas.map(a => `<tr><td>${esc(a.name)}</td><td>${a.kind === 'PICKUP' ? 'Đón' : 'Trả'}</td><td class="mono">${esc(vnd(a.fee_vnd))}</td><td class="mono">${esc(a.lead_time_minutes)}p</td><td class="mono">${esc(a.service_hours?.from)}–${esc(a.service_hours?.to)}</td><td><select data-area-confirm="${esc(a.area_id)}"><option value="AUTO" ${(a.confirmation || 'AUTO') === 'AUTO' ? 'selected' : ''}>Tự động</option><option value="MANUAL" ${a.confirmation === 'MANUAL' ? 'selected' : ''}>Nhà xe duyệt</option></select></td><td><button class="btn ${a.active ? 'danger' : ''}" data-area="${esc(a.area_id)}" data-active="${a.active ? 1 : 0}">${a.active ? 'Tắt' : 'Bật'}</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">Chưa có vùng phục vụ.</p>';
+  document.querySelectorAll('#areaList button[data-area]').forEach(b => b.addEventListener('click', async () => {
+    const r = await api(`/api/v1/ops/service-areas/${encodeURIComponent(b.dataset.area)}/${b.dataset.active === '1' ? 'deactivate' : 'activate'}`, { method: 'POST', idempotent: true });
+    toast(r.ok ? 'Đã cập nhật vùng' : r.message); if (r.ok) loadService();
+  }));
+  document.querySelectorAll('#areaList select[data-area-confirm]').forEach(sel => sel.addEventListener('change', async () => {
+    const r = await api(`/api/v1/ops/service-areas/${encodeURIComponent(sel.dataset.areaConfirm)}`, { method: 'PATCH', body: { confirmation: sel.value } });
+    toast(r.ok ? (sel.value === 'MANUAL' ? 'Địa chỉ mới trong vùng sẽ chờ nhà xe duyệt' : 'Địa chỉ mới trong vùng được xác nhận ngay') : r.message);
+    if (!r.ok) loadService();
+  }));
+  draft.points = []; draft.layer = null;
+  map.on('click', (e) => {
+    draft.points.push([+e.latlng.lat.toFixed(5), +e.latlng.lng.toFixed(5)]);
+    if (draft.layer) draft.layer.setLatLngs(draft.points); else draft.layer = L.polygon(draft.points, { color: '#b45309', dashArray: '4 4' }).addTo(map);
+    $('#areaCount').textContent = `${draft.points.length} điểm`;
+  });
+  $('#areaClear').addEventListener('click', () => { draft.points = []; if (draft.layer) { draft.layer.remove(); draft.layer = null; } $('#areaCount').textContent = '0 điểm'; });
+  $('#areaForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    if (draft.points.length < 3) { $('#areaError').textContent = 'Chấm ít nhất 3 điểm trên bản đồ'; return; }
+    const r = await api('/api/v1/ops/service-areas', { method: 'POST', idempotent: true, body: { name: f.name.value.trim(), kind: f.kind.value, polygon: draft.points, fee_vnd: Number(f.fee.value), lead_time_minutes: Number(f.lead.value), service_hours: { from: f.from.value.trim(), to: f.to.value.trim() }, confirmation: f.confirmation.value } });
+    $('#areaError').textContent = r.ok ? '' : r.message;
+    if (r.ok) { toast('Đã tạo vùng phục vụ'); loadService(); }
+  });
+}
+
+// ---------- audit ----------
+async function loadAudit() {
+  const r = await api('/api/v1/ops/audit-logs');
+  if (!r.ok) { $('#auditBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.message)}</p>`; return; }
+  const list = r.data.audit_logs || [];
+  const chain = r.data.chain;
+  // The server chains each company's entries; a removed or edited entry breaks the chain.
+  const chainNote = !chain ? '' : chain.intact
+    ? `<p style="margin:0;padding:10px 16px;border-bottom:1px solid var(--line)"><span class="pill ok">Chuỗi nhật ký nguyên vẹn</span> <span class="muted">${esc(chain.checked)} dòng đã kiểm</span></p>`
+    : `<p style="margin:0;padding:10px 16px;border-bottom:1px solid var(--line)"><span class="pill danger">Chuỗi nhật ký bị đứt</span> <span class="muted">tại ${esc(chain.broken_at)}: có dòng bị xóa hoặc sửa ngoài hệ thống</span></p>`;
+  $('#auditBox').innerHTML = chainNote + `<table><thead><tr><th>Thời điểm</th><th>Người làm</th><th>Thao tác</th><th>Đối tượng</th></tr></thead><tbody>${list.length ? list.map(x => `<tr><td class="mono">${esc(hhmm(x.at || x.timestamp))} ${esc(dmy(x.at || x.timestamp))}</td><td>${esc(x.actor || '')}<div class="muted" style="font-size:12px">${esc(x.role || '')}</div></td><td>${esc(x.action)}</td><td class="mono">${esc(x.resource || '')}</td></tr>`).join('') : '<tr><td colspan="4" class="muted">Chưa có thao tác.</td></tr>'}</tbody></table>`;
+}
+
+// ---------- fixed timetable (MGR-032, D129) ----------
+const WEEKDAY_SHORT = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']; // 1 = Monday .. 7 = Sunday
+const schedules = { list: [], routes: [], editing: null, changeFrom: null };
+const dayChips = (days) => `<div class="days">${WEEKDAY_SHORT.map((d, i) => `<span class="${days.includes(i + 1) ? 'on' : ''}">${d}</span>`).join('')}</div>`;
+const ddmm = (day) => (day ? `${day.slice(8, 10)}/${day.slice(5, 7)}/${day.slice(0, 4)}` : '');
+const daysText = (days) => (days.length === 7 ? 'mọi ngày' : days.map(d => WEEKDAY_SHORT[d - 1]).join(', '));
+const SCHEDULE_STATUS = { ACTIVE: ['Đang chạy', 'ok'], UPCOMING: ['Sắp áp dụng', 'info'], STOPPED: ['Tạm ngừng', 'warn'], ENDED: ['Đã kết thúc', ''] };
+$('#sDays').innerHTML = WEEKDAY_SHORT.map((d, i) => `<label><input type="checkbox" name="day" value="${i + 1}" checked> ${d}</label>`).join('');
+// What the schedule will be once its coming changes apply (the last one wins).
+const lastSettings = (sc) => (sc.upcoming.length ? sc.upcoming[sc.upcoming.length - 1] : sc);
+function changeText(u) {
+  if (!u.active) return 'ngừng chạy';
+  return `${u.departure} · ${daysText(u.days_of_week)} · ${vnd(u.base_fare_vnd)}${u.valid_to ? ` · đến ${ddmm(u.valid_to)}` : ''}`;
+}
+async function loadSchedules() {
+  const r = await api('/api/v1/ops/schedules');
+  if (!r.ok) {
+    $('#schedulesBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.status === 403 ? 'Chỉ giám đốc và điều độ sửa được lịch chạy.' : r.message)}</p>`;
+    $('#scheduleForm').classList.add('hidden');
+    return;
+  }
+  $('#scheduleForm').classList.remove('hidden');
+  schedules.list = r.data.schedules || [];
+  schedules.routes = r.data.routes || [];
+  schedules.changeFrom = r.data.change_from;
+  const lastSale = new Date(Date.parse(`${r.data.change_from}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  const windowDays = Math.round((Date.parse(lastSale) - Date.parse(r.data.today)) / 86400000);
+  $('#scheduleRule').innerHTML = `<span class="pill info">Khách đặt trước tối đa ${esc(windowDays)} ngày, đến ${esc(ddmm(lastSale))}</span> Lịch mới và mọi thay đổi có hiệu lực từ <b>${esc(ddmm(r.data.change_from))}</b>; các ngày đang bán giữ nguyên giờ, giá và ngày chạy.`;
+  for (const id of ['sFrom', 'sEff', 'sTo']) $(`#${id}`).min = id === 'sTo' ? r.data.today : r.data.change_from;
+  $('#sExtraDate').min = r.data.today;
+  if (!schedules.editing) {
+    $('#sRoute').innerHTML = schedules.routes.map(rt => `<option value="${esc(rt.route_id)}">${esc(rt.name)}</option>`).join('');
+    if (!$('#sFrom').value) $('#sFrom').value = r.data.change_from;
+  }
+  let lastRoute = null;
+  $('#schedulesBox').innerHTML = schedules.list.length ? `<table><thead><tr><th>Giờ</th><th>Ngày chạy · áp dụng</th><th>Giá</th><th>Trạng thái</th><th></th></tr></thead><tbody>${schedules.list.map(sc => {
+    const routeName = schedules.routes.find(rt => rt.route_id === sc.route_id)?.name || sc.route_name;
+    const head = sc.route_id !== lastRoute ? `<tr><td colspan="5" style="background:#f8fafc;font-weight:700">${esc(routeName)}</td></tr>` : '';
+    lastRoute = sc.route_id;
+    const span = sc.status === 'UPCOMING' ? `Áp dụng từ ${esc(ddmm(sc.valid_from))}${sc.valid_to ? ` đến ${esc(ddmm(sc.valid_to))}` : ''}` : sc.valid_to ? `Chạy đến ${esc(ddmm(sc.valid_to))}` : 'Không hạn';
+    const [label, kind] = SCHEDULE_STATUS[sc.status] || [sc.status, ''];
+    if (sc.extra) return `${head}<tr><td style="min-width:150px"><span class="mono" style="font-size:16px;font-weight:700">${esc(sc.departure)}</span><div class="muted" style="font-size:12px">${esc(sc.duration_minutes)} phút</div></td><td><span class="pill info">Tăng cường</span> <span class="muted">ngày ${esc(ddmm(sc.valid_from))}</span></td><td class="mono" style="white-space:nowrap">${esc(vnd(sc.base_fare_vnd))}</td><td>${sc.status === 'ENDED' ? '<span class="pill">Đã chạy</span>' : '<span class="pill ok">Đang bán</span>'}</td><td class="muted" style="font-size:12px">Hủy trên bảng điều độ nếu không chạy</td></tr>`;
+    const changes = sc.upcoming.map(u => `<div style="font-size:12px;margin-top:6px;padding:4px 8px;border-radius:6px;background:var(--warn-soft);color:var(--warn)">Từ ${esc(ddmm(u.effective_from))}: ${esc(changeText(u))}${u.locked ? ' (đã mở bán)' : ''}</div>`).join('');
+    const cancellable = sc.upcoming.some(u => !u.locked);
+    const willRun = lastSettings(sc).active;
+    return `${head}<tr class="${schedules.editing === sc.schedule_id ? 'sel' : ''}"><td style="min-width:150px"><span class="mono" style="font-size:16px;font-weight:700">${esc(sc.departure)}</span><div class="muted" style="font-size:12px">${esc(sc.duration_minutes)} phút${sc.route_name !== routeName ? ` · ${esc(sc.route_name)}` : ''}</div><div class="muted" style="font-size:12px">${esc(sc.vehicle_title || sc.vehicle_type)}</div></td><td>${dayChips(sc.days_of_week)}<div class="muted" style="font-size:12px;margin-top:4px">${span}</div>${changes}</td><td class="mono" style="white-space:nowrap">${esc(vnd(sc.base_fare_vnd))}</td><td style="white-space:nowrap"><span class="pill ${kind}">${esc(label)}</span></td>
+      <td><div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap"><button class="btn" data-edit-sch="${esc(sc.schedule_id)}">Sửa</button><button class="btn" data-toggle-sch="${esc(sc.schedule_id)}" data-run="${willRun ? '1' : '0'}">${willRun ? 'Ngừng' : 'Chạy lại'}</button>${cancellable ? `<button class="btn danger" data-cancel-sch="${esc(sc.schedule_id)}">Hủy thay đổi</button>` : ''}</div></td></tr>`;
+  }).join('')}</tbody></table>` : '<p class="muted" style="padding:16px;margin:0">Nhà xe chưa có lịch chạy.</p>';
+  const box = $('#schedulesBox');
+  box.querySelectorAll('button[data-edit-sch]').forEach(b => b.addEventListener('click', () => editSchedule(b.dataset.editSch)));
+  box.querySelectorAll('button[data-toggle-sch]').forEach(b => b.addEventListener('click', async () => {
+    const r2 = await api(`/api/v1/ops/schedules/${encodeURIComponent(b.dataset.toggleSch)}`, { method: 'PATCH', body: { active: b.dataset.run !== '1' } });
+    toast(r2.ok ? `${b.dataset.run === '1' ? 'Ngừng chạy' : 'Chạy lại'} từ ${ddmm(r2.data.effective_from)}` : r2.message);
+    if (r2.ok) loadSchedules();
+  }));
+  box.querySelectorAll('button[data-cancel-sch]').forEach(b => b.addEventListener('click', async () => {
+    const r2 = await api(`/api/v1/ops/schedules/${encodeURIComponent(b.dataset.cancelSch)}/changes`, { method: 'DELETE' });
+    toast(r2.ok ? 'Đã hủy thay đổi chưa mở bán' : r2.message);
+    if (r2.ok) loadSchedules();
+  }));
+}
+function resetScheduleForm() {
+  schedules.editing = null;
+  const f = $('#scheduleForm');
+  f.reset();
+  f.querySelectorAll('input[name="day"]').forEach(c => { c.checked = true; });
+  f.valid_from.value = schedules.changeFrom || '';
+  $('#sFromField').classList.remove('hidden');
+  $('#sEffField').classList.add('hidden');
+  $('#sRoute').disabled = false;
+  $('#sExtraField').classList.remove('hidden');
+  toggleExtra();
+  $('#scheduleFormTitle').textContent = 'Thêm giờ chạy';
+  $('#scheduleSave').textContent = 'Thêm giờ chạy';
+  $('#scheduleCancel').classList.add('hidden');
+  $('#scheduleError').textContent = '';
+}
+function editSchedule(id) {
+  const sc = schedules.list.find(x => x.schedule_id === id);
+  if (!sc) return;
+  schedules.editing = id;
+  const f = $('#scheduleForm');
+  // The form starts from what the schedule will be after its coming changes.
+  const next = lastSettings(sc);
+  $('#sRoute').innerHTML = `<option value="${esc(sc.route_id)}">${esc(sc.route_name)}</option>`;
+  $('#sRoute').disabled = true; // a departure stays on its route; add a new one for another route
+  f.extra.checked = false; $('#sExtraField').classList.add('hidden'); toggleExtra();
+  f.departure.value = next.departure; f.duration_minutes.value = next.duration_minutes;
+  f.querySelectorAll('input[name="day"]').forEach(c => { c.checked = next.days_of_week.includes(Number(c.value)); });
+  f.valid_to.value = next.valid_to || '';
+  f.base_fare_vnd.value = next.base_fare_vnd; f.active.checked = next.active;
+  // Not on sale yet: its start may move. On sale: the change starts on a day not on sale.
+  const upcoming = sc.status === 'UPCOMING';
+  $('#sFromField').classList.toggle('hidden', !upcoming);
+  $('#sEffField').classList.toggle('hidden', upcoming);
+  f.valid_from.value = sc.valid_from || '';
+  f.effective_from.value = schedules.changeFrom;
+  $('#scheduleFormTitle').textContent = `Sửa giờ ${sc.departure} · ${sc.route_name}`;
+  $('#scheduleSave').textContent = 'Lưu thay đổi';
+  $('#scheduleCancel').classList.remove('hidden');
+  $('#scheduleError').textContent = '';
+  document.querySelectorAll('#schedulesBox tr').forEach(tr => tr.classList.toggle('sel', !!tr.querySelector(`button[data-edit-sch="${CSS.escape(id)}"]`)));
+}
+$('#scheduleCancel').addEventListener('click', () => { resetScheduleForm(); loadSchedules(); });
+// An extra departure runs on one day inside the booking window: no weekdays, no validity (D134).
+function toggleExtra() {
+  const on = $('#sExtra').checked;
+  $('#sExtraDateField').classList.toggle('hidden', !on);
+  $('#sRecurring').classList.toggle('hidden', on);
+}
+$('#sExtra').addEventListener('change', toggleExtra);
+$('#scheduleForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const days = [...f.querySelectorAll('input[name="day"]:checked')].map(c => Number(c.value));
+  if (!f.departure.value) { $('#scheduleError').textContent = 'Cần giờ xuất bến'; return; }
+  if (!schedules.editing && f.extra.checked) {
+    if (!f.extra_date.value) { $('#scheduleError').textContent = 'Chọn ngày chạy tăng cường'; return; }
+    const extra = { route_id: f.route_id.value, departure: f.departure.value, extra_date: f.extra_date.value };
+    if (f.duration_minutes.value) extra.duration_minutes = Number(f.duration_minutes.value);
+    if (f.base_fare_vnd.value) extra.base_fare_vnd = Number(f.base_fare_vnd.value);
+    const r = await api('/api/v1/ops/schedules', { method: 'POST', idempotent: true, body: extra });
+    $('#scheduleError').textContent = r.ok ? '' : r.message;
+    if (!r.ok) return;
+    toast(`Đã thêm chuyến tăng cường ${extra.departure} ngày ${ddmm(extra.extra_date)}, đang mở bán`);
+    resetScheduleForm(); loadSchedules();
+    return;
+  }
+  if (!days.length) { $('#scheduleError').textContent = 'Chọn ít nhất một ngày chạy'; return; }
+  const body = { departure: f.departure.value, days_of_week: days, valid_to: f.valid_to.value || null, active: f.active.checked };
+  if (f.duration_minutes.value) body.duration_minutes = Number(f.duration_minutes.value);
+  if (f.base_fare_vnd.value) body.base_fare_vnd = Number(f.base_fare_vnd.value);
+  const editing = schedules.editing;
+  const sc = schedules.list.find(x => x.schedule_id === editing);
+  if (!editing) { body.route_id = f.route_id.value; body.valid_from = f.valid_from.value || null; }
+  else if (sc?.status === 'UPCOMING') body.valid_from = f.valid_from.value || sc.valid_from;
+  else if (f.effective_from.value) body.effective_from = f.effective_from.value;
+  $('#scheduleSave').disabled = true;
+  const r = editing
+    ? await api(`/api/v1/ops/schedules/${encodeURIComponent(editing)}`, { method: 'PATCH', body })
+    : await api('/api/v1/ops/schedules', { method: 'POST', idempotent: true, body });
+  $('#scheduleSave').disabled = false;
+  $('#scheduleError').textContent = r.ok ? '' : r.message;
+  if (!r.ok) return;
+  toast(`${editing ? 'Đã lưu' : 'Đã thêm giờ chạy'}, có hiệu lực từ ${ddmm(r.data.effective_from || r.data.valid_from)}`);
+  resetScheduleForm();
+  loadSchedules();
+});
+
+// ---------- promotion banners (MGR-031) ----------
+const BANNER_STATUS = { LIVE: ['Đang chạy', 'ok'], SCHEDULED: ['Chưa bắt đầu', 'info'], ENDED: ['Đã kết thúc', ''], OFF: ['Đang tắt', 'warn'] };
+const banners = { list: [], editing: null };
+// datetime-local works in the office's wall clock; the server stores Vietnam time with its offset.
+const toLocalInput = (iso) => { if (!iso) return ''; const d = new Date(Date.parse(iso) + 7 * 3600000); return isNaN(d) ? '' : d.toISOString().slice(0, 16); };
+const fromLocalInput = (v) => (v ? `${v}:00+07:00` : null);
+const dmyhm = (iso) => iso ? `${dmy(iso)} ${hhmm(iso)}` : '';
+function slideHtml(b, mini = false) {
+  const bg = b.image_url ? `background-image:url('${esc(b.image_url)}')` : `background:linear-gradient(135deg, ${esc(b.background_color)}, color-mix(in srgb, ${esc(b.background_color)} 75%, #000))`;
+  if (mini) return `<div class="slide mini" style="${bg}"></div>`;
+  return `<div class="slide" style="${bg}">${b.image_url ? '' : `<b>${esc(b.title || 'Tiêu đề')}</b>${b.subtitle ? `<span>${esc(b.subtitle)}</span>` : ''}<i style="color:${esc(b.background_color)}">Xem chi tiết</i>`}</div>`;
+}
+async function loadBanners() {
+  const r = await api('/api/v1/ops/promo-banners');
+  if (!r.ok) {
+    $('#bannersBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.status === 403 ? 'Chỉ giám đốc nhà xe sửa được quảng cáo.' : r.message)}</p>`;
+    $('#bannerForm').classList.add('hidden');
+    return;
+  }
+  $('#bannerForm').classList.remove('hidden');
+  banners.list = r.data.banners || [];
+  const live = banners.list.filter(b => b.status === 'LIVE').length;
+  $('#bannerCount').textContent = `${live} đang chạy / ${banners.list.length} quảng cáo`;
+  $('#bannersBox').innerHTML = banners.list.length ? `<table><thead><tr><th></th><th>Quảng cáo</th><th>Trạng thái</th><th title="Thứ tự trên slider">TT</th><th></th></tr></thead><tbody>${banners.list.map(b => {
+    const [label, kind] = BANNER_STATUS[b.status] || [b.status, ''];
+    const when = b.starts_at || b.ends_at ? `${esc(dmyhm(b.starts_at) || 'ngay')} → ${esc(dmyhm(b.ends_at) || 'không hạn')}` : 'Không hạn';
+    return `<tr class="${banners.editing === b.banner_id ? 'sel' : ''}"><td>${slideHtml(b, true)}</td><td style="width:100%"><b>${esc(b.title)}</b>${b.subtitle ? `<div class="muted" style="font-size:12px">${esc(b.subtitle)}</div>` : ''}<div class="muted" style="font-size:12px">${when}</div></td><td><span class="pill ${kind}">${esc(label)}</span></td><td class="mono">${esc(b.sort_order)}</td>
+      <td><div class="acts"><button class="btn" data-edit="${esc(b.banner_id)}">Sửa</button> <button class="btn" data-toggle="${esc(b.banner_id)}" data-active="${b.active ? '1' : '0'}">${b.active ? 'Tắt' : 'Bật'}</button> <button class="btn danger" data-del="${esc(b.banner_id)}">Xóa</button></div></td></tr>`;
+  }).join('')}</tbody></table>` : '<p class="muted" style="padding:16px;margin:0">Chưa có quảng cáo. App khách đang ẩn slider.</p>';
+  const box = $('#bannersBox');
+  box.querySelectorAll('button[data-edit]').forEach(b => b.addEventListener('click', () => editBanner(b.dataset.edit)));
+  box.querySelectorAll('button[data-toggle]').forEach(b => b.addEventListener('click', async () => {
+    const r2 = await api(`/api/v1/ops/promo-banners/${encodeURIComponent(b.dataset.toggle)}/${b.dataset.active === '1' ? 'deactivate' : 'activate'}`, { method: 'POST', idempotent: true });
+    toast(r2.ok ? (b.dataset.active === '1' ? 'Đã tắt quảng cáo' : 'Đã bật quảng cáo') : r2.message);
+    if (r2.ok) loadBanners();
+  }));
+  // Deleting cannot be undone: the first click arms the button, a second one within 4 s deletes.
+  box.querySelectorAll('button[data-del]').forEach(b => b.addEventListener('click', async () => {
+    if (!b.dataset.armed) {
+      b.dataset.armed = '1'; b.textContent = 'Xóa hẳn?';
+      setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = 'Xóa'; } }, 4000);
+      return;
+    }
+    const r2 = await api(`/api/v1/ops/promo-banners/${encodeURIComponent(b.dataset.del)}`, { method: 'DELETE' });
+    toast(r2.ok ? 'Đã xóa quảng cáo' : r2.message);
+    if (r2.ok) { if (banners.editing === b.dataset.del) resetBannerForm(); loadBanners(); }
+  }));
+  if (!banners.editing) {
+    // A new banner goes last unless the director picks another place.
+    if (!$('#bannerForm').title.value) $('#bannerForm').sort_order.value = String(Math.max(0, ...banners.list.map(b => b.sort_order)) + 1);
+    previewBanner();
+  }
+}
+function resetBannerForm() {
+  banners.editing = null;
+  const f = $('#bannerForm');
+  f.reset();
+  f.background_color.value = '#2563eb';
+  f.sort_order.value = String(Math.max(0, ...banners.list.map(b => b.sort_order)) + 1);
+  $('#bannerFormTitle').textContent = 'Thêm quảng cáo';
+  $('#bannerSave').textContent = 'Tạo quảng cáo';
+  $('#bannerCancel').classList.add('hidden');
+  f.active.closest('label').classList.remove('hidden');
+  $('#bannerError').textContent = '';
+  previewBanner();
+}
+function editBanner(id) {
+  const b = banners.list.find(x => x.banner_id === id);
+  if (!b) return;
+  banners.editing = id;
+  const f = $('#bannerForm');
+  f.title.value = b.title; f.subtitle.value = b.subtitle || ''; f.background_color.value = b.background_color.toLowerCase();
+  f.image_url.value = b.image_url || ''; f.sort_order.value = b.sort_order;
+  f.starts_at.value = toLocalInput(b.starts_at); f.ends_at.value = toLocalInput(b.ends_at); f.content_html.value = b.content_html;
+  $('#bannerFormTitle').textContent = 'Sửa quảng cáo';
+  $('#bannerSave').textContent = 'Lưu thay đổi';
+  $('#bannerCancel').classList.remove('hidden');
+  f.active.closest('label').classList.add('hidden'); // on / off has its own button in the list
+  $('#bannerError').textContent = '';
+  document.querySelectorAll('#bannersBox tr').forEach(tr => tr.classList.toggle('sel', !!tr.querySelector(`button[data-edit="${CSS.escape(id)}"]`)));
+  previewBanner();
+}
+function bannerBody() {
+  const f = $('#bannerForm');
+  return {
+    title: f.title.value.trim(), subtitle: f.subtitle.value.trim(), background_color: f.background_color.value.toUpperCase(),
+    image_url: f.image_url.value.trim() || null, sort_order: Number(f.sort_order.value), starts_at: fromLocalInput(f.starts_at.value),
+    ends_at: fromLocalInput(f.ends_at.value), content_html: f.content_html.value
+  };
+}
+// The detail page preview runs in a sandboxed frame (no scripts), styled like the app's card.
+function previewBanner() {
+  const b = bannerBody();
+  $('#bannerSlidePreview').innerHTML = slideHtml(b);
+  $('#bannerHtmlPreview').srcdoc = `<!doctype html><meta charset="utf-8"><style>body{font:15px/1.5 system-ui,sans-serif;color:#0f172a;margin:16px}img{max-width:100%}h2{font-size:20px;margin:0 0 8px}</style>${b.content_html || '<p style="color:#94a3b8">Nội dung trang chi tiết hiện ở đây.</p>'}`;
+}
+$('#bannerForm').addEventListener('input', previewBanner);
+$('#bannerNew').addEventListener('click', () => { resetBannerForm(); loadBanners(); $('#bTitle').focus(); });
+$('#bannerCancel').addEventListener('click', () => { resetBannerForm(); loadBanners(); });
+$('#bannerForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = bannerBody();
+  if (!body.title) { $('#bannerError').textContent = 'Cần tiêu đề'; return; }
+  if (!body.content_html.trim()) { $('#bannerError').textContent = 'Cần nội dung trang chi tiết'; return; }
+  $('#bannerSave').disabled = true;
+  const editing = banners.editing;
+  const r = editing
+    ? await api(`/api/v1/ops/promo-banners/${encodeURIComponent(editing)}`, { method: 'PATCH', body })
+    : await api('/api/v1/ops/promo-banners', { method: 'POST', idempotent: true, body: { ...body, active: e.target.active.checked } });
+  $('#bannerSave').disabled = false;
+  $('#bannerError').textContent = r.ok ? '' : r.message;
+  if (!r.ok) return;
+  toast(editing ? 'Đã lưu quảng cáo' : 'Đã tạo quảng cáo');
+  resetBannerForm();
+  loadBanners();
+});
+
+// ---------- fleet (MGR-005, MGR-006) ----------
+const fleetState = { vehicles: [], layouts: [] };
+
+async function loadFleet() {
+  const [vr, lr] = await Promise.all([
+    api('/api/v1/ops/vehicles'),
+    api('/api/v1/ops/seat-layouts')
+  ]);
+
+  const rawLayouts = lr.data || lr.raw;
+  fleetState.layouts = Array.isArray(rawLayouts) ? rawLayouts : (rawLayouts?.layouts || (Array.isArray(lr.data?.layouts) ? lr.data.layouts : []));
+
+  const layoutSelect = $('#vehLayout');
+  if (layoutSelect) {
+    layoutSelect.innerHTML = fleetState.layouts.map(l =>
+      `<option value="${esc(l.layout_id)}">${esc(l.name)} (${esc(l.total_seats || l.seats?.length || 0)} chỗ)</option>`
+    ).join('');
+  }
+
+  const box = $('#fleetBox');
+  if (!vr.ok) {
+    box.innerHTML = `<p class="error" style="padding:16px">${esc(vr.message)}</p>`;
+    return;
+  }
+
+  const rawVehicles = vr.data;
+  fleetState.vehicles = Array.isArray(rawVehicles) ? rawVehicles : (rawVehicles?.vehicles || []);
+
+  if (!fleetState.vehicles.length) {
+    box.innerHTML = '<p class="muted" style="padding:16px;margin:0">Chưa có xe nào trong đội xe.</p>';
+    return;
+  }
+
+  box.innerHTML = `<table>
+    <thead>
+      <tr>
+        <th>Biển số</th>
+        <th>Dòng xe</th>
+        <th>Sơ đồ ghế</th>
+        <th>Trạng thái</th>
+        <th>Đổi sơ đồ ghế</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${fleetState.vehicles.map(v => {
+        const l = fleetState.layouts.find(x => x.layout_id === v.layout_id);
+        const layoutName = l ? l.name : (v.layout_name || v.layout_id || 'Chưa gán');
+        const seatCount = v.total_seats ?? (l ? (l.total_seats || l.seats?.length) : '—');
+        return `<tr>
+          <td><span class="mono"><b>${esc(v.plate_number)}</b></span></td>
+          <td>${esc(v.model)}</td>
+          <td>${esc(layoutName)} <span class="muted mono">(${esc(seatCount)} chỗ)</span></td>
+          <td>${pill(v.status)}</td>
+          <td style="white-space:nowrap">
+            <div class="row" style="gap:6px">
+              <select data-veh-select="${esc(v.vehicle_id)}" style="min-width:260px">
+                ${fleetState.layouts.map(lay => `
+                  <option value="${esc(lay.layout_id)}" ${lay.layout_id === v.layout_id ? 'selected' : ''}>
+                    ${esc(lay.name)} (${esc(lay.total_seats || lay.seats?.length || 0)} chỗ)
+                  </option>
+                `).join('')}
+              </select>
+              <button class="btn" data-veh-change="${esc(v.vehicle_id)}">Đổi sơ đồ</button>
+            </div>
+            <div class="error" id="vehError_${esc(v.vehicle_id)}" style="margin-top:4px"></div>
+          </td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+
+  box.querySelectorAll('button[data-veh-change]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const vId = btn.dataset.vehChange;
+      const select = box.querySelector(`select[data-veh-select="${CSS.escape(vId)}"]`) || box.querySelector(`select[data-veh-select="${vId}"]`);
+      const errEl = document.getElementById(`vehError_${vId}`);
+      if (errEl) errEl.textContent = '';
+      if (!select) return;
+      btn.disabled = true;
+      const r = await api(`/api/v1/ops/vehicles/${encodeURIComponent(vId)}`, {
+        method: 'PATCH',
+        body: { layout_id: select.value }
+      });
+      btn.disabled = false;
+      if (!r.ok) {
+        if (errEl) errEl.textContent = r.message;
+        return;
+      }
+      toast('Đã cập nhật sơ đồ xe');
+      loadFleet();
+    });
+  });
+}
+
+$('#vehPlate')?.addEventListener('input', (e) => {
+  e.target.value = e.target.value.toUpperCase();
+});
+
+$('#fleetAddForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const plate = f.plate_number.value.trim().toUpperCase();
+  const model = f.model.value.trim();
+  const layout_id = f.layout_id.value;
+  $('#fleetAddError').textContent = '';
+  if (!plate) { $('#fleetAddError').textContent = 'Vui lòng nhập biển số xe'; return; }
+  const plateRe = /^[0-9]{2}[A-Z]{1,2}[0-9]?[- ]?(?:[0-9]{4,5}|[0-9]{2,3}\.[0-9]{2})$/;
+  if (!plateRe.test(plate)) {
+    $('#fleetAddError').textContent = $('#vehPlate')?.title || 'Biển số xe không đúng định dạng (VD: 29B-123.45)';
+    return;
+  }
+  if (!model) { $('#fleetAddError').textContent = 'Vui lòng nhập dòng xe'; return; }
+  $('#vehAddBtn').disabled = true;
+  const r = await api('/api/v1/ops/vehicles', {
+    method: 'POST',
+    body: { plate_number: plate, model, layout_id },
+    idempotent: true
+  });
+  $('#vehAddBtn').disabled = false;
+  if (!r.ok) {
+    $('#fleetAddError').textContent = r.message;
+    return;
+  }
+  f.reset();
+  toast('Đã thêm xe vào đội xe');
+  loadFleet();
+});
+
+// ---------- drivers (MGR-015, MGR-016) ----------
+const driversState = { drivers: [], editingId: null };
+
+function setDriverMinExpiry() {
+  const tomorrow = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(Date.now() + 86400000));
+  const el = $('#drvExpiry');
+  if (el) el.min = tomorrow;
+}
+
+function showDriverPinNotice(name, staffId, pin) {
+  const code = state.platformCode || state.operator?.code || '';
+  const box = $('#driverPinBox');
+  const content = $('#driverPinContent');
+  if (!box || !content) return;
+  content.innerHTML = `Mã PIN tạm của ${esc(name)} (${esc(staffId)}): <b>${esc(pin)}</b> — đưa cho tài xế, mã chỉ hiện một lần. Tài xế đăng nhập app BusGo Driver bằng mã nhà xe ${esc(code)}, mã NV và mã này, rồi đặt mã mới.`;
+  box.classList.remove('hidden');
+}
+
+$('#driverPinAckBtn')?.addEventListener('click', () => {
+  const box = $('#driverPinBox');
+  const content = $('#driverPinContent');
+  if (content) content.innerHTML = '';
+  if (box) box.classList.add('hidden');
+});
+
+function resetDriverForm() {
+  driversState.editingId = null;
+  const f = $('#driverForm');
+  if (f) f.reset();
+  $('#driverFormTitle').textContent = 'Thêm tài xế';
+  $('#drvSubmitBtn').textContent = 'Thêm tài xế';
+  $('#drvCancelBtn').classList.add('hidden');
+  const sidEl = $('#drvStaffId');
+  if (sidEl) {
+    sidEl.readOnly = false;
+    sidEl.style.background = '';
+  }
+  $('#driverError').textContent = '';
+  setDriverMinExpiry();
+}
+
+$('#drvCancelBtn')?.addEventListener('click', () => {
+  resetDriverForm();
+});
+
+$('#drvStaffId')?.addEventListener('input', (e) => {
+  e.target.value = e.target.value.toUpperCase();
+});
+
+async function loadDrivers() {
+  setDriverMinExpiry();
+  const box = $('#driversBox');
+  if (!box) return;
+  const r = await api('/api/v1/ops/drivers');
+  if (!r.ok) {
+    box.innerHTML = `<p class="error" style="padding:16px">${esc(r.message)}</p>`;
+    return;
+  }
+  const drivers = Array.isArray(r.data) ? r.data : (r.data?.drivers || []);
+  driversState.drivers = drivers;
+  if (!drivers.length) {
+    box.innerHTML = '<p class="muted" style="padding:16px;margin:0">Chưa có tài xế nào.</p>';
+    return;
+  }
+  box.innerHTML = `<table>
+    <thead>
+      <tr>
+        <th>Mã NV</th>
+        <th>Họ và tên</th>
+        <th>Số điện thoại</th>
+        <th>Hạng bằng</th>
+        <th>Hạn bằng lái</th>
+        <th>Trạng thái</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      ${drivers.map(d => {
+        let statusHtml = '';
+        if (d.status === 'LOCKED') {
+          statusHtml = '<span class="pill danger">Đã khóa</span>';
+        } else if (d.must_change_pin) {
+          statusHtml = '<span class="pill warn">Chờ đổi PIN</span>';
+        } else {
+          statusHtml = '<span class="pill ok">Đang làm</span>';
+        }
+        const expiryHtml = `${esc(d.license_expiry)}${d.license_expired ? ' <span class="pill danger">Hết hạn</span>' : ''}`;
+        const isLocked = d.status === 'LOCKED';
+        return `<tr>
+          <td><span class="mono"><b>${esc(d.staff_id)}</b></span></td>
+          <td>${esc(d.full_name)}</td>
+          <td><span class="mono">${esc(d.phone)}</span></td>
+          <td><span class="mono">${esc(d.license_class)}</span></td>
+          <td>${expiryHtml}</td>
+          <td>${statusHtml}</td>
+          <td style="white-space:nowrap">
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn" data-edit-drv="${esc(d.driver_id)}">Sửa</button>
+              ${isLocked
+                ? `<button class="btn" data-unlock-drv="${esc(d.driver_id)}">Mở khóa</button>`
+                : `<button class="btn danger" data-lock-drv="${esc(d.driver_id)}">Khóa</button>`
+              }
+              <button class="btn" data-reset-pin="${esc(d.driver_id)}" data-drv-name="${esc(d.full_name)}" data-drv-sid="${esc(d.staff_id)}">Cấp lại PIN</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+
+  box.querySelectorAll('button[data-edit-drv]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const drvId = btn.dataset.editDrv;
+      const d = driversState.drivers.find(x => x.driver_id === drvId);
+      if (!d) return;
+      driversState.editingId = d.driver_id;
+      $('#driverFormTitle').textContent = 'Sửa tài xế';
+      $('#drvName').value = d.full_name;
+      $('#drvPhone').value = d.phone;
+      const sidEl = $('#drvStaffId');
+      sidEl.value = d.staff_id;
+      sidEl.readOnly = true;
+      sidEl.style.background = '#f1f5f9';
+      $('#drvClass').value = d.license_class;
+      $('#drvExpiry').value = d.license_expiry;
+      $('#drvSubmitBtn').textContent = 'Lưu thay đổi';
+      $('#drvCancelBtn').classList.remove('hidden');
+      $('#driverError').textContent = '';
+      $('#drvName').focus();
+    });
+  });
+
+  box.querySelectorAll('button[data-lock-drv]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const drvId = btn.dataset.lockDrv;
+      if (!btn.dataset.armed) {
+        btn.dataset.armed = '1';
+        btn.textContent = 'Khóa hẳn?';
+        setTimeout(() => {
+          if (btn.isConnected) {
+            delete btn.dataset.armed;
+            btn.textContent = 'Khóa';
+          }
+        }, 4000);
+        return;
+      }
+      delete btn.dataset.armed;
+      btn.textContent = 'Khóa';
+      btn.disabled = true;
+      const r = await api(`/api/v1/ops/drivers/${encodeURIComponent(drvId)}`, {
+        method: 'PATCH',
+        body: { status: 'LOCKED' }
+      });
+      btn.disabled = false;
+      if (!r.ok) {
+        toast(r.message);
+        return;
+      }
+      toast('Đã khóa tài xế');
+      loadDrivers();
+    });
+  });
+
+  box.querySelectorAll('button[data-unlock-drv]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const drvId = btn.dataset.unlockDrv;
+      btn.disabled = true;
+      const r = await api(`/api/v1/ops/drivers/${encodeURIComponent(drvId)}`, {
+        method: 'PATCH',
+        body: { status: 'ACTIVE' }
+      });
+      btn.disabled = false;
+      if (!r.ok) {
+        toast(r.message);
+        return;
+      }
+      toast('Đã mở khóa tài xế');
+      loadDrivers();
+    });
+  });
+
+  box.querySelectorAll('button[data-reset-pin]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const drvId = btn.dataset.resetPin;
+      const drvName = btn.dataset.drvName;
+      const drvSid = btn.dataset.drvSid;
+      if (!btn.dataset.armed) {
+        btn.dataset.armed = '1';
+        btn.textContent = 'Cấp lại hẳn?';
+        setTimeout(() => {
+          if (btn.isConnected) {
+            delete btn.dataset.armed;
+            btn.textContent = 'Cấp lại PIN';
+          }
+        }, 4000);
+        return;
+      }
+      delete btn.dataset.armed;
+      btn.textContent = 'Cấp lại PIN';
+      btn.disabled = true;
+      const r = await api(`/api/v1/ops/drivers/${encodeURIComponent(drvId)}/reset-pin`, {
+        method: 'POST',
+        idempotent: true
+      });
+      btn.disabled = false;
+      if (!r.ok) {
+        toast(r.message);
+        return;
+      }
+      showDriverPinNotice(drvName, drvSid, r.data.temporary_pin);
+      toast('Đã cấp lại mã PIN');
+      loadDrivers();
+    });
+  });
+}
+
+$('#driverForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const nameRaw = f.full_name.value;
+  const phoneRaw = f.phone.value;
+  const staffIdRaw = f.staff_id.value;
+  const licClass = f.license_class.value;
+  const expiry = f.license_expiry.value;
+  const errEl = $('#driverError');
+  errEl.textContent = '';
+
+  const normalizedName = typeof nameRaw === 'string' ? nameRaw.trim().replace(/\s+/g, ' ') : '';
+  if (normalizedName.length < 2 || normalizedName.length > 60) {
+    errEl.textContent = 'Họ tên cần 2-60 ký tự';
+    return;
+  }
+  if (/[0-9<>{}@[\]#$%^*=_|\\/~]/u.test(normalizedName) || !/\p{L}/u.test(normalizedName)) {
+    errEl.textContent = 'Họ tên không được chứa số hoặc ký tự đặc biệt';
+    return;
+  }
+
+  const cleanedPhone = phoneRaw.replace(/[\s\-\.]/g, '');
+  const vnPhoneRegex = /^(?:\+84|84|0)(3|5|7|8|9)\d{8}$/;
+  if (!vnPhoneRegex.test(cleanedPhone)) {
+    errEl.textContent = 'Số điện thoại không hợp lệ (VD: 0912 345 678)';
+    return;
+  }
+  let normalizedPhone = cleanedPhone;
+  if (normalizedPhone.startsWith('+84')) normalizedPhone = '0' + normalizedPhone.slice(3);
+  else if (normalizedPhone.startsWith('84')) normalizedPhone = '0' + normalizedPhone.slice(2);
+
+  if (!['B2', 'C', 'D', 'E', 'FC'].includes(licClass)) {
+    errEl.textContent = 'Hạng bằng lái phải là một trong các hạng: B2, C, D, E, FC';
+    return;
+  }
+  if (!expiry) {
+    errEl.textContent = 'Ngày hết hạn bằng lái không được để trống';
+    return;
+  }
+  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date());
+  if (expiry <= todayStr) {
+    errEl.textContent = 'Ngày hết hạn bằng lái phải sau ngày hôm nay';
+    return;
+  }
+
+  const isEdit = !!driversState.editingId;
+  const btn = $('#drvSubmitBtn');
+  btn.disabled = true;
+
+  if (isEdit) {
+    const drvId = driversState.editingId;
+    const body = {
+      full_name: normalizedName,
+      phone: normalizedPhone,
+      license_class: licClass,
+      license_expiry: expiry
+    };
+    const r = await api(`/api/v1/ops/drivers/${encodeURIComponent(drvId)}`, {
+      method: 'PATCH',
+      body
+    });
+    btn.disabled = false;
+    if (!r.ok) {
+      errEl.textContent = r.message;
+      return;
+    }
+    toast('Đã cập nhật tài xế');
+    resetDriverForm();
+    loadDrivers();
+  } else {
+    const sid = staffIdRaw.trim().toUpperCase();
+    if (sid && !/^[A-Z0-9]{3,12}$/.test(sid)) {
+      btn.disabled = false;
+      errEl.textContent = 'Mã nhân viên không hợp lệ (3-12 ký tự chữ và số)';
+      return;
+    }
+    const body = {
+      full_name: normalizedName,
+      phone: normalizedPhone,
+      license_class: licClass,
+      license_expiry: expiry
+    };
+    if (sid) body.staff_id = sid;
+    const r = await api('/api/v1/ops/drivers', {
+      method: 'POST',
+      body,
+      idempotent: true
+    });
+    btn.disabled = false;
+    if (!r.ok) {
+      errEl.textContent = r.message;
+      return;
+    }
+    toast(`Đã thêm tài xế ${r.data.driver.full_name}`);
+    showDriverPinNotice(r.data.driver.full_name, r.data.driver.staff_id, r.data.temporary_pin);
+    resetDriverForm();
+    loadDrivers();
+  }
+});
+
+// ---------- seat layouts (MGR-007) ----------
+const layoutsState = {
+  list: [],
+  selectedId: null,
+  editingId: null,
+  editorSeats: []
+};
+
+const SEAT_TYPE_LABELS = {
+  VIP_CABIN: 'Phòng VIP',
+  SLEEPER: 'Giường nằm',
+  SEAT: 'Ghế ngồi'
+};
+const seatTypeLabel = (t) => SEAT_TYPE_LABELS[t] || t || 'Ghế';
+
+function deckTitle(deck, totalDecks) {
+  if (totalDecks === 1) return '';
+  if (totalDecks === 2) return deck === 1 ? 'Tầng dưới' : 'Tầng trên';
+  return `Tầng ${deck}`;
+}
+
+function renderDeckGridHtml(layout, deckNumber, interactive = false) {
+  const seats = interactive ? layoutsState.editorSeats : (layout?.seats || []);
+  const totalColumns = Number(interactive ? $('#layoutCols').value : (layout?.columns || 3)) || 3;
+  const deckSeats = seats.filter(s => s.deck === deckNumber);
+  const maxRow = interactive
+    ? Math.max(1, Number($('#layoutRows').value) || 1, ...deckSeats.map(s => s.row || 1))
+    : Math.max(1, ...deckSeats.map(s => s.row || 1));
+
+  // A grid column with no seat on any row of a deck is an aisle.
+  const aisleCols = new Set();
+  for (let c = 1; c <= totalColumns; c++) {
+    if (!deckSeats.some(s => s.column === c)) {
+      aisleCols.add(c);
+    }
+  }
+
+  const gridTemplate = aisleCols.size
+    ? Array.from({ length: totalColumns }, (_, i) => aisleCols.has(i + 1) ? (interactive ? '32px' : '22px') : 'minmax(42px, 56px)').join(' ')
+    : `repeat(${totalColumns}, minmax(42px, 56px))`;
+
+  const title = deckTitle(deckNumber, interactive ? (Number($('#layoutDecks').value) || 1) : (layout?.total_decks || 1));
+
+  let cellsHtml = '';
+  for (let r = 1; r <= maxRow; r++) {
+    for (let c = 1; c <= totalColumns; c++) {
+      const seat = deckSeats.find(s => s.row === r && s.column === c);
+      if (seat) {
+        const cls = `seat-box seat-${(seat.type || 'SEAT').toLowerCase()}${interactive ? ' editor-cell' : ''}`;
+        const titleAttr = `${esc(seat.seat_code)} · ${esc(seatTypeLabel(seat.type))}${interactive ? ' (bấm để xóa)' : ''}`;
+        cellsHtml += `<div class="${cls}" data-deck="${deckNumber}" data-row="${r}" data-col="${c}" title="${titleAttr}">${esc(seat.seat_code)}</div>`;
+      } else {
+        if (interactive) {
+          cellsHtml += `<div class="empty-cell editor-cell" data-deck="${deckNumber}" data-row="${r}" data-col="${c}" title="Bấm để thêm ghế">+</div>`;
+        } else if (aisleCols.has(c)) {
+          cellsHtml += '<div class="aisle-cell"></div>';
+        } else {
+          cellsHtml += '<div class="empty-cell"></div>';
+        }
+      }
+    }
+  }
+
+  return `<div class="deck-bus-frame">
+    ${title ? `<div class="deck-title">${esc(title)}</div>` : ''}
+    <div class="deck-front-label">Đầu xe</div>
+    <div class="deck-grid" style="grid-template-columns: ${gridTemplate}">
+      ${cellsHtml}
+    </div>
+  </div>`;
+}
+
+function showLayoutPreview(layout) {
+  if (!layout) {
+    $('#layoutPreviewContent').innerHTML = '<p class="muted" style="padding:16px">Chọn một sơ đồ ghế để xem chi tiết.</p>';
+    return;
+  }
+
+  const plates = (layout.used_by && layout.used_by.length)
+    ? layout.used_by.map(p => `<span class="pill mono">${esc(p)}</span>`).join(' ')
+    : '<span class="muted">Chưa có xe sử dụng</span>';
+
+  const decksHtml = Array.from({ length: layout.total_decks || 1 }, (_, i) =>
+    renderDeckGridHtml(layout, i + 1, false)
+  ).join('');
+
+  $('#layoutPreviewContent').innerHTML = `
+    <div class="row" style="justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="row" style="gap:8px;margin-bottom:4px">
+          <h3 style="margin:0;font-size:18px">${esc(layout.name)}</h3>
+          ${layout.builtin ? '<span class="pill info">Có sẵn</span>' : '<span class="pill">Tự tạo</span>'}
+        </div>
+        <div class="muted" style="font-size:13px">
+          ${esc(layout.total_decks || 1)} tầng · ${esc(layout.total_seats || layout.seats?.length || 0)} chỗ · ${esc(layout.columns || 0)} cột
+        </div>
+      </div>
+      <div class="row" style="gap:6px">
+        <button class="btn" id="previewCloneBtn">Nhân bản</button>
+        ${!layout.builtin ? `
+          <button class="btn" id="previewEditBtn">Sửa</button>
+          <button class="btn danger" id="previewDelBtn">Xóa</button>
+        ` : ''}
+      </div>
+    </div>
+    <div style="margin-bottom:14px;font-size:13px">
+      <span class="muted">Đang dùng: </span>${plates}
+    </div>
+    <div class="row" style="gap:16px;margin-bottom:14px;font-size:12px;flex-wrap:wrap">
+      <span class="row" style="gap:6px"><span class="seat-box seat-vip_cabin" style="height:20px;min-width:24px;font-size:10px"></span> Phòng VIP</span>
+      <span class="row" style="gap:6px"><span class="seat-box seat-sleeper" style="height:20px;min-width:24px;font-size:10px"></span> Giường nằm</span>
+      <span class="row" style="gap:6px"><span class="seat-box seat-seat" style="height:20px;min-width:24px;font-size:10px"></span> Ghế ngồi</span>
+    </div>
+    <div class="row" style="gap:16px;align-items:flex-start;flex-wrap:wrap">
+      ${decksHtml}
+    </div>
+  `;
+
+  $('#previewCloneBtn')?.addEventListener('click', () => duplicateLayout(layout));
+  $('#previewEditBtn')?.addEventListener('click', () => editCustomLayout(layout));
+  $('#previewDelBtn')?.addEventListener('click', (e) => deleteLayoutTwoClick(e.target, layout.layout_id));
+}
+
+async function deleteLayoutTwoClick(btn, layoutId) {
+  if (!btn.dataset.armed) {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Xóa hẳn?';
+    setTimeout(() => {
+      if (btn.isConnected) {
+        delete btn.dataset.armed;
+        btn.textContent = 'Xóa';
+      }
+    }, 4000);
+    return;
+  }
+  delete btn.dataset.armed;
+  btn.textContent = 'Đang xóa...';
+  btn.disabled = true;
+  const r = await api(`/api/v1/ops/seat-layouts/${encodeURIComponent(layoutId)}`, {
+    method: 'DELETE'
+  });
+  btn.disabled = false;
+  btn.textContent = 'Xóa';
+  if (!r.ok) {
+    const listErr = $('#layoutsListError');
+    if (listErr) listErr.textContent = r.message;
+    toast(r.message || 'Không thể xóa sơ đồ ghế');
+    return;
+  }
+  toast('Đã xóa sơ đồ ghế');
+  if (layoutsState.selectedId === layoutId) {
+    layoutsState.selectedId = null;
+  }
+  loadLayouts();
+}
+
+// The kind of bus is chosen apart from its decks: vehicle_type is built from both (SINGLE_DECK_SEATER, DOUBLE_DECK_VIP_CABIN...).
+function vehicleTypeOf(kind, decks) {
+  if (kind === 'OTHER') return 'OTHER';
+  return `${decks > 1 ? 'DOUBLE_DECK' : 'SINGLE_DECK'}_${kind}`;
+}
+
+function vehicleKindOf(vehicleType) {
+  const kind = String(vehicleType || '').replace(/^(SINGLE|DOUBLE)_DECK_/, '');
+  return ['VIP_CABIN', 'SLEEPER', 'SEATER', 'OTHER'].includes(kind) ? kind : 'VIP_CABIN';
+}
+
+function openNewLayoutEditor() {
+  layoutsState.editingId = null;
+  $('#layoutPreviewCard').classList.add('hidden');
+  $('#layoutEditorCard').classList.remove('hidden');
+  $('#layoutEditorTitle').textContent = 'Tạo sơ đồ riêng';
+  $('#layoutSaveBtn').textContent = 'Lưu sơ đồ';
+  $('#layoutEditorError').textContent = '';
+
+  $('#layoutName').value = '';
+  $('#layoutVehicleType').value = 'VIP_CABIN';
+  $('#layoutDecks').value = '2';
+  $('#layoutRows').value = '6';
+  $('#layoutCols').value = '3';
+  $('#layoutAisles').value = '2';
+  $('#layoutSeatType').value = 'VIP_CABIN';
+  $('#layoutPrefix1').value = 'A';
+  $('#layoutPrefix2').value = 'B';
+  $('#layoutPrefix3').value = 'C';
+
+  $('#layoutPrefix2Field').classList.remove('hidden');
+  $('#layoutPrefix3Field').classList.add('hidden');
+
+  generateEditorGrid();
+}
+
+function editCustomLayout(layout) {
+  if (!layout) return;
+  layoutsState.editingId = layout.layout_id;
+  $('#layoutPreviewCard').classList.add('hidden');
+  $('#layoutEditorCard').classList.remove('hidden');
+  $('#layoutEditorTitle').textContent = `Sửa sơ đồ: ${layout.name}`;
+  $('#layoutSaveBtn').textContent = 'Lưu thay đổi';
+  $('#layoutEditorError').textContent = '';
+
+  $('#layoutName').value = layout.name || '';
+  $('#layoutVehicleType').value = vehicleKindOf(layout.vehicle_type);
+  const totalDecks = Number(layout.total_decks) || 1;
+  const totalCols = Number(layout.columns) || 3;
+  $('#layoutDecks').value = totalDecks;
+  $('#layoutCols').value = totalCols;
+
+  const seats = layout.seats || [];
+  const maxRow = Math.max(1, ...seats.map(s => s.row || 1));
+  $('#layoutRows').value = maxRow;
+
+  const aisleArr = [];
+  for (let c = 1; c <= totalCols; c++) {
+    if (!seats.some(s => s.column === c)) aisleArr.push(c);
+  }
+  $('#layoutAisles').value = aisleArr.join(', ');
+
+  $('#layoutSeatType').value = seats[0]?.type || 'VIP_CABIN';
+
+  const p1 = seats.find(s => s.deck === 1)?.seat_code?.replace(/[0-9]/g, '') || 'A';
+  const p2 = seats.find(s => s.deck === 2)?.seat_code?.replace(/[0-9]/g, '') || 'B';
+  const p3 = seats.find(s => s.deck === 3)?.seat_code?.replace(/[0-9]/g, '') || 'C';
+  $('#layoutPrefix1').value = p1;
+  $('#layoutPrefix2').value = p2;
+  $('#layoutPrefix3').value = p3;
+
+  $('#layoutPrefix2Field').classList.toggle('hidden', totalDecks < 2);
+  $('#layoutPrefix3Field').classList.toggle('hidden', totalDecks < 3);
+
+  layoutsState.editorSeats = JSON.parse(JSON.stringify(seats));
+  renderEditorPreview();
+}
+
+function duplicateLayout(layout) {
+  if (!layout) return;
+  editCustomLayout(layout);
+  layoutsState.editingId = null;
+  $('#layoutEditorTitle').textContent = 'Nhân bản sơ đồ ghế';
+  $('#layoutSaveBtn').textContent = 'Tạo sơ đồ';
+  $('#layoutName').value = `${layout.name} (bản sao)`;
+}
+
+function generateEditorGrid() {
+  const totalDecks = Math.max(1, Math.min(3, Number($('#layoutDecks').value) || 1));
+  const rows = Math.max(1, Math.min(20, Number($('#layoutRows').value) || 1));
+  const cols = Math.max(1, Math.min(8, Number($('#layoutCols').value) || 1));
+  const aisleStr = $('#layoutAisles').value || '';
+  const aisleSet = new Set(
+    aisleStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n >= 1 && n <= cols)
+  );
+  const seatType = $('#layoutSeatType').value || 'VIP_CABIN';
+
+  const p1 = ($('#layoutPrefix1').value || 'A').trim().toUpperCase() || 'A';
+  const p2 = ($('#layoutPrefix2').value || 'B').trim().toUpperCase() || 'B';
+  const p3 = ($('#layoutPrefix3').value || 'C').trim().toUpperCase() || 'C';
+  const prefixes = [p1, p2, p3];
+
+  layoutsState.editorSeats = [];
+  for (let d = 1; d <= totalDecks; d++) {
+    const prefix = prefixes[d - 1] || 'A';
+    let seatNum = 1;
+    for (let r = 1; r <= rows; r++) {
+      for (let c = 1; c <= cols; c++) {
+        if (aisleSet.has(c)) continue;
+        const code = prefix + String(seatNum++).padStart(2, '0');
+        layoutsState.editorSeats.push({
+          seat_code: code,
+          deck: d,
+          row: r,
+          column: c,
+          type: seatType
+        });
+      }
+    }
+  }
+  renderEditorPreview();
+}
+
+function renumberEditorSeats() {
+  const totalDecks = Math.max(1, Math.min(3, Number($('#layoutDecks').value) || 1));
+  const p1 = ($('#layoutPrefix1').value || 'A').trim().toUpperCase() || 'A';
+  const p2 = ($('#layoutPrefix2').value || 'B').trim().toUpperCase() || 'B';
+  const p3 = ($('#layoutPrefix3').value || 'C').trim().toUpperCase() || 'C';
+  const prefixes = [p1, p2, p3];
+
+  for (let d = 1; d <= totalDecks; d++) {
+    const deckSeats = layoutsState.editorSeats.filter(s => s.deck === d);
+    deckSeats.sort((a, b) => a.row !== b.row ? a.row - b.row : a.column - b.column);
+    const prefix = prefixes[d - 1] || 'A';
+    deckSeats.forEach((s, i) => {
+      s.seat_code = prefix + String(i + 1).padStart(2, '0');
+    });
+  }
+}
+
+function renderEditorPreview() {
+  $('#editorSeatCount').textContent = layoutsState.editorSeats.length;
+  const totalDecks = Math.max(1, Math.min(3, Number($('#layoutDecks').value) || 1));
+
+  let decksHtml = '';
+  for (let d = 1; d <= totalDecks; d++) {
+    decksHtml += renderDeckGridHtml(null, d, true);
+  }
+  const previewEl = $('#layoutEditorPreview');
+  previewEl.innerHTML = `<div class="row" style="gap:16px;align-items:flex-start;flex-wrap:wrap">${decksHtml}</div>`;
+
+  previewEl.querySelectorAll('.editor-cell').forEach(cell => {
+    cell.addEventListener('click', () => {
+      const d = Number(cell.dataset.deck);
+      const r = Number(cell.dataset.row);
+      const c = Number(cell.dataset.col);
+      const idx = layoutsState.editorSeats.findIndex(s => s.deck === d && s.row === r && s.column === c);
+      if (idx >= 0) {
+        layoutsState.editorSeats.splice(idx, 1);
+      } else {
+        const type = $('#layoutSeatType').value || 'VIP_CABIN';
+        layoutsState.editorSeats.push({ seat_code: '', deck: d, row: r, column: c, type });
+      }
+      renumberEditorSeats();
+      renderEditorPreview();
+    });
+  });
+}
+
+function closeLayoutEditor() {
+  $('#layoutEditorCard').classList.add('hidden');
+  $('#layoutPreviewCard').classList.remove('hidden');
+  layoutsState.editingId = null;
+  const sel = layoutsState.list.find(l => l.layout_id === layoutsState.selectedId) || layoutsState.list[0];
+  showLayoutPreview(sel);
+}
+
+$('#layoutCancelEditBtn')?.addEventListener('click', closeLayoutEditor);
+$('#layoutNewBtn')?.addEventListener('click', openNewLayoutEditor);
+$('#layoutGenGridBtn')?.addEventListener('click', generateEditorGrid);
+// New seats take the bus's kind of seat.
+$('#layoutVehicleType')?.addEventListener('change', () => {
+  const seat = { VIP_CABIN: 'VIP_CABIN', SLEEPER: 'SLEEPER', SEATER: 'SEAT' }[$('#layoutVehicleType').value];
+  if (seat) $('#layoutSeatType').value = seat;
+});
+$('#layoutDecks')?.addEventListener('input', () => {
+  const d = Math.max(1, Math.min(3, Number($('#layoutDecks').value) || 1));
+  $('#layoutPrefix2Field').classList.toggle('hidden', d < 2);
+  $('#layoutPrefix3Field').classList.toggle('hidden', d < 3);
+});
+
+$('#layoutEditorCard')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = $('#layoutEditorError');
+  errEl.textContent = '';
+
+  const name = $('#layoutName').value.trim();
+  if (!name) { errEl.textContent = 'Vui lòng nhập tên sơ đồ (tối đa 80 ký tự)'; return; }
+  if (name.length > 80) { errEl.textContent = 'Tên sơ đồ không được vượt quá 80 ký tự'; return; }
+
+  const total_decks = Number($('#layoutDecks').value) || 1;
+  const vehicle_type = vehicleTypeOf($('#layoutVehicleType').value, total_decks);
+  const columns = Number($('#layoutCols').value) || 1;
+
+  if (!layoutsState.editorSeats.length) {
+    errEl.textContent = 'Sơ đồ phải có ít nhất 1 ghế';
+    return;
+  }
+
+  for (let d = 1; d <= total_decks; d++) {
+    if (!layoutsState.editorSeats.some(s => s.deck === d)) {
+      errEl.textContent = `Tầng ${d} không có ghế nào`;
+      return;
+    }
+  }
+
+  const body = {
+    name,
+    vehicle_type,
+    total_decks,
+    columns,
+    seats: layoutsState.editorSeats
+  };
+
+  const btn = $('#layoutSaveBtn');
+  btn.disabled = true;
+
+  let r;
+  if (layoutsState.editingId) {
+    r = await api(`/api/v1/ops/seat-layouts/${encodeURIComponent(layoutsState.editingId)}`, {
+      method: 'PATCH',
+      body
+    });
+  } else {
+    r = await api('/api/v1/ops/seat-layouts', {
+      method: 'POST',
+      body,
+      idempotent: true
+    });
+  }
+
+  btn.disabled = false;
+  if (!r.ok) {
+    errEl.textContent = r.message;
+    return;
+  }
+
+  toast(layoutsState.editingId ? 'Đã lưu thay đổi sơ đồ' : 'Đã tạo sơ đồ mới');
+  const savedId = r.data?.layout_id || layoutsState.editingId;
+  closeLayoutEditor();
+  layoutsState.selectedId = savedId;
+  await loadLayouts();
+});
+
+async function loadLayouts() {
+  const r = await api('/api/v1/ops/seat-layouts');
+  const box = $('#layoutsListBox');
+  if (!r.ok) {
+    box.innerHTML = `<p class="error" style="padding:16px">${esc(r.message)}</p>`;
+    return;
+  }
+
+  const raw = r.data || r.raw;
+  layoutsState.list = Array.isArray(raw) ? raw : (raw?.layouts || (Array.isArray(r.data?.layouts) ? r.data.layouts : []));
+
+  $('#layoutCount').textContent = `${layoutsState.list.length} sơ đồ`;
+  const listErr = $('#layoutsListError');
+  if (listErr) listErr.textContent = '';
+
+  if (!layoutsState.list.length) {
+    box.innerHTML = '<p class="muted" style="padding:16px;margin:0">Chưa có sơ đồ ghế nào.</p>';
+    showLayoutPreview(null);
+    return;
+  }
+
+  if (!layoutsState.selectedId || !layoutsState.list.some(l => l.layout_id === layoutsState.selectedId)) {
+    layoutsState.selectedId = layoutsState.list[0].layout_id;
+  }
+
+  box.innerHTML = `<table>
+    <thead>
+      <tr>
+        <th>Sơ đồ</th>
+        <th style="white-space:nowrap">Thông số</th>
+        <th style="text-align:right;white-space:nowrap">Thao tác</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${layoutsState.list.map(l => {
+        const isSel = layoutsState.selectedId === l.layout_id;
+        const plates = l.used_by && l.used_by.length ? esc(l.used_by.join(', ')) : 'chưa gán';
+        return `<tr class="click ${isSel ? 'sel' : ''}" data-layout-id="${esc(l.layout_id)}">
+          <td>
+            <b>${esc(l.name)}</b> ${l.builtin ? '<span class="pill info">Có sẵn</span>' : ''}
+            <div class="muted" style="font-size:12px">đang dùng: ${plates}</div>
+          </td>
+          <td class="mono" style="font-size:12px;white-space:nowrap">
+            ${esc(l.total_decks || 1)} tầng · ${esc(l.total_seats || l.seats?.length || 0)} chỗ
+          </td>
+          <td style="text-align:right;white-space:nowrap">
+            <div class="row" style="gap:4px;justify-content:flex-end">
+              <button class="btn" style="padding:3px 8px;font-size:12px;white-space:nowrap" data-layout-clone="${esc(l.layout_id)}">Nhân bản</button>
+              ${!l.builtin ? `
+                <button class="btn" style="padding:3px 8px;font-size:12px;white-space:nowrap" data-layout-edit="${esc(l.layout_id)}">Sửa</button>
+                <button class="btn danger" style="padding:3px 8px;font-size:12px;white-space:nowrap" data-layout-del="${esc(l.layout_id)}">Xóa</button>
+              ` : ''}
+            </div>
+          </td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+
+  box.querySelectorAll('tr[data-layout-id]').forEach(tr => {
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      const lId = tr.dataset.layoutId;
+      layoutsState.selectedId = lId;
+      box.querySelectorAll('tr[data-layout-id]').forEach(rEl => rEl.classList.toggle('sel', rEl.dataset.layoutId === lId));
+      closeLayoutEditor();
+      const sel = layoutsState.list.find(x => x.layout_id === lId);
+      showLayoutPreview(sel);
+    });
+  });
+
+  box.querySelectorAll('button[data-layout-clone]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const l = layoutsState.list.find(x => x.layout_id === btn.dataset.layoutClone);
+      if (l) duplicateLayout(l);
+    });
+  });
+
+  box.querySelectorAll('button[data-layout-edit]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const l = layoutsState.list.find(x => x.layout_id === btn.dataset.layoutEdit);
+      if (l) editCustomLayout(l);
+    });
+  });
+
+  box.querySelectorAll('button[data-layout-del]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteLayoutTwoClick(btn, btn.dataset.layoutDel);
+    });
+  });
+
+  if ($('#layoutEditorCard').classList.contains('hidden')) {
+    const sel = layoutsState.list.find(l => l.layout_id === layoutsState.selectedId) || layoutsState.list[0];
+    showLayoutPreview(sel);
+  }
+}
+
+// ---------- platform admin ----------
+const directorEmails = {
+  op_saomai: 'admin@busgo.vn'
+};
+
+function showPlatformDirectorNotice(email, tempPassword) {
+  const box = $('#platformNoticeBox');
+  const content = $('#platformNoticeContent');
+  if (!box || !content) return;
+  content.innerHTML = `Tài khoản giám đốc ${esc(email)}, mật khẩu tạm: <b>${esc(tempPassword)}</b> — gửi cho giám đốc, chỉ hiện một lần; đăng nhập lần đầu phải đổi mật khẩu.`;
+  box.classList.remove('hidden');
+}
+
+$('#platformNoticeAckBtn')?.addEventListener('click', () => {
+  const box = $('#platformNoticeBox');
+  const content = $('#platformNoticeContent');
+  if (content) content.innerHTML = '';
+  if (box) box.classList.add('hidden');
+});
+
+async function loadPlatformOperatorPicker() {
+  const r = await api('/api/v1/platform/operators');
+  const list = r.ok ? (r.data.operators || r.data || []) : [];
+  $('#platformOperator').innerHTML = '<option value="">— Chọn nhà xe —</option>' + list.map(o => `<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)})${o.active ? '' : ' · tạm ngừng'}</option>`).join('');
+  $('#platformOperator').value = state.platformCode;
+}
+$('#platformOperator').addEventListener('change', (e) => { state.platformCode = e.target.value; if (state.view !== 'platform') show(state.view); });
+async function loadOperators() {
+  const r = await api('/api/v1/platform/operators');
+  if (!r.ok) { $('#operatorsBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.status === 404 ? 'Máy chủ chưa hỗ trợ quản trị nhà xe.' : r.message)}</p>`; return; }
+  const list = r.data.operators || r.data || [];
+  $('#operatorsBox').innerHTML = `<table><thead><tr><th>Nhà xe</th><th>Mã</th><th>Tài khoản nhận tiền</th><th>Trạng thái</th><th></th></tr></thead><tbody>${list.map(o => `<tr><td>${esc(o.name)}<div class="muted" style="font-size:12px">Tổng đài ${esc(o.hotline || '—')}</div></td><td class="mono">${esc(o.code)}<div><a href="/o/${encodeURIComponent(o.code)}" target="_blank" rel="noopener">Link + QR</a></div></td><td class="mono">${esc(o.bank?.bank_name || '')}<div>${esc(o.bank?.account_number || '')}</div></td><td>${o.active ? '<span class="pill ok">Hoạt động</span>' : '<span class="pill">Tạm ngừng</span>'}</td><td style="white-space:nowrap"><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn ${o.active ? 'danger' : ''}" data-op="${esc(o.operator_id)}" data-active="${o.active ? 1 : 0}">${o.active ? 'Tạm ngừng' : 'Kích hoạt'}</button><button class="btn" data-reset-dir="${esc(o.operator_id)}" data-op-code="${esc(o.code)}">Cấp lại mật khẩu giám đốc</button></div></td></tr>`).join('')}</tbody></table>`;
+  document.querySelectorAll('#operatorsBox button[data-op]').forEach(b => b.addEventListener('click', async () => {
+    const r2 = await api(`/api/v1/platform/operators/${encodeURIComponent(b.dataset.op)}/${b.dataset.active === '1' ? 'deactivate' : 'activate'}`, { method: 'POST', idempotent: true });
+    toast(r2.ok ? 'Đã cập nhật nhà xe' : r2.message); if (r2.ok) { loadOperators(); loadPlatformOperatorPicker(); }
+  }));
+  document.querySelectorAll('#operatorsBox button[data-reset-dir]').forEach(b => b.addEventListener('click', async () => {
+    if (!b.dataset.armed) {
+      b.dataset.armed = '1';
+      b.textContent = 'Cấp lại hẳn?';
+      setTimeout(() => {
+        if (b.isConnected) {
+          delete b.dataset.armed;
+          b.textContent = 'Cấp lại mật khẩu giám đốc';
+        }
+      }, 4000);
+      return;
+    }
+    delete b.dataset.armed;
+    b.textContent = 'Cấp lại mật khẩu giám đốc';
+    b.disabled = true;
+    const opId = b.dataset.resetDir;
+    const opCode = b.dataset.opCode;
+    const r2 = await api(`/api/v1/platform/operators/${encodeURIComponent(opId)}/director/reset-password`, { method: 'POST', idempotent: true });
+    b.disabled = false;
+    if (!r2.ok) {
+      toast(r2.message);
+      return;
+    }
+    const email = directorEmails[opId] || opCode;
+    showPlatformDirectorNotice(email, r2.data.temporary_password);
+    toast('Đã cấp lại mật khẩu giám đốc');
+  }));
+}
+$('#operatorForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const dirEmail = f.director_email.value.trim();
+  const dirName = f.director_name.value.trim();
+  const body = {
+    code: f.code.value.trim().toUpperCase(),
+    name: f.name.value.trim(),
+    short_name: f.short_name.value.trim() || undefined,
+    hotline: f.hotline.value.trim() || undefined,
+    director_email: dirEmail,
+    director_name: dirName,
+    bank: {
+      bin: f.bin.value.trim(),
+      bank_name: f.bank_name.value.trim(),
+      account_number: f.account_number.value.trim(),
+      account_name: f.account_name.value.trim()
+    }
+  };
+  const r = await api('/api/v1/platform/operators', { method: 'POST', idempotent: true, body });
+  $('#operatorError').textContent = r.ok ? '' : r.message;
+  if (r.ok) {
+    toast(`Đã tạo nhà xe ${body.code}`);
+    const email = r.data?.director?.username || dirEmail;
+    if (r.data?.operator_id) {
+      directorEmails[r.data.operator_id] = email;
+    }
+    showPlatformDirectorNotice(email, r.data?.temporary_password);
+    f.reset();
+    loadOperators();
+    loadPlatformOperatorPicker();
+  }
+});
+
+// ---------- start ----------
+(function restore() {
+  const saved = load('busgo_ops_session');
+  if (!saved) return;
+  try { const s = JSON.parse(saved); state.token = s.token; state.user = s.user; state.operator = s.operator; enter(); } catch (_) {}
+})();
+</script>
+</body>
+</html>

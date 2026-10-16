@@ -1,0 +1,18 @@
+sequenceDiagram
+    autonumber
+    actor HAIL as Khách vẫy
+    actor DRI as Tài xế (DRI-007)
+    participant GW as API server
+    participant INV as Kho ghế dùng chung
+    actor ONL as Khách online (PAX-009)
+    actor MGR as Điều hành (MGR-013, MGR-017)
+
+    HAIL->>DRI: lên xe, xin đi đến điểm xuống
+    DRI->>GW: POST /driver/trips/{id}/onboard-hail {seat_code, dropoff_stop_id}
+    GW->>INV: kiểm ghế trống, bán ghế
+    GW->>GW: giá do server đặt, tạo vé BOARDED
+    GW-->>DRI: 201 {ticket_id, pnr, fare}
+    GW-->>MGR: ghế BOOKED, đơn channel DRIVER_HAIL
+    ONL->>GW: POST /trips/{id}/seats/hold {seatCodes: [ghế vừa bán]}
+    GW-->>ONL: 409 SEAT_ALREADY_BOOKED
+    DRI->>HAIL: thu tiền mặt, đưa tiền thối nếu có

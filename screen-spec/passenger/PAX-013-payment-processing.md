@@ -116,9 +116,12 @@ Exit Points:
 ---
 
 ## 7. Business Rules
-- `BR-PAY-001`: Client listens to WebSocket event `PAYMENT_COMPLETED` on room `booking:{bookingId}`.
-- `BR-PAY-002`: When the WebSocket event fires, the client dismisses the webview/QR screen and transitions immediately to `PAX-014-payment-result.md` or `PAX-015-booking-success.md`.
-- `BR-PAY-003`: If user taps "Hủy thanh toán", display confirmation dialog: *"Bạn có chắc chắn muốn hủy giao dịch thanh toán này?"*.
+- `BR-PAY-001` (Payment Initiation & Idempotency): Payment transaction must include a valid idempotency key and match booking total amount exactly. Client listens to WebSocket event `PAYMENT_COMPLETED` on room `booking:{bookingId}`.
+- `BR-PAY-002` (Idempotent Webhooks & Instant Navigation): System accepts IPN webhook callbacks idempotently without re-issuing tickets. When the WebSocket event fires, client immediately navigates to `PAX-014-payment-result.md` or `PAX-015-booking-success.md`.
+- `BR-PAY-003` (App Lifecycle & Active Fallback Polling - REV-02): When the app returns to the foreground (resumes from banking app or multitasking), the client immediately queries `POST /api/v1/passenger/payments/:orderId/verify-status` and initiates a 3-second fallback polling loop to guarantee prompt payment resolution even if WebSocket disconnected during app switching.
+- `BR-PAY-004` (Manual Payment Confirmation Trigger - REV-02): Passenger tapping "Tôi đã chuyển tiền" triggers an immediate server-side bank reconciliation query, displaying a transient spinner without blocking the UI. **The tap never marks the order paid by itself (review FND-A15).** If the bank has not reported the transfer yet, the server answers `payment_status: PENDING_PAYMENT`, `is_settled: false`, `reconciliation_mode: MANUAL_RECONCILE_REQUESTED` and the screen keeps waiting. Only a verified bank notification settles an order.
+- `BR-PAY-006` (Server-side amount and seat lock - review FND-A13, FND-A16): The order total is computed by the server from the seat prices of the trip and the voucher; prices sent by the client are ignored. Creating the order requires a live `hold_id` owned by the same user and covering exactly the booked seats, otherwise `409 HOLD_INVALID`. On success the hold becomes a payment lock that lasts until the payment window of the order closes, so the seats cannot be sold to someone else while the passenger pays.
+- `BR-PAY-005` (Cancellation Confirmation): Tapping "Hủy thanh toán" displays confirmation dialog: *"Bạn có chắc chắn muốn hủy giao dịch thanh toán này?"* while preserving seat hold for remaining TTL.
 
 ---
 
@@ -127,6 +130,7 @@ Exit Points:
 - `ACCOUNT_NUMBER_COPIED`: `{ account: "9988221100" }`
 - `BANKING_APP_OPENED`: `{ bank_code: "MB" }`
 - `PAYMENT_WEBHOOK_RECEIVED`: `{ status: "SUCCESS", latency_ms: 6200 }`
+- `MANUAL_PAYMENT_VERIFY_TRIGGERED`: `{ order_id: "ord_88219a", trigger: "USER_CLICK" }`
 
 ---
 
@@ -156,3 +160,4 @@ Scenario: Realtime VietQR payment confirmation
 | :--- | :--- | :--- | :--- |
 | `TC-PAX-013-01` | Functional | Tap copy account button | Copies to clipboard, shows toast |
 | `TC-PAX-013-02` | Realtime | Receive `PAYMENT_COMPLETED` WS | Auto-navigates to Booking Success |
+| `TC-PAX-013-03` | Lifecycle | App resumes from background | Executes active status poll within 3s |

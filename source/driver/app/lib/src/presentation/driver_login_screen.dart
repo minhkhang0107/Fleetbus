@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
-import 'driver_today_trips_screen.dart';
+import 'package:flutter/services.dart';
 
+import 'driver_change_pin_screen.dart';
+import 'driver_store.dart';
+import 'driver_widgets.dart';
+import 'main_shell_screen.dart';
+
+/// DRI-001: staff id and 6-digit PIN. No GPS or device status before the shift starts (D101).
 class DriverLoginScreen extends StatefulWidget {
   const DriverLoginScreen({super.key});
 
@@ -9,168 +15,168 @@ class DriverLoginScreen extends StatefulWidget {
 }
 
 class _DriverLoginScreenState extends State<DriverLoginScreen> {
-  final TextEditingController _staffIdController = TextEditingController(text: 'TX8821');
-  final TextEditingController _pinController = TextEditingController(text: '123456');
-  bool _isLoading = false;
-  String? _errorMessage;
+  final _operator = TextEditingController();
+  final _id = TextEditingController();
+  final _pin = TextEditingController();
+  String? _error;
 
-  void _handleLogin() {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
+  @override
+  void initState() {
+    super.initState();
+    DriverStore.savedOperatorCode().then((code) {
+      if (mounted && code.isNotEmpty) {
+        setState(() => _operator.text = code);
+      }
     });
-
-    final staffId = _staffIdController.text.trim();
-    final pin = _pinController.text.trim();
-
-    if (staffId == 'TX8821' && pin == '123456') {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const DriverTodayTripsScreen()),
-      );
-    } else {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Mã nhân viên hoặc mã PIN không hợp lệ (Thử TX8821 / 123456)';
-      });
-    }
   }
 
   @override
   void dispose() {
-    _staffIdController.dispose();
-    _pinController.dispose();
+    _operator.dispose();
+    _id.dispose();
+    _pin.dispose();
     super.dispose();
   }
 
+  bool _busy = false;
+
+  Future<void> _submit() async {
+    setState(() => _busy = true);
+    final error = await DriverScope.read(context).login(_operator.text, _id.text, _pin.text);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (error != null) {
+      setState(() => _error = error);
+      return;
+    }
+    final store = DriverScope.read(context);
+    final target = store.mustChangePin ? const DriverChangePinScreen() : const MainShellScreen();
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => target));
+  }
+
+  Widget _brand({bool large = false}) {
+    final store = DriverScope.of(context);
+    final subtitle = store.operatorName.isNotEmpty ? store.operatorName : 'Ứng dụng cho tài xế và phụ xe';
+    return Row(children: [
+      // D146: the BusGo Driver logo (tools/brand).
+      Image.asset('assets/brand/logo.png', width: large ? 72 : 48, height: large ? 72 : 48),
+      SizedBox(width: large ? 16 : 12),
+      Flexible(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('BusGo Driver', style: dsans(size: large ? 30 : 20, weight: FontWeight.w700)),
+          Text(subtitle, style: dsans(size: large ? 16 : 13, color: DTokens.muted)),
+        ]),
+      ),
+    ]);
+  }
+
+  Widget _hotline() {
+    final store = DriverScope.of(context);
+    final number = store.operatorHotline.isNotEmpty ? store.operatorHotline : '1900 6868';
+    return Text.rich(
+      TextSpan(children: [
+        TextSpan(text: 'Quên PIN? Gọi điều độ ', style: dsans(size: 13, color: DTokens.muted)),
+        TextSpan(text: number, style: dmono(size: 13, weight: FontWeight.w600)),
+      ]),
+      textAlign: TextAlign.center,
+    );
+  }
+
+  List<Widget> _fields() => [
+        Text('MÃ NHÀ XE', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.sub)),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _operator,
+          style: dmono(size: 18, weight: FontWeight.w600),
+          decoration: const InputDecoration(hintText: 'Ví dụ SAOMAI'),
+          textCapitalization: TextCapitalization.characters,
+          maxLength: 20,
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
+            TextInputFormatter.withFunction((oldValue, newValue) => newValue.copyWith(text: newValue.text.toUpperCase())),
+          ],
+        ),
+        const SizedBox(height: 18),
+        Text('MÃ NHÂN VIÊN HOẶC SỐ ĐIỆN THOẠI', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.sub)),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _id,
+          style: dmono(size: 18, weight: FontWeight.w600),
+          maxLength: 20,
+          textInputAction: TextInputAction.next,
+        ),
+        const SizedBox(height: 18),
+        Text('MÃ PIN 6 SỐ', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.sub)),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _pin,
+          obscureText: true,
+          maxLength: 6,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          style: dmono(size: 18, weight: FontWeight.w600),
+          decoration: InputDecoration(counterText: '', errorText: _error, hintText: 'Nhập 6 số'),
+          onChanged: (_) {
+            if (_error != null) setState(() => _error = null);
+          },
+          onSubmitted: (_) => _submit(),
+        ),
+      ];
+
+  Widget _submitButton() => BigButton(label: _busy ? 'Đang vào ca…' : 'Vào ca', height: 72, onPressed: _busy ? null : _submit);
+
   @override
   Widget build(BuildContext context) {
+    if (dWide(context)) {
+      // Tablet: brand on the left, a 440 dp form on the right with the button right under the PIN.
+      return Scaffold(
+        body: SafeArea(
+          child: Row(children: [
+            Expanded(
+              child: Container(
+                color: DTokens.panel2,
+                padding: const EdgeInsets.all(48),
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  _brand(large: true),
+                  const SizedBox(height: 24),
+                  Text('Vào ca bằng mã nhân viên và mã PIN do nhà xe cấp.', style: dsans(size: 16, color: DTokens.sub, height: 1.5)),
+                ]),
+              ),
+            ),
+            Expanded(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(32),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 440),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                      ..._fields(),
+                      const SizedBox(height: 24),
+                      _submitButton(),
+                      const SizedBox(height: 12),
+                      _hotline(),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+          ]),
+        ),
+      );
+    }
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A), // Dark Tactical Canvas
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 32),
-              // Brand & Cockpit Header
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2563EB),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Icon(Icons.shield_rounded, color: Colors.white, size: 28),
-                  ),
-                  const SizedBox(width: 14),
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'BUSGO DRIVER COCKPIT',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          fontFamily: 'JetBrains Mono',
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                      Text(
-                        'Hệ thống buồng lái & Điều hành an toàn',
-                        style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 48),
-
-              const Text(
-                'Đăng nhập ca lái xe',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Yêu cầu giấy phép lái xe hạng FC còn hiệu lực',
-                style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
-              ),
-
-              const SizedBox(height: 32),
-
-              // Staff ID Input
-              TextFormField(
-                controller: _staffIdController,
-                style: const TextStyle(color: Colors.white, fontFamily: 'JetBrains Mono', fontWeight: FontWeight.bold),
-                decoration: InputDecoration(
-                  labelText: 'MÃ TÀI XẾ / NHÂN VIÊN',
-                  labelStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
-                  filled: true,
-                  fillColor: const Color(0xFF1E293B),
-                  prefixIcon: const Icon(Icons.badge_rounded, color: Color(0xFF2563EB)),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // PIN Input
-              TextFormField(
-                controller: _pinController,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                maxLength: 6,
-                style: const TextStyle(color: Colors.white, fontFamily: 'JetBrains Mono', fontSize: 18, letterSpacing: 8),
-                decoration: InputDecoration(
-                  labelText: 'MÃ PIN BẢO MẬT (6 SỐ)',
-                  labelStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
-                  counterText: '',
-                  filled: true,
-                  fillColor: const Color(0xFF1E293B),
-                  prefixIcon: const Icon(Icons.lock_rounded, color: Color(0xFF2563EB)),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                ),
-              ),
-
-              if (_errorMessage != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  _errorMessage!,
-                  style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12, fontWeight: FontWeight.bold),
-                ),
-              ],
-
-              const Spacer(),
-
-              // Login CTA
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _handleLogin,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2563EB),
-                    shape: BorderRadius.circular(16),
-                  ),
-                  child: _isLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text(
-                          'BẮT ĐẦU CA LÀM VIỆC',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                            fontFamily: 'JetBrains Mono',
-                          ),
-                        ),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-          ),
+          padding: const EdgeInsets.fromLTRB(16, 32, 16, 24),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _brand(),
+            const SizedBox(height: 28),
+            ..._fields(),
+            const Spacer(),
+            _submitButton(),
+            const SizedBox(height: 10),
+            _hotline(),
+          ]),
         ),
       ),
     );

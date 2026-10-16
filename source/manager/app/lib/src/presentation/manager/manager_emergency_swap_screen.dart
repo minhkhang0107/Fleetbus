@@ -51,7 +51,7 @@ class _ManagerEmergencySwapScreenState extends State<ManagerEmergencySwapScreen>
                       SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Chuyến xe gặp sự cố: TRP-HN-TH-01 · Xe 29B-882.19 (22 ghế) ➔ Thay thế bằng xe dự phòng 29B-999.01',
+                          'Chuyến xe gặp sự cố: TRP-HN-TH-01 · Xe 29B-882.19 (22 ghế) — Thay thế bằng xe dự phòng 29B-999.01',
                           style: TextStyle(color: ManagerColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 13),
                         ),
                       ),

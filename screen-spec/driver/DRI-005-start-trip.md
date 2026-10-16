@@ -56,6 +56,7 @@
 
 ## 3. Business Rules & API Contract
 - `BR-START-001`: Starting a trip requires Android Foreground Service notification with permission `ACCESS_FINE_LOCATION` and `ACCESS_BACKGROUND_LOCATION`.
+- `BR-START-002` (The manager sees the start - Phase C review FND-C10): Starting the trip sets the manager trip (`MGR-012`, `MGR-014`) and its vehicle to `IN_TRANSIT`.
 - **API Endpoint:** `POST /api/v1/driver/trips/{tripId}/start`
 - **Request Body:**
 ```json

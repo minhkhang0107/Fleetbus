@@ -1,0 +1,21 @@
+sequenceDiagram
+    autonumber
+    actor PAX as Hành khách
+    actor DRI as Tài xế (DRI-012)
+    participant GW as API server
+    actor CSH as Thu ngân (MGR-022)
+    actor MGR as Điều hành
+
+    PAX->>DRI: đưa 500.000 đ cho vé COD 220.000 đ
+    DRI->>GW: POST /driver/trips/{id}/payments/cod-collect {ticket_id, amount_collected_vnd: 500000, change_settlement_method: REST_STOP_DEBT_RECEIPT}
+    GW->>GW: giá lấy từ vé, tiền thừa 280.000 đ, tổng nợ chuyến trong hạn mức
+    GW-->>DRI: 200 {change_settlement: {debt_receipt_code: DR-...-280K}}
+    GW-->>MGR: đơn PAID, tiền COD đã thu
+    DRI-->>PAX: đưa mã biên lai
+    PAX->>CSH: xuất trình mã biên lai ở trạm dừng
+    CSH->>GW: POST /ops/debt-receipts/{code}/redeem {station_id}
+    GW->>GW: OUTSTANDING thành REDEEMED, ghi nhật ký kiểm toán
+    GW-->>CSH: 200 {amount_vnd: 280000, phone_masked}
+    CSH->>PAX: trả 280.000 đ
+    DRI->>GW: POST /driver/trips/{id}/end
+    GW-->>DRI: 200 {total_cash_to_handover_vnd, debt_receipts_summary}

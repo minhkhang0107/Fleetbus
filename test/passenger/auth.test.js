@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { PassengerAuthService } from '../../source/passenger-app/modules/auth.js';
+import { PassengerAuthService } from '../../source/server/services/passenger/modules/auth.js';
 
 describe('Phase 2: Authentication & Onboarding Test Suite', () => {
   it('TC-AUTH-01: App config should enforce force upgrade if client version < min_supported', () => {

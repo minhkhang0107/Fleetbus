@@ -49,6 +49,7 @@
 ---
 
 ## 3. Business Rules & Batch API Contract
+- `BR-SYNC-002` (Ordered, duplicate-safe telemetry replay - review FND-A44): `POST /driver/telemetry/batch-replay` applies the pings oldest first (a ping without `timestamp` keeps its place in the buffer), skips a ping already replayed (same trip and timestamp), skips an invalid ping (unknown trip, coordinates out of range), and never lets an older ping overwrite a newer position. Replayed pings leave the offline queue. The response reports `replayed_count`, `position_updates`, `duplicates_skipped` and `invalid_skipped`. With authentication enforced, only pings of the driver's own trips are accepted.
 - `BR-SYNC-001`: Synced boarding events use `Idempotency-Key` and original `scanned_at` device timestamp so backend manifest ordering is preserved accurately regardless of sync delay.
 - **API Endpoint:** `POST /api/v1/driver/telemetry/batch-replay`
 - **Request Body:**

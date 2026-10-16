@@ -49,13 +49,14 @@ describe('Phase Manager Web: Flutter Web Platform & Dashboard Integrity Test Sui
     const content = fs.readFileSync(serviceDartPath, 'utf8');
 
     assert.ok(content.includes('/ops/dashboard/kpis'), 'KPI endpoint must be defined');
-    assert.ok(content.includes('/ops/radar'), 'Radar endpoint must be defined');
-    assert.ok(content.includes('/ops/pos/bookings'), 'POS booking endpoint must be defined');
-    assert.ok(content.includes('/swap-vehicle'), 'Swap vehicle endpoint must be defined');
-    assert.ok(content.includes('/ops/reports/executive'), 'Executive reports endpoint must be defined');
+    // Canonical paths of api-screen-map; the exact set is checked by test/mobile/api_client_contract.test.js
+    assert.ok(content.includes('/ops/fleet/live-positions'), 'Radar endpoint must be defined');
+    assert.ok(content.includes('/ops/pos/orders'), 'POS booking endpoint must be defined');
+    assert.ok(content.includes('/replace-vehicle'), 'Replace vehicle endpoint must be defined');
+    assert.ok(content.includes('/ops/reports/yield'), 'Executive reports endpoint must be defined');
   });
 
-  it('TC-MGR-WEB-05: All required Manager Web screens must exist and cover MGR-001 to MGR-030', () => {
+  it('TC-MGR-WEB-05: The Manager Web screen files must exist (9 of the 30 MGR screens; the 21 missing are listed in docs/review/phase-B-findings.md)', () => {
     const requiredFiles = [
       'manager_login_screen.dart',
       'manager_dashboard_screen.dart',
@@ -72,5 +73,43 @@ describe('Phase Manager Web: Flutter Web Platform & Dashboard Integrity Test Sui
       const fullPath = path.join(presDir, file);
       assert.ok(fs.existsSync(fullPath), `Manager screen ${file} must exist`);
     }
+  });
+
+  it('TC-MGR-WEB-06: Dart syntax hygiene check — No JS triple equals (===) and No async Future in manager app', () => {
+    const checkDir = (dir) => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          checkDir(fullPath);
+        } else if (entry.isFile() && entry.name.endsWith('.dart')) {
+          const content = fs.readFileSync(fullPath, 'utf8');
+          assert.ok(!content.includes('==='), `File ${entry.name} must not contain JavaScript === operator`);
+          assert.ok(!content.includes('async Future'), `File ${entry.name} must not contain invalid async Future declaration`);
+        }
+      }
+    };
+    checkDir(path.join(managerDir, 'app/lib'));
+  });
+
+  it('TC-MGR-WEB-07: Manager Tactical Design Anti-Pattern check — Zero picture emojis in presentation screens', () => {
+    const emojiRegex = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}]/u;
+    const entries = fs.readdirSync(presDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.endsWith('.dart')) {
+        const content = fs.readFileSync(path.join(presDir, entry.name), 'utf8');
+        assert.ok(
+          !emojiRegex.test(content),
+          `Screen ${entry.name} violates design guidelines: contains picture emoji characters.`
+        );
+      }
+    }
+  });
+
+  it('TC-MGR-WEB-08: Manager Web Distribution must exist and match BusGo Operations Control Center', () => {
+    const webDistPath = path.join(managerDir, 'web_dist/index.html');
+    assert.ok(fs.existsSync(webDistPath), 'source/manager/web_dist/index.html must exist');
+    const content = fs.readFileSync(webDistPath, 'utf8');
+    assert.ok(content.includes('BusGo Operations') || content.includes('BusGo Manager'), 'Must contain BusGo Operations title');
   });
 });

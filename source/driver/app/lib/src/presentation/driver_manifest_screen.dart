@@ -1,127 +1,266 @@
 import 'package:flutter/material.dart';
-import 'package:resources/resources.dart';
 
+import 'driver_cod_dialog.dart';
+import 'driver_qr_scanner_screen.dart';
+import 'driver_store.dart';
+import 'driver_widgets.dart';
+
+/// DRI-007 / DRI-008: passengers of the current stop. A boarding changes the row in place;
+/// an unpaid COD ticket has one action, "Thu ... và cho lên xe" (BR-COD-006); "Vắng mặt" opens
+/// 10 minutes after the bus reached the stop (BR-NOSHOW-004).
 class DriverManifestScreen extends StatelessWidget {
   const DriverManifestScreen({super.key});
 
+  Future<void> _leave(BuildContext context, DriverStore store) async {
+    final waiting = store.atStopPassengers.where((p) => p.status == PaxStatus.waiting).toList();
+    if (waiting.isNotEmpty) {
+      final yes = await showDriverSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Còn ${waiting.length} khách chưa lên xe', style: dsans(size: 18, weight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Text('Ghế ${waiting.map((p) => p.seat).join(', ')}. Rời trạm thì các khách này vẫn ở trạng thái chưa xử lý; điều hành sẽ gọi cho họ.', style: dsans(size: 15, color: DTokens.sub, height: 1.5)),
+            const SizedBox(height: 14),
+            SheetActions(
+              primary: BigButton(label: 'Vẫn rời trạm', onPressed: () => Navigator.of(ctx).pop(true)),
+              secondary: BigButton(label: 'Chờ thêm', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop(false)),
+            ),
+          ]));
+      if (yes != true) return;
+    }
+    store.leaveStop();
+    if (context.mounted) Navigator.of(context).pop();
+  }
+
+  /// Spec A9: the bus cannot reach a home pickup. A quick reason, an optional meeting point; the passenger and
+  /// the office are told by the server.
+  static Future<void> reportInaccessible(BuildContext context, DriverStore store, Passenger p) async {
+    const reasons = ['Ngõ quá hẹp, xe không vào được', 'Đường cấm xe khách giờ này', 'Không tìm thấy địa chỉ'];
+    var reason = reasons.first;
+    final meet = TextEditingController();
+    final sent = await showDriverSheet<bool>(context, builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setSheet) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Không vào được địa chỉ ghế ${p.seat}', style: dsans(size: 18, weight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Text(p.homePickup ?? '', style: dsans(size: 15, color: DTokens.sub)),
+            const SizedBox(height: 12),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final r in reasons)
+                ChoiceChip(label: Text(r), selected: reason == r, onSelected: (_) => setSheet(() => reason = r)),
+            ]),
+            const SizedBox(height: 12),
+            TextField(controller: meet, maxLength: 200, style: dsans(size: 16), decoration: const InputDecoration(labelText: 'Hẹn khách ở đâu? (không bắt buộc)', hintText: 'VD: đầu ngõ, cổng chợ')),
+            const SizedBox(height: 8),
+            Text('Khách nhận thông báo; điều hành nhận cảnh báo để sắp xếp.', style: dsans(size: 13, color: DTokens.muted)),
+            const SizedBox(height: 14),
+            SheetActions(
+              primary: BigButton(label: 'Báo khách và điều hành', color: DTokens.warn, foreground: const Color(0xFF1C1917), onPressed: () => Navigator.of(ctx).pop(true)),
+              secondary: BigButton(label: 'Thôi', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop(false)),
+            ),
+          ]),
+        ));
+    if (sent != true || !context.mounted) return;
+    final error = await store.reportInaccessible(p, reason, meet.text.trim());
+    if (context.mounted) dToast(context, error ?? 'Đã báo khách ghế ${p.seat}');
+  }
+
+  Future<void> _noShow(BuildContext context, DriverStore store, Passenger p) async {
+    final yes = await showDriverSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('Đánh dấu ghế ${p.seat} vắng mặt?', style: dsans(size: 18, weight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          Text('${p.name} · ${p.phone}. Vé không được hoàn tiền, ghế được bán lại từ trạm này. Khách nhận thông báo.', style: dsans(size: 15, color: DTokens.sub, height: 1.5)),
+          const SizedBox(height: 14),
+          SheetActions(
+            primary: BigButton(label: 'Vắng mặt', color: DTokens.danger, onPressed: () => Navigator.of(ctx).pop(true)),
+            secondary: BigButton(label: 'Chờ thêm', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop(false)),
+          ),
+        ]));
+    if (yes != true || !context.mounted) return;
+    final error = await store.markNoShow(p);
+    if (!context.mounted) return;
+    dToast(context, error ?? 'Ghế ${p.seat} vắng mặt');
+  }
+
   @override
   Widget build(BuildContext context) {
+    final store = DriverScope.of(context);
+    final list = store.atStopPassengers;
+    final boarded = list.where((p) => p.status == PaxStatus.boarded).length;
+    final opensAt = hhmm(store.noShowFrom());
+    Widget row(Passenger p) => PassengerRow(
+          p: p,
+          noShowOpen: store.noShowOpen,
+          opensAt: opensAt,
+          onBoard: () async {
+            final error = await store.board(p);
+            if (context.mounted) dToast(context, error ?? 'Ghế ${p.seat} đã lên xe');
+          },
+          onCod: () => showCodSheet(context, p),
+          onNoShow: () => _noShow(context, store, p),
+          onInaccessible: () => reportInaccessible(context, store, p),
+        );
+    final drops = store.dropOffPassengers;
+    final allHandled = list.every((p) => p.status != PaxStatus.waiting);
+    final dropOff = drops.isEmpty
+        ? null
+        : Panel(
+            border: DTokens.line,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Khách xuống ở trạm này · ${drops.length}', style: dsans(size: 15, weight: FontWeight.w700, color: DTokens.warnInk)),
+              const SizedBox(height: 8),
+              for (final p in drops)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(children: [
+                    SizedBox(width: 52, child: Text(p.seat, style: dmono(size: 18))),
+                    Expanded(child: Text(p.homeDropoff != null ? '${p.name} · trả tận nhà: ${p.homeDropoff}' : p.name, style: dsans(size: 16, weight: FontWeight.w600))),
+                  ]),
+                ),
+            ]),
+          );
+    final scan = BigButton(label: 'Quét vé', height: dWide(context) ? 72 : 64, icon: Icons.qr_code_scanner, onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverQrScannerScreen())));
+    // A walk-up passenger at the stop is sold from here too, without going back to the cockpit.
+    final hail = BigButton(label: 'Khách vẫy', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => showHailSheet(context));
+    // Once nobody is left waiting, leaving the stop is the main action.
+    final leave = allHandled
+        ? BigButton(label: 'Rời trạm', color: DTokens.ok, height: 72, onPressed: () => _leave(context, store))
+        : BigButton(label: 'Rời trạm', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => _leave(context, store));
+    final empty = Panel(child: Text('Không có khách đón ở trạm này.', style: dsans(size: 16, color: DTokens.sub)));
+    final header = DHeader(
+      title: store.stop.name,
+      subtitle: 'Đón ${list.length} · trả ${drops.length} khách · rời trạm ${store.stop.time} · bây giờ ${hhmm(store.clock)}',
+      trailing: Text('$boarded/${list.length}', style: dmono(size: 16, color: DTokens.okInk)),
+    );
+    if (dWide(context)) {
+      // Tablet: stop summary and the two stop actions on the left, passenger cards two per row on the right.
+      return Scaffold(
+        appBar: header,
+        body: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Container(
+            width: 320,
+            padding: const EdgeInsets.all(20),
+            decoration: const BoxDecoration(border: Border(right: BorderSide(color: DTokens.lineSoft))),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Row(children: [
+                Expanded(child: Stat('Đã lên', '$boarded/${list.length}', color: DTokens.okInk, size: 28)),
+                const SizedBox(width: 8),
+                Expanded(child: Stat('Rời trạm', store.stop.time, size: 28)),
+              ]),
+              const SizedBox(height: 16),
+              scan,
+              const SizedBox(height: 10),
+              hail,
+              const Spacer(),
+              leave,
+            ]),
+          ),
+          Expanded(
+            child: LayoutBuilder(builder: (context, box) {
+              final cols = box.maxWidth >= 760 ? 2 : 1;
+              final cardWidth = (box.maxWidth - 40 - 12 * (cols - 1)) / cols;
+              return SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  if (dropOff != null) ...[dropOff, const SizedBox(height: 12)],
+                  list.isEmpty ? empty : Wrap(spacing: 12, runSpacing: 12, children: [for (final p in list) SizedBox(width: cardWidth, child: row(p))]),
+                ]),
+              );
+            }),
+          ),
+        ]),
+      );
+    }
     return Scaffold(
-      backgroundColor: AppColors.canvasOps,
-      appBar: AppBar(
-        backgroundColor: AppColors.canvasOps,
-        title: const Text('Danh sách khách (28 Khách)'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _buildManifestCard(
-            context,
-            seatCode: 'A01 (T1)',
-            name: 'Trần Văn Hùng',
-            phoneMasked: '098***112',
-            destination: 'Bến xe Ninh Bình',
-            status: 'ĐÃ LÊN XE',
-            isBoarded: true,
-          ),
-          const SizedBox(height: 12),
-          _buildManifestCard(
-            context,
-            seatCode: 'A02 (T1)',
-            name: 'Nguyễn Văn Nam',
-            phoneMasked: '098***321',
-            destination: 'Bến xe Phía Bắc',
-            status: 'CHƯA LÊN XE',
-            isBoarded: false,
-            codAmount: '220.000 đ',
-          ),
-        ],
+      appBar: header,
+      body: ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 16), children: [
+        scan,
+        const SizedBox(height: 8),
+        hail,
+        const SizedBox(height: 12),
+        if (dropOff != null) ...[dropOff, const SizedBox(height: 12)],
+        if (list.isEmpty) empty,
+        for (final p in list) ...[row(p), const SizedBox(height: 8)],
+      ]),
+      bottomNavigationBar: SafeArea(
+        child: Container(
+          decoration: const BoxDecoration(border: Border(top: BorderSide(color: DTokens.lineSoft))),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: leave,
+        ),
       ),
     );
   }
+}
 
-  Widget _buildManifestCard(
-    BuildContext context, {
-    required String seatCode,
-    required String name,
-    required String phoneMasked,
-    required String destination,
-    required String status,
-    required bool isBoarded,
-    String? codAmount,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surfacePanel,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isBoarded ? AppColors.emeraldSafe : AppColors.amberWarning,
-          width: 1.5,
-        ),
+class PassengerRow extends StatelessWidget {
+  const PassengerRow({required this.p, required this.noShowOpen, required this.opensAt, required this.onBoard, required this.onCod, required this.onNoShow, required this.onInaccessible});
+  final Passenger p;
+  final bool noShowOpen;
+  final String opensAt;
+  final VoidCallback onBoard;
+  final VoidCallback onCod;
+  final VoidCallback onNoShow;
+  final VoidCallback onInaccessible;
+
+  @override
+  Widget build(BuildContext context) {
+    final boardedAt = DriverScope.of(context).boardedTime(p);
+    final (pill, border) = switch (p.status) {
+      PaxStatus.boarded => (StatusPill(boardedAt == null ? 'Đã lên' : 'Đã lên ${hhmm(boardedAt)}', DPill.ok), const Color(0xFF166534)),
+      PaxStatus.noShow => (const StatusPill('Vắng mặt', DPill.mute), DTokens.line),
+      PaxStatus.waiting => p.codDue ? (const StatusPill('Chờ thu COD', DPill.warn), const Color(0xFFA16207)) : (const StatusPill('Chưa lên', DPill.mute), DTokens.line),
+    };
+    final noShowButton = SizedBox(
+      width: 112,
+      child: BigButton(
+        label: noShowOpen ? 'Vắng mặt' : 'Vắng · $opensAt',
+        outline: true,
+        color: const Color(0xFFE2E8F0),
+        onPressed: noShowOpen ? onNoShow : null,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: isBoarded ? AppColors.emeraldSoft : AppColors.amberSoft,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  status,
-                  style: TextStyle(
-                    fontFamily: 'JetBrains Mono',
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: isBoarded ? AppColors.emeraldSafe : AppColors.amberWarning,
+    );
+    return Opacity(
+      opacity: p.status == PaxStatus.noShow ? 0.7 : 1,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        decoration: BoxDecoration(color: DTokens.panel, borderRadius: BorderRadius.circular(10), border: Border.all(color: border)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            SizedBox(width: 44, child: Text(p.seat, style: dmono(size: 16))),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(p.name, style: dsans(size: 15, weight: FontWeight.w600)),
+                Text.rich(TextSpan(children: [
+                  TextSpan(text: p.phone, style: dmono(size: 12, weight: FontWeight.w500, color: DTokens.muted)),
+                  TextSpan(text: ' · ${p.pay} · xuống ${p.homeDropoff != null ? 'tận nhà' : DriverScope.of(context).stopById(p.to).short}', style: dsans(size: 12, color: DTokens.muted)),
+                ])),
+                if (p.homePickup != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text('Đón tận nhà${p.pickupWindow != null ? ' ${p.pickupWindow}' : ''}: ${p.homePickup}${p.homeNote.isNotEmpty ? ' · ${p.homeNote}' : ''}', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.warnInk)),
                   ),
-                ),
-              ),
-              Text(
-                seatCode,
-                style: const TextStyle(
-                  fontFamily: 'JetBrains Mono',
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.pnrOrange,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textHighContrast)),
-              Text(phoneMasked, style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 12, color: AppColors.textMuted)),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text('Trả tại: $destination', style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
-          if (codAmount != null) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: AppColors.amberSoft.withOpacity(0.4),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.amberWarning.withOpacity(0.4)),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('💵 Thu tiền mặt (COD):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.amberWarning)),
-                  Text(codAmount, style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
-                ],
-              ),
+                if (p.homePickup != null && p.inaccessible)
+                  Text('Đã báo không vào được${p.meetingPoint != null ? ' · hẹn ở ${p.meetingPoint}' : ''}', style: dsans(size: 13, color: DTokens.sub)),
+              ]),
             ),
+            pill,
+          ]),
+          if (p.status == PaxStatus.waiting) ...[
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                child: p.codDue
+                    ? BigButton(label: 'Thu ${vnd(p.cod)} và cho lên xe', color: DTokens.warn, foreground: const Color(0xFF1C1917), onPressed: onCod)
+                    : BigButton(label: 'Cho lên xe', color: DTokens.ok, onPressed: onBoard),
+              ),
+              const SizedBox(width: 8),
+              noShowButton,
+            ]),
+            if (p.homePickup != null && !p.inaccessible)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(onPressed: onInaccessible, style: TextButton.styleFrom(minimumSize: const Size(48, 44)), child: Text('Không vào được địa chỉ', style: dsans(size: 14, weight: FontWeight.w600, color: DTokens.warn))),
+              ),
           ],
-        ],
+        ]),
       ),
     );
   }

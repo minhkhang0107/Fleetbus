@@ -34,10 +34,10 @@ BusGo is a mission-critical transportation operating platform with three distinc
 ## 2. Color Palette & Semantic Tokens
 
 ### 2.1. Brand Colors
-- **Brand Primary (`brand.primary`):** `#0F52BA` (Sapphire Blue — trust, precision, authoritative transit)
-- **Brand Primary Hover / Active (`brand.primaryDark`):** `#0A387E`
-- **Brand Container / Subtle Surface (`brand.primaryContainer`):** `#EBF2FC`
-- **Brand Secondary Accent (`brand.accent`):** `#FF6B00` (Safety Amber — boarding alerts, countdown highlights)
+- **Brand Primary (`brand.primary`):** `#2563EB` (Sapphire Blue). Design review 2026-10-07 (D95): one primary for the three apps, the value the Flutter themes already use; the old `#0F52BA` existed only in this file.
+- **Brand Primary Hover / Active (`brand.primaryDark`):** `#1D4ED8`
+- **Brand Container / Subtle Surface (`brand.primaryContainer`):** `#EFF6FF`
+- **Brand Secondary Accent (`brand.accent`):** `#D97706` (Amber: hold countdowns, delays). The old `#FF6B00` is dropped: one amber for every warning. PNR codes keep `#C2410C` text on `#FFF7ED` (the old `#FB9821` text fails 4.5:1 on white).
 
 ### 2.2. Neutral Surfaces & Backgrounds
 - **Background Base (`surface.base`):**
@@ -52,7 +52,7 @@ BusGo is a mission-critical transportation operating platform with three distinc
 - **Border Subtle (`border.subtle`):**
   - Light: `#E2E8F0` (Slate 200)
   - Dark: `#475569` (Slate 600)
-- **Border Focus / Interactive (`border.focus`):** `#0F52BA`
+- **Border Focus / Interactive (`border.focus`):** `#2563EB`
 
 ### 2.3. Semantic Status Tokens (Strict Invariant: Never use color alone)
 | Token | Hex (Light) | Hex (Dark) | Semantic Usage |
@@ -67,7 +67,7 @@ BusGo is a mission-critical transportation operating platform with three distinc
 | Seat State Token | Fill Color | Border Color | Text Color | Accessibility Text Label |
 | :--- | :--- | :--- | :--- | :--- |
 | `seat.available` | `#FFFFFF` | `#94A3B8` | `#0F172A` | "Ghế trống cho chặng của bạn" |
-| `seat.selected` | `#0F52BA` | `#0A387E` | `#FFFFFF` | "Ghế đang được bạn chọn" |
+| `seat.selected` | `#2563EB` | `#1D4ED8` | `#FFFFFF` | "Ghế đang được bạn chọn" |
 | `seat.held` | `#FEF3C7` | `#F59E0B` | `#92400E` | "Ghế đang tạm giữ bởi khách khác" |
 | `seat.booked` | `#E2E8F0` | `#CBD5E1` | `#94A3B8` | "Ghế đã có khách đặt chặng này" |
 | `seat.blocked` | `#FEE2E2` | `#FCA5A5` | `#991B1B` | "Ghế khóa kỹ thuật / Không mở bán" |
@@ -133,7 +133,16 @@ BusGo is a mission-critical transportation operating platform with three distinc
 
 ## 6. Anti-Slop Visual Rules (Taste Skill Enforcement)
 
-1. **NO Generic AI Purple Gradients:** The brand primary is authoritative `#0F52BA`. Avoid random neon fuchsia / purple radial background glows.
+1. **NO Generic AI Purple Gradients:** The brand primary is `#2563EB`. Avoid random neon fuchsia / purple radial background glows.
 2. **NO 3-Layer Nested Cards:** Page -> Section -> Single Card Container. Do not wrap cards inside cards inside cards with redundant borders.
 3. **NO Arbitrary Asymmetry on Operations UI:** Tables, manifests, telemetry feeds, and radar lists must be strictly aligned, tabular, and scannable.
 4. **NO Emoji in Place of Icons:** All operational status icons must use standardized `@phosphor-icons` (or Lucide vector paths), never raw UTF-8 emoji glyphs.
+
+---
+
+## 7. Feedback, Status and Emoji Rules (design review 2026-10-07, D99 to D101)
+
+1. **No browser dialogs.** A result is never an `alert()` or `confirm()`. Use, by weight: an inline state change on the row (boarded, collected), a toast for a reversible success, a bottom sheet (mobile) or a side panel (web) for a result the user must read (scan result, issued PNR, refund), and a confirmation sheet before an irreversible action (end trip, vehicle swap, refund approval) that names the amount or the count affected.
+2. **No emoji anywhere**, including status pills, buttons and toasts. Icons are stroke SVG (Lucide or Phosphor). Every status carries a text label (`ĐÃ LÊN XE`, `CHỜ THU COD`), never color alone.
+3. **No developer copy in product screens.** Simulation buttons (`GIẢ LẬP ...`), test OTP codes, refresh rates (`60Hz`, `60 FPS`), protocol names (`MQTT`, `HMAC`, `Webhook`) and touch-target sizes (`72dp`) belong to a debug build, never to a screen in this spec.
+4. **Radius scale (all apps):** `4px` badges, `8px` inputs and buttons, `12px` cards and sheets, `9999px` pills. The passenger `16px` card radius is aligned to `12px`.

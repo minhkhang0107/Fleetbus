@@ -9,7 +9,8 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
   const TEST_PORT = 3999;
 
   before(async () => {
-    const { server } = createFleetBusServer();
+    // These tests exercise business behaviour through HTTP without tokens; authentication has its own suites
+    const { server } = createFleetBusServer({ authMode: 'off' });
     await new Promise((resolve) => {
       appServer = server.listen(TEST_PORT, () => {
         baseUrl = `http://127.0.0.1:${TEST_PORT}`;
@@ -131,6 +132,24 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     assert.strictEqual(todayRes.statusCode, 200);
     assert.ok(todayRes.body.data.trips.length > 0);
 
+    // Telemetry is only accepted for a running trip: complete the readiness checklist and start it
+    const readinessRes = await makeRequest('/api/v1/driver/trips/trp_991823/readiness', {
+      method: 'POST',
+      body: {
+        checklist: {
+          tires_checked: true,
+          brakes_fluid_checked: true,
+          ac_cleanliness_checked: true,
+          first_aid_extinguisher_checked: true,
+          fuel_level_sufficient: true,
+          gps_telemetry_beacon_active: true
+        }
+      }
+    });
+    assert.strictEqual(readinessRes.statusCode, 200);
+    const startRes = await makeRequest('/api/v1/driver/trips/trp_991823/start', { method: 'POST' });
+    assert.strictEqual(startRes.statusCode, 200);
+
     // Telemetry ping
     const telemetryRes = await makeRequest('/api/v1/driver/trips/trp_991823/telemetry', {
       method: 'POST',
@@ -149,7 +168,7 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     // Radar
     const radarRes = await makeRequest('/api/v1/ops/radar');
     assert.strictEqual(radarRes.statusCode, 200);
-    assert.strictEqual(radarRes.body.data.total_tracked_vehicles, 3);
+    assert.strictEqual(radarRes.body.data.total_tracked_vehicles, 4);
 
     // Fleet Roster
     const fleetRes = await makeRequest('/api/v1/ops/fleet/vehicles');
@@ -188,10 +207,170 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
 
     const drvView = await makeRequest('/driver');
     assert.strictEqual(drvView.statusCode, 200);
-    assert.ok(drvView.body.includes('BUSGO FLEET DRIVER'));
+    assert.ok(drvView.body.includes('BusGo Driver'));
 
     const mgrView = await makeRequest('/manager');
     assert.strictEqual(mgrView.statusCode, 200);
-    assert.ok(mgrView.body.includes('BUSGO OPS'));
+    assert.ok(mgrView.body.includes('BusGo Operations'));
+
+    // Design review D99 and D101: no browser dialogs, no emoji, no simulation control inside a product screen
+    for (const view of [passView, drvView, mgrView]) {
+      assert.ok(!/\b(alert|confirm|prompt)\(/.test(view.body), 'feedback is shown in the page, never in a browser dialog');
+      assert.ok(!/\p{Extended_Pictographic}/u.test(view.body), 'no emoji in the UI');
+      assert.ok(!/GIẢ LẬP/i.test(view.body), 'simulation controls stay out of the product screens');
+    }
+  });
+
+  it('TC-SRV-06: New Spec APIs (Payment verification, Group QR, Delegation, Onboard Hail, Hotline Hold - REV-01 to REV-06)', async () => {
+    // 1. Hotline Hold (MGR-020, REV-06)
+    const holdRes = await makeRequest('/api/v1/ops/pos/hotline-hold', {
+      method: 'POST',
+      body: {
+        tripId: 'trp_991823',
+        passengerName: 'Trần Thị Lan',
+        phone: '0912988776',
+        seatCodes: ['A04'],
+        holdPolicy: 'UNTIL_DEPARTURE_OFFSET',
+        departureOffsetMinutes: 30
+      }
+    });
+    assert.strictEqual(holdRes.statusCode, 201);
+    assert.strictEqual(holdRes.body.data.hold_status, 'HELD_HOTLINE');
+    assert.ok(holdRes.body.data.hold_until);
+
+    // 2. Onboard Hail Passenger (DRI-006, DRI-007, REV-05)
+    const hailRes = await makeRequest('/api/v1/driver/trips/trp_991823/onboard-hail', {
+      method: 'POST',
+      body: {
+        passenger_name: 'Khách Bắt Dọc Đường',
+        phone: '0988001122',
+        seat_code: 'B04',
+        fare_amount_vnd: 220000,
+        amount_collected_vnd: 250000,
+        change_settlement_method: 'CASH_RETURNED'
+      }
+    });
+    assert.strictEqual(hailRes.statusCode, 201);
+    assert.strictEqual(hailRes.body.data.boarding_status, 'BOARDED');
+    assert.strictEqual(hailRes.body.data.change_settlement.change_due_vnd, 30000);
+
+    // 3. Passenger Order creation and group QR retrieval / status verification (REV-01, REV-02)
+    const orderHoldRes = await makeRequest('/api/v1/trips/trp_hn_th_01/seats/hold', {
+      method: 'POST',
+      body: { seatCodes: ['A05', 'A06'], userId: 'usr_srv_test' }
+    });
+    assert.strictEqual(orderHoldRes.statusCode, 200);
+
+    const orderRes = await makeRequest('/api/v1/passenger/checkout/create-order', {
+      method: 'POST',
+      body: {
+        holdId: orderHoldRes.body.data.hold_id,
+        userId: 'usr_srv_test',
+        tripId: 'trp_hn_th_01',
+        seatCodes: ['A05', 'A06'],
+        payer: { full_name: 'Nguyễn Văn Server', phone: '0919888999' },
+        passengers: [
+          { full_name: 'Khách Một', phone: '0919888999' },
+          { full_name: 'Khách Hai', phone: '0919888000' }
+        ],
+        amountVnd: 440000,
+        pickupStop: 'Giáp Bát',
+        dropoffStop: 'Ninh Bình'
+      }
+    });
+    assert.strictEqual(orderRes.statusCode, 201);
+    const orderId = orderRes.body.data.payment.order_id;
+
+    // "Tôi đã chuyển tiền" (manual_trigger) only asks for reconciliation; it never settles (REV-02)
+    const manualRes = await makeRequest(`/api/v1/passenger/payments/${orderId}/verify-status`, {
+      method: 'POST',
+      body: { manual_trigger: true }
+    });
+    assert.strictEqual(manualRes.statusCode, 200);
+    assert.strictEqual(manualRes.body.data.payment_status, 'PENDING_PAYMENT');
+    assert.strictEqual(manualRes.body.data.is_settled, false);
+
+    // Money arrives through the bank webhook
+    const ipnRes = await makeRequest('/api/v1/webhooks/vietqr/ipn', {
+      method: 'POST',
+      body: {
+        transferMemo: orderRes.body.data.payment.payment_details.transfer_memo,
+        amountVnd: 440000,
+        bankRef: `tx_srv_${Date.now()}`
+      }
+    });
+    assert.strictEqual(ipnRes.statusCode, 200);
+    assert.strictEqual(ipnRes.body.data.settled, true);
+
+    const statusRes = await makeRequest(`/api/v1/passenger/payments/${orderId}/verify-status`, {
+      method: 'POST',
+      body: {}
+    });
+    assert.strictEqual(statusRes.statusCode, 200);
+    assert.strictEqual(statusRes.body.data.payment_status, 'PAID');
+    assert.strictEqual(statusRes.body.data.is_settled, true);
+
+    // Group QR (REV-01)
+    const groupQrRes = await makeRequest(`/api/v1/passenger/orders/${orderId}/group-qr`);
+    assert.strictEqual(groupQrRes.statusCode, 200);
+    assert.ok(groupQrRes.body.data.group_qr.qr_code_value.startsWith('BUSGO_GRP|'));
+    assert.strictEqual(groupQrRes.body.data.active_tickets_count, 2);
+
+    // Delegate Ticket (REV-01)
+    const ticketId = statusRes.body.data.tickets[1].ticket_id;
+    const delegateRes = await makeRequest(`/api/v1/passenger/tickets/${ticketId}/delegate`, {
+      method: 'POST',
+      body: {
+        delegateToPhone: '0919888000',
+        delegateToName: 'Khách 2'
+      }
+    });
+    assert.strictEqual(delegateRes.statusCode, 200);
+    assert.match(delegateRes.body.data.offline_pin, /^\d{6}$/);
+    assert.ok(delegateRes.body.data.share_link.startsWith('https://busgo.vn/pass/'));
+    assert.ok(!delegateRes.body.data.share_link.includes(delegateRes.body.data.offline_pin), 'the PIN never goes in a URL');
+  });
+
+  it('TC-SRV-07: Diagnostic, Manual Boarding, No-show & Manager Ops Queries', async () => {
+    // 1. Driver Manual Boarding with PIN (DRI-010)
+    const manualBoardRes = await makeRequest('/api/v1/driver/trips/trp_991823/boarding/manual', {
+      method: 'POST',
+      body: {
+        ticket_id: 'tkt_88192a',
+        pin: '682914'
+      }
+    });
+    // Validates route responsiveness (200 or 400 with detailed error)
+    assert.ok([200, 400].includes(manualBoardRes.statusCode));
+
+    // 2. Driver Mark No-Show (DRI-011)
+    const noShowRes = await makeRequest('/api/v1/driver/trips/trp_991823/tickets/tkt_no_show_test/no-show', {
+      method: 'POST',
+      body: { reason: 'Khách không có mặt sau 10 phút xuất bến' }
+    });
+    assert.strictEqual(noShowRes.statusCode, 404, 'a ticket that is not on the manifest is not found');
+    assert.strictEqual(noShowRes.body.code, 'TICKET_NOT_FOUND');
+
+    // 3. Driver Diagnostics & Profile (DRI-014, DRI-016, DRI-018)
+    const gpsHealthRes = await makeRequest('/api/v1/driver/system/gps-health');
+    assert.strictEqual(gpsHealthRes.statusCode, 200);
+    assert.strictEqual(gpsHealthRes.body.data.gps_signal, 'GOOD');
+
+    const diagPingRes = await makeRequest('/api/v1/driver/system/diagnostics-ping');
+    assert.strictEqual(diagPingRes.statusCode, 200);
+    assert.strictEqual(diagPingRes.body.data.gateway_status, 'HEALTHY');
+
+    const drvProfileRes = await makeRequest('/api/v1/driver/profile');
+    assert.strictEqual(drvProfileRes.statusCode, 200);
+    assert.strictEqual(drvProfileRes.body.data.license_class, 'FC');
+
+    // 4. Manager Bookings & Audit Logs (MGR-017, MGR-018, MGR-028)
+    const mgrBookingsRes = await makeRequest('/api/v1/ops/bookings');
+    assert.strictEqual(mgrBookingsRes.statusCode, 200);
+    assert.ok(Array.isArray(mgrBookingsRes.body.data.bookings));
+
+    const mgrAuditRes = await makeRequest('/api/v1/ops/audit-logs');
+    assert.strictEqual(mgrAuditRes.statusCode, 200);
+    assert.ok(Array.isArray(mgrAuditRes.body.data.audit_logs));
   });
 });

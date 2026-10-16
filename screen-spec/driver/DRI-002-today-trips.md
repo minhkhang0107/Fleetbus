@@ -7,6 +7,7 @@
 **Route:** `/driver/today-trips`  
 **Version:** 1.0  
 **Source Requirements:** `F-DRI-02`, `BR-DRI-002`, `UC-DRI-TRIP-001`  
+**Assignment rule (review FND-A42):** The list contains only the trips assigned to the signed-in driver. A driver with no assignment receives an empty list, never other drivers' trips.  
 **Taste-Skill Config:** `DESIGN_VARIANCE: 4`, `MOTION_INTENSITY: 3`, `VISUAL_DENSITY: 6`
 
 ---

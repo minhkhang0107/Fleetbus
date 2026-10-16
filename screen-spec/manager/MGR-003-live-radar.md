@@ -88,6 +88,8 @@
 
 ---
 
+- `BR-RADAR-001` (GPS health follows the last ping - Phase C review FND-C07): The position of a vehicle on the radar is the last ping of the vehicle that runs the trip (found through the trip, so a replacement vehicle takes over after `MGR-023`). `gps_health` is `LIVE` up to 60 s after the last ping, `STALE` after 60 s and `OFFLINE` after 180 s, the same thresholds as `PAX-018` (`BR-TRACK-002`). A vehicle that never pinged keeps its registered health. A stopped bus is still in transit: the vehicle status follows the trip (`DRI-005`, `DRI-017`), not the speed.
+
 ## 5. Acceptance Criteria & Test Matrix
 - **AC-001:** Clicking any bus marker on the map highlights its corresponding card in the right operational deck and centers the map camera.
 - **TC-MGR-003-01:** Verifies map renders 100+ moving vehicle markers simultaneously at $60\text{fps}$ without UI jank.

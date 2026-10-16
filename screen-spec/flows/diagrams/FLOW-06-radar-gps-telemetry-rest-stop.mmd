@@ -1,0 +1,21 @@
+sequenceDiagram
+    autonumber
+    actor DRI as Tài xế (DRI-006)
+    participant GW as API server
+    participant BR as Event Bridge
+    actor PAX as Hành khách (PAX-018)
+    actor MGR as Điều hành (MGR-003)
+
+    DRI->>GW: POST /driver/trips/{id}/telemetry {lat, lng, speed_kmh, bearing_deg}
+    GW->>BR: DRIVER_TELEMETRY (kèm thời điểm của ping)
+    BR-->>PAX: vị trí xe của chuyến
+    BR-->>MGR: vị trí xe chạy chuyến (qua chuyến, rồi biển số), last_ping_at
+    PAX->>GW: GET /trips/{id}/tracking (mỗi 10 giây)
+    GW-->>PAX: signal_status LIVE
+    Note over GW: không có ping mới
+    PAX->>GW: GET /trips/{id}/tracking (sau 61 giây)
+    GW-->>PAX: signal_status STALE
+    MGR->>GW: GET /ops/fleet/live-positions (sau 181 giây)
+    GW-->>MGR: gps_health OFFLINE
+    DRI->>GW: POST /driver/telemetry/batch-replay [ping đã đệm]
+    GW->>BR: DRIVER_TELEMETRY (ping mới nhất)

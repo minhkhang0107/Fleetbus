@@ -1,0 +1,23 @@
+sequenceDiagram
+    autonumber
+    actor PAX as Hành khách (PAX-017)
+    actor DRI as Tài xế (DRI-009/010/011)
+    participant GW as API server
+    participant BR as Event Bridge
+    actor MGR as Điều hành (MGR-012)
+
+    PAX->>GW: GET /tickets/{id}
+    GW-->>PAX: ticket + QR 30 giây
+    DRI->>GW: POST /driver/trips/{id}/boarding {qrPayload}
+    GW->>GW: kiểm chữ ký, cửa sổ thời gian, vé thuộc chuyến, chưa lên xe
+    GW-->>DRI: 200 BOARDED, số điện thoại đã che
+    GW->>BR: PASSENGER_BOARDED
+    BR-->>PAX: vé BOARDED, thông báo chào mừng
+    BR-->>MGR: boarded_passengers + 1
+    DRI->>GW: POST /driver/trips/{id}/boarding {qrPayload}
+    GW-->>DRI: 400 ALREADY_BOARDED
+    DRI->>GW: POST /driver/trips/{id}/tickets/{ticketId}/no-show
+    GW->>GW: sau giờ xuất bến 10 phút, khách còn chờ lên xe
+    GW->>BR: PASSENGER_NO_SHOW
+    BR-->>PAX: vé NO_SHOW, thông báo
+    BR-->>MGR: no_show_passengers + 1

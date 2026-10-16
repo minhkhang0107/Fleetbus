@@ -48,4 +48,5 @@
 
 ## 3. API Contract & Business Rules
 - **Endpoint:** `GET /api/v1/ops/dashboard/kpis` (Polling every $30\text{s}$ or WebSocket push).
+- **KPI definitions (review FND-A49):** every figure is computed from the data, never fixed. `gross_revenue_vnd` is the sum of paid fares; `refunded_vnd` is the sum of refunds approved in `MGR-022`; `net_revenue_vnd = gross - refunded`. `overall_load_factor_pct` is booked seats over seats of all trips. `on_time_departure_rate_pct` is the share of trips whose delay is at most 15 minutes. `fleet_average_speed_kmh` is the mean speed of the vehicles that are `IN_TRANSIT` and moving (0 when none). `corridors` lists, per route that has trips, its load factor and its number of running trips.
 - **TC-MGR-002-01:** Verifies metric cards calculate revenue, active trips, and load factors in real time.

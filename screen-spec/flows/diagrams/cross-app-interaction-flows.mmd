@@ -1,0 +1,11 @@
+flowchart TB
+    PAX["Passenger app (PAX)"] -->|REST| GW["API server"]
+    DRI["Driver app (DRI)"] -->|REST| GW
+    MGR["Manager portal (MGR)"] -->|REST| GW
+    BANK["Ngân hàng VietQR"] -->|webhook IPN| GW
+    GW --> BR["Event Bridge"]
+    BR --> INV["Kho ghế dùng chung"]
+    BR --> PAY["Vé và thanh toán"]
+    BR --> TRK["Theo dõi và thông báo"]
+    BR --> OPS["Điều hành"]
+    BR --> CAB["Tài xế"]

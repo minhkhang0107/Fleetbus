@@ -70,6 +70,7 @@
 | `CollectCodButton` | Button | Conditional | Ticket Fare State | Visible if COD pending | Opens `DRI-012-cod.md` |
 | `ManualBoardCTA` | Button | Yes | Manifest State | Enabled | Marks boarded with 1 tap (`DRI-010`) |
 | `MarkNoShowCTA` | Text CTA | Yes | Departure Time | Enabled after grace | Opens `DRI-011-no-show.md` |
+| `OnboardHailCTA` | Primary CTA | Yes | Manifest State | Enabled | Opens On-the-road Hail Passenger Sheet |
 
 ---
 
@@ -105,6 +106,38 @@
 }
 ```
 
+### 4.2. Onboard Hail Passenger (Đón khách vẫy dọc đường - REV-05)
+- **Endpoint:** `POST /api/v1/driver/trips/{tripId}/onboard-hail`
+- **Auth:** Bearer (Driver)
+- **Request Body:**
+```json
+{
+  "passenger_name": "Khách Vẫy Dọc Đường",
+  "phone": "0912345678",
+  "dropoff_stop_id": "stp_th_bx",
+  "seat_code": "B06",
+  "fare_amount_vnd": 180000,
+  "payment_method": "CASH",
+  "amount_collected_vnd": 200000,
+  "change_settlement_method": "CASH_RETURNED"
+}
+```
+- **Response `201 Created`:**
+```json
+{
+  "status": "success",
+  "data": {
+    "ticket_id": "tkt_hail_99120",
+    "pnr": "BG-HAIL-771",
+    "seat_code": "B06",
+    "boarding_status": "BOARDED",
+    "payment_status": "SUCCESS",
+    "amount_collected_vnd": 200000,
+    "change_due_vnd": 20000
+  }
+}
+```
+
 ---
 
 ## 5. Security & Privacy
@@ -112,6 +145,27 @@
 
 ---
 
-## 6. Acceptance Criteria & Test Matrix
+## 6. Business Rules (REV-05)
+- `BR-MAN-002` (Đón khách dọc đường):
+  - Phụ xe/tài xế chỉ được phép thêm khách vẫy dọc đường vào ghế còn trống (`VACANT`) trên chuyến xe.
+  - Ngay khi tạo thành công, vé được chuyển thẳng trạng thái `BOARDED`, `Payment` ghi nhận `SUCCESS` với tiền mặt thu tại chỗ, và tự động đồng bộ vào nhật trình xe để tính doanh thu ca trực của tài xế.
+
+---
+
+## 7. Acceptance Criteria & Test Matrix
 - **AC-001:** Manifest groups passengers by current stop by default; tapping "Lên xe" updates status to `BOARDED` and decrements pending count.
+- **AC-002:** Tapping "THÊM KHÁCH DỌC ĐƯỜNG" allows assigning an empty seat, instantly issuing a boarded ticket and recording cash payment.
 - **TC-DRI-007-01:** Verifies COD pending badge is visible only for unpaid tickets.
+- **BR-HAIL-002 (Server-side fare and checks - review FND-A40):** The hail fare is the trip fare set by the server; `fare_amount_vnd` sent by the client is ignored. The trip must be `IN_TRANSIT` (`400 TRIP_NOT_ACTIVE`), `seat_code` is required (`400 SEAT_REQUIRED`) and must be free (`409 SEAT_OCCUPIED`), cash received must cover the fare (`400 INSUFFICIENT_AMOUNT`), and a phone, when given, must be valid. `WALLET_CREDIT` for the change needs a phone (`400 WALLET_PHONE_REQUIRED`). No fabricated default phone is stored. Hail cash is tracked separately from COD cash (`total_hail_collected_vnd`).
+- **BR-HAIL-003 (Hail rides one segment - Phase E review, `OQ-028`):** The hail passenger rides from the stop the bus has reached (`current_stop_index`, set by `DRI-008`) to `dropoff_stop_id` (the last stop when omitted). The seat must be free for exactly that segment in the shared inventory and on the manifest: a seat sold earlier on the route, or already left by its passenger, is available; a seat sold for any stop between the current one and the drop-off is `409 SEAT_OCCUPIED`. An unknown drop-off gives `400 STOP_NOT_FOUND`, one that is not after the current stop `400 INVALID_SEGMENT`. The ticket carries `pickup_stop_id` and `dropoff_stop_id`.
+
+- **Privacy (OQ-007):** Every driver response shows only `phone_masked` (for example `098***456`). The full phone stays on the server for notifications.
+- **TC-DRI-007-02:** Verifies onboard hail passenger assigns vacant seat and marks ticket boarded.
+
+
+
+## Design review 2026-10-07: COD ticket boarding (D100)
+
+- `BR-COD-006`: an unpaid COD ticket boards **only** through the COD collection (`DRI-012`, `POST .../payments/cod-collect`), which marks it `BOARDED` in the same step. Manual boarding, PIN and QR scan of that ticket answer `409 COD_PAYMENT_REQUIRED` with `{ticket_id, seat_code, cod_amount_vnd}`; a group QR boards the paid members and lists the others in `cod_pending_passengers`.
+- UI: the manifest row of an unpaid COD ticket has one primary action **"Thu {giá} & cho lên xe"** (opens the `DRI-012` sheet), never a separate "Cho lên xe" button. A scan that returns `COD_PAYMENT_REQUIRED` opens the same sheet with the fare filled in.
+- Test: `test/server/cod_boarding_gate.test.js` (`TC-DSG-01` to `04`).

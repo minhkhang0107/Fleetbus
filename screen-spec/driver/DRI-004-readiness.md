@@ -12,7 +12,7 @@
 ---
 
 ## 1. Purpose & User Story
-- **Purpose:** Enforce mandatory pre-trip safety and physical vehicle verification before trip start: verify fuel level, tire pressure, brake test, air conditioning, emergency hammer & fire extinguisher, and input start odometer reading.
+- **Purpose:** Enforce mandatory pre-trip safety and physical vehicle verification before trip start: verify fuel level, tire pressure, brake test, air conditioning, emergency hammer & fire extinguisher.
 - **Actor:** Driver / Lead Technician.
 - **Entry Condition:** Proceeded from `DRI-003-trip-detail-prestart.md`.
 - **Outcome:** Checklist submitted; trip marked `READY_FOR_START`; advances to `DRI-005-start-trip.md`.
@@ -42,11 +42,6 @@
 │ │ ☑️ 6. Vệ sinh khoang khách & Túi rác sạch sẽ │  │
 │ └─────────────────────────────────────────────┘  │
 │                                                   │
-│ 🔢 SỐ CÔNG-TƠ-MÉT XUẤT PHÁT (Odometer)            │
-│ ┌─────────────────────────────────────────────┐   │
-│ │ [ 142850 ] km                               │   │
-│ └─────────────────────────────────────────────┘   │
-│                                                   │
 ├───────────────────────────────────────────────────┤
 │ [ TIẾP TỤC: XUẤT BẾN CHUYẾN ĐI (CTA - 64dp) ]     │
 └───────────────────────────────────────────────────┘
@@ -55,12 +50,11 @@
 ---
 
 ## 3. Business Rules & API Contract
-- `BR-READINESS-001`: All 6 checklist items must be checked and valid odometer reading entered before the Continue CTA unlocks.
+- `BR-READINESS-001`: All 6 checklist items must be checked before the Continue CTA unlocks.
 - **API Endpoint:** `POST /api/v1/driver/trips/{tripId}/readiness`
 - **Request Body:**
 ```json
 {
-  "odometer_start_km": 142850,
   "checklist": {
     "documents_valid": true,
     "fuel_ok": true,

@@ -32,6 +32,7 @@ Parent Screen: None (Active Drive Lock)
 Previous Screen: Locked from back navigation (Must explicitly tap "KẾT THÚC CHUYẾN" at final stop)
 Child Modals / Sub-screens:
   ├── [DRI-007 Manifest] (Tap "DANH SÁCH HÀNH KHÁCH")
+  │     └── [Onboard Hail Passenger] (Tap "➕ THÊM KHÁCH DỌC ĐƯỜNG")
   ├── [DRI-008 Stop Detail] (Tap Next Stop Card)
   ├── [DRI-009 Scan QR] (Tap "QUÉT VÉ QR")
   ├── [DRI-013 Navigation] (Tap "BẢN ĐỒ DẪN ĐƯỜNG")
@@ -129,6 +130,7 @@ Child Modals / Sub-screens:
 ---
 
 ## 7. Business Rules & Offline Resilience
+- `BR-COCKPIT-003` (Telemetry accepted only while running - review FND-A41): The server accepts a telemetry ping only for a trip in `IN_TRANSIT` (`400 TRIP_NOT_ACTIVE`) and only with a latitude in [-90, 90], a longitude in [-180, 180] and a non-negative speed (`400 INVALID_TELEMETRY`). Starting a trip (`DRI-005`) requires status `READY`, which is reached only after the whole readiness checklist is complete (`400 INVALID_TRIP_STATE`).
 - `BR-COCKPIT-001`: If cellular network is lost, the native Android service automatically diverts MQTT payloads into a local SQLite table (`offline_telemetry_queue`) with zero dropped frames.
 - `BR-COCKPIT-002`: When network returns, `DRI-015-offline-sync-center.md` flushes buffered telemetry in batched HTTP chunks (`POST /api/v1/driver/telemetry/batch-replay`).
 - `BR-COCKPIT-003`: The app acquires an Android WakeLock (`PARTIAL_WAKE_LOCK`) and screen stay-awake lock while in active trip mode.
@@ -149,3 +151,8 @@ Child Modals / Sub-screens:
 ## 9. Acceptance Criteria & Test Matrix
 - **AC-001:** Cockpit renders high-contrast metrics; tapping "QUÉT VÉ QR" opens the camera scanner within $<200\text{ms}$.
 - **TC-DRI-006-01:** Verifies background GPS continues publishing even when screen is locked or another app is opened.
+
+## Design review 2 (D107): nothing to tap while the bus moves
+
+- `BR-COCKPIT-005`: while the speed is above 5 km/h, the cockpit hides every action that needs reading or typing (scan, manifest, hail sale, end trip) and shows the next stop, the speed and one large "Báo sự cố" button. The actions come back when the bus stops. A co-driver uses the manifest on a second device under the same trip.
+- "Kết thúc chuyến" appears only at the last stop (`BR-END-005`).

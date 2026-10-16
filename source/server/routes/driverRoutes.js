@@ -4,18 +4,74 @@
  */
 
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { isProduction } from '../config.js';
+
+
+// An unpaid COD ticket is a 409 that tells the app which fare to collect (DRI-010, DRI-012).
+function sendBoardingError(res, result, status = 400) {
+  if (result.code === 'COD_PAYMENT_REQUIRED') {
+    sendError(res, result.error, result.code, 409, { ticket_id: result.ticket_id, seat_code: result.seat_code, cod_amount_vnd: result.cod_amount_vnd });
+    return;
+  }
+  sendError(res, result.error, result.code, status);
+}
+
+// App sends telemetry every 5 s; offline batches go through batch-replay without rate limit.
+export const lastAcceptedTelemetry = new Map();
+
+export function isTelemetryRateLimited(tripId, now = Date.now()) {
+  const lastTime = lastAcceptedTelemetry.get(tripId);
+  return typeof lastTime === 'number' && now - lastTime < 1000;
+}
+
+/** Adds each stop's planned time (and whether the company set it or it is estimated), as the passenger sees it. */
+function withStopTimes(trip, services) {
+  const times = services.searchService?.stopTimes?.(trip.trip_id) || {};
+  return { ...trip, stops: (trip.stops || []).map(s => ({ ...s, planned_time: times[s.stop_id]?.planned_time ?? null, time_source: times[s.stop_id]?.time_source ?? null })) };
+}
 
 export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   const { driverService } = services;
 
+
+  // With authentication enforced, a driver only reaches the trips assigned to them.
+  if (req.identity && pathname.startsWith('/api/v1/driver/trips/')) {
+    const tripId = pathname.split('/')[5];
+    const trip = driverService.activeTrips.get(tripId);
+    if (trip && trip.driver_id !== req.identity.sub) {
+      sendError(res, 'Chuyến xe không thuộc ca làm việc của bạn', 'FORBIDDEN', 403);
+      return true;
+    }
+  }
+
   // POST /api/v1/driver/auth/login or /api/v1/auth/driver/login (DRI-001)
   if ((pathname === '/api/v1/driver/auth/login' || pathname === '/api/v1/auth/driver/login') && req.method === 'POST') {
     parseJsonBody(req).then(body => {
-      const result = driverService.authenticateDriver(body.staffIdOrPhone || body.staff_id || body.username, body.pin || body.password);
+      const result = driverService.authenticateDriver(body.staffIdOrPhone || body.staff_id || body.username, body.pin || body.password, {}, Date.now(), req.operatorId);
       if (result.success) {
         sendSuccess(res, result.data);
       } else {
-        sendError(res, result.error, result.code, 401, result);
+        sendError(res, result.error, result.code, { ACCOUNT_LOCKED: 429, LICENSE_EXPIRED: 403, DRIVER_LOCKED: 403 }[result.code] || 401, result);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/driver/auth/change-pin (DRI-001)
+  if (pathname === '/api/v1/driver/auth/change-pin' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const driverId = req.identity?.sub;
+      if (!driverId) {
+        sendError(res, 'Cần đăng nhập để thực hiện thao tác này', 'UNAUTHORIZED', 401);
+        return;
+      }
+      const currentPin = body?.current_pin ?? body?.currentPin;
+      const newPin = body?.new_pin ?? body?.newPin;
+      const result = driverService.changePin(driverId, { currentPin, newPin }, req.operatorId);
+      if (result.success) {
+        sendSuccess(res, { success: true });
+      } else {
+        sendError(res, result.error, result.code, result.status || 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -23,9 +79,33 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
 
   // GET /api/v1/driver/trips/today (DRI-002)
   if (pathname === '/api/v1/driver/trips/today' && req.method === 'GET') {
-    const driverId = req.headers['x-driver-id'] || 'drv_8821a';
+    // The token decides who the driver is; the header is only a development fallback
+    const driverId = req.identity?.sub || req.headers['x-driver-id'] || 'drv_8821a';
     const result = driverService.getTodayTrips(driverId);
-    sendSuccess(res, result.data);
+    sendSuccess(res, { ...result.data, trips: (result.data.trips || []).map(t => withStopTimes(t, services)) });
+    return true;
+  }
+
+  // GET /api/v1/driver/trips/:tripId (DRI-003)
+  if (req.method === 'GET' && /^\/api\/v1\/driver\/trips\/[^/]+$/.test(pathname)) {
+    const result = driverService.getTrip(pathname.split('/')[5]);
+    if (result.success) {
+      sendSuccess(res, withStopTimes(result.data, services));
+    } else {
+      sendError(res, result.error, result.code, 404);
+    }
+    return true;
+  }
+
+  // POST /api/v1/driver/trips/:tripId/stops/:stopId/arrive (DRI-008)
+  if (req.method === 'POST' && /^\/api\/v1\/driver\/trips\/[^/]+\/stops\/[^/]+\/arrive$/.test(pathname)) {
+    const parts = pathname.split('/');
+    const result = driverService.arriveAtStop(parts[5], parts[7]);
+    if (result.success) {
+      sendSuccess(res, result.data);
+    } else {
+      sendError(res, result.error, result.code, ['TRIP_NOT_FOUND', 'STOP_NOT_FOUND'].includes(result.code) ? 404 : (result.code === 'STOP_OUT_OF_ORDER' ? 409 : 400));
+    }
     return true;
   }
 
@@ -62,17 +142,30 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
+      if (isTelemetryRateLimited(tripId)) {
+        sendError(res, 'Gửi vị trí quá dày, tối thiểu 1 giây một lần', 'TELEMETRY_RATE_LIMITED', 429);
+        return;
+      }
       const result = driverService.recordTelemetry(tripId, {
         lat: body.lat,
         lng: body.lng,
         speed_kmh: body.speed_kmh,
         bearing_deg: body.bearing_deg,
+        seq: body.seq,
+        recorded_at: body.recorded_at,
+        accuracy_m: body.accuracy_m,
         is_offline: body.is_offline
       });
       if (result.success) {
+        // A stale or too old ping is not an error: the app just moves on to the next one.
+        if (result.accepted === false) {
+          sendSuccess(res, { accepted: false, reason: result.reason });
+          return;
+        }
+        lastAcceptedTelemetry.set(tripId, Date.now());
         sendSuccess(res, result);
       } else {
-        sendError(res, result.error, 'TELEMETRY_ERROR', 400);
+        sendError(res, result.error, result.code || 'TELEMETRY_ERROR', result.code === 'TRIP_NOT_FOUND' ? 404 : (result.code === 'LOW_ACCURACY' ? 422 : 400));
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -82,21 +175,16 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   if (pathname.startsWith('/api/v1/driver/trips/') && pathname.endsWith('/manifest') && req.method === 'GET') {
     const parts = pathname.split('/');
     const tripId = parts[5];
-    const trip = driverService.activeTrips.get(tripId);
-    if (trip) {
-      sendSuccess(res, {
-        trip_id: tripId,
-        vehicle_plate: trip.vehicle_plate,
-        boarded_count: trip.boarded_count,
-        manifest: trip.manifest
-      });
+    const result = driverService.getManifest(tripId);
+    if (result.success) {
+      sendSuccess(res, result.data);
     } else {
-      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+      sendError(res, result.error, result.code, 404);
     }
     return true;
   }
 
-  // POST /api/v1/driver/trips/:tripId/board-qr or /api/v1/driver/trips/:tripId/boarding (DRI-009, DRI-010)
+  // POST /api/v1/driver/trips/:tripId/board-qr or /api/v1/driver/trips/:tripId/boarding (DRI-009)
   if (pathname.startsWith('/api/v1/driver/trips/') && (pathname.endsWith('/board-qr') || pathname.endsWith('/boarding')) && req.method === 'POST') {
     const parts = pathname.split('/');
     const tripId = parts[5];
@@ -106,8 +194,111 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
       if (result.success) {
         sendSuccess(res, result.data || result);
       } else {
-        sendError(res, result.error, result.code, 400);
+        sendBoardingError(res, result);
       }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/driver/trips/:tripId/home-run (DRI-020): set off to collect the home pickups before departure
+  if (req.method === 'POST' && /^\/api\/v1\/driver\/trips\/[^/]+\/home-run$/.test(pathname)) {
+    const result = driverService.startHomeRun(pathname.split('/')[5]);
+    if (result.success) {
+      sendSuccess(res, withStopTimes(result.data, services));
+    } else {
+      sendError(res, result.error, result.code, result.code === 'TRIP_NOT_FOUND' ? 404 : 409);
+    }
+    return true;
+  }
+
+  // POST /api/v1/driver/trips/:tripId/boarding/manual (DRI-010)
+  if (pathname.startsWith('/api/v1/driver/trips/') && pathname.endsWith('/boarding/manual') && req.method === 'POST') {
+    const parts = pathname.split('/');
+    const tripId = parts[5];
+    parseJsonBody(req).then(body => {
+      let qrOrPin = body.qrString || body.qrPayload;
+      if (body.pin && (body.ticket_id || body.ticketId)) {
+        qrOrPin = `PIN:${body.ticket_id || body.ticketId}:${body.pin}`;
+      }
+      if (qrOrPin) {
+        const result = driverService.boardPassengerByQR(tripId, qrOrPin, body.now);
+        if (result.success) {
+          sendSuccess(res, result.data || result);
+        } else {
+          sendBoardingError(res, result);
+        }
+      } else {
+        const result = driverService.boardPassengerManually(
+          tripId,
+          { ticketId: body.ticket_id || body.ticketId, seatCode: body.seat_code },
+          body.now
+        );
+        if (result.success) {
+          sendSuccess(res, result.data);
+        } else {
+          sendBoardingError(res, result, result.code === 'NOT_FOUND' || result.code === 'TRIP_NOT_FOUND' ? 404 : 400);
+        }
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/driver/trips/:tripId/tickets/:ticketId/no-show or /manifest/:ticketId/no-show (DRI-011)
+  if (pathname.startsWith('/api/v1/driver/trips/') && pathname.endsWith('/no-show') && req.method === 'POST') {
+    const parts = pathname.split('/');
+    const tripId = parts[5];
+    const ticketIndex = parts.indexOf('tickets') !== -1 ? parts.indexOf('tickets') : parts.indexOf('manifest');
+    const ticketId = ticketIndex !== -1 ? parts[ticketIndex + 1] : null;
+    parseJsonBody(req).then(body => {
+      const tId = ticketId || body.ticketId || body.ticket_id;
+      const result = driverService.markNoShow(tripId, tId, body.reason, {
+        // The grace period runs on the server clock; a client time is honoured in tests only.
+        mockNow: (!isProduction() && body.now) || Date.now(),
+        passengerRequestedCancel: Boolean(body.passenger_requested_cancel)
+      });
+      if (result.success) {
+        sendSuccess(res, result.data || result);
+      } else {
+        sendError(res, result.error, result.code, ['TRIP_NOT_FOUND', 'TICKET_NOT_FOUND'].includes(result.code) ? 404 : 400);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // D144: the home run. POST .../home-order {ticket_ids}; .../tickets/:id/home-arrived; .../tickets/:id/home-missed;
+  // .../tickets/:id/contact (the passenger's number for a call, logged).
+  const homeOrderMatch = pathname.match(/^\/api\/v1\/driver\/trips\/([^/]+)\/home-order$/);
+  if (homeOrderMatch && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const result = driverService.setHomeOrder(homeOrderMatch[1], body.ticket_ids ?? body.ticketIds);
+      if (result.success) sendSuccess(res, result.data);
+      else sendError(res, result.error, result.code, result.code === 'TRIP_NOT_FOUND' ? 404 : 400);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+  const homeTicket = pathname.match(/^\/api\/v1\/driver\/trips\/([^/]+)\/tickets\/([^/]+)\/(home-arrived|home-missed|contact)$/);
+  if (homeTicket && req.method === 'POST') {
+    const [, tripId, ticketId, action] = homeTicket;
+    const result = action === 'home-arrived'
+      ? driverService.homeArrived(tripId, ticketId)
+      : action === 'home-missed'
+        ? driverService.homeMissed(tripId, ticketId)
+        : driverService.passengerContact(tripId, ticketId);
+    if (result.success) sendSuccess(res, result.data);
+    else sendError(res, result.error, result.code, ['TRIP_NOT_FOUND', 'TICKET_NOT_FOUND'].includes(result.code) ? 404 : 409, result.missable_at ? { missable_at: result.missable_at } : null);
+    return true;
+  }
+
+  // POST /api/v1/driver/trips/:tripId/tickets/:ticketId/inaccessible (spec A9: home address not reachable)
+  const inaccessible = pathname.match(/^\/api\/v1\/driver\/trips\/([^/]+)\/tickets\/([^/]+)\/inaccessible$/);
+  if (inaccessible && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const result = driverService.reportInaccessibleAddress(inaccessible[1], inaccessible[2], {
+        reason: body.reason,
+        meetingPoint: body.meeting_point ?? body.meetingPoint
+      });
+      if (result.success) sendSuccess(res, result.data);
+      else sendError(res, result.error, result.code, ['TRIP_NOT_FOUND', 'TICKET_NOT_FOUND'].includes(result.code) ? 404 : (result.code === 'VALIDATION_ERROR' ? 400 : 409));
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
@@ -117,11 +308,27 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.collectCod(tripId, body.ticketId || body.ticket_id, body.amountVnd || body.amount_vnd);
+      const result = driverService.collectCod(tripId, body.ticketId || body.ticket_id, body);
       if (result.success) {
         sendSuccess(res, result.data || result);
       } else {
-        sendError(res, result.error, 'COD_ERROR', 400);
+        sendError(res, result.error, result.code || 'COD_ERROR', ['TRIP_NOT_FOUND', 'TICKET_NOT_FOUND'].includes(result.code) ? 404 : 400);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/driver/trips/:tripId/onboard-hail (DRI-006, DRI-007, REV-05)
+  if (pathname.startsWith('/api/v1/driver/trips/') && pathname.endsWith('/onboard-hail') && req.method === 'POST') {
+    const parts = pathname.split('/');
+    const tripId = parts[5];
+    parseJsonBody(req).then(body => {
+      const result = driverService.onboardHailPassenger(tripId, body, body.now);
+      if (result.success) {
+        sendSuccess(res, result.data || result, 201);
+      } else {
+        const status = result.code === 'TRIP_NOT_FOUND' ? 404 : (result.code === 'SEAT_OCCUPIED' ? 409 : 400);
+        sendError(res, result.error, result.code || 'HAIL_ERROR', status);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -132,11 +339,17 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.reportIncident(tripId, body.incidentType || body.type, body.description, body.estimatedDelayMinutes || body.delay_minutes);
+      const result = driverService.reportIncident(
+        tripId,
+        body.incidentType || body.type || body.incident_type,
+        body.description !== undefined ? body.description : (body.note !== undefined ? body.note : body.desc),
+        body.estimatedDelayMinutes || body.delay_minutes || 0,
+        { lat: body.lat, lng: body.lng }
+      );
       if (result.success) {
         sendSuccess(res, result);
       } else {
-        sendError(res, result.error, 'INCIDENT_ERROR', 400);
+        sendError(res, result.error, result.code || 'INCIDENT_ERROR', 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -145,7 +358,11 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   // POST /api/v1/driver/telemetry/batch-replay (DRI-015)
   if (pathname === '/api/v1/driver/telemetry/batch-replay' && req.method === 'POST') {
     parseJsonBody(req).then(body => {
-      const result = driverService.replayOfflineBuffer(body.telemetryBuffer || body.buffer || []);
+      let buffer = body.telemetryBuffer || body.buffer || [];
+      if (req.identity && Array.isArray(buffer)) {
+        buffer = buffer.filter(item => driverService.activeTrips.get(item.trip_id || item.tripId)?.driver_id === req.identity.sub);
+      }
+      const result = driverService.replayOfflineBuffer(buffer);
       sendSuccess(res, result);
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -156,13 +373,52 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.endTrip(tripId, body.endOdometerKm || body.odometer_km);
+      const result = driverService.endTrip(tripId, { earlyEndReason: body.early_end_reason ?? body.earlyEndReason });
       if (result.success) {
-        sendSuccess(res, result);
+        sendSuccess(res, result.data || result);
       } else {
-        sendError(res, result.error, result.code, 400);
+        sendError(res, result.error, result.code, result.code === 'TRIP_NOT_FOUND' ? 404 : 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/driver/system/gps-health (DRI-014)
+  if (pathname === '/api/v1/driver/system/gps-health' && req.method === 'GET') {
+    sendSuccess(res, {
+      gps_signal: 'GOOD',
+      satellites_locked: 14,
+      accuracy_meters: 4.2,
+      foreground_service_active: true,
+      battery_optimization_whitelisted: true,
+      mqtt_connection_status: 'ONLINE',
+      mqtt_rtt_ms: 42,
+      mock_location_detected: false,
+      buffered_offline_count: driverService.offlineQueue.length
+    });
+    return true;
+  }
+
+  // GET /api/v1/driver/system/diagnostics-ping (DRI-016)
+  if (pathname === '/api/v1/driver/system/diagnostics-ping' && req.method === 'GET') {
+    sendSuccess(res, {
+      gateway_status: 'HEALTHY',
+      api_latency_ms: 18,
+      mqtt_broker_status: 'CONNECTED',
+      timestamp: new Date().toISOString()
+    });
+    return true;
+  }
+
+  // GET /api/v1/driver/profile (DRI-018)
+  if (pathname === '/api/v1/driver/profile' && req.method === 'GET') {
+    const driverId = req.identity?.sub || req.headers['x-driver-id'] || 'drv_8821a';
+    const result = driverService.getProfile(driverId);
+    if (result.success) {
+      sendSuccess(res, result.data);
+    } else {
+      sendError(res, result.error, result.code, 404);
+    }
     return true;
   }
 

@@ -1,615 +1,570 @@
 <!DOCTYPE html>
-<html lang="vi" class="h-full">
+<html lang="vi">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BusGo Manager — Trung Tâm Điều Hành & Giám Sát Hoạt Động</title>
-
-  <!-- Typography: Geist & JetBrains Mono (Strictly NO Inter) -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            'canvas-light': '#F8FAFC',
-            'surface-panel': '#FFFFFF',
-            'surface-dark': '#0F172A',
-            'sidebar-active': '#1E293B',
-            'charcoal-ink': '#0F172A',
-            'text-muted': '#64748B',
-            'border-whisper': 'rgba(226, 232, 240, 0.8)',
-            'primary-sapphire': '#2563EB',
-            'primary-sapphire-soft': '#EFF6FF',
-            'emerald-safe': '#16A34A',
-            'emerald-soft': '#F0FDF4',
-            'amber-warning': '#D97706',
-            'amber-soft': '#FEF3C7',
-            'alert-critical': '#DC2626',
-            'alert-soft': '#FEF2F2',
-            'pnr-orange': '#FB9821',
-          },
-          fontFamily: {
-            sans: ['Geist', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
-          }
-        }
-      }
-    }
-  </script>
-
-  <style>
-    body {
-      font-family: 'Geist', sans-serif;
-      background-color: #F8FAFC;
-      color: #0F172A;
-      -webkit-font-smoothing: antialiased;
-    }
-    .font-mono-data {
-      font-family: 'JetBrains Mono', monospace;
-      font-feature-settings: "tnum";
-      font-variant-numeric: tabular-nums;
-    }
-    .nav-item {
-      display: flex;
-      align-items: center;
-      padding: 10px 14px;
-      font-size: 13px;
-      font-weight: 500;
-      color: #94A3B8;
-      border-radius: 8px;
-      transition: all 0.15s ease;
-      cursor: pointer;
-    }
-    .nav-item:hover {
-      color: #F8FAFC;
-      background-color: #1E293B;
-    }
-    .nav-item.active {
-      color: #FFFFFF;
-      background-color: #2563EB;
-      font-weight: 600;
-    }
-    .tab-content {
-      display: none;
-    }
-    .tab-content.active {
-      display: block;
-    }
-    .card-panel {
-      background: #FFFFFF;
-      border: 1px solid rgba(226, 232, 240, 0.8);
-      border-radius: 12px;
-      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
-    }
-    .table-header-cell {
-      padding: 10px 14px;
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: #64748B;
-      background-color: #F8FAFC;
-      border-bottom: 1px solid rgba(226, 232, 240, 0.8);
-    }
-    .table-body-cell {
-      padding: 12px 14px;
-      font-size: 13px;
-      border-bottom: 1px solid rgba(226, 232, 240, 0.6);
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BusGo Operations — Bảng điều hành</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<!--
+  Prototype of the BusGo Operations web portal, redesigned on 2026-10-07 (docs/review/design-review-findings.md, D95 to D102).
+  Rules shown here: staff 2FA for the director (OQ-027); one seat inventory for counter and hotline, 4 held seats per phone
+  (BR-POS-006); vehicle swap needs a STANDBY vehicle with enough seats and an eligible driver (BR-REPLACE-001..003);
+  refunds act on a request with a policy tier, once (BR-REFUND-002); a debt receipt is paid once (BR-REFUND-003).
+  No browser dialogs: results show in place, irreversible actions ask in a dialog that names the amount (D99). Static data.
+-->
+<style>
+:root{
+  --canvas:#F8FAFC;--surface:#FFFFFF;--ink:#0F172A;--muted:#475569;--line:#E2E8F0;--line-strong:#CBD5E1;
+  --primary:#2563EB;--primary-dark:#1D4ED8;--primary-soft:#EFF6FF;--nav:#0F172A;
+  --ok:#166534;--ok-soft:#DCFCE7;--warn:#D97706;--warn-ink:#78350F;--warn-soft:#FEF3C7;--danger:#B91C1C;--danger-soft:#FEE2E2;
+  --pnr:#C2410C;--pnr-soft:#FFF7ED;--mono:'JetBrains Mono',ui-monospace,monospace;--sans:Geist,system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html,body{margin:0;min-height:100%}
+body{background:var(--canvas);font-family:var(--sans);color:var(--ink);-webkit-font-smoothing:antialiased;font-size:14px}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+button:disabled{cursor:not-allowed;opacity:.55}
+a{color:var(--primary-dark)}
+.mono{font-family:var(--mono)}
+.shell{display:flex;flex-wrap:wrap;min-height:100vh}
+nav.side{flex:1 1 232px;max-width:100%;background:var(--nav);color:#CBD5E1;padding:20px 12px;display:flex;flex-direction:column;gap:18px}
+nav.side .brand{display:flex;flex-direction:column;padding:0 8px}
+nav.side .brand b{font-size:16px;color:#fff}
+nav.side .brand span{font-size:12px;color:#94A3B8}
+nav.side .grp{display:flex;flex-direction:column;gap:2px}
+nav.side .grp > span{font-size:11px;font-weight:600;letter-spacing:.06em;color:#64748B;padding:0 8px 6px}
+nav.side button{height:40px;padding:0 10px;border-radius:8px;border:0;background:transparent;color:#CBD5E1;display:flex;align-items:center;justify-content:space-between;font-size:14px;text-align:left}
+nav.side button:hover{background:#1E293B}
+nav.side button[aria-current=page]{background:#1E3A8A;color:#fff;font-weight:600}
+nav.side .count{font:600 12px var(--mono);background:#B91C1C;color:#fff;border-radius:9999px;padding:1px 7px}
+nav.side .foot{margin-top:auto;padding:0 8px;display:flex;flex-direction:column;gap:6px}
+main{flex:999 1 560px;min-width:0;padding:24px;display:flex;flex-direction:column;gap:16px}
+@media (min-width:900px){nav.side{flex:0 0 232px}}
+.page{display:none;flex-direction:column;gap:16px}
+.page.active{display:flex}
+.head{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+h1{margin:0;font-size:24px;font-weight:700;letter-spacing:-.01em}
+h2{margin:0;font-size:16px;font-weight:600}
+.sub{font-size:14px;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.card > h2{padding:14px 16px;border-bottom:1px solid var(--line)}
+.pad{padding:16px}
+.row{display:flex;align-items:center;gap:8px}
+.between{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.wrap{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.kpi{padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.kpi .v{font:700 26px var(--mono)}
+.kpi .k{font-size:13px;color:var(--muted)}
+.btn{height:40px;padding:0 14px;border-radius:8px;border:0;font-weight:600;font-size:14px;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{background:var(--primary-dark)}
+.btn-ghost{background:#fff;border:1px solid var(--line-strong);color:var(--ink)}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-warn{background:var(--warn);color:#1C1917}
+.btn-lg{height:48px;font-size:15px}
+.pill{font-size:12px;font-weight:600;padding:2px 8px;border-radius:9999px;white-space:nowrap;display:inline-block}
+.p-ok{color:var(--ok);background:var(--ok-soft)}
+.p-warn{color:var(--warn-ink);background:var(--warn-soft)}
+.p-info{color:#1E3A8A;background:#DBEAFE}
+.p-danger{color:#fff;background:var(--danger)}
+.p-mute{color:#334155;background:#F1F5F9}
+.tag{font-size:12px;font-weight:700;padding:2px 8px;border-radius:4px}
+.pnr{font:600 14px var(--mono);color:var(--pnr)}
+.field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#334155}
+.input{height:40px;border:1px solid var(--line-strong);border-radius:8px;padding:0 10px;background:#fff;font-size:14px;width:100%}
+.input:focus{outline:2px solid var(--primary);outline-offset:-1px}
+.input.err{border-color:var(--danger)}
+.err{font-size:13px;color:var(--danger)}
+textarea.input{height:auto;padding:10px;resize:vertical}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;color:var(--muted);font-size:12px;font-weight:600;padding:10px 8px}
+td{padding:12px 8px;border-top:1px solid #F1F5F9;vertical-align:middle}
+th:first-child,td:first-child{padding-left:16px}
+th:last-child,td:last-child{padding-right:16px}
+tr.sel td{background:var(--primary-soft)}
+.scroll{overflow-x:auto}
+.seg{display:flex;gap:4px;background:#E2E8F0;padding:4px;border-radius:8px}
+.seg button{height:36px;padding:0 14px;border:0;border-radius:6px;background:transparent;color:#334155;font-weight:600}
+.seg button[aria-selected=true]{background:#fff;color:var(--primary-dark);box-shadow:0 1px 2px rgba(15,23,42,.08)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#334155}
+.legend span{display:flex;align-items:center;gap:6px}
+.sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+.seatgrid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.seat{height:48px;border-radius:8px;font:600 14px var(--mono);border:1.5px solid #94A3B8;background:#fff}
+.seat.on{background:var(--primary);border-color:var(--primary-dark);color:#fff}
+.seat.held{background:var(--warn-soft);border-color:var(--warn);color:#92400E;opacity:1}
+.seat.booked{background:#E2E8F0;border-color:#E2E8F0;color:#64748B;opacity:1}
+.seat.blocked{background:var(--danger-soft);border-color:#FCA5A5;color:#991B1B;opacity:1}
+.opt{display:grid;grid-template-columns:18px 1fr auto;gap:12px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:8px;cursor:pointer}
+.opt:has(input:checked){border:1.5px solid var(--primary);background:var(--primary-soft)}
+.opt:has(input:disabled){color:#64748B;cursor:not-allowed}
+.opt input{width:18px;height:18px;margin:0;accent-color:var(--primary)}
+.notice{border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.5}
+.n-info{background:var(--primary-soft);border:1px solid #BFDBFE;color:#1E3A8A}
+.n-warn{background:var(--warn-soft);border:1px solid #FCD34D;color:var(--warn-ink)}
+.n-ok{background:#F0FDF4;border:1px solid #BBF7D0;color:var(--ok)}
+.n-err{background:#FEF2F2;border:1px solid #FECACA;color:var(--danger)}
+.map{min-height:560px;position:relative;background:#EEF2F6;border:1px solid var(--line);border-radius:12px;overflow:hidden;flex:2 1 520px;min-width:0}
+.marker{position:absolute;display:flex;flex-direction:column;align-items:center;gap:4px;border:0;background:transparent;padding:0}
+.marker .dot{width:18px;height:18px;border-radius:9999px}
+.marker .lbl{background:#fff;border:1px solid var(--line-strong);border-radius:6px;padding:2px 6px;font:600 12px var(--mono)}
+.modal{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
+.modal.show{display:flex}
+.dialog{background:#fff;border-radius:12px;max-width:480px;width:100%;padding:20px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 40px rgba(15,23,42,.25)}
+.toast{position:fixed;right:24px;bottom:24px;background:#0F172A;color:#fff;padding:12px 16px;border-radius:10px;display:none;z-index:60;max-width:420px}
+.toast.show{display:block}
+.login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+.login .card{width:100%;max-width:400px;padding:24px;display:flex;flex-direction:column;gap:14px}
+</style>
 </head>
-<body class="h-full flex overflow-hidden">
+<body>
 
-  <!-- ========================================================================= -->
-  <!-- FIXED 240px DARK COMMAND SIDEBAR -->
-  <!-- ========================================================================= -->
-  <aside class="w-60 bg-surface-dark flex flex-col justify-between select-none z-30 flex-shrink-0">
-    <div>
-      <!-- Brand Logo -->
-      <div class="h-14 flex items-center px-4 border-b border-slate-800 space-x-3">
-        <div class="w-8 h-8 bg-primary-sapphire rounded-lg flex items-center justify-center text-white font-bold shadow-md">
-          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
-        </div>
-        <div>
-          <span class="font-bold text-sm tracking-tight text-white block">BUSGO OPS</span>
-          <span class="text-[10px] text-slate-400 font-mono-data">v3.0.0 · Control Center</span>
-        </div>
-      </div>
-
-      <!-- Navigation Section Group -->
-      <div class="p-3 space-y-6">
-        <div>
-          <span class="px-3 text-[10px] uppercase font-bold text-slate-500 tracking-wider">TỔNG QUAN VẬN HÀNH</span>
-          <div class="mt-2 space-y-1">
-            <div onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-item active">
-              <svg class="w-4 h-4 mr-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
-              <span>Dashboard Hoạt Động</span>
-            </div>
-            <div onclick="switchTab('radar')" id="nav-radar" class="nav-item">
-              <svg class="w-4 h-4 mr-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
-              <span>Live Radar GPS</span>
-            </div>
-            <div onclick="switchTab('dispatch')" id="nav-dispatch" class="nav-item">
-              <svg class="w-4 h-4 mr-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="4" rx="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
-              <span>Bảng Điều Độ (Gantt)</span>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <span class="px-3 text-[10px] uppercase font-bold text-slate-500 tracking-wider">KINH DOANH & ĐẶT VÉ</span>
-          <div class="mt-2 space-y-1">
-            <div onclick="switchTab('pos')" id="nav-pos" class="nav-item">
-              <svg class="w-4 h-4 mr-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
-              <span>Bán Vé POS / Hotline</span>
-            </div>
-            <div onclick="switchTab('replacement')" id="nav-replacement" class="nav-item">
-              <svg class="w-4 h-4 mr-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></svg>
-              <span>Đổi Xe Khẩn Cấp (Wizard)</span>
-            </div>
-            <div onclick="switchTab('reconcile')" id="nav-reconcile" class="nav-item">
-              <svg class="w-4 h-4 mr-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-              <span>Đối Soát & Hoàn Tiền</span>
-            </div>
-          </div>
-        </div>
-      </div>
+<!-- MGR-001 Login with 2FA -->
+<div class="login" id="login">
+  <form class="card" onsubmit="return false" aria-label="Đăng nhập nhân viên">
+    <div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:20px;font-weight:700">BusGo Operations</span><span class="sub">Đăng nhập dành cho nhân viên điều hành</span></div>
+    <div id="lg-1" style="display:flex;flex-direction:column;gap:12px">
+      <label class="field">Tên đăng nhập<input class="input" id="lg-user" value="dung.nt" autocomplete="username"></label>
+      <label class="field">Mật khẩu<input class="input" id="lg-pass" type="password" autocomplete="current-password" placeholder="Mật khẩu của bạn"></label>
+      <label class="field">Vai trò (bản demo)<select class="input" id="lg-role"><option value="FLEET_DIRECTOR">Giám đốc điều hành</option><option value="DISPATCHER">Điều phối viên</option><option value="CASHIER">Thu ngân</option></select></label>
     </div>
-
-    <!-- Manager Account Profile Footer -->
-    <div class="p-3 border-t border-slate-800 bg-slate-900/60">
-      <div class="flex items-center space-x-3">
-        <div class="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs text-primary-sapphire font-mono-data">
-          TD
-        </div>
-        <div class="flex-1 min-w-0">
-          <p class="text-xs font-bold text-white truncate">Nguyễn Tiến Dũng</p>
-          <p class="text-[10px] text-slate-400 truncate">Giám Đốc Điều Hành (Admin)</p>
-        </div>
-      </div>
+    <div id="lg-2" style="display:none;flex-direction:column;gap:12px">
+      <span class="sub">Nhập mã 6 số từ ứng dụng xác thực trên điện thoại của bạn.</span>
+      <label class="field">Mã xác thực<input class="input mono" id="lg-totp" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></label>
     </div>
-  </aside>
+    <span class="err" id="lg-err" hidden></span>
+    <button class="btn btn-primary btn-lg" id="lg-go">Đăng nhập</button>
+  </form>
+</div>
 
-  <!-- ========================================================================= -->
-  <!-- MAIN OPERATIONAL WORKSPACE -->
-  <!-- ========================================================================= -->
-  <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
+<div class="shell" id="shell" hidden>
+  <nav class="side" aria-label="Menu điều hành">
+    <div class="brand"><b>BusGo Operations</b><span id="who"></span></div>
+    <div class="grp"><span>TỔNG QUAN</span>
+      <button data-page="dashboard">Bảng điều hành <i class="count" id="cnt-alerts"></i></button>
+      <button data-page="radar">Radar đội xe</button></div>
+    <div class="grp"><span>ĐIỀU ĐỘ</span>
+      <button data-page="dispatch">Bảng điều độ</button>
+      <button data-page="replace">Đổi xe khẩn cấp</button></div>
+    <div class="grp"><span>BÁN VÉ VÀ CSKH</span>
+      <button data-page="pos">Quầy vé và hotline</button>
+      <button data-page="refunds">Hoàn tiền và biên lai <i class="count" id="cnt-refunds"></i></button></div>
+    <div class="foot"><button style="padding:0" id="logout">Đăng xuất</button></div>
+  </nav>
 
-    <!-- Top Command & Live Status Bar -->
-    <header class="h-14 bg-white border-b border-border-whisper flex items-center justify-between px-6 z-20 flex-shrink-0">
-      <div class="flex items-center space-x-4 flex-1">
-        <div class="relative w-80">
-          <input type="text" placeholder="Tìm PNR, Biển số xe, SĐT khách (Phím /)..." class="w-full h-9 pl-9 pr-4 bg-slate-100/80 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-primary-sapphire focus:bg-white transition" />
-          <svg class="w-4 h-4 text-slate-400 absolute left-3 top-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-        </div>
+  <main>
+    <!-- MGR-002 Dashboard -->
+    <section class="page" data-page="dashboard">
+      <div class="head"><div><h1>Bảng điều hành</h1><span class="sub">Thứ Sáu 28/08/2026 · cập nhật 13:04</span></div>
+        <label class="row input" style="flex:0 1 360px;min-width:220px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="search" type="search" placeholder="Tìm mã vé, biển số" aria-label="Tìm kiếm" style="border:0;outline:none;flex:1;background:transparent"></label></div>
+      <div class="kpis" id="kpis"></div>
+      <div class="wrap">
+        <section class="card" style="flex:1 1 420px;min-width:0"><h2>Cần xử lý</h2><div id="alerts"></div></section>
+        <section class="card" style="flex:1.4 1 520px;min-width:0"><h2>Chuyến hôm nay</h2><div class="scroll"><table id="trips-mini" style="min-width:560px"></table></div></section>
       </div>
+    </section>
 
-      <div class="flex items-center space-x-4">
-        <div class="flex items-center space-x-2 bg-emerald-soft text-emerald-safe border border-emerald-safe/30 px-3 py-1 rounded-full text-xs font-bold font-mono-data">
-          <span class="w-2 h-2 bg-emerald-safe rounded-full animate-pulse"></span>
-          <span>ATC RADAR: ONLINE (60 FPS)</span>
-        </div>
-        <div class="flex items-center space-x-2 bg-amber-soft text-amber-warning border border-amber-warning/30 px-3 py-1 rounded-full text-xs font-bold font-mono-data">
-          <span>🚨 2 CẢNH BÁO HOẠT ĐỘNG</span>
-        </div>
+    <!-- MGR-003 Radar -->
+    <section class="page" data-page="radar">
+      <div class="head"><div><h1>Radar đội xe</h1><span class="sub">Vị trí cập nhật mỗi 3 giây</span></div>
+        <div class="legend"><span><i class="sw" style="background:#16A34A;border-radius:9999px"></i>Trực tiếp</span><span><i class="sw" style="border:2px dashed #D97706;border-radius:9999px"></i>Mất tín hiệu &gt; 60 giây</span><span><i class="sw" style="background:#64748B"></i>Ngoại tuyến &gt; 3 phút</span><span><i class="sw" style="background:#DC2626;border-radius:9999px"></i>Sự cố</span></div></div>
+      <div class="wrap" style="align-items:stretch">
+        <section class="map" aria-label="Bản đồ">
+          <svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice" style="position:absolute;inset:0;width:100%;height:100%" aria-hidden="true"><path d="M0 120 H800 M0 300 H800 M0 470 H800 M150 0 V600 M420 0 V600 M640 0 V600" stroke="#E2E8F0" stroke-width="14" fill="none"/><path d="M300 60 C 320 200, 300 320, 360 560" stroke="#94A3B8" stroke-width="6" fill="none" stroke-linecap="round"/><path d="M300 60 C 420 90, 560 120, 760 160" stroke="#94A3B8" stroke-width="6" fill="none" stroke-linecap="round"/></svg>
+          <div id="markers"></div>
+        </section>
+        <section class="card" style="flex:1 1 320px;min-width:0"><h2>Xe đang có chuyến</h2><div id="veh-list"></div></section>
       </div>
-    </header>
+    </section>
 
-    <!-- Scrollable Multi-Tab Content View -->
-    <div class="flex-1 overflow-y-auto p-6 space-y-6">
+    <!-- MGR-014 Dispatch + MGR-024 Delay -->
+    <section class="page" data-page="dispatch">
+      <div class="head"><div><h1>Bảng điều độ</h1><span class="sub">Xe, tài xế và ghế của các chuyến hôm nay</span></div></div>
+      <section class="card"><div class="scroll"><table id="dispatch" style="min-width:820px"></table></div></section>
+    </section>
 
-      <!-- ========================================================================= -->
-      <!-- TAB 1: EXECUTIVE OPERATIONS DASHBOARD (MGR-002) -->
-      <!-- ========================================================================= -->
-      <div id="tab-dashboard" class="tab-content active space-y-6">
-        <div>
-          <h1 class="text-xl font-bold text-charcoal-ink">Bảng Điều Hành Hoạt Động (Operations Dashboard)</h1>
-          <p class="text-xs text-text-muted">Tổng quan thời gian thực ca chạy ngày 28/08/2026</p>
-        </div>
-
-        <!-- 6-Metric KPI Tiles -->
-        <div class="grid grid-cols-6 gap-4">
-          <div class="card-panel p-4">
-            <span class="text-[11px] font-bold text-text-muted uppercase">Xe Đang Chạy</span>
-            <div class="flex items-baseline space-x-1.5 mt-2">
-              <span class="font-mono-data text-2xl font-bold text-primary-sapphire">2 / 3</span>
-              <span class="text-xs text-text-muted">Xe</span>
-            </div>
-            <span class="text-[10px] text-emerald-safe font-semibold">🟢 66.7% Đội xe hoạt động</span>
+    <!-- MGR-020 POS -->
+    <section class="page" data-page="pos">
+      <div class="head"><h1>Quầy vé và hotline</h1>
+        <div class="seg" role="tablist"><button role="tab" data-mode="sell">Bán tại quầy</button><button role="tab" data-mode="hold">Giữ chỗ qua hotline</button></div></div>
+      <div class="wrap">
+        <section class="card pad" style="flex:1.3 1 460px;min-width:0;display:flex;flex-direction:column;gap:14px">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
+            <label class="field">Chuyến<select class="input"><option>14:00 Hà Nội → Thanh Hóa · 29B-123.45</option></select></label>
+            <label class="field">Đón<select class="input" id="pos-from"><option value="0">Bến xe Giáp Bát</option><option value="1">Nút giao Pháp Vân</option><option value="2">Bến xe Ninh Bình</option></select></label>
+            <label class="field">Trả<select class="input" id="pos-to"><option value="2">Bến xe Ninh Bình</option><option value="3" selected>Bến xe Phía Bắc Thanh Hóa</option></select></label>
           </div>
-
-          <div class="card-panel p-4">
-            <span class="text-[11px] font-bold text-text-muted uppercase">Tỷ Lệ Lấp Đầy</span>
-            <div class="flex items-baseline space-x-1.5 mt-2">
-              <span class="font-mono-data text-2xl font-bold text-emerald-safe">85.7%</span>
-            </div>
-            <span class="text-[10px] text-text-muted">48 / 56 Chỗ đã bán</span>
-          </div>
-
-          <div class="card-panel p-4">
-            <span class="text-[11px] font-bold text-text-muted uppercase">Doanh Thu Hôm Nay</span>
-            <div class="flex items-baseline space-x-1.5 mt-2">
-              <span class="font-mono-data text-xl font-bold text-charcoal-ink">660.000 đ</span>
-            </div>
-            <span class="text-[10px] text-emerald-safe font-semibold">100% Thu tự động VietQR</span>
-          </div>
-
-          <div class="card-panel p-4">
-            <span class="text-[11px] font-bold text-text-muted uppercase">Đúng Giờ Xuất Bến</span>
-            <div class="flex items-baseline space-x-1.5 mt-2">
-              <span class="font-mono-data text-2xl font-bold text-emerald-safe">96.8%</span>
-            </div>
-            <span class="text-[10px] text-text-muted">Chuẩn KPI quốc gia</span>
-          </div>
-
-          <div class="card-panel p-4">
-            <span class="text-[11px] font-bold text-text-muted uppercase">Sự Cố Cần Xử Lý</span>
-            <div class="flex items-baseline space-x-1.5 mt-2">
-              <span class="font-mono-data text-2xl font-bold text-amber-warning">1</span>
-              <span class="text-xs text-text-muted">Cảnh báo</span>
-            </div>
-            <span class="text-[10px] text-amber-warning font-semibold">Trễ +35p cao tốc 5B</span>
-          </div>
-
-          <div class="card-panel p-4">
-            <span class="text-[11px] font-bold text-text-muted uppercase">Tốc Độ TB Đội Xe</span>
-            <div class="flex items-baseline space-x-1.5 mt-2">
-              <span class="font-mono-data text-2xl font-bold text-charcoal-ink">58.5</span>
-              <span class="text-xs text-text-muted">km/h</span>
-            </div>
-            <span class="text-[10px] text-emerald-safe font-semibold">Tất cả xe dưới 80 km/h</span>
-          </div>
-        </div>
-
-        <!-- Corridors & Alerts Split -->
-        <div class="grid grid-cols-3 gap-6">
-          <div class="card-panel p-5 col-span-2 space-y-4">
-            <h3 class="text-sm font-bold text-charcoal-ink">Tỷ lệ lấp đầy theo hành lang huyết mạch</h3>
-            <div class="space-y-3">
-              <div>
-                <div class="flex justify-between text-xs mb-1 font-semibold">
-                  <span>Hà Nội ➔ Thanh Hóa (Cao tốc Ninh Bình - Bãi Vọt)</span>
-                  <span class="font-mono-data text-primary-sapphire">94.2% · 28/34 Khách</span>
-                </div>
-                <div class="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div class="h-full bg-primary-sapphire rounded-full" style="width: 94.2%"></div>
-                </div>
-              </div>
-
-              <div>
-                <div class="flex justify-between text-xs mb-1 font-semibold">
-                  <span>Hà Nội ➔ Hải Phòng (Cao tốc 5B)</span>
-                  <span class="font-mono-data text-emerald-safe">90.9% · 20/22 Khách</span>
-                </div>
-                <div class="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div class="h-full bg-emerald-safe rounded-full" style="width: 90.9%"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="card-panel p-5 space-y-3">
-            <h3 class="text-sm font-bold text-charcoal-ink">Cảnh báo hoạt động cần xử lý</h3>
-            <div class="space-y-2.5">
-              <div class="p-3 bg-amber-soft border border-amber-warning/40 rounded-xl text-xs space-y-1">
-                <div class="flex justify-between font-bold text-amber-warning font-mono-data">
-                  <span>⚠️ XE 29B-444.11 TRỄ +35 PHÚT</span>
-                  <span>13:00</span>
-                </div>
-                <p class="text-slate-700">Chuyến trp_991824 kẹt xe tại đầu nút giao cao tốc 5B Đình Vũ.</p>
-              </div>
-
-              <div class="p-3 bg-emerald-soft border border-emerald-safe/40 rounded-xl text-xs space-y-1">
-                <div class="flex justify-between font-bold text-emerald-safe font-mono-data">
-                  <span>🟢 XE 29B-123.45 ON-TRACK</span>
-                  <span>13:02</span>
-                </div>
-                <p class="text-slate-700">Tốc độ 62 km/h, dự kiến đến Bến xe Ninh Bình sớm 5 phút.</p>
-              </div>
-            </div>
-          </div>
-        </div>
+          <div class="legend"><span><i class="sw" style="border:1.5px solid #94A3B8"></i>Trống cho đoạn này</span><span><i class="sw" style="background:var(--primary)"></i>Đang chọn</span><span><i class="sw" style="background:var(--warn-soft);border:1.5px solid var(--warn)"></i>Đang giữ</span><span><i class="sw" style="background:#E2E8F0"></i>Đã bán</span><span><i class="sw" style="background:var(--danger-soft);border:1.5px solid #FCA5A5"></i>Khóa kỹ thuật</span></div>
+          <div class="seatgrid" id="pos-seats"></div>
+        </section>
+        <section class="card pad" style="flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:12px">
+          <label class="field">Số điện thoại khách<input class="input mono" id="pos-phone" inputmode="numeric" placeholder="0988 776 655"></label>
+          <label class="field">Họ tên<input class="input" id="pos-name" placeholder="Họ và tên khách"></label>
+          <div id="pos-mode-panel" style="display:flex;flex-direction:column;gap:12px"></div>
+          <span class="err" id="pos-err" hidden></span>
+          <div id="pos-result"></div>
+        </section>
       </div>
+      <section class="card"><h2>Giữ chỗ hotline đang hiệu lực</h2><div class="scroll"><table id="holds" style="min-width:640px"></table></div></section>
+      <section class="card"><h2>Vé xuất tại quầy hôm nay</h2><div class="scroll"><table id="pos-history" style="min-width:640px"></table></div></section>
+    </section>
 
-      <!-- ========================================================================= -->
-      <!-- TAB 2: LIVE FLEET RADAR GPS (MGR-003, MGR-004) -->
-      <!-- ========================================================================= -->
-      <div id="tab-radar" class="tab-content space-y-4">
-        <div class="flex justify-between items-center">
-          <div>
-            <h2 class="text-xl font-bold text-charcoal-ink">Giám Sát Vị Trí Xe Trực Tiếp (Live Fleet Radar)</h2>
-            <p class="text-xs text-text-muted">Theo dõi GPS 60Hz, tốc độ xe và cảnh báo lệch lộ trình</p>
-          </div>
-          <button class="px-3.5 py-1.5 bg-primary-sapphire text-white font-bold text-xs rounded-lg shadow">
-            + BẬT CHẾ ĐỘ TOÀN MÀN HÌNH ATC
-          </button>
-        </div>
+    <!-- MGR-023 Replacement -->
+    <section class="page" data-page="replace">
+      <div style="display:flex;flex-direction:column;gap:4px"><h1 id="rp-title"></h1><span class="sub" id="rp-sub"></span></div>
+      <div id="rp-body"></div>
+    </section>
 
-        <div class="grid grid-cols-3 gap-6 h-[600px]">
-          <!-- Vector Map Canvas Simulation -->
-          <div class="card-panel col-span-2 bg-slate-900 border-slate-800 relative overflow-hidden flex flex-col justify-between p-4">
-            <div class="flex justify-between z-10">
-              <span class="bg-slate-800/90 text-white font-mono-data text-xs px-3 py-1 rounded-lg border border-slate-700">
-                🛰️ VỆ TINH: 14 BEACON KẾT NỐI
-              </span>
-              <span class="bg-emerald-safe/20 text-emerald-safe border border-emerald-safe px-3 py-1 rounded-lg text-xs font-bold font-mono-data">
-                TỌA ĐỘ TRUNG TÂM: 20.9812°N, 105.8430°E
-              </span>
-            </div>
-
-            <!-- Radar Graphic Elements -->
-            <div class="absolute inset-0 flex items-center justify-center opacity-20 pointer-events-none">
-              <div class="w-96 h-96 border border-emerald-safe rounded-full"></div>
-              <div class="w-64 h-64 border border-emerald-safe rounded-full absolute"></div>
-              <div class="w-32 h-32 border border-emerald-safe rounded-full absolute"></div>
-            </div>
-
-            <!-- Bus Marker 1 -->
-            <div class="absolute top-1/3 left-1/2 -translate-x-1/2 flex items-center space-x-2 bg-slate-900/95 border-2 border-emerald-safe px-3 py-1.5 rounded-xl shadow-2xl">
-              <div class="w-3 h-3 bg-emerald-safe rounded-full animate-ping"></div>
-              <div>
-                <span class="font-mono-data text-xs font-bold text-white block">29B-123.45</span>
-                <span class="text-[10px] text-emerald-safe font-mono-data">62 km/h · Đang đến Ninh Bình</span>
-              </div>
-            </div>
-
-            <div class="flex justify-between z-10 text-[11px] text-slate-400 font-mono-data">
-              <span>ĐỘ TRỄ MẠNG: 12ms</span>
-              <span>ĐỘ CHÍNH XÁC GPS: &lt; 2.5m</span>
-            </div>
-          </div>
-
-          <!-- Tracked Vehicle Queue List -->
-          <div class="card-panel p-4 flex flex-col justify-between">
-            <div class="space-y-3">
-              <h3 class="text-xs font-bold text-text-muted uppercase">Danh sách phương tiện đang chạy</h3>
-
-              <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                <div class="flex justify-between items-start">
-                  <span class="font-mono-data font-bold text-sm text-charcoal-ink">29B-123.45</span>
-                  <span class="font-mono-data text-[10px] bg-emerald-soft text-emerald-safe border border-emerald-safe/40 px-2 py-0.5 rounded font-bold">LIVE · 62 km/h</span>
-                </div>
-                <p class="text-xs text-text-muted">Tài xế: <b class="text-charcoal-ink">Trần Văn Bình</b> · Limousine 34</p>
-                <p class="text-xs text-slate-500">Tuyến: Hà Nội ➔ Thanh Hóa (Cao tốc)</p>
-              </div>
-
-              <div class="p-3 bg-amber-soft/40 border border-amber-warning/40 rounded-xl space-y-2">
-                <div class="flex justify-between items-start">
-                  <span class="font-mono-data font-bold text-sm text-charcoal-ink">29B-444.11</span>
-                  <span class="font-mono-data text-[10px] bg-amber-warning text-white px-2 py-0.5 rounded font-bold">STALE · TRỄ 35P</span>
-                </div>
-                <p class="text-xs text-text-muted">Tài xế: <b class="text-charcoal-ink">Lê Văn Toàn</b> · Cabin VIP 22</p>
-                <p class="text-xs text-slate-500">Tuyến: Hà Nội ➔ Hải Phòng (5B)</p>
-              </div>
-            </div>
-
-            <button onclick="switchTab('replacement')" class="w-full py-2.5 bg-slate-900 text-white font-bold text-xs rounded-xl shadow hover:bg-slate-800 transition">
-              ĐIỀU ĐỘNG ĐỔI XE KHẨN CẤP ➔
-            </button>
-          </div>
-        </div>
+    <!-- MGR-022 Refunds -->
+    <section class="page" data-page="refunds">
+      <div class="head"><h1>Hoàn tiền và biên lai nợ</h1></div>
+      <div class="wrap">
+        <section class="card" style="flex:1.6 1 520px;min-width:0">
+          <div class="between" style="padding:14px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap"><h2 id="rf-title"></h2><span class="sub">Mức hoàn do hệ thống tính theo chính sách</span></div>
+          <div class="scroll"><table id="refunds" style="min-width:640px"></table></div>
+          <div id="rf-detail" style="padding:16px"></div>
+        </section>
+        <section class="card pad" style="flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:12px">
+          <h2>Trả biên lai nợ tiền thừa</h2>
+          <label class="field">Mã biên lai khách đưa<span class="row"><input class="input mono" id="dr-code" placeholder="DR-A02-280K"><button class="btn btn-ghost" id="dr-find">Tra cứu</button></span></label>
+          <div id="dr-result"></div>
+        </section>
       </div>
-
-      <!-- ========================================================================= -->
-      <!-- TAB 3: DISPATCH BOARD (MGR-014) -->
-      <!-- ========================================================================= -->
-      <div id="tab-dispatch" class="tab-content space-y-4">
-        <div>
-          <h2 class="text-xl font-bold text-charcoal-ink">Bảng Điều Độ Chuyến Xe (Dispatch Board)</h2>
-          <p class="text-xs text-text-muted">Quản lý lịch phân tài, biển số xe và tình trạng đặt vé</p>
-        </div>
-
-        <div class="card-panel overflow-hidden">
-          <table class="w-full text-left border-collapse">
-            <thead>
-              <tr>
-                <th class="table-header-cell">Mã Chuyến</th>
-                <th class="table-header-cell">Tuyến Đường</th>
-                <th class="table-header-cell">Biển Số Xe</th>
-                <th class="table-header-cell">Tài Xế Phân Ca</th>
-                <th class="table-header-cell">Giờ Xuất Bến</th>
-                <th class="table-header-cell">Tình Trạng Ghế</th>
-                <th class="table-header-cell">Trạng Thái</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td class="table-body-cell font-mono-data font-bold text-primary-sapphire">trp_991823</td>
-                <td class="table-body-cell font-semibold">Hà Nội — Thanh Hóa</td>
-                <td class="table-body-cell font-mono-data font-bold">29B-123.45</td>
-                <td class="table-body-cell">Trần Văn Bình (TX8821)</td>
-                <td class="table-body-cell font-mono-data">14:00 (28/08)</td>
-                <td class="table-body-cell font-mono-data font-bold text-emerald-safe">28 / 34 Chỗ</td>
-                <td class="table-body-cell"><span class="px-2.5 py-1 bg-emerald-soft text-emerald-safe border border-emerald-safe/40 rounded-full text-xs font-bold font-mono-data">IN_TRANSIT</span></td>
-              </tr>
-              <tr>
-                <td class="table-body-cell font-mono-data font-bold text-primary-sapphire">trp_991824</td>
-                <td class="table-body-cell font-semibold">Hà Nội — Hải Phòng</td>
-                <td class="table-body-cell font-mono-data font-bold">29B-444.11</td>
-                <td class="table-body-cell">Lê Văn Toàn (TX7712)</td>
-                <td class="table-body-cell font-mono-data">15:30 (28/08)</td>
-                <td class="table-body-cell font-mono-data font-bold text-emerald-safe">20 / 22 Chỗ</td>
-                <td class="table-body-cell"><span class="px-2.5 py-1 bg-amber-soft text-amber-warning border border-amber-warning/40 rounded-full text-xs font-bold font-mono-data">DELAY +35P</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- ========================================================================= -->
-      <!-- TAB 4: POS COUNTER & HOTLINE BOOKING (MGR-019, MGR-020) -->
-      <!-- ========================================================================= -->
-      <div id="tab-pos" class="tab-content space-y-4">
-        <div>
-          <h2 class="text-xl font-bold text-charcoal-ink">Bán Vé Tại Quầy POS & Đặt Vé Qua Tổng Đài Hotline</h2>
-          <p class="text-xs text-text-muted">Xuất vé nhanh cho khách gọi điện hoặc mua trực tiếp tại bến</p>
-        </div>
-
-        <div class="grid grid-cols-3 gap-6">
-          <div class="card-panel p-5 space-y-4">
-            <h3 class="text-sm font-bold text-charcoal-ink uppercase">Thông tin khách hàng</h3>
-            <div class="space-y-3">
-              <div>
-                <label class="block text-xs font-semibold text-text-muted mb-1">Họ và tên khách</label>
-                <input id="pos-name" type="text" value="Lê Minh Tâm" class="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold" />
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-text-muted mb-1">Số điện thoại</label>
-                <input id="pos-phone" type="text" value="0988776655" class="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-lg font-mono-data text-sm font-bold" />
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-text-muted mb-1">Chuyến xe</label>
-                <select class="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold">
-                  <option>14:00 - Hà Nội ➔ Thanh Hóa (29B-123.45)</option>
-                </select>
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-text-muted mb-1">Số ghế chỉ định</label>
-                <input id="pos-seat" type="text" value="A03" class="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-lg font-mono-data text-sm font-bold text-primary-sapphire" />
-              </div>
-            </div>
-
-            <button onclick="handleCreatePOSBooking()" class="w-full h-12 bg-primary-sapphire text-white font-bold text-sm rounded-xl shadow hover:bg-blue-600 transition">
-              XUẤT VÉ POS & IN MÃ PNR ➔
-            </button>
-          </div>
-
-          <div class="card-panel p-5 col-span-2 space-y-3">
-            <h3 class="text-sm font-bold text-charcoal-ink uppercase">Lịch sử xuất vé tại quầy hôm nay</h3>
-            <div class="space-y-2" id="pos-history-list">
-              <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl flex justify-between items-center">
-                <div>
-                  <span class="font-mono-data font-bold text-sm text-pnr-orange">BG-99412</span>
-                  <span class="text-xs font-bold text-charcoal-ink ml-2">Nguyễn Thị Hoa · Ghế B01</span>
-                  <p class="text-[11px] text-text-muted">Chuyến 14:00 (Hà Nội - Thanh Hóa) · Đã thanh toán 220.000 đ</p>
-                </div>
-                <span class="px-2.5 py-1 bg-emerald-soft text-emerald-safe border border-emerald-safe/40 rounded-full text-xs font-bold font-mono-data">PAID</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ========================================================================= -->
-      <!-- TAB 5: EMERGENCY VEHICLE REPLACEMENT (MGR-023) -->
-      <!-- ========================================================================= -->
-      <div id="tab-replacement" class="tab-content space-y-4">
-        <div>
-          <h2 class="text-xl font-bold text-charcoal-ink">Quy Trình Đổi Xe Khẩn Cấp (Emergency Vehicle Replacement)</h2>
-          <p class="text-xs text-text-muted">Tự động ánh xạ chuyển đổi chỗ ngồi và thông báo cho 28 hành khách</p>
-        </div>
-
-        <div class="card-panel p-6 space-y-6">
-          <div class="grid grid-cols-2 gap-8">
-            <div class="p-4 bg-alert-soft/60 border border-alert-critical/40 rounded-2xl space-y-3">
-              <span class="text-xs font-bold text-alert-critical uppercase">XE GẶP SỰ CỐ (XE CŨ)</span>
-              <h3 class="text-lg font-bold text-charcoal-ink font-mono-data">29B-123.45 (Limousine 34)</h3>
-              <p class="text-xs text-text-muted">Số khách cần chuyển chỗ: <b class="font-mono-data text-charcoal-ink font-bold">28 Hành khách</b></p>
-            </div>
-
-            <div class="p-4 bg-emerald-soft border border-emerald-safe/40 rounded-2xl space-y-3">
-              <span class="text-xs font-bold text-emerald-safe uppercase">XE THAY THẾ (DỰ PHÒNG TẠI BẾN)</span>
-              <h3 class="text-lg font-bold text-charcoal-ink font-mono-data">29B-888.22 (Sleeper 34)</h3>
-              <p class="text-xs text-text-muted">Trạng thái: <b class="text-emerald-safe font-bold">SẴN SÀNG ĐIỀU ĐỘNG NGAY</b></p>
-            </div>
-          </div>
-
-          <button onclick="handleExecuteReplacement()" class="w-full h-14 bg-amber-warning text-white font-bold text-base rounded-xl shadow-lg hover:bg-amber-600 transition flex items-center justify-center space-x-2">
-            <span>XÁC NHẬN ĐIỀU ĐỘNG XE 29B-888.22 & ÁNH XẠ TOÀN BỘ 28 GHẾ ➔</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- ========================================================================= -->
-      <!-- TAB 6: RECONCILIATION & REFUNDS (MGR-021, MGR-022) -->
-      <!-- ========================================================================= -->
-      <div id="tab-reconcile" class="tab-content space-y-4">
-        <div>
-          <h2 class="text-xl font-bold text-charcoal-ink">Đối Soát Tài Chính & Xử Lý Hoàn Tiền (Reconciliation & Refunds)</h2>
-          <p class="text-xs text-text-muted">Khớp nối sổ cái cổng thanh toán Napas247 / VietQR với dữ liệu bán vé</p>
-        </div>
-
-        <div class="card-panel overflow-hidden">
-          <table class="w-full text-left border-collapse">
-            <thead>
-              <tr>
-                <th class="table-header-cell">Mã PNR</th>
-                <th class="table-header-cell">Hành Khách</th>
-                <th class="table-header-cell">Số Tiền</th>
-                <th class="table-header-cell">Cổng Thanh Toán</th>
-                <th class="table-header-cell">Trạng Thái Sổ Cái</th>
-                <th class="table-header-cell">Thao Tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td class="table-body-cell font-mono-data font-bold text-pnr-orange">BG-88219</td>
-                <td class="table-body-cell font-semibold">Trần Văn Hùng</td>
-                <td class="table-body-cell font-mono-data font-bold">440.000 đ</td>
-                <td class="table-body-cell font-mono-data text-xs">VietQR Napas247</td>
-                <td class="table-body-cell"><span class="px-2.5 py-1 bg-emerald-soft text-emerald-safe border border-emerald-safe/40 rounded-full text-xs font-bold font-mono-data">MATCHED 100%</span></td>
-                <td class="table-body-cell">
-                  <button onclick="handleRefund('BG-88219')" class="px-3 py-1 bg-alert-critical text-white font-bold text-xs rounded-lg hover:bg-red-700 transition">
-                    PHÊ DUYỆT HOÀN TIỀN
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-    </div>
+    </section>
   </main>
+</div>
 
-  <script>
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+<div class="modal" id="modal"><div class="dialog" role="dialog" aria-modal="true" id="dialog"></div></div>
+<div class="toast" role="status" id="toast"></div>
 
-      const targetTab = document.getElementById('tab-' + tabId);
-      const targetNav = document.getElementById('nav-' + tabId);
+<script>
+(function () {
+  'use strict';
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const vnd = (n) => n.toLocaleString('vi-VN') + ' đ';
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-      if (targetTab) targetTab.classList.add('active');
-      if (targetNav) targetNav.classList.add('active');
-    }
+  const ROLES = { FLEET_DIRECTOR: 'Giám đốc điều hành', DISPATCHER: 'Điều phối viên', CASHIER: 'Thu ngân' };
+  const CAN = {
+    FLEET_DIRECTOR: ['dashboard', 'radar', 'dispatch', 'replace', 'pos', 'refunds'],
+    DISPATCHER: ['dashboard', 'radar', 'dispatch', 'replace', 'pos'],
+    CASHIER: ['dashboard', 'pos', 'refunds']
+  };
+  const S = {
+    role: null, page: 'dashboard', mode: 'sell', picked: [], replaceTrip: 'trp_991824', pnrSeq: 9899,
+    trips: [
+      { id: 'trp_991822', dep: '07:00', route: 'Hà Nội → Thanh Hóa', plate: '29B-882.19', driver: 'Hoàng Văn Sơn', sold: 14, cap: 22, status: 'IN_TRANSIT', delay: 40, gps: 'STALE', x: 37, y: 14, speed: 0 },
+      { id: 'trp_991823', dep: '14:00', route: 'Hà Nội → Thanh Hóa', plate: '29B-123.45', driver: 'Trần Văn Bình', sold: 28, cap: 34, status: 'SCHEDULED', delay: 0, gps: 'LIVE', x: 39, y: 46, speed: 62 },
+      { id: 'trp_991824', dep: '15:30', route: 'Hà Nội → Hải Phòng', plate: '29B-444.11', driver: 'Lê Văn Toàn', sold: 20, cap: 22, status: 'INCIDENT', delay: 0, gps: 'LIVE', x: 66, y: 20, speed: 0 }
+    ],
+    vehicles: [
+      { plate: '29B-888.22', type: 'Giường nằm 34 chỗ', seats: 34, at: 'bến Giáp Bát', status: 'STANDBY' },
+      { plate: '29B-555.10', type: 'Limousine 16 chỗ', seats: 16, at: 'bến Mỹ Đình', status: 'STANDBY' },
+      { plate: '29B-777.01', type: 'Giường nằm 34 chỗ', seats: 34, at: 'xưởng', status: 'MAINTENANCE' }
+    ],
+    drivers: [
+      { id: 'TX5530', name: 'Nguyễn Hữu Phước', ok: true, note: 'Trong ca · bằng FC còn hạn đến 03/2028' },
+      { id: 'TX6102', name: 'Đặng Quốc Việt', ok: false, note: 'Bằng lái hết hạn 15/08/2026' }
+    ],
+    alerts: [
+      { id: 'a1', kind: 'INCIDENT', trip: 'trp_991824', at: '13:00', text: 'Xe hỏng tại nút giao cao tốc 5B, ước tính chậm 35 phút. 20 khách trên chuyến 15:30 Hà Nội → Hải Phòng.' },
+      { id: 'a2', kind: 'GPS', trip: 'trp_991822', at: '2 phút', text: 'Không nhận vị trí từ 07:52. Khách đang theo dõi xe thấy cảnh báo cùng lúc.' },
+      { id: 'a3', kind: 'PAYMENT', pnr: 'BG-551920', text: 'Khách chuyển 200.000 đ cho đơn 220.000 đ. Chưa xuất vé, đã mở yêu cầu trả lại tiền.' }
+    ],
+    seats: { A01: 'booked', A02: 'booked', A04: 'held', A08: 'booked', A11: 'blocked', B01: 'booked', B02: 'booked', B04: 'booked', B07: 'held', B09: 'booked', B11: 'booked' },
+    holds: [{ id: 'H-301', phone: '0988776655', name: 'Lê Minh Tâm', seats: ['B07'], trip: '14:00 Hà Nội → Thanh Hóa', until: '13:00' }, { id: 'H-298', phone: '0912000222', name: 'Phan Thị Lụa', seats: ['A04'], trip: '14:00 Hà Nội → Thanh Hóa', until: '13:00' }],
+    posHistory: [{ pnr: 'BG-99412', name: 'Nguyễn Thị Hoa', seats: 'B01', amount: 220000, method: 'Tiền mặt', at: '09:12' }],
+    refunds: [
+      { id: 'R1', pnr: 'BG-882199', name: 'Nguyễn Văn An', reason: 'Chuyến chậm 40p', tone: 'p-info', paid: 170000, pct: 100, amount: 170000, detail: 'Điều hành công bố chậm 40 phút lúc 06:35; khách hủy lúc 06:41. Hoàn về tài khoản VietinBank đã chuyển, mã giao dịch FT26240A81.', status: 'PENDING' },
+      { id: 'R2', pnr: 'BG-603311', name: 'Trần Thị Hằng', reason: 'Hủy trước 8 giờ', tone: 'p-mute', paid: 220000, pct: 80, amount: 176000, detail: 'Khách hủy trước giờ chạy 8 giờ: mức 6 đến 12 giờ, hoàn 80%, phí 44.000 đ.', status: 'PENDING' },
+      { id: 'R3', pnr: 'BG-551920', name: 'Phan Đức Huy', reason: 'Chuyển thiếu tiền', tone: 'p-warn', paid: 200000, pct: null, amount: 200000, detail: 'Khách chuyển 200.000 đ cho đơn 220.000 đ nên không xuất vé. Trả lại đủ số tiền đã nhận.', status: 'PENDING' }
+    ],
+    selRefund: 'R1',
+    debts: { 'DR-A02-280K': { amount: 280000, name: 'Nguyễn Văn Nam', phone: '098***321', issued: '29B-123.45 · 28/08 14:24', status: 'OUTSTANDING' } }
+  };
 
-    function handleCreatePOSBooking() {
-      const name = document.getElementById('pos-name').value;
-      const phone = document.getElementById('pos-phone').value;
-      const seat = document.getElementById('pos-seat').value;
-      const pnr = 'BG-POS' + Math.floor(1000 + Math.random() * 9000);
+  // ---------- Shell ----------
+  function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 3000); }
+  function dialog(html, bind) { $('#dialog').innerHTML = html; $('#modal').classList.add('show'); if (bind) bind($('#dialog')); const f = $('#dialog input, #dialog textarea, #dialog button'); if (f) f.focus(); }
+  function closeDialog() { $('#modal').classList.remove('show'); }
+  $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeDialog(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#modal').classList.contains('show')) closeDialog(); });
 
-      alert(`✅ ĐÃ XUẤT VÉ POS THÀNH CÔNG!\nMã PNR: ${pnr}\nKhách hàng: ${name}\nGhế: ${seat}\nThu tiền: 220.000 đ`);
+  function goPage(p) {
+    if (!CAN[S.role].includes(p)) { toast('Vai trò ' + ROLES[S.role] + ' không có quyền mở trang này'); return; }
+    S.page = p;
+    $$('.page').forEach((x) => x.classList.toggle('active', x.dataset.page === p));
+    $$('nav.side [data-page]').forEach((b) => { if (b.dataset.page === p) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+    R[p](); counts(); window.scrollTo(0, 0);
+  }
+  function counts() {
+    const a = S.alerts.length, r = S.refunds.filter((x) => x.status === 'PENDING').length;
+    $('#cnt-alerts').textContent = a || ''; $('#cnt-alerts').hidden = !a;
+    $('#cnt-refunds').textContent = r || ''; $('#cnt-refunds').hidden = !r;
+  }
+  const trip = (id) => S.trips.find((t) => t.id === id);
+  function statusPill(t) {
+    if (t.status === 'INCIDENT') return '<span class="pill p-danger">Sự cố' + (t.delay ? ' · chậm ' + t.delay + 'p' : '') + '</span>';
+    if (t.delay) return `<span class="pill p-warn">Chậm ${t.delay}p</span>`;
+    if (t.status === 'IN_TRANSIT') return '<span class="pill p-ok">Đang chạy</span>';
+    return '<span class="pill p-info">Chờ xuất bến</span>';
+  }
+  function gpsPill(t) {
+    if (t.status === 'INCIDENT') return '<span class="pill p-danger">Sự cố · đứng yên</span>';
+    return t.gps === 'LIVE' ? `<span class="pill p-ok">Trực tiếp · ${t.speed} km/h</span>` : t.gps === 'STALE' ? '<span class="pill p-warn">Mất tín hiệu 2 phút</span>' : '<span class="pill p-mute">Ngoại tuyến</span>';
+  }
 
-      const list = document.getElementById('pos-history-list');
-      const item = document.createElement('div');
-      item.className = 'p-3 bg-emerald-soft border border-emerald-safe/40 rounded-xl flex justify-between items-center';
-      item.innerHTML = `
-        <div>
-          <span class="font-mono-data font-bold text-sm text-pnr-orange">${pnr}</span>
-          <span class="text-xs font-bold text-charcoal-ink ml-2">${name} · Ghế ${seat}</span>
-          <p class="text-[11px] text-text-muted">Chuyến 14:00 (Hà Nội - Thanh Hóa) · Đã thanh toán 220.000 đ</p>
+  // ---------- Pages ----------
+  const R = {
+    dashboard() {
+      const sold = S.trips.reduce((a, t) => a + t.sold, 0), cap = S.trips.reduce((a, t) => a + t.cap, 0);
+      const posSum = S.posHistory.reduce((a, p) => a + p.amount, 0);
+      const urgent = S.alerts.filter((a) => a.kind === 'INCIDENT').length;
+      $('#kpis').innerHTML = [
+        ['Xe đang chạy', S.trips.filter((t) => t.status === 'IN_TRANSIT').length + ' / ' + S.trips.length, S.trips.some((t) => t.status === 'INCIDENT') ? '1 xe gặp sự cố' : 'Không có sự cố'],
+        ['Ghế đã bán', sold + ' / ' + cap, Math.round(sold / cap * 100) + '% lấp đầy'],
+        ['Doanh thu tại quầy', vnd(posSum), S.posHistory.length + ' vé hôm nay'],
+        ['Việc cần xử lý', String(S.alerts.length), urgent ? urgent + ' khẩn cấp' : 'Không có việc khẩn']
+      ].map(([k, v, s], i) => `<div class="card kpi"><span class="k">${k}</span><span class="v" style="${i === 3 && S.alerts.length ? 'color:var(--danger)' : ''}">${v}</span><span class="k" style="font-size:12px">${s}</span></div>`).join('');
+      $('#alerts').innerHTML = S.alerts.length ? S.alerts.map((a) => {
+        const t = a.trip ? trip(a.trip) : null;
+        const tag = a.kind === 'INCIDENT' ? '<span class="tag" style="background:var(--danger);color:#fff">KHẨN CẤP</span>' : a.kind === 'GPS' ? '<span class="tag" style="background:var(--warn-soft);color:var(--warn-ink)">MẤT TÍN HIỆU</span>' : '<span class="tag" style="background:#DBEAFE;color:#1E3A8A">THANH TOÁN</span>';
+        const acts = a.kind === 'INCIDENT' ? `<button class="btn btn-primary" data-replace="${a.trip}">Đổi xe</button><button class="btn btn-ghost" data-delay="${a.trip}">Công bố chậm</button>`
+          : a.kind === 'GPS' ? '<button class="btn btn-ghost" data-page="radar">Mở radar</button><button class="btn btn-ghost" data-dismiss="' + a.id + '">Đã gọi tài xế</button>'
+          : '<button class="btn btn-ghost" data-page="refunds" data-pick-refund="R3">Xem yêu cầu</button>';
+        return `<article style="padding:14px 16px;border-bottom:1px solid #F1F5F9;display:flex;flex-direction:column;gap:10px"><div class="row" style="flex-wrap:wrap">${tag}<span class="mono" style="font-weight:600">${t ? t.plate : a.pnr}</span>${a.at ? `<span class="sub" style="font-size:13px">${a.at}</span>` : ''}</div><span style="line-height:1.5">${esc(a.text)}</span><div class="row" style="flex-wrap:wrap">${acts}</div></article>`;
+      }).join('') : '<p class="sub pad" style="margin:0">Không còn việc nào cần xử lý.</p>';
+      $('#trips-mini').innerHTML = '<thead><tr><th>Giờ</th><th>Tuyến</th><th>Xe · tài xế</th><th>Khách</th><th>Trạng thái</th></tr></thead><tbody>' + S.trips.map((t) => `<tr><td class="mono">${t.dep}</td><td>${t.route}</td><td><span class="mono">${t.plate}</span> · ${t.driver}</td><td class="mono">${t.sold}/${t.cap}</td><td>${statusPill(t)}</td></tr>`).join('') + '</tbody>';
+    },
+    radar() {
+      $('#markers').innerHTML = S.trips.map((t) => {
+        const inc = t.status === 'INCIDENT';
+        const dot = inc ? 'background:#DC2626;border:3px solid #fff;box-shadow:0 0 0 3px #FCA5A5' : t.gps === 'LIVE' ? 'background:#16A34A;border:3px solid #fff;box-shadow:0 1px 3px rgba(15,23,42,.3)' : 'background:#fff;border:3px dashed #D97706';
+        const lbl = inc ? 'border-color:#DC2626;color:#B91C1C' : t.gps === 'STALE' ? 'background:var(--warn-soft);border-color:#D97706;color:var(--warn-ink)' : '';
+        return `<button class="marker" data-focus="${t.id}" style="left:${t.x}%;top:${t.y}%" aria-label="Xe ${t.plate}"><span class="dot" style="${dot}"></span><span class="lbl" style="${lbl}">${t.plate} · ${inc ? 'Sự cố' : t.gps === 'STALE' ? '2 phút trước' : t.speed}</span></button>`;
+      }).join('');
+      const order = S.trips.slice().sort((a, b) => (b.status === 'INCIDENT') - (a.status === 'INCIDENT') || (b.gps !== 'LIVE') - (a.gps !== 'LIVE'));
+      $('#veh-list').innerHTML = order.map((t) => `<article id="v-${t.id}" style="padding:14px 16px;border-bottom:1px solid #F1F5F9;display:flex;flex-direction:column;gap:6px;${t.status === 'INCIDENT' ? 'background:#FEF2F2' : ''}">
+        <div class="between"><span class="mono" style="font-weight:700;font-size:15px">${t.plate}</span>${gpsPill(t)}</div>
+        <span class="sub" style="font-size:13px">${t.route} ${t.dep} · ${t.driver}</span>
+        <div class="row">${t.status === 'INCIDENT' ? `<button class="btn btn-primary" data-replace="${t.id}">Đổi xe</button>` : ''}<a class="btn btn-ghost" href="tel:0912000111" style="text-decoration:none">Gọi tài xế</a></div></article>`).join('');
+    },
+    dispatch() {
+      $('#dispatch').innerHTML = '<thead><tr><th>Mã chuyến</th><th>Giờ</th><th>Tuyến</th><th>Xe</th><th>Tài xế</th><th>Ghế</th><th>Trạng thái</th><th></th></tr></thead><tbody>' + S.trips.map((t) => `<tr>
+        <td class="mono" style="color:var(--primary-dark)">${t.id}</td><td class="mono">${t.delay ? `<s style="color:#94A3B8">${t.dep}</s> ${addMin(t.dep, t.delay)}` : t.dep}</td><td>${t.route}</td><td class="mono">${t.plate}</td><td>${t.driver}</td><td class="mono">${t.sold}/${t.cap}</td><td>${statusPill(t)}</td>
+        <td><div class="row"><button class="btn btn-ghost" data-delay="${t.id}">Công bố chậm</button><button class="btn btn-ghost" data-replace="${t.id}">Đổi xe</button></div></td></tr>`).join('') + '</tbody>';
+    },
+    pos() {
+      $$('[data-mode]').forEach((b) => b.setAttribute('aria-selected', b.dataset.mode === S.mode));
+      const codes = []; for (let i = 1; i <= 12; i++) codes.push('A' + String(i).padStart(2, '0')); for (let i = 1; i <= 12; i++) codes.push('B' + String(i).padStart(2, '0'));
+      const names = { free: 'trống', held: 'đang giữ', booked: 'đã bán', blocked: 'khóa kỹ thuật' };
+      $('#pos-seats').innerHTML = codes.map((c) => {
+        const st = S.seats[c] || 'free', on = S.picked.includes(c);
+        return `<button class="seat ${on ? 'on' : st === 'free' ? '' : st}" data-pseat="${c}" ${st !== 'free' && !on ? 'disabled' : ''} aria-pressed="${on}" aria-label="Ghế ${c}, ${on ? 'đang chọn' : names[st]}">${c}</button>`;
+      }).join('');
+      const seatLabel = S.picked.length ? 'Ghế ' + S.picked.join(', ') : 'Chưa chọn ghế';
+      const total = 220000 * S.picked.length;
+      $('#pos-mode-panel').innerHTML = S.mode === 'sell'
+        ? `<fieldset style="border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:8px"><legend class="field" style="margin-bottom:6px">Thu tiền bằng</legend>
+            <label class="row"><input type="radio" name="pay" value="Tiền mặt" checked style="accent-color:var(--primary)">Tiền mặt</label><label class="row"><input type="radio" name="pay" value="Thẻ tại quầy" style="accent-color:var(--primary)">Thẻ tại quầy</label><label class="row"><input type="radio" name="pay" value="Chuyển khoản" style="accent-color:var(--primary)">Chuyển khoản</label></fieldset>
+           <div class="between" style="border-top:1px solid var(--line);padding-top:12px"><span class="sub">${seatLabel}</span><span style="font:700 22px var(--mono)">${vnd(total)}</span></div>
+           <button class="btn btn-primary btn-lg" id="pos-sell" ${S.picked.length ? '' : 'disabled'}>${S.picked.length ? 'Thu ' + vnd(total) + ' và xuất vé' : 'Chọn ghế để bán'}</button>`
+        : `<fieldset style="border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:8px"><legend class="field" style="margin-bottom:6px">Giữ đến</legend>
+            <label class="row"><input type="radio" name="policy" value="13:00" checked style="accent-color:var(--primary)">60 phút trước giờ chạy (13:00)</label><label class="row"><input type="radio" name="policy" value="custom" style="accent-color:var(--primary)">30 phút kể từ bây giờ</label></fieldset>
+           <div class="notice n-info" id="hold-quota">Mỗi số điện thoại giữ tối đa 4 ghế cùng lúc, tính mọi chuyến.</div>
+           <div class="between" style="border-top:1px solid var(--line);padding-top:12px"><span class="sub">${seatLabel}</span><span class="sub">Thu tiền khi khách đến quầy</span></div>
+           <button class="btn btn-warn btn-lg" id="pos-hold" ${S.picked.length ? '' : 'disabled'}>${S.picked.length ? 'Giữ ' + S.picked.length + ' ghế' : 'Chọn ghế để giữ'}</button>`;
+      updateQuota();
+      $('#holds').innerHTML = S.holds.length ? '<thead><tr><th>Mã</th><th>Khách</th><th>Số điện thoại</th><th>Ghế</th><th>Giữ đến</th><th></th></tr></thead><tbody>' + S.holds.map((h) => `<tr><td class="mono">${h.id}</td><td>${esc(h.name)}</td><td class="mono">${h.phone}</td><td class="mono">${h.seats.join(', ')}</td><td class="mono">${h.until}</td><td><div class="row"><button class="btn btn-primary" data-convert="${h.id}">Khách đến, thu tiền</button><button class="btn btn-ghost" data-release="${h.id}">Nhả ghế</button></div></td></tr>`).join('') + '</tbody>' : '<tbody><tr><td class="sub">Không có giữ chỗ nào.</td></tr></tbody>';
+      $('#pos-history').innerHTML = '<thead><tr><th>Mã vé</th><th>Khách</th><th>Ghế</th><th>Thu</th><th>Phương thức</th><th>Giờ</th></tr></thead><tbody>' + S.posHistory.slice().reverse().map((p) => `<tr><td class="pnr">${p.pnr}</td><td>${esc(p.name)}</td><td class="mono">${p.seats}</td><td class="mono">${vnd(p.amount)}</td><td>${p.method}</td><td class="mono">${p.at}</td></tr>`).join('') + '</tbody>';
+    },
+    replace() {
+      const t = trip(S.replaceTrip);
+      $('#rp-title').textContent = 'Đổi xe cho chuyến ' + t.dep + ' ' + t.route;
+      $('#rp-sub').innerHTML = `Xe hiện tại <span class="mono">${t.plate}</span> · ${t.sold} ghế đã bán · tài xế ${t.driver}`;
+      if (t.replaced) {
+        $('#rp-body').innerHTML = `<div class="notice n-ok" style="font-size:14px">Đã đổi sang xe <strong class="mono">${t.plate}</strong> và tài xế ${t.driver} lúc ${t.replaced}. ${t.sold} khách giữ nguyên mã ghế và đã nhận thông báo đổi xe.</div>`;
+        return;
+      }
+      const vehOpt = (v) => { const ok = v.status === 'STANDBY' && v.seats >= t.sold; const why = v.status !== 'STANDBY' ? 'Đang bảo dưỡng' : v.seats < t.sold ? 'Thiếu ' + (t.sold - v.seats) + ' chỗ' : 'Đủ ' + t.sold + ' ghế';
+        return `<label class="opt"><input type="radio" name="veh" value="${v.plate}" ${ok ? '' : 'disabled'}><span style="display:flex;flex-direction:column"><span class="mono" style="font-weight:700;font-size:15px">${v.plate}</span><span class="sub" style="font-size:13px">${v.type} · ${v.at}</span></span><span class="pill ${ok ? 'p-ok' : 'p-mute'}" style="${ok ? '' : 'color:#991B1B;background:#FEE2E2'}">${why}</span></label>`; };
+      $('#rp-body').innerHTML = `<div class="wrap">
+        <div style="flex:1.5 1 480px;min-width:0;display:flex;flex-direction:column;gap:16px">
+          <fieldset class="card pad" style="margin:0;display:flex;flex-direction:column;gap:10px"><legend style="font-weight:600;font-size:16px;padding:0 4px">1. Xe thay thế</legend>${S.vehicles.map(vehOpt).join('')}</fieldset>
+          <fieldset class="card pad" style="margin:0;display:flex;flex-direction:column;gap:10px"><legend style="font-weight:600;font-size:16px;padding:0 4px">2. Tài xế</legend>
+            <label class="opt"><input type="radio" name="drv" value="keep" checked><span style="display:flex;flex-direction:column"><span style="font-weight:600">Giữ tài xế ${t.driver}</span><span class="sub" style="font-size:13px">Tài xế ra bến lấy xe mới</span></span><span></span></label>
+            ${S.drivers.map((d) => `<label class="opt"><input type="radio" name="drv" value="${d.id}" ${d.ok ? '' : 'disabled'}><span style="display:flex;flex-direction:column"><span style="font-weight:600">${d.name} · ${d.id}</span><span class="sub" style="font-size:13px">${d.note}</span></span><span class="pill ${d.ok ? 'p-ok' : 'p-mute'}" style="${d.ok ? '' : 'color:#991B1B;background:#FEE2E2'}">${d.ok ? 'Sẵn sàng' : 'Không đủ điều kiện'}</span></label>`).join('')}</fieldset>
+          <label class="card pad field" style="font-size:16px;font-weight:600;color:var(--ink)">3. Lý do (ghi vào nhật ký)<textarea class="input" id="rp-reason" rows="3" placeholder="Ví dụ: hỏng hộp số tại nút giao 5B, cứu hộ kéo về xưởng"></textarea></label>
         </div>
-        <span class="px-2.5 py-1 bg-emerald-soft text-emerald-safe border border-emerald-safe/40 rounded-full text-xs font-bold font-mono-data">PAID</span>
-      `;
-      list.prepend(item);
+        <aside class="card pad" style="flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:14px"><h2>Khi xác nhận</h2>
+          <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;line-height:1.5;color:#334155" id="rp-effects"><li>Chọn xe thay thế để xem tác động.</li></ul>
+          <div class="notice n-warn">Đổi xe không tự hoãn chuyến. Nếu xe mới đến muộn hơn 30 phút, hãy công bố chậm để khách được hủy miễn phí.</div>
+          <span class="err" id="rp-err" hidden></span>
+          <button class="btn btn-primary btn-lg" id="rp-go">Đổi xe cho ${t.sold} khách</button></aside></div>`;
+      const eff = () => {
+        const v = ($('input[name=veh]:checked') || {}).value, d = ($('input[name=drv]:checked') || {}).value;
+        const dn = d === 'keep' || !d ? t.driver : S.drivers.find((x) => x.id === d).name;
+        $('#rp-effects').innerHTML = v ? `<li>Chuyến chuyển sang xe <span class="mono">${v}</span> và tài xế ${dn}.</li><li>${t.sold} khách giữ nguyên mã ghế và nhận thông báo đổi xe kèm biển số mới.</li><li>Xe <span class="mono">${t.plate}</span> chuyển sang bảo dưỡng.</li>${d && d !== 'keep' ? `<li>${t.driver} không còn thấy chuyến này trong app tài xế.</li>` : ''}` : '<li>Chọn xe thay thế để xem tác động.</li>';
+      };
+      $$('#rp-body input').forEach((i) => i.addEventListener('change', eff));
+      $('#rp-go').onclick = () => {
+        const v = ($('input[name=veh]:checked') || {}).value, d = $('input[name=drv]:checked').value, reason = $('#rp-reason').value.trim();
+        const err = $('#rp-err');
+        if (!v) { err.hidden = false; err.textContent = 'Chọn xe thay thế.'; return; }
+        if (reason.length < 5) { err.hidden = false; err.textContent = 'Nhập lý do đổi xe (ít nhất 5 ký tự).'; $('#rp-reason').classList.add('err'); return; }
+        err.hidden = true;
+        const dn = d === 'keep' ? t.driver : S.drivers.find((x) => x.id === d).name;
+        dialog(`<h2 style="font-size:18px">Đổi xe cho ${t.sold} khách?</h2><p style="margin:0;line-height:1.5;color:#334155">Chuyến ${t.dep} ${t.route} chuyển từ <span class="mono">${t.plate}</span> sang <span class="mono">${v}</span>, tài xế ${dn}. Không hoàn tác được.</p><div class="row" style="justify-content:flex-end"><button class="btn btn-ghost" id="d-no">Hủy</button><button class="btn btn-primary" id="d-yes">Đổi xe</button></div>`, (dl) => {
+          $('#d-no', dl).onclick = closeDialog;
+          $('#d-yes', dl).onclick = () => {
+            const old = S.vehicles.find((x) => x.plate === v); old.status = 'IN_TRANSIT';
+            S.vehicles.push({ plate: t.plate, type: '', seats: t.cap, at: 'xưởng', status: 'MAINTENANCE' });
+            t.plate = v; t.driver = dn; t.status = 'SCHEDULED'; t.gps = 'LIVE'; t.replaced = '13:12';
+            S.alerts = S.alerts.filter((a) => a.trip !== t.id || a.kind !== 'INCIDENT');
+            closeDialog(); toast('Đã đổi xe, ' + t.sold + ' khách đã nhận thông báo'); R.replace(); counts();
+          };
+        });
+      };
+    },
+    refunds() {
+      const pend = S.refunds.filter((r) => r.status === 'PENDING').length;
+      $('#rf-title').textContent = 'Yêu cầu hoàn tiền · ' + pend + ' chờ duyệt';
+      const st = (r) => r.status === 'PENDING' ? '' : r.status === 'APPROVED' ? '<span class="pill p-ok">Đã hoàn</span>' : '<span class="pill p-mute">Đã từ chối</span>';
+      $('#refunds').innerHTML = '<thead><tr><th>Mã vé</th><th>Khách</th><th>Lý do</th><th>Đã trả</th><th>Hoàn</th><th></th></tr></thead><tbody>' + S.refunds.map((r) => `<tr class="${S.selRefund === r.id ? 'sel' : ''}"><td class="pnr">${r.pnr}</td><td>${esc(r.name)}</td><td><span class="pill ${r.tone}">${r.reason}</span></td><td class="mono">${vnd(r.paid)}</td><td class="mono" style="font-weight:700">${vnd(r.amount)} <span style="font:500 12px var(--sans);color:var(--muted)">${r.pct != null ? r.pct + '%' : 'trả lại'}</span></td><td>${S.selRefund === r.id ? '<span style="font-weight:600;color:var(--primary-dark)">Đang xem</span>' : st(r) || `<button class="btn btn-ghost" data-rsel="${r.id}">Xem</button>`}</td></tr>`).join('') + '</tbody>';
+      const r = S.refunds.find((x) => x.id === S.selRefund);
+      $('#rf-detail').innerHTML = !r ? '' : `<div style="border:1px solid #BFDBFE;background:#F8FAFF;border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:10px">
+        <span style="font-weight:600;font-size:15px">${r.pnr} · ${r.reason.toLowerCase()}</span><span style="line-height:1.5;color:#334155">${r.detail}</span>
+        ${r.status === 'PENDING' ? `<div class="row" style="flex-wrap:wrap"><button class="btn btn-primary" id="rf-ok">Duyệt hoàn ${vnd(r.amount)}</button><button class="btn btn-ghost" id="rf-no">Từ chối, ghi lý do</button></div>` : `<div class="notice ${r.status === 'APPROVED' ? 'n-ok' : 'n-err'}">${r.status === 'APPROVED' ? 'Đã duyệt lúc ' + r.at + ' · lệnh hoàn ' + vnd(r.amount) + ' đã gửi cổng thanh toán.' : 'Đã từ chối lúc ' + r.at + ': ' + esc(r.why)}</div>`}</div>`;
+      const ok = $('#rf-ok'), no = $('#rf-no');
+      if (ok) ok.onclick = () => dialog(`<h2 style="font-size:18px">Duyệt hoàn ${vnd(r.amount)}?</h2><p style="margin:0;line-height:1.5;color:#334155">Hoàn cho ${esc(r.name)} (${r.pnr}) về tài khoản đã thanh toán. Mỗi yêu cầu chỉ duyệt một lần.</p><div class="row" style="justify-content:flex-end"><button class="btn btn-ghost" id="d-no">Hủy</button><button class="btn btn-primary" id="d-yes">Duyệt hoàn tiền</button></div>`, (dl) => {
+        $('#d-no', dl).onclick = closeDialog;
+        $('#d-yes', dl).onclick = () => { r.status = 'APPROVED'; r.at = '13:15'; if (r.pnr === 'BG-551920') S.alerts = S.alerts.filter((a) => a.pnr !== r.pnr); closeDialog(); toast('Đã gửi lệnh hoàn ' + vnd(r.amount)); nextRefund(); R.refunds(); counts(); };
+      });
+      if (no) no.onclick = () => dialog(`<h2 style="font-size:18px">Từ chối yêu cầu ${r.pnr}</h2><label class="field">Lý do (khách sẽ nhận được)<textarea class="input" id="d-why" rows="3"></textarea></label><span class="err" id="d-err" hidden>Nhập lý do từ chối.</span><div class="row" style="justify-content:flex-end"><button class="btn btn-ghost" id="d-no">Hủy</button><button class="btn btn-danger" id="d-yes">Từ chối</button></div>`, (dl) => {
+        $('#d-no', dl).onclick = closeDialog;
+        $('#d-yes', dl).onclick = () => { const w = $('#d-why', dl).value.trim(); if (!w) { $('#d-err', dl).hidden = false; return; } r.status = 'REJECTED'; r.why = w; r.at = '13:15'; closeDialog(); toast('Đã từ chối yêu cầu ' + r.pnr); nextRefund(); R.refunds(); counts(); };
+      });
     }
+  };
+  function nextRefund() { const n = S.refunds.find((x) => x.status === 'PENDING'); if (n) S.selRefund = n.id; }
+  function addMin(h, m) { const [a, b] = h.split(':').map(Number); const t = a * 60 + b + m; return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); }
+  function heldBy(phone) { return S.holds.filter((h) => h.phone === phone).reduce((a, h) => a + h.seats.length, 0); }
+  function updateQuota() {
+    const q = $('#hold-quota'); if (!q) return;
+    const phone = $('#pos-phone').value.replace(/\s/g, ''), n = heldBy(phone);
+    q.className = 'notice ' + (n + S.picked.length > 4 ? 'n-err' : 'n-info');
+    q.textContent = /^0\d{9}$/.test(phone) ? `Số này đang giữ ${n} ghế. Mỗi số điện thoại giữ tối đa 4 ghế cùng lúc, tính mọi chuyến.` : 'Mỗi số điện thoại giữ tối đa 4 ghế cùng lúc, tính mọi chuyến.';
+  }
+  function posValidate() {
+    const phone = $('#pos-phone').value.replace(/\s/g, ''), name = $('#pos-name').value.trim(), err = $('#pos-err');
+    const bad = (m, el) => { err.hidden = false; err.textContent = m; if (el) el.classList.add('err'); return null; };
+    $('#pos-phone').classList.remove('err'); $('#pos-name').classList.remove('err');
+    if (!/^0\d{9}$/.test(phone)) return bad('Số điện thoại cần 10 chữ số, bắt đầu bằng 0.', $('#pos-phone'));
+    if (name.length < 2) return bad('Nhập họ tên khách.', $('#pos-name'));
+    if (!S.picked.length) return bad('Chọn ít nhất 1 ghế.');
+    err.hidden = true; return { phone, name };
+  }
 
-    function handleExecuteReplacement() {
-      alert('🔄 ĐÃ ĐIỀU ĐỘNG XE THAY THẾ THÀNH CÔNG!\nXe 29B-888.22 đã nhận lệnh xuất bến thay cho xe 29B-123.45.\nĐã tự động gửi SMS thông báo biển số xe mới cho 28 hành khách!');
-      switchTab('dashboard');
+  // ---------- Events ----------
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('button'); if (!el) return;
+    const d = el.dataset;
+    if (d.pickRefund) S.selRefund = d.pickRefund;
+    if (d.page) return goPage(d.page);
+    if (d.replace) { S.replaceTrip = d.replace; return goPage('replace'); }
+    if (d.dismiss) { S.alerts = S.alerts.filter((a) => a.id !== d.dismiss); toast('Đã đóng cảnh báo'); R.dashboard(); return counts(); }
+    if (d.focus) { const v = $('#v-' + d.focus); if (v) { v.scrollIntoView({ block: 'nearest' }); v.style.outline = '2px solid var(--primary)'; setTimeout(() => { v.style.outline = ''; }, 1500); } return; }
+    if (d.delay) {
+      const t = trip(d.delay);
+      return dialog(`<h2 style="font-size:18px">Công bố chậm chuyến ${t.dep} ${t.route}</h2>
+        <label class="field">Chậm bao nhiêu phút<select class="input" id="d-min"><option>15</option><option>30</option><option selected>40</option><option>60</option><option>90</option></select></label>
+        <label class="field">Lý do (khách sẽ thấy)<textarea class="input" id="d-why" rows="2">${t.status === 'INCIDENT' ? 'Xe gặp sự cố kỹ thuật, đang điều xe thay thế.' : ''}</textarea></label>
+        <div class="notice n-info" id="d-hint"></div><span class="err" id="d-err" hidden>Nhập lý do.</span>
+        <div class="row" style="justify-content:flex-end"><button class="btn btn-ghost" id="d-no">Hủy</button><button class="btn btn-primary" id="d-yes">Gửi cho ${t.sold} khách</button></div>`, (dl) => {
+        const hint = () => { const m = Number($('#d-min', dl).value); $('#d-hint', dl).textContent = m > 30 ? 'Chậm hơn 30 phút: khách được hủy miễn phí, hoàn 100%.' : 'Chậm từ 30 phút trở xuống: chính sách hủy giữ nguyên.'; };
+        hint(); $('#d-min', dl).onchange = hint; $('#d-no', dl).onclick = closeDialog;
+        $('#d-yes', dl).onclick = () => { const w = $('#d-why', dl).value.trim(); if (!w) { $('#d-err', dl).hidden = false; return; } t.delay = Number($('#d-min', dl).value); closeDialog(); toast('Đã thông báo chậm ' + t.delay + ' phút tới ' + t.sold + ' khách'); R[S.page](); };
+      });
     }
+    if (d.mode) { S.mode = d.mode; $('#pos-result').innerHTML = ''; return R.pos(); }
+    if (d.pseat) { const c = d.pseat, i = S.picked.indexOf(c); if (i >= 0) S.picked.splice(i, 1); else S.picked.push(c); return R.pos(); }
+    if (d.rsel) { S.selRefund = d.rsel; return R.refunds(); }
+    if (d.release) {
+      const h = S.holds.find((x) => x.id === d.release);
+      return dialog(`<h2 style="font-size:18px">Nhả ${h.seats.length} ghế của ${esc(h.name)}?</h2><p style="margin:0;color:#334155">Ghế ${h.seats.join(', ')} được mở bán lại cho mọi kênh ngay.</p><div class="row" style="justify-content:flex-end"><button class="btn btn-ghost" id="d-no">Hủy</button><button class="btn btn-primary" id="d-yes">Nhả ghế</button></div>`, (dl) => {
+        $('#d-no', dl).onclick = closeDialog;
+        $('#d-yes', dl).onclick = () => { h.seats.forEach((c) => delete S.seats[c]); S.holds = S.holds.filter((x) => x !== h); closeDialog(); toast('Đã nhả ghế ' + h.seats.join(', ')); R.pos(); };
+      });
+    }
+    if (d.convert) {
+      const h = S.holds.find((x) => x.id === d.convert), amt = 220000 * h.seats.length;
+      return dialog(`<h2 style="font-size:18px">Thu ${vnd(amt)} và xuất vé cho ${esc(h.name)}?</h2><p style="margin:0;color:#334155">Ghế giữ ${h.seats.join(', ')}. Vé xuất ngay, khách nhận SMS.</p><div class="row" style="justify-content:flex-end"><button class="btn btn-ghost" id="d-no">Hủy</button><button class="btn btn-primary" id="d-yes">Đã thu ${vnd(amt)}</button></div>`, (dl) => {
+        $('#d-no', dl).onclick = closeDialog;
+        $('#d-yes', dl).onclick = () => { h.seats.forEach((c) => { S.seats[c] = 'booked'; }); const pnr = 'BG-POS' + (S.pnrSeq++); S.posHistory.push({ pnr, name: h.name, seats: h.seats.join(', '), amount: amt, method: 'Tiền mặt', at: '13:10' }); S.holds = S.holds.filter((x) => x !== h); closeDialog(); toast('Đã xuất vé ' + pnr); R.pos(); };
+      });
+    }
+  });
+  document.addEventListener('click', (e) => {
+    if (e.target.id === 'pos-sell') {
+      const v = posValidate(); if (!v) return;
+      const amt = 220000 * S.picked.length, method = $('input[name=pay]:checked').value, pnr = 'BG-POS' + (S.pnrSeq++), seats = S.picked.slice();
+      seats.forEach((c) => { S.seats[c] = 'booked'; });
+      S.posHistory.push({ pnr, name: v.name, seats: seats.join(', '), amount: amt, method, at: '13:08' }); S.picked = [];
+      R.pos();
+      $('#pos-result').innerHTML = `<div class="notice n-ok" style="font-size:14px">Đã xuất vé <strong class="mono">${pnr}</strong> · ghế ${seats.join(', ')} · thu ${vnd(amt)} (${method}). SMS đã gửi tới khách. <button class="btn btn-ghost" style="margin-top:8px" onclick="this.textContent='Đã gửi lệnh in'">In vé</button></div>`;
+    }
+    if (e.target.id === 'pos-hold') {
+      const v = posValidate(); if (!v) return;
+      const n = heldBy(v.phone);
+      if (n + S.picked.length > 4) { const err = $('#pos-err'); err.hidden = false; err.textContent = `Số ${v.phone} đang giữ ${n} ghế; giữ thêm ${S.picked.length} ghế sẽ vượt giới hạn 4 ghế. Không ghế nào bị khóa.`; return; }
+      const until = $('input[name=policy]:checked').value === 'custom' ? '13:40' : '13:00';
+      const id = 'H-' + (302 + S.holds.length), seats = S.picked.slice();
+      seats.forEach((c) => { S.seats[c] = 'held'; });
+      S.holds.push({ id, phone: v.phone, name: v.name, seats, trip: '14:00 Hà Nội → Thanh Hóa', until }); S.picked = [];
+      R.pos();
+      $('#pos-result').innerHTML = `<div class="notice n-ok" style="font-size:14px">Đã giữ ghế ${seats.join(', ')} cho ${esc(v.name)} đến ${until} (mã ${id}). Hết hạn, ghế tự mở bán lại.</div>`;
+    }
+  });
+  $('#pos-phone').addEventListener('input', updateQuota);
 
-    function handleRefund(pnr) {
-      alert(`💵 ĐÃ DUYỆT HOÀN TIỀN 100% CHO VÉ ${pnr}!\nSố tiền: 440.000 đ đã hoàn về tài khoản ngân hàng gốc.`);
-    }
-  </script>
+  $('#dr-find').onclick = () => {
+    const code = $('#dr-code').value.trim().toUpperCase(), out = $('#dr-result'), d = S.debts[code];
+    if (!d) { out.innerHTML = `<div class="notice n-err">Không tìm thấy biên lai ${esc(code || '(trống)')}. Kiểm tra lại mã trên giấy của khách.</div>`; return; }
+    const st = d.status === 'OUTSTANDING' ? '<span class="pill p-warn">Chưa trả</span>' : '<span class="pill p-mute">Đã trả lúc ' + d.at + '</span>';
+    out.innerHTML = `<div style="border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px">
+      <div class="between"><span class="sub">Số tiền</span><span style="font:700 18px var(--mono)">${vnd(d.amount)}</span></div>
+      <div class="between"><span class="sub">Khách</span><span>${d.name} · <span class="mono">${d.phone}</span></span></div>
+      <div class="between"><span class="sub">Phát hành</span><span>${d.issued}</span></div>
+      <div class="between"><span class="sub">Trạng thái</span>${st}</div></div>
+      ${d.status === 'OUTSTANDING' ? `<button class="btn btn-primary btn-lg" style="width:100%;margin-top:12px" id="dr-pay">Đã trả ${vnd(d.amount)} cho khách</button>` : '<div class="notice n-err" style="margin-top:12px">Biên lai này đã được trả. Không trả lần hai.</div>'}
+      <span class="sub" style="font-size:12px;display:block;margin-top:8px">Ghi vào nhật ký với tên người trả và trạm. Mỗi biên lai chỉ trả một lần.</span>`;
+    const p = $('#dr-pay'); if (p) p.onclick = () => { d.status = 'REDEEMED'; d.at = '13:20'; toast('Đã ghi nhận trả ' + vnd(d.amount)); $('#dr-find').click(); };
+  };
+
+  // ---------- Login ----------
+  $('#lg-go').onclick = () => {
+    const err = $('#lg-err'), step2 = $('#lg-2').style.display === 'flex';
+    if (!step2) {
+      if (!$('#lg-user').value.trim() || $('#lg-pass').value.length < 6) { err.hidden = false; err.textContent = 'Tên đăng nhập hoặc mật khẩu chưa đúng.'; return; }
+      err.hidden = true; S.role = $('#lg-role').value;
+      if (S.role === 'FLEET_DIRECTOR') { $('#lg-1').style.display = 'none'; $('#lg-2').style.display = 'flex'; $('#lg-go').textContent = 'Xác nhận'; $('#lg-totp').focus(); return; }
+    } else if (!/^\d{6}$/.test($('#lg-totp').value) || $('#lg-totp').value === '000000') { err.hidden = false; err.textContent = 'Mã xác thực không đúng hoặc đã hết hạn.'; return; }
+    err.hidden = true; enter();
+  };
+  function enter() {
+    $('#login').hidden = true; $('#shell').hidden = false;
+    $('#who').textContent = ({ FLEET_DIRECTOR: 'Nguyễn Tiến Dũng', DISPATCHER: 'Vũ Thị Ngọc', CASHIER: 'Phạm Thị Lan' })[S.role] + ' · ' + ROLES[S.role];
+    $$('nav.side [data-page]').forEach((b) => { b.hidden = !CAN[S.role].includes(b.dataset.page); });
+    goPage('dashboard');
+  }
+  $('#logout').onclick = () => { $('#shell').hidden = true; $('#login').hidden = false; $('#lg-1').style.display = 'flex'; $('#lg-2').style.display = 'none'; $('#lg-pass').value = ''; $('#lg-totp').value = ''; $('#lg-go').textContent = 'Đăng nhập'; };
+})();
+</script>
 </body>
 </html>

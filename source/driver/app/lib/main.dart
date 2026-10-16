@@ -1,22 +1,28 @@
 import 'package:flutter/material.dart';
-import 'package:resources/resources.dart';
-import 'src/presentation/driver_cockpit_dashboard.dart';
 
-void main() async {
+import 'src/presentation/driver_login_screen.dart';
+import 'src/presentation/driver_store.dart';
+import 'src/presentation/driver_widgets.dart';
+
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const BusGoDriverApp());
+  runApp(BusGoDriverApp(store: DriverStore()));
 }
 
 class BusGoDriverApp extends StatelessWidget {
-  const BusGoDriverApp({super.key});
+  const BusGoDriverApp({super.key, required this.store});
+  final DriverStore store;
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'BusGo Driver — Tactical Cockpit',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkCockpitTheme,
-      home: const DriverCockpitDashboard(),
+    return DriverScope(
+      store: store,
+      child: MaterialApp(
+        title: 'BusGo Driver',
+        debugShowCheckedModeBanner: false,
+        theme: driverTheme(),
+        home: const DriverLoginScreen(),
+      ),
     );
   }
 }

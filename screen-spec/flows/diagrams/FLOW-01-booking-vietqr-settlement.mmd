@@ -1,0 +1,26 @@
+sequenceDiagram
+    autonumber
+    actor PAX as Hành khách (PAX)
+    participant GW as API server
+    participant INV as Kho ghế dùng chung
+    actor BANK as Ngân hàng
+    actor MGR as Điều hành (MGR-013)
+    actor DRI as Tài xế (DRI-007)
+
+    PAX->>GW: POST /trips/{id}/seats/hold {seatCodes}
+    GW->>INV: giữ ghế 10 phút cho người này
+    GW-->>PAX: 200 {hold_id, expires_at}
+    MGR->>GW: GET /ops/trips/{id}/seat-matrix
+    GW-->>MGR: ghế HELD kèm held_until
+    PAX->>GW: POST /bookings/create {tripId, holdId, seatCodes, payer, passengers}
+    GW->>GW: kiểm hold, tự tính giá, tạo đơn và PNR
+    GW-->>PAX: 201 {order, payment: transfer_memo, qr}
+    PAX->>BANK: quét VietQR, chuyển đúng số tiền
+    BANK->>GW: POST /webhooks/vietqr/ipn {transferMemo, amountVnd, bankRef}
+    GW->>GW: kiểm chữ ký, PNR, số tiền; phát hành vé
+    GW->>INV: ghế thành BOOKED kèm PNR
+    GW-->>DRI: hành khách vào manifest
+    GW-->>MGR: đơn mới, số ghế, doanh thu
+    GW-->>PAX: thông báo PAYMENT_SUCCESS; PAX-013 thấy trạng thái PAID khi hỏi lại
+    BANK->>GW: gửi lại cùng thông báo
+    GW-->>BANK: 200, không thay đổi gì

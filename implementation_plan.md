@@ -1,54 +1,48 @@
-# Implementation Plan: FleetBus (BusGo) UI & System SRS Alignment via StitchMCP
+# Implementation Plan: Mobile Review & Cross-Platform Alignment (Android & iOS)
 
-Dựa trên tài liệu đặc tả tổng hợp master [bus_booking_tracking_system_spec.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/docs/specs/bus_booking_tracking_system_spec.md) và thiết kế hệ thống [DESIGN.md](file:///home/david/Downloads/scripts/AI_tools/tools/FleetBus/docs/design/DESIGN.md), kế hoạch này quy định việc thiết kế, kiểm thử và review 13 màn hình UI giao diện qua StitchMCP.
+Review and harden the FleetBus Passenger and Driver mobile apps to guarantee reliable execution on both Android and iOS platforms.
 
----
+## User Review Required
 
-## 1. Danh Mục Màn Hình & Ánh Xạ Chức Năng SRS (`bus_booking_tracking_system_spec.md`)
+> [!NOTE]
+> All changes align existing scaffolding (`source/passenger` and `source/driver`) with the official bundle identifiers (`vn.busgo.passenger` and `vn.busgo.driver`) and resolve real-world runtime crash hazards on Android and network blocks on iOS.
 
-### 1.1. Passenger Mobile Application (Light Canvas `#F8FAFC`, Sapphire `#2563EB`)
-- **F-PAS-01**: Xác thực OTP & Hồ sơ / Danh bạ người đi hộ → `PASS-01` (`b4415c98...`)
-- **F-PAS-02**: Tìm kiếm Chuyến & Lọc Chặng phụ (Sub-routes) → `PASS-02` (`0eeb6c65...`)
-- **F-PAS-03**: Sơ đồ Ghế Đa tầng Realtime & Redis Lock 10 Phút → `PASS-03` (`ef45253f...`)
-- **F-PAS-04**: Thanh toán VietQR Dynamic & Dynamic QR Ticket HMAC → `PASS-04` (`73f0552d...`)
-- **F-PAS-05**: Theo dõi Live GPS Telemetry, Speed & Geofencing ETA HUD → `PASS-05` (`be48f147...`)
+## Proposed Changes
 
-### 1.2. Driver Mobile Application (Tactical Dark Cockpit `#0F172A`)
-- **F-DRI-01**: Đăng nhập Ca chạy & Lịch trình chuyến xe được gán → `DRV-01` (`bbcad1d6...`)
-- **F-DRI-02**: Manifest Đón/Trả, Masked Phone Call & Camera QR Scanner → `DRV-02` (`903ccc77...`)
-- **F-DRI-03/04**: GPS Telemetry Engine (3s/15m), Offline Buffer & Navigation HUD → `DRV-03` (`6ebf3efa...`)
+### Phase 1: Android Platform Build & Runtime Alignment
+Align Gradle build scripts and Kotlin activity sources with Android package conventions:
+- Fix Android namespace and applicationId from legacy template `com.mkd.mestudy` to `vn.busgo.passenger` and `vn.busgo.driver`.
+- Relocate `MainActivity.kt` to matching package directory `src/main/kotlin/vn/busgo/passenger/MainActivity.kt` and `src/main/kotlin/vn/busgo/driver/MainActivity.kt`.
+- Enable cleartext traffic for local development in `AndroidManifest.xml` (`android:usesCleartextTraffic="true"`).
 
-### 1.3. Admin Web CMS Portal (ATC GIS Operations Radar - Asymmetric Desktop Layout)
-- **F-ADM-01**: Visual Drag-and-Drop Seat Layout Builder đa tầng → `ADM-01` (`24d4cfaf...`)
-- **F-ADM-02**: Quản trị Tuyến đường, Trạm dừng & PostGIS Point Geometry → `ADM-02` (`9002fe15...`)
-- **F-ADM-03**: Trip Dispatching, Gán Xe/Tài xế & Bảng giá chặng linh hoạt → `ADM-03` (`92208eff...`)
-- **F-ADM-04**: GIS Live Operations Radar (Cảnh báo lệch tuyến >500m, dừng quá 20m) → `ADM-04` (`0d4217c3...`)
-- **F-ADM-05**: Phòng vé POS Hotline & Điều phối Khẩn cấp / Đổi vé → `ADM-05` (`21f08db7...`)
+### Phase 2: iOS Platform Build & Runtime Alignment
+Align Xcode project settings and security permissions for iOS devices and simulators:
+- Update `PRODUCT_BUNDLE_IDENTIFIER` in `Runner.xcodeproj/project.pbxproj` to `vn.busgo.passenger` (Passenger) and `vn.busgo.driver` (Driver).
+- Configure `NSAppTransportSecurity` in `Info.plist` with `NSAllowsArbitraryLoads` and `NSAllowsLocalNetworking` so the app can communicate with local development API servers on iOS.
 
----
+### Phase 3: Cross-Platform Network Adaptability & Dependencies
+- Add `data: path: ../data` to `dependencies` in `pubspec.yaml` for both apps.
+- Implement platform-adaptive `defaultBaseUrl` in `passenger_api_service.dart` and `driver_api_service.dart`:
+  - Android Emulator: `http://10.0.2.2:3000`
+  - iOS Simulator & Web: `http://localhost:3000`
+  - Overridable via constructor / environment.
 
-## 2. Quy Chuẩn Review & Tiêu Chí Kiểm Thu
+### Phase 4: Automated Verification & Test Suite
+- Expand `test/mobile/mobile_client.test.js` and `test/mobile/driver_mobile.test.js` to verify:
+  - Android namespace, applicationId, and Kotlin MainActivity package matching
+  - iOS Xcode `project.pbxproj` bundle identifier matching
+  - iOS `Info.plist` App Transport Security configuration
+  - Pubspec dependencies linking `package:data`
+  - BaseUrl cross-platform resolution
+- Run `npm test`, `npm run lint`, and `node test/e2e_live_flow.js`.
 
-### 2.1. Đơn vị Dữ liệu Realtime & Monospace Engine
-- **Mã PNR**: Chuỗi 6-8 ký tự in hoa (ví dụ: `FB9821`), hiển thị bằng font `JetBrains Mono`.
-- **Biển số phương tiện**: Chuẩn biển số Việt Nam (ví dụ: `29B-123.45`), hiển thị `JetBrains Mono`.
-- **Thời gian đếm ngược (Seat Lock 10m)**: Định dạng `MM:SS` (ví dụ: `09:58`), nhấp nháy khi còn < 60s.
-- **Telemetry GPS**: Tốc độ `58.2 km/h`, Khoảng cách `8.5 km`, Tọa độ Lat/Lng hiển thị `JetBrains Mono`.
+## Verification Plan
 
-### 2.2. Kiểm Tra Strict Anti-Patterns (`DESIGN.md`)
-- ❌ Không dùng font `Inter` hay font serif tự do.
-- ❌ Không dùng màu đen thuần `#000000`.
-- ❌ Không dùng Emojis (Bắt buộc 100% SVG Icons).
-- ❌ Không dùng hiệu ứng Neon Outer Glow hay gradient tím/xanh AI.
+### Automated Tests
+- `npm test`: Run all 14 test suites including expanded mobile platform suites.
+- `npm run lint`: Verify 0 syntax errors across all JS/test files.
+- `node test/e2e_live_flow.js`: Verify complete end-to-end flow.
 
----
-
-## 3. Kế Hoạch Xác Nhận & Đánh Giá (Verification Plan)
-
-### Kiểm Tra Cấu Trúc Code HTML/CSS:
-1. Đọc mã HTML từng màn hình trong Stitch Project `13555615882856172226` qua StitchMCP.
-2. Kiểm tra `tailwind.config` cho việc load đúng `Geist` và `JetBrains Mono`.
-3. Kiểm tra các class Tailwind như `bg-canvas-ops`, `bg-surface-dark`, `text-pnr-orange`, `text-alert-crimson`.
-
-### Báo Cáo Đánh Giá Tổng Hợp:
-- Cập nhật toàn bộ kết quả audit chi tiết vào [walkthrough.md](file:///home/david/.gemini/antigravity-ide/brain/2262b68b-3c19-4bfa-a0bc-a6a5971cef80/walkthrough.md).
+### Manual / Structural Inspection
+- Inspect `git diff` for exact alignment.
+- Verify directory trees for Android Kotlin activities.

@@ -1,0 +1,23 @@
+sequenceDiagram
+    autonumber
+    actor CALLER as Khách gọi hotline
+    actor OPR as Tổng đài (MGR-020)
+    participant GW as API server
+    participant INV as Kho ghế dùng chung
+    actor ONL as Khách online (PAX-009)
+    actor DSP as Điều phối (MGR-013)
+
+    CALLER->>OPR: xin giữ ghế đến một giờ nhất định
+    OPR->>GW: POST /ops/pos/hotline-hold {tripId, phone, seatCodes, holdPolicy}
+    GW->>GW: nhả các hold đã hết hạn, kiểm tối đa 4 ghế mỗi số điện thoại
+    GW->>INV: khóa ghế cho đến hold_until
+    GW-->>OPR: 201 {reservation_id, hold_until}
+    ONL->>GW: POST /trips/{id}/seats/hold {seatCodes: [ghế giữ]}
+    GW-->>ONL: 409 SEAT_LOCKED_BY_OTHER
+    Note over INV: hết hạn, khóa tự rã ở lần đọc kế tiếp
+    ONL->>GW: POST /trips/{id}/seats/hold
+    GW-->>ONL: 200 (ghế đã trống)
+    DSP->>GW: POST /ops/trips/{id}/seats/override-lock {seatCodes, locked: true, reason}
+    GW->>INV: ghế BLOCKED
+    ONL->>GW: POST /trips/{id}/seats/hold {seatCodes: [ghế khóa]}
+    GW-->>ONL: 409 SEAT_BLOCKED
