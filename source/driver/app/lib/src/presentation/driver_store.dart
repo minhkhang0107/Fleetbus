@@ -516,6 +516,8 @@ class DriverStore extends ChangeNotifier {
     _road = null;
     mustChangePin = false;
     temporaryPin = null;
+    endedCash = null;
+    earlyEndReason = null;
     notifyListeners();
   }
 
@@ -642,9 +644,15 @@ class DriverStore extends ChangeNotifier {
     homeRun = [for (final s in (run?['stops'] as List? ?? []).cast<Map<String, dynamic>>()) HomeRunStop.fromJson(s)];
     homeWaitMinutes = (run?['wait_minutes'] as num?)?.toInt() ?? 5;
     trip = switch (t['status']) { 'IN_TRANSIT' => TripState.inTransit, 'COMPLETED' => TripState.completed, _ => TripState.readyCheck };
+    if (trip == TripState.completed) {
+      endedCash = (t['total_cash_to_handover_vnd'] as num?)?.toInt() ?? codCash + hailCash;
+    } else {
+      endedCash = null;
+    }
     if (t['current_lat'] is num) _lat = (t['current_lat'] as num).toDouble();
     if (t['current_lng'] is num) _lng = (t['current_lng'] as num).toDouble();
     if (fresh) {
+      earlyEndReason = null;
       final list = t['readiness_checklist'] as Map<String, dynamic>? ?? {};
       for (var i = 0; i < checkKeys.length; i++) {
         checked[i] = trip != TripState.readyCheck || list[checkKeys[i]] == true && t['status'] == 'READY';
@@ -684,6 +692,7 @@ class DriverStore extends ChangeNotifier {
   }
 
   Future<String?> startTrip() async {
+    earlyEndReason = null;
     final checklist = {for (var i = 0; i < checkKeys.length; i++) checkKeys[i]: checked[i]};
     final ready = await _call(() => api.submitReadinessCheck(tripId!, checklist));
     if (ready.error != null) return ready.error;
@@ -942,16 +951,32 @@ class DriverStore extends ChangeNotifier {
   Future<void> loadFreeSeats() async {
     final r = await _call(() => api.getSeatMap(tripId!));
     if (r.error != null) return;
+    final seatsList = (r.data?['seats'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
     final taken = manifest.where((p) => p.status != PaxStatus.noShow).map((p) => p.seat).toSet();
     freeSeats = [
-      for (final s in (r.data!['seats'] as List).cast<Map<String, dynamic>>())
+      for (final s in seatsList)
         if (s['state'] == 'AVAILABLE' && !taken.contains(s['seat_code'])) s['seat_code'] as String,
     ];
     notifyListeners();
   }
 
-  Future<String?> sellHail(String seat, String toStop) =>
-      _act('Bán vé khách vẫy ghế $seat', () => api.onboardHailPassenger(tripId!, seatCode: seat, amountCollectedVnd: fare, dropoffStopId: toStop));
+  Future<String?> sellHail(
+    String seat,
+    String toStop, {
+    int? given,
+    String? method,
+    String? phone,
+    String? name,
+  }) =>
+      _act('Bán vé khách vẫy ghế $seat', () => api.onboardHailPassenger(
+        tripId!,
+        seatCode: seat,
+        amountCollectedVnd: given ?? fare,
+        dropoffStopId: toStop,
+        changeSettlementMethod: method != null ? (changeSettlementMethods[method] ?? method) : 'CASH_RETURNED',
+        phone: (phone != null && phone.trim().isNotEmpty) ? phone.trim() : null,
+        passengerName: (name != null && name.trim().isNotEmpty) ? name.trim() : 'Khách vẫy dọc đường',
+      ));
 
   // ---------- Incident, sync, end (DRI-015, DRI-017, DRI-019) ----------
   Future<String?> reportIncident(String type, int delay) async {
@@ -986,6 +1011,7 @@ class DriverStore extends ChangeNotifier {
     final r = await _call(() => api.endTrip(tripId!, earlyEndReason: lastStop && atStop ? null : earlyEndReason), label: 'Kết thúc chuyến');
     if (r.error != null) return r.error;
     endedCash = (r.data!['total_cash_to_handover_vnd'] as num?)?.toInt() ?? codCash + hailCash;
+    earlyEndReason = null;
     _stopTimers();
     moving = false;
     trip = TripState.completed;

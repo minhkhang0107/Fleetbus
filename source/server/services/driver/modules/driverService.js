@@ -1430,7 +1430,7 @@ export class DriverCockpitService {
       this._markBoarded(tripId, trip, item, mockNow);
     }
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
-      this.eventBridge.emit('COD_COLLECTED', { tripId, ticketId, pnr: item.pnr, fareVnd: fareAmount });
+      this.eventBridge.emit('COD_COLLECTED', { tripId, ticketId, pnr: item.pnr, fareVnd: fareAmount, seatCode: item.seat_code });
       if (item.source === 'HOTLINE' && item.reservation_id) {
         this.eventBridge.emit('HOTLINE_HOLD_CONVERTED', { tripId, reservationId: item.reservation_id, seatCode: item.seat_code });
       }
@@ -1884,6 +1884,7 @@ export class DriverCockpitService {
 
     trip.status = 'COMPLETED';
     trip.completed_at = summary.completed_at;
+    trip.total_cash_to_handover_vnd = summary.total_cash_to_handover_vnd;
     this._event(trip, 'TRIP_COMPLETED', { early_end_reason: summary.early_end_reason });
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {

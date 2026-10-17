@@ -376,6 +376,7 @@ class Ticket {
       paid: (j['fare_vnd'] as num?)?.toInt() ?? 0,
       name: j['passenger_name'] ?? '',
       status: status,
+      plate: j['vehicle_plate']?.toString() ?? j['plate']?.toString() ?? '',
       homePickup: j['home_pickup']?['address'],
       homeDropoff: j['home_dropoff']?['address'],
       pickupWindow: _window(j['home_pickup']),
@@ -1238,6 +1239,13 @@ class PassengerStore extends ChangeNotifier {
     final issued = tickets.where((t) => t.pnr == orderPnr).toList();
     if (issued.isNotEmpty) {
       final first = issued.first;
+      final serverPlate = (r.value!['tickets'] as List? ?? [])
+          .cast<Map<String, dynamic>>()
+          .map((m) => m['vehicle_plate']?.toString() ?? m['plate']?.toString())
+          .firstWhere((p) => p != null && p.isNotEmpty, orElse: () => null);
+      final settledPlate = (first.plate.isNotEmpty ? first.plate : null) ??
+          serverPlate ??
+          (trip?.plate.isNotEmpty == true ? trip!.plate : '');
       lastTicket = Ticket(
         id: first.id,
         pnr: first.pnr,
@@ -1254,13 +1262,13 @@ class PassengerStore extends ChangeNotifier {
         paid: orderAmount,
         name: first.name,
         status: first.status,
-        plate: trip?.plate ?? '',
+        plate: settledPlate,
         homePickup: first.homePickup,
         homeDropoff: first.homeDropoff,
         pickupWindow: first.pickupWindow,
       );
       for (final t in issued) {
-        t.plate = trip?.plate ?? '';
+        if (settledPlate.isNotEmpty) t.plate = settledPlate;
       }
     }
     orderId = null;
@@ -1319,7 +1327,7 @@ class PassengerStore extends ChangeNotifier {
     }
     for (final t in list) {
       final old = tickets.where((o) => o.id == t.id).firstOrNull;
-      if (old != null) t.plate = old.plate;
+      if (old != null && t.plate.isEmpty) t.plate = old.plate;
     }
     tickets = list;
     for (final tripId in tickets.where((t) => !t.past && t.active).map((t) => t.tripId).toSet()) {
@@ -1341,6 +1349,10 @@ class PassengerStore extends ChangeNotifier {
     t.pin = r.value!['offline_pin']?.toString();
     final status = r.value!['ticket']?['status'];
     if (status == 'BOARDED') t.status = TicketStatus.boarded;
+    if (r.value!['ticket']?['trip_completed'] == true) {
+      t.past = true;
+      _tripEnded[t.tripId] = true;
+    }
 
     if (t.isGroup) {
       if (t.status == TicketStatus.active) {
@@ -1417,15 +1429,24 @@ class PassengerStore extends ChangeNotifier {
   }
 
   // ---------- Tracking and notices (PAX-018, PAX-020) ----------
+  final Map<String, bool> _tripEnded = {};
+  bool isTripEnded(String tripId) => _tripEnded[tripId] == true;
+
   Future<Tracking> loadTracking(String tripId, {String? ticketId}) async {
     final r = await _call(() => api.getLiveRadarHUD(tripId, ticketId: ticketId));
     if (!r.ok) return Tracking(GpsSignal.none, text: r.error!);
-    return _trackingFrom(r.value!);
+    final tr = _trackingFrom(r.value!);
+    if (tr.ended || tr.tripStatus == 'COMPLETED') _tripEnded[tripId] = true;
+    return tr;
   }
 
   /// The bus pushed by the server after each of its positions; errors or ends when the connection drops.
   Stream<Tracking> watchTracking(String tripId, {String? ticketId}) =>
-      api.watchLiveRadarHUD(tripId, ticketId: ticketId).map(_trackingFrom);
+      api.watchLiveRadarHUD(tripId, ticketId: ticketId).map((d) {
+        final tr = _trackingFrom(d);
+        if (tr.ended || tr.tripStatus == 'COMPLETED') _tripEnded[tripId] = true;
+        return tr;
+      });
 
   Tracking _trackingFrom(Map<String, dynamic> d) {
     final signal = switch (d['signal_status']) {

@@ -83,7 +83,7 @@ class DriverTodayTripsScreen extends StatelessWidget {
             MaterialPageRoute(builder: (_) => const DriverPassengerListScreen()),
           ),
         ),
-        if (store.endedCash != null) ...[
+        if (store.trip == TripState.completed && store.endedCash != null) ...[
           const SizedBox(height: 10),
           Panel(color: DTokens.bg, child: Text('Đã nộp ${vnd(store.endedCash!)} · ${store.boardedCount} khách lên xe', style: dsans(size: 14))),
         ],

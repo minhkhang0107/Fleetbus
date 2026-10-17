@@ -33,7 +33,7 @@ class DriverEndTripScreen extends StatelessWidget {
       },
     );
     final report = <Widget>[
-      if (store.earlyEndReason != null) ...[
+      if (!(store.lastStop && store.atStop) && store.earlyEndReason != null) ...[
         Panel(color: DTokens.dangerBg, child: Text('Kết thúc trước bến cuối. Lý do: ${store.earlyEndReason}', style: dsans(size: 14, color: DTokens.dangerInk))),
         const SizedBox(height: 12),
       ],

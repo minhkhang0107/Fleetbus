@@ -183,6 +183,7 @@ export class PassengerPaymentService {
     order.payment_status = 'PAID';
     order.paid_at = new Date(mockNow).toISOString();
     order.payment_ref = paymentRef;
+    const vehiclePlate = this._resolveVehiclePlate(order.trip_id) || null;
 
     // Generate individual tickets for each passenger / seat
     const generatedTicketIds = [];
@@ -214,6 +215,7 @@ export class PassengerPaymentService {
         dropoff_stop_id: order.dropoff_stop_id,
         home_pickup: order.home_pickup || null,
         home_dropoff: order.home_dropoff || null,
+        vehicle_plate: vehiclePlate,
         status: 'ACTIVE', // ACTIVE | BOARDED | CANCELLED
         created_at: new Date(mockNow).toISOString(),
         boarded_at: null,
@@ -307,12 +309,22 @@ export class PassengerPaymentService {
     };
   }
 
+  /** Plate of the bus assigned to a trip, from the event bridge (null before the office assigns one). */
+  _resolveVehiclePlate(tripId) {
+    return (tripId && this.plateProvider?.(tripId)) || null;
+  }
+
+
   _enrichTicket(ticket) {
     if (!ticket) return ticket;
     if (ticket.pickup_time === undefined) {
       const timeInfo = resolveStopTime({ trip_id: ticket.trip_id, departure_time: ticket.departure_time }, ticket.pickup_stop_id, this.searchService);
       ticket.pickup_time = timeInfo.pickup_time;
       ticket.pickup_time_estimated = timeInfo.pickup_time_estimated;
+    }
+    if (!ticket.vehicle_plate && ticket.trip_id) {
+      const plate = this._resolveVehiclePlate(ticket.trip_id);
+      if (plate) ticket.vehicle_plate = plate;
     }
     return ticket;
   }

@@ -163,10 +163,12 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
   Widget build(BuildContext context) {
     final store = PassengerScope.of(context);
     final t = widget.ticket;
-    final usable = t.status == TicketStatus.active;
+    final walletTicket = store.tickets.where((o) => o.id == t.id).firstOrNull;
+    final isFinished = t.past || walletTicket?.past == true || store.isTripEnded(t.tripId);
+    final usable = t.status == TicketStatus.active && !isFinished;
     final pill = switch (t.status) {
       TicketStatus.active => const Pill('Hợp lệ', PillKind.ok),
-      TicketStatus.boarded => const Pill('Đã lên xe', PillKind.ok),
+      TicketStatus.boarded => isFinished ? const Pill('Đã đi', PillKind.mute) : const Pill('Đã lên xe', PillKind.ok),
       TicketStatus.noShow => const Pill('Vắng mặt', PillKind.mute),
       TicketStatus.refunding => const Pill('Đang hoàn tiền', PillKind.info),
       TicketStatus.cancelled => const Pill('Đã hủy', PillKind.mute),

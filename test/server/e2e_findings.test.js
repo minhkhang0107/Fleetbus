@@ -192,4 +192,195 @@ describe('E2E Findings: assign options, live radar driver, and grouped pickup no
       assert.strictEqual(multiArrived2.length, 1, 'notification must remain deduplicated on repeated stop arrival');
     });
   });
+
+  describe('Bug G5: Hotline hold converted on COD collection creates POS_HOTLINE booking', () => {
+    let services;
+
+    before(() => {
+      ({ services } = createFleetBusServer());
+    });
+
+    it('hold 1 seat -> driver collects COD with change -> bookings has one PAID POS_HOTLINE booking with fare = seat fare and dashboard net revenue includes it; collecting again is refused/does not duplicate', () => {
+      const tripId = 'trp_hn_th_01';
+      const trip = services.managerService.findTrip(tripId);
+      assert.ok(trip);
+      const operatorId = trip.operator_id || 'op_saomai';
+
+      // 1. Hold 1 seat via hotline
+      const holdRes = services.managerService.createHotlineHold({
+        tripId,
+        passengerName: 'Le Thi Hoa',
+        phone: '0987000333',
+        seatCodes: ['A11'],
+        holdPolicy: 'CUSTOM_EXPIRY_MINUTES',
+        customExpiryMinutes: 60,
+        operatorId
+      });
+      assert.strictEqual(holdRes.success, true);
+      const reservation = holdRes.data;
+      assert.ok(reservation);
+      const pnr = reservation.pnr;
+      const seatFare = services.managerService.routes.find(r => r.route_id === trip.route_id)?.base_fare_vnd || trip.base_fare_vnd || 220000;
+
+      // Initial revenue before collecting COD
+      const kpisBefore = services.managerService.getDashboardKPIs(operatorId);
+      const netBefore = kpisBefore.data.kpi_metrics.net_revenue_vnd;
+
+      // Find ticket on driver's manifest
+      const driverTrip = services.driverService.activeTrips.get(tripId);
+      assert.ok(driverTrip, 'driver trip must exist');
+      const manifestItem = driverTrip.manifest.find(m => m.pnr === pnr && m.seat_code === 'A11');
+      assert.ok(manifestItem, 'hotline passenger must be in driver manifest');
+      const ticketId = manifestItem.ticket_id;
+
+      // 2. Driver collects COD with change (passenger gives seatFare + 20.000 đ)
+      const collectRes = services.driverService.collectCod(tripId, ticketId, {
+        amount_collected_vnd: seatFare + 20000,
+        fare_amount_vnd: seatFare,
+        change_settlement_method: 'CASH_RETURNED'
+      });
+      assert.strictEqual(collectRes.success, true);
+
+      // 3. bookings has one PAID POS_HOTLINE booking with fare = seat fare
+      const matchingBookings = services.managerService.bookings.filter(b => b.pnr === pnr);
+      assert.strictEqual(matchingBookings.length, 1, 'must have exactly one booking for this PNR');
+      const b = matchingBookings[0];
+      assert.strictEqual(b.payment_status, 'PAID');
+      assert.strictEqual(b.channel, 'POS_HOTLINE');
+      assert.strictEqual(b.total_fare_vnd, seatFare, 'fare must be seat fare, not cash given, not change');
+      assert.deepStrictEqual(b.seat_codes, ['A11']);
+      assert.strictEqual(b.passenger_name, 'Le Thi Hoa');
+      assert.strictEqual(b.phone, '0987000333');
+
+      // Dashboard net revenue includes it
+      const kpisAfter = services.managerService.getDashboardKPIs(operatorId);
+      assert.strictEqual(kpisAfter.data.kpi_metrics.net_revenue_vnd, netBefore + seatFare);
+
+      // 4. Collecting again is refused / does not duplicate
+      const collectAgainRes = services.driverService.collectCod(tripId, ticketId, {
+        amount_collected_vnd: seatFare,
+        fare_amount_vnd: seatFare
+      });
+      assert.strictEqual(collectAgainRes.success, false);
+      assert.strictEqual(collectAgainRes.code, 'ALREADY_COLLECTED');
+
+      // Even if event is fired directly, it does not double count
+      services.eventBridge.emit('COD_COLLECTED', { tripId, ticketId, pnr, fareVnd: seatFare, seatCode: 'A11' });
+      assert.strictEqual(services.managerService.bookings.filter(b => b.pnr === pnr).length, 1);
+      assert.strictEqual(services.managerService.bookings.find(b => b.pnr === pnr).total_fare_vnd, seatFare);
+      const kpisAfterDup = services.managerService.getDashboardKPIs(operatorId);
+      assert.strictEqual(kpisAfterDup.data.kpi_metrics.net_revenue_vnd, netBefore + seatFare);
+    });
+
+    it('multi-seat hotline hold collected seat by seat extends the booking and never double counts', () => {
+      const tripId = 'trp_hn_th_01';
+      const trip = services.managerService.findTrip(tripId);
+      const operatorId = trip.operator_id || 'op_saomai';
+
+      const holdRes = services.managerService.createHotlineHold({
+        tripId,
+        passengerName: 'Nguyen Van Hai',
+        phone: '0987000888',
+        seatCodes: ['B04', 'B05'],
+        holdPolicy: 'CUSTOM_EXPIRY_MINUTES',
+        customExpiryMinutes: 60,
+        operatorId
+      });
+      assert.strictEqual(holdRes.success, true);
+      const reservation = holdRes.data;
+      const pnr = reservation.pnr;
+      const seatFare = services.managerService.routes.find(r => r.route_id === trip.route_id)?.base_fare_vnd || trip.base_fare_vnd || 220000;
+
+      const driverTrip = services.driverService.activeTrips.get(tripId);
+      const itemB04 = driverTrip.manifest.find(m => m.pnr === pnr && m.seat_code === 'B04');
+      const itemB05 = driverTrip.manifest.find(m => m.pnr === pnr && m.seat_code === 'B05');
+
+      // Collect seat 1
+      const res1 = services.driverService.collectCod(tripId, itemB04.ticket_id, {
+        amount_collected_vnd: seatFare,
+        fare_amount_vnd: seatFare
+      });
+      assert.strictEqual(res1.success, true);
+
+      let b = services.managerService.bookings.find(b => b.pnr === pnr);
+      assert.ok(b);
+      assert.deepStrictEqual(b.seat_codes, ['B04']);
+      assert.strictEqual(b.total_fare_vnd, seatFare);
+
+      // Collect seat 2
+      const res2 = services.driverService.collectCod(tripId, itemB05.ticket_id, {
+        amount_collected_vnd: seatFare,
+        fare_amount_vnd: seatFare
+      });
+      assert.strictEqual(res2.success, true);
+
+      b = services.managerService.bookings.find(b => b.pnr === pnr);
+      assert.ok(b);
+      assert.deepStrictEqual(b.seat_codes, ['B04', 'B05']);
+      assert.strictEqual(b.total_fare_vnd, seatFare * 2);
+    });
+  });
+
+  describe('Bug G2: Issued tickets take vehicle plate from assigned trip and update on swap', () => {
+    let services;
+
+    before(() => {
+      ({ services } = createFleetBusServer());
+    });
+
+    it('settled tickets get vehicle_plate from the assigned trip and update on assignment/swap', () => {
+      const tripId = 'trp_hn_th_01';
+      // 1. Assign bus veh_01 (29B-123.45) to trip
+      const assignRes = services.managerService.assignTrip(tripId, {
+        vehicleId: 'veh_01',
+        driverId: 'drv_8821a'
+      });
+      assert.strictEqual(assignRes.success, true);
+      const trip = services.managerService.findTrip(tripId);
+      assert.strictEqual(trip.vehicle_plate, '29B-123.45');
+
+      // 2. Passenger creates payment order for trip (simulating trip without plate at client search time)
+      const mockTripWithoutPlate = {
+        trip_id: tripId,
+        route_name: 'Hà Nội — Thanh Hóa',
+        departure_time: '2026-08-28T07:00:00+07:00'
+      };
+      const orderRes = services.paymentService.createPaymentOrder({
+        holdId: 'hld_g2_test',
+        trip: mockTripWithoutPlate,
+        seatCodes: ['A03'],
+        payer: { full_name: 'Nguyễn Văn An', phone: '0987654321' },
+        passengers: [{ full_name: 'Nguyễn Văn An', phone: '0987654321' }],
+        amountVnd: 220000,
+        pickupStop: { name: 'Mỹ Đình' },
+        dropoffStop: { name: 'Thanh Hóa' }
+      });
+      assert.strictEqual(orderRes.success, true);
+      const orderId = orderRes.data.order_id;
+
+      // 3. Settle payment
+      const settleRes = services.paymentService.settlePayment(orderId, 'tx_g2_001');
+      assert.strictEqual(settleRes.success, true);
+      assert.strictEqual(settleRes.data.tickets.length, 1);
+      const issuedTicket = settleRes.data.tickets[0];
+      assert.strictEqual(issuedTicket.vehicle_plate, '29B-123.45', 'issued ticket must carry vehicle_plate from assigned trip');
+
+      // 4. Ticket wallet query returns vehicle_plate
+      const walletRes = services.paymentService.getTicketsByPhone('0987654321', 'UPCOMING');
+      assert.strictEqual(walletRes.success, true);
+      const walletTicket = walletRes.data.find(t => t.ticket_id === issuedTicket.ticket_id);
+      assert.ok(walletTicket);
+      assert.strictEqual(walletTicket.vehicle_plate, '29B-123.45');
+
+      // 5. If emergency swap happens to veh_03 (standby bus 29B-888.22), tickets are updated
+      const veh03 = services.managerService.vehicles.find(v => v.vehicle_id === 'veh_03');
+      assert.ok(veh03);
+      assert.strictEqual(veh03.plate_number, '29B-888.22');
+      const swapRes = services.managerService.replaceTripVehicle(tripId, 'veh_03', 'Xe bảo dưỡng định kỳ');
+      assert.strictEqual(swapRes.success, true);
+      assert.strictEqual(issuedTicket.vehicle_plate, '29B-888.22', 'ticket vehicle_plate must update on vehicle swap');
+    });
+  });
 });
+
+

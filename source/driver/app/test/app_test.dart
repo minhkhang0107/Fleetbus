@@ -236,6 +236,37 @@ void main() {
         trip['status'] = 'COMPLETED';
         return ok({'total_cash_to_handover_vnd': trip['total_cod_collected_vnd'] + trip['total_hail_collected_vnd']});
       }
+      if (path.contains('/seat-map')) {
+        return ok({
+          'seats': [
+            {'seat_code': 'A03', 'state': 'AVAILABLE'},
+            {'seat_code': 'A04', 'state': 'AVAILABLE'},
+            {'seat_code': 'A05', 'state': 'AVAILABLE'},
+            {'seat_code': 'A06', 'state': 'AVAILABLE'},
+            {'seat_code': 'A07', 'state': 'AVAILABLE'},
+            {'seat_code': 'A08', 'state': 'AVAILABLE'},
+            {'seat_code': 'A09', 'state': 'AVAILABLE'},
+            {'seat_code': 'A10', 'state': 'AVAILABLE'},
+          ]
+        });
+      }
+      if (path.endsWith('/onboard-hail')) {
+        final seat = body['seat_code'] as String;
+        final p = {
+          'ticket_id': 'tkt_hail_${DateTime.now().millisecondsSinceEpoch}_$seat',
+          'pnr': 'BG-HAIL-101',
+          'seat_code': seat,
+          'passenger_name': body['passenger_name'] ?? 'Khách vẫy dọc đường',
+          'pickup_stop_id': 'stp_hn_gb',
+          'dropoff_stop_id': body['dropoff_stop_id'] ?? 'stp_th_pb',
+          'boarding_status': 'BOARDED',
+          'payment_method': 'CASH',
+          'cod_amount_vnd': 0,
+        };
+        (trip['manifest'] as List).add(p);
+        trip['total_hail_collected_vnd'] = (trip['total_hail_collected_vnd'] as int) + 220000;
+        return ok(p);
+      }
       if (path.contains('/driver/trips/')) return ok(trip);
       return ok({});
     });
@@ -934,6 +965,68 @@ void main() {
     store.dispose();
   });
 
+  testWidgets('hail sheet shows all free seats, default given = fare, choosing 500k shows the change and sends the mapped method', (tester) async {
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final store = await started();
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (ctx) => ElevatedButton(
+              onPressed: () => showHailSheet(ctx),
+              child: const Text('Mở Khách vẫy'),
+            ),
+          ),
+        ),
+      ),
+    ));
+
+    await tester.tap(find.text('Mở Khách vẫy'));
+    await tester.pumpAndSettle();
+
+    // 1. Hail sheet shows all free seats (A03 through A10 from seat-map)
+    expect(find.text('A03'), findsOneWidget);
+    expect(find.text('A08'), findsOneWidget);
+    expect(find.text('A09'), findsOneWidget);
+    expect(find.text('A10'), findsOneWidget);
+
+    // 2. Default given = fare (220.000 đ)
+    expect(find.text('Đã nhận 220.000 đ · Cho lên xe'), findsOneWidget);
+    expect(find.text('Đủ tiền, không có tiền thừa'), findsOneWidget);
+    expect(find.text('Trả tiền mặt ngay'), findsNothing);
+
+    // 3. Choosing 500k shows the change and options
+    await tester.ensureVisible(find.text('500k'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('500k'));
+    await tester.pumpAndSettle();
+    expect(find.text('Trả lại khách 280.000 đ'), findsOneWidget);
+    expect(find.text('Đã nhận 500.000 đ · Cho lên xe'), findsOneWidget);
+    expect(find.text('Trả tiền mặt ngay'), findsOneWidget);
+
+    // Wallet credit is disabled when no phone is entered
+    final walletTile = tester.widget<ChoiceTile>(find.widgetWithText(ChoiceTile, 'Cộng vào ví của khách'));
+    expect(walletTile.enabled, isFalse);
+
+    // 4. Submit with default CASH method and verify mapped method sent to server
+    await tester.ensureVisible(find.widgetWithText(BigButton, 'Đã nhận 500.000 đ · Cho lên xe'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(BigButton, 'Đã nhận 500.000 đ · Cho lên xe'));
+    await tester.pumpAndSettle();
+
+    final hailReq = sent.firstWhere((r) => r.url.path.endsWith('/onboard-hail'));
+    final payload = jsonDecode(hailReq.body) as Map<String, dynamic>;
+    expect(payload['seat_code'], 'A03');
+    expect(payload['amount_collected_vnd'], 500000);
+    expect(payload['change_settlement_method'], 'CASH_RETURNED');
+    store.dispose();
+  });
+
   test('leaveStop calls departStop on server and sets bus moving', () async {
     final store = await started();
     expect(sent.any((r) => r.url.path.endsWith('/depart')), isFalse);
@@ -1061,6 +1154,98 @@ void main() {
     expect(find.widgetWithText(BigButton, 'Cho lên xe'), findsNothing);
     expect(find.text('Vắng mặt'), findsNothing);
     expect(find.widgetWithText(BigButton, 'Quét vé'), findsNothing);
+
+    store.dispose();
+  });
+
+  testWidgets('G1: load trip B after ending trip A -> no "Đã nộp" on B', (tester) async {
+    final store = await started();
+    store.leaveStop();
+    await store.arrive();
+    store.leaveStop();
+    await store.arrive();
+    expect(store.lastStop, isTrue);
+    expect(await store.endTrip(), isNull);
+    expect(store.trip, TripState.completed);
+    expect(store.endedCash, 0);
+
+    trip = {
+      'trip_id': 'trp_hn_th_02',
+      'route_name': 'Hà Nội — Thanh Hóa (Chiều về)',
+      'planned_departure_time': '2026-08-28T14:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-888.22',
+      'base_fare_vnd': 220000,
+      'current_stop_index': 0,
+      'total_cod_collected_vnd': 0,
+      'total_hail_collected_vnd': 0,
+      'debts': <Map<String, dynamic>>[],
+      'readiness_checklist': {for (final k in DriverStore.checkKeys) k: false},
+      'stops': [
+        {'stop_id': 'stp_th_pb', 'name': 'Bến xe Phía Bắc Thanh Hóa', 'order': 1, 'status': 'PENDING'},
+        {'stop_id': 'stp_hn_gb', 'name': 'Bến xe Giáp Bát', 'order': 2, 'status': 'PENDING'},
+      ],
+      'manifest': <Map<String, dynamic>>[],
+    };
+
+    await store.loadShift();
+    expect(store.tripId, 'trp_hn_th_02');
+    expect(store.trip, TripState.readyCheck);
+    expect(store.endedCash, isNull);
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverTodayTripsScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Đã nộp'), findsNothing);
+    store.dispose();
+  });
+
+  testWidgets('G4: no early-end warning after loading a new trip or when reaching last stop', (tester) async {
+    final store = await started();
+    store.earlyEndReason = 'Den Ben xe Sam Son';
+    expect(store.earlyEndReason, 'Den Ben xe Sam Son');
+
+    trip = {
+      'trip_id': 'trp_hn_th_02',
+      'route_name': 'Hà Nội — Thanh Hóa (Chiều về)',
+      'planned_departure_time': '2026-08-28T14:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-888.22',
+      'base_fare_vnd': 220000,
+      'current_stop_index': 0,
+      'total_cod_collected_vnd': 0,
+      'total_hail_collected_vnd': 0,
+      'debts': <Map<String, dynamic>>[],
+      'readiness_checklist': {for (final k in DriverStore.checkKeys) k: true},
+      'stops': [
+        {'stop_id': 'stp_th_pb', 'name': 'Bến xe Phía Bắc Thanh Hóa', 'order': 1, 'status': 'PENDING'},
+        {'stop_id': 'stp_hn_gb', 'name': 'Bến xe Giáp Bát', 'order': 2, 'status': 'PENDING'},
+      ],
+      'manifest': <Map<String, dynamic>>[],
+    };
+
+    await store.loadShift();
+    expect(store.earlyEndReason, isNull);
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverEndTripScreen()),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Kết thúc trước bến cuối'), findsNothing);
+
+    store.stopIndex = store.stops.length - 1;
+    store.atStop = true;
+    store.earlyEndReason = 'Den Ben xe Sam Son';
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverEndTripScreen()),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Kết thúc trước bến cuối'), findsNothing);
 
     store.dispose();
   });

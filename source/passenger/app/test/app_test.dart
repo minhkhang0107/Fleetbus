@@ -183,7 +183,13 @@ void main() {
           },
         };
       }
-      if (path.endsWith('/verify-status')) data = {'payment_status': paid ? 'PAID' : 'PENDING_PAYMENT', 'is_settled': paid};
+      if (path.endsWith('/verify-status')) {
+        data = {
+          'payment_status': paid ? 'PAID' : 'PENDING_PAYMENT',
+          'is_settled': paid,
+          if (paid) 'tickets': [{...ticket, 'status': ticketStatus}],
+        };
+      }
       if (path.endsWith('/passenger/tickets')) {
         final tab = req.url.queryParameters['tab'];
         if (tab == 'UPCOMING') {
@@ -1400,5 +1406,103 @@ void main() {
     expect(rFailed.ok, isFalse);
     expect(rFailed.code, 'BOARDING_STARTED');
     expect(rFailed.error, 'Chuyến đã xuất bến');
+  });
+
+  testWidgets('G2: success screen shows the plate from the settled ticket when trip had no plate at search time', (tester) async {
+    final store = await storeWithServer();
+    await store.verifyOtp('0987654321', '123456');
+    await store.loadTrips();
+    // Simulate passenger searched before assignment (no plate on trip)
+    store.trip = const Trip(
+      id: 'trp_hn_th_01',
+      dep: '07:00',
+      arr: '10:00',
+      duration: '3h',
+      type: 'Giường nằm',
+      vip: false,
+      price: 220000,
+      from: 'Mỹ Đình',
+      to: 'Thanh Hóa',
+      via: 'Pháp Vân',
+      seatsLeft: 30,
+      plate: '',
+      stops: [],
+    );
+    ticket['vehicle_plate'] = '29B-888.22';
+
+    store.orderId = 'ord_1';
+    store.orderPnr = 'BG-000001';
+    store.orderAmount = 220000;
+    paid = true;
+    expect(await store.checkPayment(), isTrue);
+    expect(store.lastTicket!.plate, '29B-888.22');
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(
+        store: store,
+        child: PassengerBookingSuccessScreen(ticket: store.lastTicket!, phone: '0987654321'),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('29B-888.22'), findsOneWidget);
+    expect(find.text('Nhà xe sẽ báo'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('G6: past boarded ticket shows "Đã đi" on boarding-pass screen', (tester) async {
+    final store = await storeWithServer();
+    final boardedPastTicket = Ticket(
+      id: 'tkt_boarded_01',
+      pnr: 'BG-000001',
+      tripId: 'trp_hn_th_01',
+      route: 'Hà Nội → Thanh Hóa',
+      date: 'T6 28/08',
+      dep: '07:00',
+      seat: 'A02',
+      pickup: 'Giáp Bát',
+      paid: 220000,
+      name: 'Nguyễn An',
+      status: TicketStatus.boarded,
+      past: true,
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(
+        store: store,
+        child: PassengerTicketQrScreen(ticket: boardedPastTicket),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Đã đi'), findsOneWidget);
+    expect(find.text('Đã lên xe'), findsNothing);
+
+    // When ticket is boarded but not past, it shows "Đã lên xe"
+    final activeBoardedTicket = Ticket(
+      id: 'tkt_boarded_02',
+      pnr: 'BG-000002',
+      tripId: 'trp_hn_th_02',
+      route: 'Hà Nội → Thanh Hóa',
+      date: 'T6 28/08',
+      dep: '07:00',
+      seat: 'A03',
+      pickup: 'Giáp Bát',
+      paid: 220000,
+      name: 'Nguyễn An',
+      status: TicketStatus.boarded,
+      past: false,
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(
+        store: store,
+        child: PassengerTicketQrScreen(ticket: activeBoardedTicket),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Đã lên xe'), findsOneWidget);
+    expect(find.text('Đã đi'), findsNothing);
   });
 }

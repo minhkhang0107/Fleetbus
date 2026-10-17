@@ -116,6 +116,19 @@ export class FleetBusEventBridge extends EventEmitter {
     if (seatMapService) seatMapService.eventBridge = this;
     if (paymentService && seatMapService) paymentService.seatMapService = seatMapService;
     if (paymentService && services.searchService) paymentService.searchService = services.searchService;
+    if (paymentService) {
+      paymentService.plateProvider = (tripId) => {
+        const ops = managerService?.trips?.find(t => t.trip_id === tripId);
+        if (ops?.vehicle_plate) return ops.vehicle_plate;
+        const drv = driverService?.activeTrips?.get(tripId);
+        if (drv?.vehicle_plate) return drv.vehicle_plate;
+        const detail = services.searchService?.getTripDetail?.(tripId);
+        if (detail?.data?.plate_number) return detail.data.plate_number;
+        if (detail?.data?.vehicle_plate) return detail.data.vehicle_plate;
+        if (ops?.schedule_id) return managerService?.defaultPlateFor?.(ops.schedule_id) || null;
+        return null;
+      };
+    }
     // The stops of a trip, in order: the passenger trip (PAX-008) is the authority, a driver-only trip uses its own
     if (seatMapService) {
       seatMapService.stopsProvider = (tripId) => {
@@ -511,21 +524,23 @@ export class FleetBusEventBridge extends EventEmitter {
     this.on('HOTLINE_HOLD_CONVERTED', ({ tripId, reservationId, seatCode }) => {
       if (managerService && managerService.hotlineReservations) {
         const rsv = managerService.hotlineReservations.find(r => r.reservation_id === reservationId);
-        if (rsv && rsv.hold_status === 'HELD_HOTLINE') {
+        if (rsv && (rsv.hold_status === 'HELD_HOTLINE' || rsv.hold_status === 'CONVERTED')) {
           // Initialize tracking of converted seats
           if (!rsv.converted_seats) rsv.converted_seats = [];
-          if (!rsv.converted_seats.includes(seatCode)) rsv.converted_seats.push(seatCode);
-
-          if (rsv.converted_seats.length === rsv.seat_codes.length) {
-            rsv.hold_status = 'CONVERTED';
-            rsv.converted_at = new Date().toISOString();
+          if (!rsv.converted_seats.includes(seatCode)) {
+            rsv.converted_seats.push(seatCode);
             
             // Move from held to booked
             const trip = managerService.findTrip(tripId);
             if (trip) {
-              trip.held_seats = Math.max(0, (trip.held_seats || 0) - rsv.seat_codes.length);
-              trip.booked_seats = (trip.booked_seats || 0) + rsv.seat_codes.length;
+              trip.held_seats = Math.max(0, (trip.held_seats || 0) - 1);
+              trip.booked_seats = (trip.booked_seats || 0) + 1;
             }
+          }
+
+          if (rsv.converted_seats.length === rsv.seat_codes.length) {
+            rsv.hold_status = 'CONVERTED';
+            rsv.converted_at = new Date().toISOString();
           }
         }
       }
@@ -664,6 +679,11 @@ export class FleetBusEventBridge extends EventEmitter {
       if (driverTrip && paymentService?.tickets) {
         addToManifest(driverTrip, [...paymentService.tickets.values()].filter(t => t.trip_id === tripId && ['ACTIVE', 'BOARDED'].includes(t.status)));
       }
+      if (paymentService?.tickets) {
+        for (const ticket of paymentService.tickets.values()) {
+          if (ticket.trip_id === tripId) ticket.vehicle_plate = vehiclePlate;
+        }
+      }
       if (driverTrip) {
         for (const r of managerService?.hotlineReservations || []) {
           if (r.trip_id === tripId && r.hold_status === 'HELD_HOTLINE') {
@@ -698,6 +718,11 @@ export class FleetBusEventBridge extends EventEmitter {
       // A. Driver Cockpit: the trip moves to the new vehicle and, when named, to the new driver
       if (driverService && typeof driverService.reassignTrip === 'function') {
         driverService.reassignTrip(tripId, { vehiclePlate: newPlate, driverId: newDriverId });
+      }
+      if (paymentService?.tickets) {
+        for (const ticket of paymentService.tickets.values()) {
+          if (ticket.trip_id === tripId) ticket.vehicle_plate = newPlate;
+        }
       }
 
       // B. Passenger Radar: Register vehicle replacement disruption & notify passengers
@@ -920,11 +945,35 @@ export class FleetBusEventBridge extends EventEmitter {
     // -------------------------------------------------------------------------
     // 8c. COD_COLLECTED / HAIL_BOARDED / WALLET_CREDIT_REQUESTED: driver cash events -> Manager & Passenger wallet
     // -------------------------------------------------------------------------
-    this.on('COD_COLLECTED', ({ pnr, fareVnd }) => {
-      const booking = managerService?.bookings?.find(b => b.pnr === pnr);
-      if (booking) {
-        booking.payment_status = 'PAID';
-        booking.cod_collected_vnd = (booking.cod_collected_vnd || 0) + fareVnd;
+    this.on('COD_COLLECTED', ({ tripId, ticketId, pnr, fareVnd, seatCode }) => {
+      if (!managerService?.bookings) return;
+      let booking = managerService.bookings.find(b => b.pnr === pnr);
+      if (!booking) {
+        // A hotline hold paid on board becomes a booking here, so its cash reaches the revenue (G5).
+        const rsv = managerService.hotlineReservations?.find(r => r.pnr === pnr);
+        if (!rsv) return;
+        booking = {
+          pnr,
+          trip_id: tripId || rsv.trip_id,
+          passenger_name: rsv.passenger_name,
+          phone: rsv.phone || null,
+          seat_codes: [],
+          total_fare_vnd: 0,
+          payment_status: 'PAID',
+          issued_at: new Date().toISOString(),
+          channel: 'POS_HOTLINE',
+          operator_id: rsv.operator_id || operatorOfTrip(this.services, tripId || rsv.trip_id)
+        };
+        managerService.bookings.push(booking);
+      }
+      booking.collected_ticket_ids = booking.collected_ticket_ids || [];
+      if (ticketId && booking.collected_ticket_ids.includes(ticketId)) return;
+      if (ticketId) booking.collected_ticket_ids.push(ticketId);
+      booking.payment_status = 'PAID';
+      booking.cod_collected_vnd = (booking.cod_collected_vnd || 0) + fareVnd;
+      if (booking.channel === 'POS_HOTLINE' && seatCode && !booking.seat_codes.includes(seatCode)) {
+        booking.seat_codes.push(seatCode);
+        booking.total_fare_vnd += fareVnd;
       }
     });
 
