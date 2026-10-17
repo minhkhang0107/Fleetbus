@@ -90,6 +90,17 @@ Khởi động máy chủ bằng `make start_server` hoặc `npm start`:
 - 🩺 Kiểm tra sức khỏe hệ thống: [http://localhost:3000/health](http://localhost:3000/health)
 - 📑 Tài liệu OpenAPI Spec: [http://localhost:3000/api/v1/openapi.json](http://localhost:3000/api/v1/openapi.json)
 
+### Dùng từ máy khác qua Tailscale
+
+Máy chạy server và máy (hoặc điện thoại) dùng thử cùng đăng nhập một tailnet; không cần chung mạng Wi-Fi, không mở cổng router.
+
+1. Trên máy chạy server: `make tailscale_url` in địa chỉ cho máy khác (dạng `http://100.x.y.z:3000`).
+2. `make tailscale_server` khởi động server với `FLEETBUS_PUBLIC_URL` là địa chỉ đó, để link theo dõi xe gửi cho người thân mở được từ máy khác.
+3. Web điều hành: máy khác mở `http://100.x.y.z:3000/manager`.
+4. App: `make tailscale_apk` build 2 APK trỏ vào địa chỉ đó, chép ra `dist/tailscale/busgo-passenger.apk` và `dist/tailscale/busgo-driver.apk`; cài lên điện thoại có Tailscale hoặc lên emulator của máy khác (`adb install -r …`).
+
+Đổi địa chỉ (ví dụ tên MagicDNS): `make tailscale_apk SERVER_URL=http://<tên-máy>:3000`. Server nghe trên mọi địa chỉ nên không cần cấu hình thêm; nếu máy có tường lửa thì cho phép cổng 3000 trên giao diện `tailscale0`. Đây là server dev (tài khoản mẫu, khóa dev): chỉ chia sẻ trong tailnet, không mở ra Internet.
+
 ### Lưu trữ và bảo mật dữ liệu (D126, D127)
 
 Mọi dữ liệu nghiệp vụ (nhà xe, nhân viên, tài xế, chuyến, ghế, đơn, vé, ví, thông báo, nhật ký, phiên đăng nhập, bộ đếm đăng nhập sai, idempotency) được lưu vào SQLite (`node:sqlite`, Node ≥ 22.5). Dữ liệu là code (danh mục API, hình học tuyến, trạm dừng nghỉ, luật voucher) vẫn nằm trong code.
