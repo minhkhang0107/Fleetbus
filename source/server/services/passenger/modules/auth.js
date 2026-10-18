@@ -4,7 +4,7 @@
  */
 
 import { validateVietnamPhone } from '../core/formatters.js';
-import { isProduction } from '../../../config.js';
+import { isProduction, VIP_PASSENGER_OTP, isVipPassengerPhone } from '../../../config.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { findOperatorById, DEFAULT_OPERATOR_ID, publicOperatorProfile } from '../../../core/operators.js';
 
@@ -76,8 +76,12 @@ export class PassengerAuthService {
       };
     }
 
-    // Generate 6-digit OTP (Deterministic mock for 0912345678 is 882199)
-    const otp = normalized === '0912345678' ? '882199' : Math.floor(100000 + Math.random() * 900000).toString();
+    // Generate 6-digit OTP (Deterministic mock for 0912345678 is 882199, VIP is 888777 outside production)
+    const otp = isVipPassengerPhone(normalized)
+      ? VIP_PASSENGER_OTP
+      : normalized === '0912345678'
+      ? '882199'
+      : Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = mockNow + this.otpTtlSeconds * 1000;
 
     this.otpStore.set(cacheKey, {
@@ -127,7 +131,11 @@ export class PassengerAuthService {
     }
 
     // "The fixed test OTP 882199 for 0912345678 applies to every operator."
-    if (record.otp !== inputOtp && !(normalized === '0912345678' && inputOtp === '882199')) {
+    if (
+      record.otp !== inputOtp &&
+      !(normalized === '0912345678' && inputOtp === '882199') &&
+      !(isVipPassengerPhone(normalized) && inputOtp === VIP_PASSENGER_OTP)
+    ) {
       record.attempts += 1;
       return {
         success: false,
@@ -147,19 +155,29 @@ export class PassengerAuthService {
       userId = `usr_${opCode.toLowerCase()}_${normalized.slice(-6)}`;
     }
 
+    const vip = isVipPassengerPhone(normalized);
+
     const user = {
       user_id: userId,
       phone: normalized,
-      full_name: normalized === '0912345678' ? 'Nguyễn Văn An' : 'Hành khách BusGo',
+      full_name: vip ? 'Khách VIP BusGo' : normalized === '0912345678' ? 'Nguyễn Văn An' : 'Hành khách BusGo',
       email: `${normalized}@passenger.busgo.vn`,
       role: 'ROLE_PASSENGER',
+      is_vip: vip,
       created_at: new Date(mockNow).toISOString(),
       operator_id: operatorId,
       operator: publicOperatorProfile(op)
     };
 
     const token = signToken(
-      { sub: user.user_id, phone: normalized, role: user.role, kind: 'passenger', operator_id: operatorId },
+      {
+        sub: user.user_id,
+        phone: normalized,
+        role: user.role,
+        kind: 'passenger',
+        operator_id: operatorId,
+        ...(vip ? { vip: true } : {})
+      },
       { prefix: TOKEN_PREFIXES.passenger, ttlSeconds: 12 * 3600, now: mockNow }
     );
     this.sessions.set(token, user);

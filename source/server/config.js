@@ -64,3 +64,12 @@ export function getStaffTotpSecret(userId, account = null) {
   return isProduction() ? null : DEV_TOTP_SECRET;
 }
 
+/**
+ * VIP / review passenger account: rides free across all bus companies, dev/staging only. Never active in production.
+ */
+export const VIP_PASSENGER_PHONE = '0999888777';
+export const VIP_PASSENGER_OTP = '888777';
+
+export function isVipPassengerPhone(phone) {
+  return !isProduction() && phone === VIP_PASSENGER_PHONE;
+}
