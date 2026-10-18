@@ -25,6 +25,8 @@ export const CHANGE_METHODS = ['CASH_RETURNED', 'REST_STOP_DEBT_RECEIPT', 'WALLE
 const NO_SHOW_GRACE_MINUTES = 10;
 // BR-COD-005: change owed to passengers as debt receipts may total at most this much per trip
 const DEBT_LIMIT_PER_TRIP_VND = 1000000;
+// The evening before, the driver prepares early trips and home pickups start 75 min before departure.
+export const DRIVER_UPCOMING_WINDOW_MS = 12 * 3600000;
 
 export const MOCK_DRIVERS_DB = [
   {
@@ -585,8 +587,11 @@ export class DriverCockpitService {
     const trips = Array.from(this.activeTrips.values())
       .filter(t => t.driver_id === driverId)
       .filter(t => {
-        const day = t.planned_departure_time ? vnDate(Date.parse(t.planned_departure_time)) : null;
-        return !day || day === today || (!isProduction() && day === DEMO_DATE);
+        const departureMs = t.planned_departure_time ? Date.parse(t.planned_departure_time) : null;
+        const day = departureMs ? vnDate(departureMs) : null;
+        const isToday = !day || day === today || (!isProduction() && day === DEMO_DATE);
+        const isUpcoming = departureMs !== null && departureMs > now && departureMs <= now + DRIVER_UPCOMING_WINDOW_MS;
+        return isToday || isUpcoming;
       })
       .sort((a, b) => Date.parse(a.planned_departure_time || 0) - Date.parse(b.planned_departure_time || 0))
       .map(t => this._publicTrip(t));

@@ -123,10 +123,20 @@ export class FleetBusEventBridge extends EventEmitter {
         if (ops?.vehicle_plate) return ops.vehicle_plate;
         const drv = driverService?.activeTrips?.get(tripId);
         if (drv?.vehicle_plate) return drv.vehicle_plate;
-        const detail = services.searchService?.getTripDetail?.(tripId);
-        if (detail?.data?.plate_number) return detail.data.plate_number;
-        if (detail?.data?.vehicle_plate) return detail.data.vehicle_plate;
-        if (ops?.schedule_id) return managerService?.defaultPlateFor?.(ops.schedule_id) || null;
+        const run = parseRunId(tripId);
+        const scheduleId = ops?.schedule_id || run?.templateId || null;
+        if (scheduleId) {
+          const presetPlate = managerService?.defaultPlateFor?.(scheduleId);
+          if (presetPlate) return presetPlate;
+          const template = services.searchService?.getTripDetail?.(scheduleId)?.data;
+          const templatePlate = template?.plate_number || template?.vehicle_plate || null;
+          if (templatePlate) return templatePlate;
+        }
+        const defaultPlate = managerService?.defaultPlateFor?.(tripId);
+        if (defaultPlate) return defaultPlate;
+        const detail = services.searchService?.getTripDetail?.(tripId)?.data;
+        const runPlate = detail?.plate_number || detail?.vehicle_plate || null;
+        if (runPlate) return runPlate;
         return null;
       };
     }
