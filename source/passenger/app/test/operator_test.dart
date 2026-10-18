@@ -63,6 +63,45 @@ void main() {
     return PassengerStore(api: PassengerApiClientService(baseUrl: 'http://test', client: client));
   }
 
+  String tokenExpiring(DateTime exp) =>
+      'pax_jwt_${base64Url.encode(utf8.encode(jsonEncode({'sub': 'usr_1', 'kind': 'passenger', 'exp': exp.millisecondsSinceEpoch}))).replaceAll('=', '')}.sig';
+
+  test('the login survives closing the app until its token expires, for the same company only', () async {
+    expect(PassengerStore.tokenStillValid(tokenExpiring(DateTime.now().add(const Duration(hours: 1)))), isTrue);
+    expect(PassengerStore.tokenStillValid(tokenExpiring(DateTime.now().subtract(const Duration(minutes: 1)))), isFalse);
+    expect(PassengerStore.tokenStillValid('tok'), isFalse);
+
+    final first = storeWithServer();
+    expect(await first.selectOperator('SAOMAI'), isNull);
+    expect(await first.verifyOtp('0987654321', '123456'), isNull);
+    final prefs = await SharedPreferences.getInstance();
+    final saved = jsonDecode(prefs.getString('passenger_session')!) as Map<String, dynamic>;
+    expect((saved['token'], saved['operator_code'], saved['phone']), ('tok', 'SAOMAI', '0987654321'));
+
+    final token = tokenExpiring(DateTime.now().add(const Duration(hours: 1)));
+    await prefs.setString('passenger_session', jsonEncode({...saved, 'token': token}));
+    final reopened = storeWithServer();
+    await reopened.restoreOperator();
+    expect((reopened.loggedIn, reopened.userPhone), (true, '0987654321'));
+    await pumpEventQueue();
+    expect(sent.lastWhere((r) => r.url.path.endsWith('/passenger/tickets')).headers['authorization'], 'Bearer $token');
+
+    reopened.logout();
+    await pumpEventQueue();
+    expect(prefs.getString('passenger_session'), isNull, reason: 'signing out forgets the session');
+
+    await prefs.setString('passenger_session', jsonEncode({...saved, 'token': tokenExpiring(DateTime.now().subtract(const Duration(minutes: 1)))}));
+    final expired = storeWithServer();
+    await expired.restoreOperator();
+    expect(expired.loggedIn, isFalse);
+    expect(prefs.getString('passenger_session'), isNull);
+
+    await prefs.setString('passenger_session', jsonEncode({...saved, 'token': token, 'operator_code': 'XUYENVIET'}));
+    final otherCompany = storeWithServer();
+    await otherCompany.restoreOperator();
+    expect(otherCompany.loggedIn, isFalse, reason: 'a session belongs to the company it was made for');
+  });
+
   test('operator flow', () async {
     final store = storeWithServer();
     

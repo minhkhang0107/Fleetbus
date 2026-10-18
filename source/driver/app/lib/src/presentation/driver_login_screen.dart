@@ -8,7 +8,10 @@ import 'main_shell_screen.dart';
 
 /// DRI-001: staff id and 6-digit PIN. No GPS or device status before the shift starts (D101).
 class DriverLoginScreen extends StatefulWidget {
-  const DriverLoginScreen({super.key});
+  const DriverLoginScreen({super.key, this.restoreSession = false});
+
+  /// On app start: go straight to the shift when a saved session is still valid.
+  final bool restoreSession;
 
   @override
   State<DriverLoginScreen> createState() => _DriverLoginScreenState();
@@ -20,9 +23,12 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
   final _pin = TextEditingController();
   String? _error;
 
+  late bool _restoring = widget.restoreSession;
+
   @override
   void initState() {
     super.initState();
+    if (_restoring) _restore();
     DriverStore.savedOperatorCode().then((code) {
       if (mounted && code.isNotEmpty) {
         setState(() => _operator.text = code);
@@ -39,6 +45,16 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
   }
 
   bool _busy = false;
+
+  Future<void> _restore() async {
+    final ok = await DriverScope.read(context).restoreSession();
+    if (!mounted) return;
+    if (ok) {
+      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const MainShellScreen()));
+    } else {
+      setState(() => _restoring = false);
+    }
+  }
 
   Future<void> _submit() async {
     setState(() => _busy = true);
@@ -127,6 +143,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_restoring) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     if (dWide(context)) {
       // Tablet: brand on the left, a 440 dp form on the right with the button right under the PIN.
       return Scaffold(

@@ -763,6 +763,51 @@ class PassengerStore extends ChangeNotifier {
     final code = prefs.getString('operator_code');
     if (code != null && code.isNotEmpty) {
       await selectOperator(code); // silently ignore errors
+      if (operator != null) await _restoreSession(prefs);
+    }
+  }
+
+  static const _sessionKey = 'passenger_session';
+
+  /// Keeps the signed-in passenger on the device so reopening the app does not ask for an OTP again.
+  Future<void> _saveSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_sessionKey, jsonEncode({'token': api.authToken, 'operator_code': operator?.code, 'phone': userPhone, 'name': userName}));
+  }
+
+  /// Signs the passenger back in with the saved token of this company while it has not expired.
+  Future<void> _restoreSession(SharedPreferences prefs) async {
+    final raw = prefs.getString(_sessionKey);
+    if (raw == null) return;
+    try {
+      final s = jsonDecode(raw) as Map<String, dynamic>;
+      final token = s['token'];
+      if (token is! String || s['operator_code'] != operator?.code || !tokenStillValid(token)) {
+        await prefs.remove(_sessionKey);
+        return;
+      }
+      api.authToken = token;
+      userPhone = s['phone'] as String?;
+      userName = s['name'] as String?;
+    } catch (_) {
+      await prefs.remove(_sessionKey);
+      return;
+    }
+    notifyListeners();
+    unawaited(loadTickets());
+    unawaited(loadNotices());
+    unawaited(_registerDevice());
+  }
+
+  /// The server's token is `<prefix><base64url(json)>.<signature>` with `exp` in milliseconds.
+  static bool tokenStillValid(String token, {DateTime? now}) {
+    try {
+      final body = token.split('_jwt_').last.split('.').first;
+      final payload = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(body)))) as Map<String, dynamic>;
+      final exp = payload['exp'];
+      return exp is num && exp > (now ?? DateTime.now()).millisecondsSinceEpoch;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -860,6 +905,7 @@ class PassengerStore extends ChangeNotifier {
     final name = r.value!['user']?['full_name'];
     userName = name is String && name != 'Hành khách BusGo' ? name : null;
     devOtp = null;
+    await _saveSession();
     notifyListeners();
     unawaited(loadTickets());
     unawaited(loadNotices());
@@ -870,6 +916,7 @@ class PassengerStore extends ChangeNotifier {
 
   void logout() {
     api.authToken = null;
+    unawaited(SharedPreferences.getInstance().then((prefs) => prefs.remove(_sessionKey)));
     userPhone = null;
     userName = null;
     tickets = [];

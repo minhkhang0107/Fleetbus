@@ -21,7 +21,7 @@ class BusGoDriverApp extends StatelessWidget {
         title: 'BusGo Driver',
         debugShowCheckedModeBanner: false,
         theme: driverTheme(),
-        home: const DriverLoginScreen(),
+        home: const DriverLoginScreen(restoreSession: true),
       ),
     );
   }

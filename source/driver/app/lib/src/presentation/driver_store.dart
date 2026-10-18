@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
@@ -297,6 +298,61 @@ class DriverStore extends ChangeNotifier {
   }
 
   bool get loggedIn => api.authToken != null;
+
+  static const _sessionKey = 'driver_session';
+
+  /// Keeps the signed-in session on the device so reopening the app skips the login screen.
+  Future<void> _saveSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_sessionKey, jsonEncode({
+      'token': api.authToken,
+      'operator_code': operatorCode,
+      'operator_name': operatorName,
+      'operator_hotline': operatorHotline,
+      'driver_name': driverName,
+      'staff_id': staffId,
+    }));
+  }
+
+  /// Restores the saved session while its token has not expired; true when the driver is signed in again.
+  Future<bool> restoreSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_sessionKey);
+    if (raw == null) return false;
+    try {
+      final s = jsonDecode(raw) as Map<String, dynamic>;
+      final token = s['token'];
+      if (token is! String || !tokenStillValid(token)) {
+        await prefs.remove(_sessionKey);
+        return false;
+      }
+      api.authToken = token;
+      operatorCode = s['operator_code'] ?? '';
+      api.operatorCode = operatorCode.isEmpty ? null : operatorCode;
+      operatorName = s['operator_name'] ?? '';
+      operatorHotline = s['operator_hotline'] ?? '';
+      driverName = s['driver_name'] ?? '';
+      staffId = s['staff_id'] ?? '';
+    } catch (_) {
+      await prefs.remove(_sessionKey);
+      return false;
+    }
+    notifyListeners();
+    unawaited(loadShift());
+    return true;
+  }
+
+  /// The server's token is `<prefix><base64url(json)>.<signature>` with `exp` in milliseconds.
+  static bool tokenStillValid(String token, {DateTime? now}) {
+    try {
+      final body = token.split('_jwt_').last.split('.').first;
+      final payload = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(body)))) as Map<String, dynamic>;
+      final exp = payload['exp'];
+      return exp is num && exp > (now ?? DateTime.now()).millisecondsSinceEpoch;
+    } catch (_) {
+      return false;
+    }
+  }
   List<ShiftTrip> shift = [];
   bool loading = false;
   String? loadError;
@@ -492,6 +548,7 @@ class DriverStore extends ChangeNotifier {
       return 'Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.';
     }
     if (!mustChangePin) {
+      await _saveSession();
       await loadShift();
     }
     return null;
@@ -503,12 +560,14 @@ class DriverStore extends ChangeNotifier {
     if (r.error != null) return r.error;
     mustChangePin = false;
     temporaryPin = null;
+    await _saveSession();
     notifyListeners();
     return null;
   }
 
   void logout() {
     api.authToken = null;
+    unawaited(SharedPreferences.getInstance().then((prefs) => prefs.remove(_sessionKey)));
     _stopTimers();
     tripId = null;
     shift = [];

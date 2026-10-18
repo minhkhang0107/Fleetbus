@@ -319,6 +319,55 @@ void main() {
     store.dispose();
   });
 
+  String tokenExpiring(DateTime exp) =>
+      'drv_jwt_${base64Url.encode(utf8.encode(jsonEncode({'sub': 'drv_8821a', 'kind': 'driver', 'exp': exp.millisecondsSinceEpoch}))).replaceAll('=', '')}.sig';
+
+  test('the session survives closing the app until its token expires', () async {
+    expect(DriverStore.tokenStillValid(tokenExpiring(DateTime.now().add(const Duration(hours: 1)))), isTrue);
+    expect(DriverStore.tokenStillValid(tokenExpiring(DateTime.now().subtract(const Duration(minutes: 1)))), isFalse);
+    expect(DriverStore.tokenStillValid('tok'), isFalse);
+
+    final first = storeWithServer();
+    expect(await first.login('SAOMAI', 'TX8821', '123456'), isNull);
+    final prefs = await SharedPreferences.getInstance();
+    final saved = jsonDecode(prefs.getString('driver_session')!) as Map<String, dynamic>;
+    expect((saved['token'], saved['operator_code'], saved['driver_name']), ('tok', 'SAOMAI', 'Trần Văn Bình'));
+    first.dispose();
+
+    final token = tokenExpiring(DateTime.now().add(const Duration(hours: 1)));
+    await prefs.setString('driver_session', jsonEncode({...saved, 'token': token}));
+    final reopened = storeWithServer();
+    expect(await reopened.restoreSession(), isTrue);
+    expect((reopened.loggedIn, reopened.driverName, reopened.operatorName), (true, 'Trần Văn Bình', 'Sao Mai Bus'));
+    await pumpEventQueue();
+    final shiftCall = sent.lastWhere((r) => !r.url.path.endsWith('/login'));
+    expect((shiftCall.headers['authorization'], shiftCall.headers['x-operator-code']), ('Bearer $token', 'SAOMAI'));
+
+    reopened.logout();
+    await pumpEventQueue();
+    expect(prefs.getString('driver_session'), isNull, reason: 'signing out forgets the session');
+    reopened.dispose();
+
+    await prefs.setString('driver_session', jsonEncode({...saved, 'token': tokenExpiring(DateTime.now().subtract(const Duration(minutes: 1)))}));
+    final expired = storeWithServer();
+    expect(await expired.restoreSession(), isFalse);
+    expect(expired.loggedIn, isFalse);
+    expect(prefs.getString('driver_session'), isNull);
+    expired.dispose();
+  });
+
+  test('a temporary PIN is not remembered until it is changed', () async {
+    final store = storeWithServer();
+    tempDriverMustChangePin = true;
+    expect(await store.login('SAOMAI', 'TX_TEMP', '654321'), isNull);
+    expect(store.mustChangePin, isTrue);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('driver_session'), isNull);
+    expect(await store.changePin('654321', '135790'), isNull);
+    expect(prefs.getString('driver_session'), isNotNull);
+    store.dispose();
+  });
+
   test('start sends the checklist, starts the trip and marks the first stop reached', () async {
     final store = await started();
     expect(store.trip, TripState.inTransit);
