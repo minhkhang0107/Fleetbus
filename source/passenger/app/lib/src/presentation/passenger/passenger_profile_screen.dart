@@ -50,6 +50,10 @@ class PassengerProfileScreen extends StatelessWidget {
                     style: sans(size: 16, weight: FontWeight.w600),
                   ),
                   if (store.userPhone != null) Text(store.userPhone!, style: mono(size: 13, weight: FontWeight.w500, color: PTokens.muted)),
+                  if (store.isVip) ...[
+                    gap(4),
+                    const Pill('Tài khoản VIP · mọi vé 0 đ', PillKind.ok),
+                  ],
                 ]),
               ),
             ]),

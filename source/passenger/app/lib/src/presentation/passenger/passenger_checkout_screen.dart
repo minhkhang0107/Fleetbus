@@ -172,9 +172,9 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
             ),
             gap(16),
             _line('Giá vé ($n ghế)', vnd(store.baseFare)),
-            if (store.insuranceFee > 0) _line('Bảo hiểm', vnd(store.insuranceFee)),
-            if (store.homePickup != null) _line('Phụ phí đón tận nhà', vnd(store.homePickup!.feeVnd)),
-            if (store.homeDropoff != null) _line('Phụ phí trả tận nhà', vnd(store.homeDropoff!.feeVnd)),
+            if (store.insured) _line('Bảo hiểm', vnd(store.insuranceFee)),
+            if (store.homePickup != null) _line('Phụ phí đón tận nhà', vnd(store.feeOf(store.homePickup!.feeVnd))),
+            if (store.homeDropoff != null) _line('Phụ phí trả tận nhà', vnd(store.feeOf(store.homeDropoff!.feeVnd))),
             // D130: disclosed before the transfer, never shown as confirmed while the company has not answered.
             if ((store.homePickup?.needsReview ?? false) || (store.homeDropoff?.needsReview ?? false))
               Container(

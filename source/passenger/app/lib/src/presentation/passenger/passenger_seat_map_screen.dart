@@ -227,7 +227,7 @@ class _SeatButton extends StatelessWidget {
             SeatState.held => (PTokens.warnSoft, PTokens.warn, const Color(0xFF92400E), 'Đang giữ', false),
             SeatState.booked => (PTokens.line, PTokens.line, const Color(0xFF64748B), 'Đã bán', false),
             SeatState.blocked => (PTokens.dangerSoft, const Color(0xFFFCA5A5), const Color(0xFF991B1B), 'Khóa', false),
-            SeatState.free => (PTokens.surface, const Color(0xFF94A3B8), PTokens.ink, '${(store.trip?.price ?? 0) ~/ 1000}k', true),
+            SeatState.free => (PTokens.surface, const Color(0xFF94A3B8), PTokens.ink, '${(store.trip != null ? store.fareOf(store.trip!) : 0) ~/ 1000}k', true),
           };
     final semantic = selected ? 'bạn đang chọn' : switch (state) { SeatState.held => 'người khác đang giữ', SeatState.booked => 'đã bán', SeatState.blocked => 'khóa kỹ thuật', SeatState.free => 'trống' };
     return Padding(

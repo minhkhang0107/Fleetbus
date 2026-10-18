@@ -158,7 +158,7 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
       ], right: [
         if (!pWide(context)) gap(12),
         for (final a in areas) ...[
-          Text('${a.name}: phụ phí ${vnd(a.feeVnd)}${a.leadMinutes > 0 ? ' · đặt trước ${a.leadMinutes} phút' : ''} · ${a.from}–${a.to}', style: sans(size: 13, color: PTokens.muted)),
+          Text('${a.name}: phụ phí ${vnd(store.feeOf(a.feeVnd))}${a.leadMinutes > 0 ? ' · đặt trước ${a.leadMinutes} phút' : ''} · ${a.from}–${a.to}', style: sans(size: 13, color: PTokens.muted)),
           gap(4),
         ],
         gap(8),

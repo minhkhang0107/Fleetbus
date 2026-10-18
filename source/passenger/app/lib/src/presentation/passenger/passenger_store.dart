@@ -618,6 +618,7 @@ class PassengerStore extends ChangeNotifier {
   // Session
   String? userName;
   String? userPhone;
+  bool isVip = false;
   bool get loggedIn => api.authToken != null;
   String? devOtp; // development server only: fills the OTP field like an SMS autofill
 
@@ -641,7 +642,7 @@ class PassengerStore extends ChangeNotifier {
   HomeAddress? homePickup;
   HomeAddress? homeDropoff;
   List<ServiceArea> serviceAreas = [];
-  int get homeFees => (homePickup?.feeVnd ?? 0) + (homeDropoff?.feeVnd ?? 0);
+  int get homeFees => isVip ? 0 : (homePickup?.feeVnd ?? 0) + (homeDropoff?.feeVnd ?? 0);
   int deck = 1;
   int seatColumns = 1;
   List<Seat> seatMap = [];
@@ -772,7 +773,7 @@ class PassengerStore extends ChangeNotifier {
   /// Keeps the signed-in passenger on the device so reopening the app does not ask for an OTP again.
   Future<void> _saveSession() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_sessionKey, jsonEncode({'token': api.authToken, 'operator_code': operator?.code, 'phone': userPhone, 'name': userName}));
+    await prefs.setString(_sessionKey, jsonEncode({'token': api.authToken, 'operator_code': operator?.code, 'phone': userPhone, 'name': userName, 'vip': isVip}));
   }
 
   /// Signs the passenger back in with the saved token of this company while it has not expired.
@@ -783,13 +784,16 @@ class PassengerStore extends ChangeNotifier {
       final s = jsonDecode(raw) as Map<String, dynamic>;
       final token = s['token'];
       if (token is! String || s['operator_code'] != operator?.code || !tokenStillValid(token)) {
+        isVip = false;
         await prefs.remove(_sessionKey);
         return;
       }
       api.authToken = token;
       userPhone = s['phone'] as String?;
       userName = s['name'] as String?;
+      isVip = s['vip'] == true;
     } catch (_) {
+      isVip = false;
       await prefs.remove(_sessionKey);
       return;
     }
@@ -904,6 +908,7 @@ class PassengerStore extends ChangeNotifier {
     userPhone = phone;
     final name = r.value!['user']?['full_name'];
     userName = name is String && name != 'Hành khách BusGo' ? name : null;
+    isVip = r.value!['user']?['is_vip'] == true;
     devOtp = null;
     await _saveSession();
     notifyListeners();
@@ -919,6 +924,7 @@ class PassengerStore extends ChangeNotifier {
     unawaited(SharedPreferences.getInstance().then((prefs) => prefs.remove(_sessionKey)));
     userPhone = null;
     userName = null;
+    isVip = false;
     tickets = [];
     notices = [];
     notifyListeners();
@@ -1114,7 +1120,7 @@ class PassengerStore extends ChangeNotifier {
   String? homeServiceSummary({required bool pickupSide}) {
     final areas = serviceAreas.where((a) => a.kind == (pickupSide ? 'PICKUP' : 'DROPOFF')).toList();
     if (areas.isEmpty) return null;
-    final fees = areas.map((a) => a.feeVnd).toList()..sort();
+    final fees = areas.map((a) => feeOf(a.feeVnd)).toList()..sort();
     final lead = areas.map((a) => a.leadMinutes).reduce((a, b) => a < b ? a : b);
     final parts = [
       fees.first == fees.last ? '+${vnd(fees.first)}' : 'Từ +${vnd(fees.first)}',
@@ -1215,10 +1221,13 @@ class PassengerStore extends ChangeNotifier {
     return null;
   }
 
+  int fareOf(Trip t) => isVip ? 0 : t.price;
+  int feeOf(int fee) => isVip ? 0 : fee;
+
   // ---------- Checkout (PAX-011 / PAX-012) ----------
-  int get baseFare => (trip?.price ?? 0) * seats.length;
-  int get insuranceFee => insured ? 10000 * seats.length : 0;
-  int get discount => voucher == null ? 0 : (voucherDiscount < baseFare ? voucherDiscount : baseFare);
+  int get baseFare => isVip ? 0 : (trip?.price ?? 0) * seats.length;
+  int get insuranceFee => isVip ? 0 : (insured ? 10000 * seats.length : 0);
+  int get discount => isVip ? 0 : (voucher == null ? 0 : (voucherDiscount < baseFare ? voucherDiscount : baseFare));
   // The home pickup / drop-off fee is per order, not per seat (server rule).
   int get total => baseFare + insuranceFee - discount + homeFees;
 
@@ -1229,6 +1238,7 @@ class PassengerStore extends ChangeNotifier {
 
   /// PAX-012: the company's server says whether the code applies and what it takes off this order.
   Future<String?> applyVoucher(String code) async {
+    if (isVip) return 'Tài khoản VIP đã được miễn phí vé.';
     final c = code.trim().toUpperCase();
     if (c.isEmpty) return 'Nhập mã giảm giá.';
     final r = await _call(() => api.checkVoucher(c, baseFare));

@@ -162,7 +162,8 @@ class _TripCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final few = trip.seatsLeft <= 3;
     // The passenger's own ride on this trip: where they get on and off, at what time.
-    final ride = PassengerScope.of(context).rideFor(trip);
+    final store = PassengerScope.of(context);
+    final ride = store.rideFor(trip);
     final i = trip.stops.indexOf(ride.on);
     final j = trip.stops.indexOf(ride.off);
     final between = j > i ? j - i - 1 : 0;
@@ -183,7 +184,7 @@ class _TripCard extends StatelessWidget {
             child: Text(trip.type, style: sans(size: 12, weight: FontWeight.w600, color: trip.vip ? PTokens.primaryDark : const Color(0xFF334155))),
           ),
           const Spacer(),
-          Text(vnd(trip.price), style: mono(size: 17, weight: FontWeight.w700)),
+          Text(vnd(store.fareOf(trip)), style: mono(size: 17, weight: FontWeight.w700)),
         ]),
         gap(12),
         Row(children: [

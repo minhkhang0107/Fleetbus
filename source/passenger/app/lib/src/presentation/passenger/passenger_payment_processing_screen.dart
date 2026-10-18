@@ -31,6 +31,13 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
     super.initState();
     // BR-PAY-003: ask the server every 3 seconds; the bank webhook is what settles the order.
     _poll = Timer.periodic(const Duration(seconds: 3), (_) => _check(manual: false));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final store = PassengerScope.read(context);
+      if (store.orderAmount == 0) {
+        _check(manual: false);
+      }
+    });
   }
 
   @override
