@@ -99,6 +99,8 @@ Máy chạy server và máy (hoặc điện thoại) dùng thử cùng đăng nh
 3. Web điều hành: máy khác mở `http://100.x.y.z:3000/manager`.
 4. App: `make tailscale_apk` build 2 APK trỏ vào địa chỉ đó, chép ra `dist/tailscale/busgo-passenger.apk` và `dist/tailscale/busgo-driver.apk`; cài lên điện thoại có Tailscale hoặc lên emulator của máy khác (`adb install -r …`).
 
+Đẩy APK lên Google Drive: `make drive_apk FLUTTER=~/development/flutter/bin/flutter` build 2 APK như trên rồi upload vào thư mục Drive của nhóm (ghi đè `busgo-driver.apk`, `busgo-passenger.apk` để link chia sẻ luôn trỏ bản mới nhất, kèm bản có ngày giờ trong `builds/`). Lần đầu cần kết nối Drive: `brew install rclone` rồi `rclone config create gdrive drive scope=drive` (mở trình duyệt để đăng nhập tài khoản Google có quyền sửa thư mục). Đổi thư mục: `DRIVE_FOLDER_ID=<id>`.
+
 Đổi địa chỉ (ví dụ tên MagicDNS): `make tailscale_apk SERVER_URL=http://<tên-máy>:3000`. Server nghe trên mọi địa chỉ nên không cần cấu hình thêm; nếu máy có tường lửa thì cho phép cổng 3000 trên giao diện `tailscale0`. Đây là server dev (tài khoản mẫu, khóa dev): chỉ chia sẻ trong tailnet, không mở ra Internet.
 
 ### Lưu trữ và bảo mật dữ liệu (D126, D127)
