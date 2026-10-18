@@ -185,6 +185,7 @@ class TicketCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = ticket;
     final active = !t.past && t.active;
+    final platePart = t.plate.isNotEmpty ? ' · Xe ${t.plate}' : (active ? ' · Xe: Nhà xe sẽ báo' : '');
     final status = switch (t.status) {
       TicketStatus.active => const Pill('Đã thanh toán', PillKind.ok),
       TicketStatus.boarded => t.past ? const Pill('Đã đi', PillKind.mute) : const Pill('Đã lên xe', PillKind.ok),
@@ -223,7 +224,7 @@ class TicketCard extends StatelessWidget {
               Text(t.route, style: sans(size: 15, weight: FontWeight.w600)),
             ]),
             gap(6),
-            Text(active ? '${t.date} · Ghế ${t.seat} · ${_pickupLine(t)}' : '${t.date} · Ghế ${t.seat}${t.refund != null ? ' · hoàn ${vnd(t.refund!)}' : ''}', style: sans(size: 13, color: PTokens.muted)),
+            Text(active ? '${t.date} · Ghế ${t.seat} · ${_pickupLine(t)}$platePart' : '${t.date} · Ghế ${t.seat}$platePart${t.refund != null ? ' · hoàn ${vnd(t.refund!)}' : ''}', style: sans(size: 13, color: PTokens.muted)),
             if (active && t.status == TicketStatus.active) _BusComing(ticket: t),
             if (active) ...[
               gap(10),

@@ -247,6 +247,10 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
             ]),
             gap(12),
             Row(children: [
+              Expanded(child: KeyValue('Biển số xe', t.plate.isEmpty ? 'Nhà xe sẽ báo' : t.plate, isMono: t.plate.isNotEmpty)),
+            ]),
+            gap(12),
+            Row(children: [
               Expanded(child: KeyValue('Đón', '${t.pickup} · ${t.pickupTimeLabel}')),
               Expanded(child: KeyValue('Ngày', t.date)),
             ]),

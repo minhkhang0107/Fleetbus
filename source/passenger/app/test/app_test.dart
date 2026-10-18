@@ -87,6 +87,8 @@ void main() {
   Map<String, dynamic>? trackingAnswer;
   // Custom group QR answer for tests; null = default fake group QR.
   Map<String, dynamic>? groupQrAnswer;
+  // Custom ticket plate answer for QR/pass tests; null = default ticket plate.
+  String? ticketPlateAnswer;
   // Whether qr/reissue is allowed or refused with BOARDING_STARTED.
   bool reissueAllowed = false;
   bool voucherRefused = false;
@@ -98,6 +100,8 @@ void main() {
     historyTicketsAnswer = null;
     trackingAnswer = null;
     groupQrAnswer = null;
+    ticketPlateAnswer = null;
+    ticket.remove('vehicle_plate');
     reissueAllowed = false;
     voucherRefused = false;
     final client = MockClient((req) async {
@@ -215,7 +219,15 @@ void main() {
       if (path.endsWith('/disruptions')) data = {'has_disruption': false};
       if (path.endsWith('/notifications')) list = [];
       if (path.endsWith('/tickets/tkt_BG1_A02') || (path.contains('/tickets/') && !path.contains('/qr') && !path.contains('/share') && !path.contains('/delegate'))) {
-        data = {'ticket': {...ticket, 'status': ticketStatus}, 'boarding_qr': {'qr_code_value': 'BUSGO|BG-000001|tkt_BG1_A02|v1|abc', 'version': 1}, 'offline_pin': '123456'};
+        data = {
+          'ticket': {
+            ...ticket,
+            'status': ticketStatus,
+            if (ticketPlateAnswer != null) 'vehicle_plate': ticketPlateAnswer,
+          },
+          'boarding_qr': {'qr_code_value': 'BUSGO|BG-000001|tkt_BG1_A02|v1|abc', 'version': 1},
+          'offline_pin': '123456',
+        };
       }
       if (path.contains('/orders/') && path.endsWith('/group-qr')) {
         data = groupQrAnswer ?? {
@@ -1536,5 +1548,95 @@ void main() {
 
     expect(find.text('Đã lên xe'), findsOneWidget);
     expect(find.text('Đã đi'), findsNothing);
+  });
+
+  testWidgets('T1: a ticket with plate shows plate on PassengerTicketQrScreen and wallet card; empty plate shows fallback', (tester) async {
+    final store = await storeWithServer();
+
+    // 1. Ticket with plate '29B-123.45'
+    ticketPlateAnswer = '29B-123.45';
+    final ticketWithPlate = Ticket.fromJson({
+      ...ticket,
+      'ticket_id': 'tkt_with_plate',
+      'vehicle_plate': '29B-123.45',
+      'status': 'ACTIVE',
+    });
+
+    // On PassengerTicketQrScreen
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(store: store, child: PassengerTicketQrScreen(ticket: ticketWithPlate)),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Biển số xe'), findsOneWidget);
+    expect(find.text('29B-123.45'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+
+    // On TicketCard
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(store: store, child: Scaffold(body: TicketCard(ticket: ticketWithPlate))),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('29B-123.45'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+
+    // 2. Ticket with empty plate
+    ticketPlateAnswer = '';
+    final ticketEmptyPlate = Ticket.fromJson({
+      ...ticket,
+      'ticket_id': 'tkt_empty_plate',
+      'vehicle_plate': '',
+      'status': 'ACTIVE',
+    });
+
+    // On PassengerTicketQrScreen
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(store: store, child: PassengerTicketQrScreen(ticket: ticketEmptyPlate)),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Biển số xe'), findsOneWidget);
+    expect(find.text('Nhà xe sẽ báo'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+
+    // On TicketCard
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(store: store, child: Scaffold(body: TicketCard(ticket: ticketEmptyPlate))),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Nhà xe sẽ báo'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  test('T1: loadPass updates t.plate from the qr response (reassigned bus)', () async {
+    final store = await storeWithServer();
+    ticketPlateAnswer = '30F-999.99';
+    final t = Ticket.fromJson({
+      ...ticket,
+      'vehicle_plate': '29B-123.45',
+      'status': 'ACTIVE',
+    });
+    expect(t.plate, '29B-123.45');
+
+    final err = await store.loadPass(t);
+    expect(err, isNull);
+    expect(t.plate, '30F-999.99');
+  });
+
+  testWidgets('T1: opening ticket QR screen refreshes plate from server', (tester) async {
+    final store = await storeWithServer();
+    ticketPlateAnswer = '30F-999.99';
+    final t = Ticket.fromJson({
+      ...ticket,
+      'vehicle_plate': '29B-123.45',
+      'status': 'ACTIVE',
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(store: store, child: PassengerTicketQrScreen(ticket: t)),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(t.plate, '30F-999.99');
+    expect(find.text('30F-999.99'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
   });
 }

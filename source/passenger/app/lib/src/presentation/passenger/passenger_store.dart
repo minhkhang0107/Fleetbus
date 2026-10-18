@@ -1422,6 +1422,12 @@ class PassengerStore extends ChangeNotifier {
       t.past = true;
       _tripEnded[t.tripId] = true;
     }
+    final vp = r.value!['ticket']?['vehicle_plate']?.toString();
+    final lp = r.value!['ticket']?['plate']?.toString();
+    final plate = (vp != null && vp.isNotEmpty) ? vp : ((lp != null && lp.isNotEmpty) ? lp : null);
+    if (plate != null) {
+      t.plate = plate;
+    }
 
     if (t.isGroup) {
       if (t.status == TicketStatus.active) {
