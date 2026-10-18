@@ -36,7 +36,7 @@ const PASSENGER_RULES = [
 const IDEMPOTENT_RULES = {
   passenger: /\/(seats\/hold|hold-seats|bookings\/create|checkout\/create-order|delegate|qr\/reissue|cancel|home-request\/withdraw|tickets\/[^/]+\/stops)$/,
   driver: /\/(readiness|start|home-run|home-order|home-arrived|home-missed|arrive|depart|inaccessible|boarding|boarding\/manual|board-qr|payments\/cod-collect|collect-cod|onboard-hail|incidents?|end|no-show|batch-replay|change-pin)$/,
-  staff: /\/(platform\/operators(\/[^/]+\/(activate|deactivate|director\/reset-password))?|auth\/(change-password|totp\/(setup|confirm))|pos\/(orders|bookings|hotline-hold|hotline-holds\/[^/]+\/cancel)|refunds\/[^/]+\/process|service-areas(\/[^/]+\/(activate|deactivate))?|promo-banners(\/[^/]+\/(activate|deactivate))?|schedules|trips\/[^/]+\/(assign|cancel|sales)|home-requests\/[^/]+\/[^/]+\/(confirm|reject)|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem|seat-layouts(\/[^/]+)?|vehicles(\/[^/]+)?|drivers(\/[^/]+\/reset-pin)?)$/
+  staff: /\/(platform\/operators(\/[^/]+\/(activate|deactivate|director\/reset-password))?|auth\/(change-password|totp\/(setup|confirm))|pos\/(orders|bookings|hotline-hold|hotline-holds\/[^/]+\/cancel)|refunds\/[^/]+\/process|service-areas(\/[^/]+\/(activate|deactivate))?|promo-banners(\/[^/]+\/(activate|deactivate))?|vouchers(\/[^/]+\/(activate|deactivate))?|schedules|trips\/[^/]+\/(assign|cancel|sales)|home-requests\/[^/]+\/[^/]+\/(confirm|reject)|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem|seat-layouts(\/[^/]+)?|vehicles(\/[^/]+)?|drivers(\/[^/]+\/reset-pin)?)$/
 };
 
 // Staff permissions by role (MGR-029). The first matching rule decides; no rule means any staff role.
@@ -53,6 +53,7 @@ const STAFF_RULES = [
   [/^\/api\/v1\/ops\/service-(config|areas)/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/schedules/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/promo-banners/, ['FLEET_DIRECTOR']],
+  [/^\/api\/v1\/ops\/vouchers/, ['FLEET_DIRECTOR']],
   [/^\/api\/v1\/ops\/trips\/[^/]+\/assign(-options)?$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/trips\/[^/]+\/(cancel|sales)$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/home-requests/, ['FLEET_DIRECTOR', 'DISPATCHER']],

@@ -27,6 +27,7 @@ import { handleWebhookRoutes } from './routes/webhookRoutes.js';
 import { handlePlatformRoutes } from './routes/platformRoutes.js';
 import { handleServiceConfigRoutes } from './routes/serviceConfigRoutes.js';
 import { handlePromoBannerRoutes } from './routes/promoBannerRoutes.js';
+import { handleVoucherRoutes } from './routes/voucherRoutes.js';
 import { handleScheduleRoutes } from './routes/scheduleRoutes.js';
 import { handleTripExceptionRoutes } from './routes/tripExceptionRoutes.js';
 import { renderOnboardingPage, renderOnboardingNotFound } from './web/onboarding.js';
@@ -37,6 +38,7 @@ import { getWebhookSecret, getAuthMode, isProduction } from './config.js';
 import { resolveAccess, authenticate, IdempotencyStore, resolveOperator } from './core/gateway.js';
 import { TenantDatabases } from './core/tenantDb.js';
 import { seedPromoBanners } from './core/promoBanners.js';
+import { seedVouchers } from './core/vouchers.js';
 import { loadMasterKey } from './core/dbCrypto.js';
 import { StateStore } from './core/stateStore.js';
 import { knownOperatorIds, stateCollections } from './core/stateCollections.js';
@@ -55,7 +57,10 @@ function defaultDataDir() {
 }
 
 function seedTenant(db, operatorId) {
-  if (!isProduction()) seedPromoBanners(db, operatorId);
+  if (!isProduction()) {
+    seedPromoBanners(db, operatorId);
+    seedVouchers(db);
+  }
 }
 
 function openTenantDbs(dataDir, env = process.env) {
@@ -118,6 +123,7 @@ export function createFleetBusServer(customServices = {}) {
       if (handlePlatformRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleServiceConfigRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handlePromoBannerRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handleVoucherRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleScheduleRoutes(req, res, pathname, parsedUrl, services)) return;
     } catch (err) {
       if (err.code === 'TENANT_REQUIRED') sendError(res, err.message, err.code, 400);

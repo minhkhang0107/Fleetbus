@@ -89,6 +89,7 @@ void main() {
   Map<String, dynamic>? groupQrAnswer;
   // Whether qr/reissue is allowed or refused with BOARDING_STARTED.
   bool reissueAllowed = false;
+  bool voucherRefused = false;
 
   Future<PassengerStore> storeWithServer({bool selectOp = true}) async {
     sent = [];
@@ -98,6 +99,7 @@ void main() {
     trackingAnswer = null;
     groupQrAnswer = null;
     reissueAllowed = false;
+    voucherRefused = false;
     final client = MockClient((req) async {
       sent.add(req);
       Map<String, dynamic>? data;
@@ -172,6 +174,16 @@ void main() {
         };
       }
       if (path.endsWith('/seats/hold')) data = {'hold_id': 'hld_1', 'seconds_remaining': 600};
+      if (path.endsWith('/vouchers/check')) {
+        final code = (jsonDecode(req.body) as Map<String, dynamic>)['code'];
+        if (code != 'SAOMAI2027') {
+          return http.Response(jsonEncode({'status': 'error', 'code': 'VOUCHER_EXPIRED', 'message': 'Mã giảm giá đã hết hạn'}), 422, headers: {'content-type': 'application/json; charset=utf-8'});
+        }
+        data = {'code': 'SAOMAI2027', 'description': 'Giảm 30k', 'discount_vnd': 30000};
+      }
+      if (path.endsWith('/bookings/create') && voucherRefused) {
+        return http.Response(jsonEncode({'status': 'error', 'code': 'VOUCHER_USED_UP', 'message': 'Mã giảm giá đã hết lượt'}), 422, headers: {'content-type': 'application/json; charset=utf-8'});
+      }
       if (path.endsWith('/bookings/create')) {
         data = {
           'payment': {
@@ -768,6 +780,26 @@ void main() {
     expect(find.textContaining('Nhà xe chưa xác nhận địa chỉ này'), findsOneWidget);
     expect(find.text('Hủy yêu cầu đón tận nhà'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  test('a discount code is checked by the company server and sent with the order', () async {
+    final store = await storeWithServer();
+    await store.verifyOtp('0987654321', '123456');
+    await store.loadTrips();
+    store.chooseTrip(store.trips.single);
+    await store.loadSeatMap();
+    store.toggleSeat('A02');
+    await store.holdSeats();
+    expect(await store.applyVoucher('old2020'), 'Mã giảm giá đã hết hạn');
+    expect(store.voucher, isNull);
+    expect(await store.applyVoucher(' saomai2027 '), isNull);
+    expect(bodyOf('/vouchers/check'), {'code': 'SAOMAI2027', 'subtotal_vnd': store.baseFare});
+    expect((store.voucher, store.discount, store.total), ('SAOMAI2027', 30000, store.baseFare + store.insuranceFee - 30000 + store.homeFees));
+
+    voucherRefused = true;
+    expect(await store.createOrder('Nguyễn An', '0987654321'), 'Mã giảm giá đã hết lượt');
+    expect(bodyOf('/bookings/create')['voucherCode'], 'SAOMAI2027');
+    expect((store.voucher, store.discount), (null, 0), reason: 'a code the server refused is dropped');
   });
 
   test('no ticket before the bank confirms; after it the wallet ticket becomes the receipt', () async {

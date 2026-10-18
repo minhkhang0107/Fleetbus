@@ -4,6 +4,7 @@
  */
 
 import EventEmitter from 'events';
+import { confirmVoucherUse } from './vouchers.js';
 import { operatorOfTrip } from './tenancy.js';
 import { findOperatorById } from './operators.js';
 import { homeConfirmed } from './serviceAreas.js';
@@ -177,6 +178,12 @@ export class FleetBusEventBridge extends EventEmitter {
       const tripId = order.trip_id;
       // A ticket of a day's run must reach a driver and the office: set the run up if nobody has yet.
       this.ensureRunOperations(tripId);
+
+      // The order's discount code use is kept for good (core/vouchers.js).
+      const tenantDbs = this.services?.tenantDbs;
+      if (tenantDbs && order.operator_id) {
+        confirmVoucherUse(tenantDbs.forOperator(order.operator_id), order.order_id);
+      }
 
       // A. Seat Map: Permanently lock seats as BOOKED
       if (seatMapService && typeof seatMapService.confirmBooking === 'function') {

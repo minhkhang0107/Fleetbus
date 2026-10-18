@@ -57,6 +57,36 @@ export const MIGRATIONS = [
       updated_at TEXT NOT NULL,
       PRIMARY KEY (collection, id_hash)
     );`
+  },
+  {
+    version: 3,
+    name: 'vouchers',
+    // Discount codes of the company and the orders that used them (core/vouchers.js).
+    sql: `CREATE TABLE vouchers (
+      code TEXT PRIMARY KEY,
+      description TEXT NOT NULL DEFAULT '',
+      discount_type TEXT NOT NULL,
+      discount_value INTEGER NOT NULL,
+      max_discount_vnd INTEGER,
+      min_order_vnd INTEGER NOT NULL DEFAULT 0,
+      starts_at TEXT,
+      ends_at TEXT,
+      usage_limit INTEGER,
+      per_customer_limit INTEGER,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE voucher_redemptions (
+      order_id TEXT PRIMARY KEY,
+      code TEXT NOT NULL,
+      phone TEXT,
+      discount_vnd INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX voucher_redemptions_code ON voucher_redemptions (code, phone);`
   }
 ];
 

@@ -172,6 +172,14 @@ class PassengerApiClientService {
   }
 
   /**
+   * PAX-012: What a discount code takes off an order of [subtotalVnd] seat fare; the server prices the
+   * order again when it is created. Refusals: VOUCHER_INVALID, VOUCHER_EXPIRED, VOUCHER_USED_UP, VOUCHER_MIN_ORDER...
+   */
+  Future<Map<String, dynamic>> checkVoucher(String code, int subtotalVnd) {
+    return _post('/api/v1/passenger/vouchers/check', body: {'code': code, 'subtotal_vnd': subtotalVnd});
+  }
+
+  /**
    * PAX-005: Search Stations
    */
   Future<List<dynamic>> searchStations(String query) async {

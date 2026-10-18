@@ -83,6 +83,10 @@
   #bannersBox .pill { white-space: nowrap; }
   #bannersBox .btn { padding: 4px 10px; font-size: 13px; white-space: nowrap; }
   #bannersBox .acts { display: flex; gap: 6px; justify-content: flex-end; }
+  /* Discount codes (MGR-035) */
+  #vouchersBox .pill { white-space: nowrap; }
+  #vouchersBox .btn { padding: 4px 10px; font-size: 13px; white-space: nowrap; }
+  #vouchersBox .acts { display: flex; gap: 6px; justify-content: flex-end; }
   .htmlPreview { width: 100%; height: 260px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
   .field textarea.code { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 13px; min-height: 180px; resize: vertical; }
   /* Fixed timetable (MGR-032) */
@@ -203,6 +207,7 @@
     <button data-view="service">Cấu hình đón trả</button>
     <button data-view="homereq">Duyệt đón tận nhà <span class="pill warn hidden" id="homeReqCount"></span></button>
     <button data-view="banners">Quảng cáo</button>
+    <button data-view="vouchers">Mã giảm giá</button>
     <button data-view="audit">Nhật ký thao tác</button>
     <button data-view="platform" class="hidden" id="navPlatform">Nhà xe (nền tảng)</button>
     <div class="spacer"></div>
@@ -475,6 +480,41 @@
       <p class="muted" style="margin:-6px 0 8px">Địa chỉ trong vùng "nhà xe duyệt" chờ ở đây. Khi chưa xác nhận, khách lên xe ở bến và tài xế không thấy địa chỉ. Từ chối thì khách được hoàn phụ phí và được hủy vé không mất phí. Chưa duyệt khi xe xuất bến thì tự từ chối.</p>
       <div class="toolbar"><select id="homeReqStatus"><option value="PENDING_REVIEW">Chờ duyệt</option><option value="CONFIRMED">Đã xác nhận</option><option value="REJECTED">Đã từ chối</option><option value="WITHDRAWN">Khách đã hủy</option><option value="ALL">Tất cả</option></select><span class="muted" id="homeReqInfo"></span></div>
       <div class="card scroll" style="padding:0" id="homeReqBox"></div>
+    </div>
+
+    <!-- Discount codes passengers type at checkout (MGR-035) -->
+    <div data-panel="vouchers" class="hidden">
+      <h2>Mã giảm giá</h2>
+      <p class="muted" style="margin:-6px 0 14px">Khách nhập mã ở bước thanh toán trên app. Mã chỉ dùng được cho nhà xe này. Một lượt được tính khi khách tạo đơn; đơn không thanh toán thì lượt được trả lại.</p>
+      <div class="split bannerSplit">
+        <div>
+          <div class="toolbar"><button class="btn primary" id="voucherNew">+ Tạo mã</button><span class="muted" id="voucherCount"></span></div>
+          <div class="card scroll" style="padding:0" id="vouchersBox"></div>
+        </div>
+        <form class="card" id="voucherForm" novalidate>
+          <div class="section-title" style="margin-top:0" id="voucherFormTitle">Tạo mã giảm giá</div>
+          <div class="field"><label for="vCode">Mã (3-20 chữ cái không dấu hoặc số)</label><input id="vCode" name="code" maxlength="20" required class="mono" style="text-transform:uppercase" placeholder="VD: SAOMAI2027"></div>
+          <div class="field"><label for="vDesc">Mô tả cho khách</label><input id="vDesc" name="description" maxlength="120" placeholder="VD: Giảm 30.000 đ mọi tuyến"></div>
+          <div class="row">
+            <div class="field"><label for="vType">Kiểu giảm</label><select id="vType" name="discount_type"><option value="FIXED">Số tiền (đ)</option><option value="PERCENT">Phần trăm (%)</option></select></div>
+            <div class="field grow"><label for="vValue" id="vValueLabel">Số tiền giảm (đ)</label><input id="vValue" name="discount_value" type="number" min="1" required></div>
+            <div class="field grow" id="vMaxWrap"><label for="vMax">Giảm tối đa (đ, trống = không giới hạn)</label><input id="vMax" name="max_discount_vnd" type="number" min="1000"></div>
+          </div>
+          <div class="field"><label for="vMin">Đơn tối thiểu (đ, tính trên tiền vé)</label><input id="vMin" name="min_order_vnd" type="number" min="0" value="0"></div>
+          <div class="row">
+            <div class="field grow"><label for="vStart">Bắt đầu (trống = ngay)</label><input id="vStart" name="starts_at" type="datetime-local"></div>
+            <div class="field grow"><label for="vEnd">Hết hạn (trống = không hạn)</label><input id="vEnd" name="ends_at" type="datetime-local"></div>
+          </div>
+          <div class="row" style="margin-bottom:6px"><button class="btn" type="button" id="vOneYear">Hạn 1 năm từ hôm nay</button></div>
+          <div class="row">
+            <div class="field grow"><label for="vLimit">Tổng số lượt (trống = không giới hạn)</label><input id="vLimit" name="usage_limit" type="number" min="1"></div>
+            <div class="field grow"><label for="vPer">Số lượt mỗi khách (trống = không giới hạn)</label><input id="vPer" name="per_customer_limit" type="number" min="1"></div>
+          </div>
+          <label class="row" style="margin:0 0 12px"><input type="checkbox" name="active" checked> Bật ngay khi lưu</label>
+          <div class="error" id="voucherError"></div>
+          <div class="row"><button class="btn primary" type="submit" id="voucherSave">Tạo mã</button><button class="btn hidden" type="button" id="voucherCancel">Hủy sửa</button></div>
+        </form>
+      </div>
     </div>
 
     <!-- Promotion banners on the passenger home slider (MGR-031, D125) -->
@@ -930,6 +970,7 @@ async function enter() {
     service: ['FLEET_DIRECTOR', 'DISPATCHER'],
     homereq: ['FLEET_DIRECTOR', 'DISPATCHER'],
     banners: ['FLEET_DIRECTOR'],
+    vouchers: ['FLEET_DIRECTOR'],
     audit: ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'DISPATCHER']
   };
   document.querySelectorAll('nav button[data-view]').forEach(b => {
@@ -963,7 +1004,7 @@ function show(view) {
   if (state.user?.role === 'PLATFORM_ADMIN' && view !== 'platform' && !state.platformCode) {
     toast('Chọn nhà xe ở thanh trên để xem dữ liệu điều hành');
   }
-  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, fleet: loadFleet, drivers: loadDrivers, layouts: loadLayouts, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, audit: loadAudit, platform: loadOperators })[view]?.();
+  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, fleet: loadFleet, drivers: loadDrivers, layouts: loadLayouts, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, vouchers: loadVouchers, audit: loadAudit, platform: loadOperators })[view]?.();
 }
 
 // ---------- overview ----------
@@ -1862,6 +1903,124 @@ $('#bannerForm').addEventListener('submit', async (e) => {
   resetBannerForm();
   loadBanners();
 });
+
+// ---------- discount codes (MGR-035) ----------
+const VOUCHER_STATUS = { LIVE: ['Đang dùng được', 'ok'], SCHEDULED: ['Chưa bắt đầu', 'info'], ENDED: ['Đã hết hạn', ''], USED_UP: ['Hết lượt', 'warn'], OFF: ['Đang tắt', 'warn'] };
+const vouchers = { list: [], editing: null };
+// A code often runs for a year or more, so its dates carry the year.
+const dmyyhm = (iso) => { const d = new Date(iso); return !iso || isNaN(d) ? '' : `${d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Ho_Chi_Minh' })} ${hhmm(iso)}`; };
+const voucherOff = (v) => v.discount_type === 'PERCENT' ? `${v.discount_value}%${v.max_discount_vnd ? `, tối đa ${vnd(v.max_discount_vnd)}` : ''}` : vnd(v.discount_value);
+async function loadVouchers() {
+  const r = await api('/api/v1/ops/vouchers');
+  if (!r.ok) {
+    $('#vouchersBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.status === 403 ? 'Chỉ giám đốc nhà xe quản lý được mã giảm giá.' : r.message)}</p>`;
+    $('#voucherForm').classList.add('hidden');
+    return;
+  }
+  $('#voucherForm').classList.remove('hidden');
+  vouchers.list = r.data.vouchers || [];
+  const live = vouchers.list.filter(v => v.status === 'LIVE').length;
+  $('#voucherCount').textContent = `${live} đang dùng được / ${vouchers.list.length} mã`;
+  $('#vouchersBox').innerHTML = vouchers.list.length ? `<table><thead><tr><th>Mã</th><th>Giảm</th><th>Đã dùng</th><th>Trạng thái</th><th></th></tr></thead><tbody>${vouchers.list.map(v => {
+    const [label, kind] = VOUCHER_STATUS[v.status] || [v.status, ''];
+    const when = v.starts_at || v.ends_at ? `${esc(dmyyhm(v.starts_at) || 'ngay')} → ${esc(dmyyhm(v.ends_at) || 'không hạn')}` : 'Không hạn';
+    const rules = [v.min_order_vnd ? `đơn từ ${vnd(v.min_order_vnd)}` : '', v.per_customer_limit ? `${v.per_customer_limit} lượt/khách` : ''].filter(Boolean).join(', ');
+    return `<tr class="${vouchers.editing === v.code ? 'sel' : ''}"><td style="width:100%"><b class="mono">${esc(v.code)}</b>${v.description ? `<div class="muted" style="font-size:12px">${esc(v.description)}</div>` : ''}<div class="muted" style="font-size:12px">${when}${rules ? ` · ${esc(rules)}` : ''}</div></td><td style="white-space:nowrap">${esc(voucherOff(v))}</td><td class="mono" style="white-space:nowrap">${esc(v.used_count)}${v.usage_limit ? ` / ${esc(v.usage_limit)}` : ''}</td><td><span class="pill ${kind}">${esc(label)}</span></td>
+      <td><div class="acts"><button class="btn" data-edit="${esc(v.code)}">Sửa</button> <button class="btn" data-toggle="${esc(v.code)}" data-active="${v.active ? '1' : '0'}">${v.active ? 'Tắt' : 'Bật'}</button> <button class="btn danger" data-del="${esc(v.code)}">Xóa</button></div></td></tr>`;
+  }).join('')}</tbody></table>` : '<p class="muted" style="padding:16px;margin:0">Chưa có mã giảm giá.</p>';
+  const box = $('#vouchersBox');
+  box.querySelectorAll('button[data-edit]').forEach(b => b.addEventListener('click', () => editVoucher(b.dataset.edit)));
+  box.querySelectorAll('button[data-toggle]').forEach(b => b.addEventListener('click', async () => {
+    const r2 = await api(`/api/v1/ops/vouchers/${encodeURIComponent(b.dataset.toggle)}/${b.dataset.active === '1' ? 'deactivate' : 'activate'}`, { method: 'POST', idempotent: true });
+    toast(r2.ok ? (b.dataset.active === '1' ? 'Đã tắt mã' : 'Đã bật mã') : r2.message);
+    if (r2.ok) loadVouchers();
+  }));
+  // Deleting cannot be undone: the first click arms the button, a second one within 4 s deletes.
+  box.querySelectorAll('button[data-del]').forEach(b => b.addEventListener('click', async () => {
+    if (!b.dataset.armed) {
+      b.dataset.armed = '1'; b.textContent = 'Xóa hẳn?';
+      setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = 'Xóa'; } }, 4000);
+      return;
+    }
+    const r2 = await api(`/api/v1/ops/vouchers/${encodeURIComponent(b.dataset.del)}`, { method: 'DELETE' });
+    toast(r2.ok ? 'Đã xóa mã' : r2.message);
+    if (r2.ok) { if (vouchers.editing === b.dataset.del) resetVoucherForm(); loadVouchers(); }
+  }));
+}
+function syncVoucherType() {
+  const percent = $('#voucherForm').discount_type.value === 'PERCENT';
+  $('#vValueLabel').textContent = percent ? 'Phần trăm giảm (1-100)' : 'Số tiền giảm (đ)';
+  $('#vMaxWrap').classList.toggle('hidden', !percent);
+}
+function resetVoucherForm() {
+  vouchers.editing = null;
+  const f = $('#voucherForm');
+  f.reset();
+  f.code.disabled = false;
+  $('#voucherFormTitle').textContent = 'Tạo mã giảm giá';
+  $('#voucherSave').textContent = 'Tạo mã';
+  $('#voucherCancel').classList.add('hidden');
+  f.active.closest('label').classList.remove('hidden');
+  $('#voucherError').textContent = '';
+  syncVoucherType();
+}
+function editVoucher(code) {
+  const v = vouchers.list.find(x => x.code === code);
+  if (!v) return;
+  vouchers.editing = code;
+  const f = $('#voucherForm');
+  f.code.value = v.code; f.code.disabled = true; // the code itself never changes: passengers may already know it
+  f.description.value = v.description || ''; f.discount_type.value = v.discount_type; f.discount_value.value = v.discount_value;
+  f.max_discount_vnd.value = v.max_discount_vnd ?? ''; f.min_order_vnd.value = v.min_order_vnd ?? 0;
+  f.starts_at.value = toLocalInput(v.starts_at); f.ends_at.value = toLocalInput(v.ends_at);
+  f.usage_limit.value = v.usage_limit ?? ''; f.per_customer_limit.value = v.per_customer_limit ?? '';
+  $('#voucherFormTitle').textContent = `Sửa mã ${v.code}`;
+  $('#voucherSave').textContent = 'Lưu thay đổi';
+  $('#voucherCancel').classList.remove('hidden');
+  f.active.closest('label').classList.add('hidden'); // on / off has its own button in the list
+  $('#voucherError').textContent = '';
+  document.querySelectorAll('#vouchersBox tr').forEach(tr => tr.classList.toggle('sel', !!tr.querySelector(`button[data-edit="${CSS.escape(code)}"]`)));
+  syncVoucherType();
+}
+function voucherBody() {
+  const f = $('#voucherForm');
+  const num = (v) => (v === '' ? null : Number(v));
+  return {
+    code: f.code.value.trim().toUpperCase(), description: f.description.value.trim(), discount_type: f.discount_type.value,
+    discount_value: num(f.discount_value.value), max_discount_vnd: f.discount_type.value === 'PERCENT' ? num(f.max_discount_vnd.value) : null,
+    min_order_vnd: num(f.min_order_vnd.value) ?? 0, starts_at: fromLocalInput(f.starts_at.value), ends_at: fromLocalInput(f.ends_at.value),
+    usage_limit: num(f.usage_limit.value), per_customer_limit: num(f.per_customer_limit.value)
+  };
+}
+$('#voucherForm').discount_type.addEventListener('change', syncVoucherType);
+$('#vOneYear').addEventListener('click', () => {
+  const f = $('#voucherForm');
+  const start = f.starts_at.value ? Date.parse(`${f.starts_at.value}:00+07:00`) : Date.now();
+  const end = new Date(start);
+  end.setFullYear(end.getFullYear() + 1);
+  f.ends_at.value = toLocalInput(end.toISOString());
+});
+$('#voucherNew').addEventListener('click', () => { resetVoucherForm(); loadVouchers(); $('#vCode').focus(); });
+$('#voucherCancel').addEventListener('click', () => { resetVoucherForm(); loadVouchers(); });
+$('#voucherForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = voucherBody();
+  const editing = vouchers.editing;
+  if (!editing && !/^[A-Z0-9]{3,20}$/.test(body.code)) { $('#voucherError').textContent = 'Mã gồm 3-20 chữ cái không dấu hoặc chữ số'; return; }
+  if (!body.discount_value) { $('#voucherError').textContent = 'Cần mức giảm'; return; }
+  $('#voucherSave').disabled = true;
+  const { code, ...fields } = body;
+  const r = editing
+    ? await api(`/api/v1/ops/vouchers/${encodeURIComponent(editing)}`, { method: 'PATCH', body: fields })
+    : await api('/api/v1/ops/vouchers', { method: 'POST', idempotent: true, body: { ...body, active: e.target.active.checked } });
+  $('#voucherSave').disabled = false;
+  $('#voucherError').textContent = r.ok ? '' : r.message;
+  if (!r.ok) return;
+  toast(editing ? 'Đã lưu mã' : `Đã tạo mã ${r.data.code}`);
+  resetVoucherForm();
+  loadVouchers();
+});
+syncVoucherType();
 
 // ---------- fleet (MGR-005, MGR-006) ----------
 const fleetState = { vehicles: [], layouts: [] };

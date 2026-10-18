@@ -466,6 +466,33 @@ class ManagerApiService {
     return _delete('/ops/promo-banners/${Uri.encodeComponent(bannerId)}');
   }
 
+  // MGR-035: Discount codes of the company, with uses so far and status LIVE / SCHEDULED / ENDED / USED_UP / OFF (director only)
+  Future<Map<String, dynamic>> getVouchers() {
+    return _get('/ops/vouchers');
+  }
+
+  // MGR-035: New code { code, discount_type FIXED|PERCENT, discount_value, max_discount_vnd, min_order_vnd, starts_at, ends_at, usage_limit, per_customer_limit }
+  Future<Map<String, dynamic>> createVoucher(Map<String, dynamic> voucher, {String? idempotencyKey}) {
+    return _post('/ops/vouchers', body: voucher, idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-035: Edit some fields of a code; fields left out are kept, the code itself never changes
+  Future<Map<String, dynamic>> updateVoucher(String code, Map<String, dynamic> fields) {
+    return _patch('/ops/vouchers/${Uri.encodeComponent(code)}', body: fields);
+  }
+
+  // MGR-035: Switch a code on or off for passengers
+  Future<Map<String, dynamic>> setVoucherActive(String code, {required bool active, String? idempotencyKey}) {
+    final id = Uri.encodeComponent(code);
+    if (active) return _post('/ops/vouchers/$id/activate', idempotent: true, idempotencyKey: idempotencyKey);
+    return _post('/ops/vouchers/$id/deactivate', idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-035: Delete a code nobody has used (409 VOUCHER_IN_USE otherwise: switch it off instead)
+  Future<Map<String, dynamic>> deleteVoucher(String code) {
+    return _delete('/ops/vouchers/${Uri.encodeComponent(code)}');
+  }
+
   // MGR-032: Fixed timetable (schedules) and the routes a new one may run on
   Future<Map<String, dynamic>> getSchedules() {
     return _get('/ops/schedules');

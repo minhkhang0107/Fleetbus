@@ -29,6 +29,7 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
     final store = PassengerScope.read(context);
     if (_name.text.isEmpty && store.userName != null) _name.text = store.userName!;
     if (_phone.text.isEmpty && store.userPhone != null) _phone.text = store.userPhone!;
+    if (_voucher.text.isEmpty && store.voucher != null) _voucher.text = store.voucher!;
   }
 
   @override
@@ -39,7 +40,9 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
     super.dispose();
   }
 
-  void _applyVoucher(PassengerStore store) {
+  bool _checkingVoucher = false;
+
+  Future<void> _applyVoucher(PassengerStore store) async {
     if (store.voucher != null) {
       store.removeVoucher();
       setState(() {
@@ -48,10 +51,13 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
       });
       return;
     }
-    final error = store.applyVoucher(_voucher.text);
+    setState(() => _checkingVoucher = true);
+    final error = await store.applyVoucher(_voucher.text);
+    if (!mounted) return;
     setState(() {
+      _checkingVoucher = false;
       _voucherOk = error == null;
-      _voucherMessage = error ?? 'Đã áp dụng: giảm ${vnd(PassengerStore.knownVouchers[store.voucher]!)}';
+      _voucherMessage = error ?? 'Đã áp dụng: giảm ${vnd(store.discount)}';
     });
   }
 
@@ -70,6 +76,13 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
     if (!mounted) return;
     setState(() => _creating = false);
     if (error != null) {
+      // The server dropped a code that no longer applies: show it next to the field.
+      if (store.voucher == null && _voucherOk) {
+        setState(() {
+          _voucherOk = false;
+          _voucherMessage = error;
+        });
+      }
       showToast(context, error);
       return;
     }
@@ -138,7 +151,7 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              SizedBox(width: 120, child: GhostButton(label: store.voucher == null ? 'Áp dụng' : 'Bỏ mã', onPressed: () => _applyVoucher(store))),
+              SizedBox(width: 120, child: GhostButton(label: store.voucher == null ? (_checkingVoucher ? 'Đang kiểm tra' : 'Áp dụng') : 'Bỏ mã', onPressed: _checkingVoucher ? null : () => _applyVoucher(store))),
             ]),
             if (_voucherMessage != null) ...[gap(6), Text(_voucherMessage!, style: sans(size: 13, weight: FontWeight.w500, color: _voucherOk ? PTokens.success : PTokens.danger))],
           ], right: [

@@ -5,11 +5,6 @@
 
 import { validateVietnamPhone, validateCCCD, validatePersonName } from '../core/formatters.js';
 
-export const PROMO_VOUCHERS = {
-  'BUSGO50K': { type: 'FIXED', value: 50000, minOrder: 200000, description: 'Giảm 50.000 đ cho đơn từ 200k' },
-  'VIP10': { type: 'PERCENT', value: 10, maxDiscount: 50000, minOrder: 150000, description: 'Giảm 10% tối đa 50k' }
-};
-
 export class PassengerCheckoutService {
   /**
    * PAX-011: Validate and construct passenger manifest
@@ -86,7 +81,12 @@ export class PassengerCheckoutService {
   /**
    * PAX-012: Build Order Summary and Calculate Breakdown
    */
-  calculateOrderReview({ trip = {}, seatCodes = [], pickupStop = 'Bến xe Giáp Bát', dropoffStop = 'Bến xe Phía Bắc Thanh Hóa', voucherCode, insuranceSelected = false, seats, seatPriceVnd }) {
+  /**
+   * [resolveVoucher] (code, subtotal) → { ok, voucher, discount_vnd } or a refusal { ok: false, code, message }:
+   * the company's discount codes (core/vouchers.js). A code that does not apply refuses the order, so the
+   * passenger never pays a price other than the one the app showed.
+   */
+  calculateOrderReview({ trip = {}, seatCodes = [], pickupStop = 'Bến xe Giáp Bát', dropoffStop = 'Bến xe Phía Bắc Thanh Hóa', voucherCode, resolveVoucher = null, insuranceSelected = false, seats, seatPriceVnd }) {
     const effectiveSeatCodes = seatCodes.length > 0 ? seatCodes : (seats ? seats.map(s => typeof s === 'string' ? s : s.seat_code) : []);
     const seatPrice = seatPriceVnd || trip.base_fare_vnd || 220000;
     const perSeatPrices = Array.isArray(seats) && seats.length > 0 && seats.every(s => s && Number.isFinite(s.price_vnd))
@@ -102,25 +102,18 @@ export class PassengerCheckoutService {
     // Voucher computation
     let voucherDiscount = 0;
     let appliedVoucher = null;
-    let voucherError = null;
 
     if (voucherCode) {
-      const promo = PROMO_VOUCHERS[voucherCode.toUpperCase().trim()];
-      if (promo && subtotalFare >= promo.minOrder) {
-        if (promo.type === 'FIXED') {
-          voucherDiscount = promo.value;
-        } else if (promo.type === 'PERCENT') {
-          const rawDiscount = (subtotalFare * promo.value) / 100;
-          voucherDiscount = Math.min(rawDiscount, promo.maxDiscount);
-        }
-        appliedVoucher = {
-          code: voucherCode.toUpperCase().trim(),
-          description: promo.description,
-          discount_amount: voucherDiscount
-        };
-      } else {
-        voucherError = 'Mã không hợp lệ hoặc đã hết lượt';
+      const r = resolveVoucher ? resolveVoucher(voucherCode, subtotalFare) : { ok: false, code: 'VOUCHER_INVALID', message: 'Mã giảm giá không đúng' };
+      if (!r.ok) {
+        return { success: false, code: r.code, error: r.message };
       }
+      voucherDiscount = r.discount_vnd;
+      appliedVoucher = {
+        code: r.voucher.code,
+        description: r.voucher.description,
+        discount_amount: voucherDiscount
+      };
     }
 
     const finalTotal = Math.max(0, subtotalFare + insuranceFare - voucherDiscount);
@@ -144,8 +137,7 @@ export class PassengerCheckoutService {
           voucher_discount: voucherDiscount,
           final_total_vnd: finalTotal
         },
-        applied_voucher: appliedVoucher,
-        voucher_error: voucherError
+        applied_voucher: appliedVoucher
       }
     };
   }

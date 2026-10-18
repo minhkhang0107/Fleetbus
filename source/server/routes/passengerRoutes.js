@@ -4,6 +4,7 @@
  */
 
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { evaluateVoucher, reserveVoucher } from '../core/vouchers.js';
 import { publicOperatorProfile, DEFAULT_OPERATOR_ID } from '../core/operators.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { verifyToken } from '../core/tokens.js';
@@ -488,13 +489,20 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         return;
       }
 
+      const voucherDb = body.voucherCode ? services.tenantDbs.forOperator(req.operatorId) : null;
+      const voucherPhone = req.identity?.phone || checkoutValidation.data.payer?.phone || null;
       const orderReview = checkoutService.computeOrderReview({
         trip: tripDetail,
         seats: holdCheck.data.seats,
         seatCodes,
         voucherCode: body.voucherCode,
+        resolveVoucher: (code, subtotal) => evaluateVoucher(voucherDb, code, { subtotal, phone: voucherPhone }),
         insuranceSelected: Boolean(body.insuranceSelected)
       });
+      if (!orderReview.success) {
+        sendError(res, orderReview.error, orderReview.code, 422);
+        return;
+      }
       const totalVnd = orderReview.total_payment_vnd + home.fee_vnd;
 
       const paymentOrderResult = paymentService.createPaymentOrder({
@@ -513,8 +521,19 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         dropoffStop: (tripDetail.stops || []).find(s => s.stop_id === holdCheck.data.dropoff_stop_id)?.name || body.dropoffStop || 'Bến xe Phía Bắc Thanh Hóa'
       });
 
+      // The code's use is taken now and given back if the payment window closes unpaid.
+      const applied = orderReview.data.applied_voucher;
+      if (applied) {
+        reserveVoucher(voucherDb, { code: applied.code, orderId: paymentOrderResult.data.order_id, phone: voucherPhone, discountVnd: applied.discount_amount, expiresAt: paymentOrderResult.data.expires_at });
+      }
+
       // The hold becomes a payment lock until the payment window closes (no double sale while the customer pays).
       seatMapService.extendHold(tripId, body.holdId, new Date(paymentOrderResult.data.expires_at).getTime());
+
+      // Nothing to transfer (a code took the whole fare): banks cannot send 0 đ, so the order is paid now.
+      if (totalVnd === 0) {
+        paymentService.settlePayment(paymentOrderResult.data.order_id, `VOUCHER_${applied?.code || 'FREE'}`);
+      }
 
       sendSuccess(res, {
         // needs_review: an address the company still has to confirm; the app says so before the transfer (D130).

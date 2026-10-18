@@ -613,7 +613,6 @@ class PassengerStore extends ChangeNotifier {
   OperatorInfo? operator;
   Map<String, Place> places = {};
 
-  static const knownVouchers = {'BUSGO50K': 50000};
   static const maxSeats = 5;
 
   // Session
@@ -650,6 +649,7 @@ class PassengerStore extends ChangeNotifier {
   final List<String> seats = [];
   String? holdId;
   String? voucher;
+  int voucherDiscount = 0;
   bool insured = false;
 
   // Order and payment (PAX-013)
@@ -1208,6 +1208,9 @@ class PassengerStore extends ChangeNotifier {
       return r.error;
     }
     holdId = r.value!['hold_id'];
+    // Other seats or another trip price differently: a code applied before is checked again at checkout.
+    voucher = null;
+    voucherDiscount = 0;
     _startCountdown('hold', (r.value!['seconds_remaining'] as num?)?.toInt() ?? 600);
     return null;
   }
@@ -1215,7 +1218,7 @@ class PassengerStore extends ChangeNotifier {
   // ---------- Checkout (PAX-011 / PAX-012) ----------
   int get baseFare => (trip?.price ?? 0) * seats.length;
   int get insuranceFee => insured ? 10000 * seats.length : 0;
-  int get discount => voucher == null ? 0 : (knownVouchers[voucher]! < baseFare ? knownVouchers[voucher]! : baseFare);
+  int get discount => voucher == null ? 0 : (voucherDiscount < baseFare ? voucherDiscount : baseFare);
   // The home pickup / drop-off fee is per order, not per seat (server rule).
   int get total => baseFare + insuranceFee - discount + homeFees;
 
@@ -1224,17 +1227,21 @@ class PassengerStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  String? applyVoucher(String code) {
+  /// PAX-012: the company's server says whether the code applies and what it takes off this order.
+  Future<String?> applyVoucher(String code) async {
     final c = code.trim().toUpperCase();
     if (c.isEmpty) return 'Nhập mã giảm giá.';
-    if (!knownVouchers.containsKey(c)) return 'Mã không hợp lệ hoặc đã hết hạn.';
-    voucher = c;
+    final r = await _call(() => api.checkVoucher(c, baseFare));
+    if (!r.ok) return r.error;
+    voucher = '${r.value!['code'] ?? c}';
+    voucherDiscount = (r.value!['discount_vnd'] as num?)?.toInt() ?? 0;
     notifyListeners();
     return null;
   }
 
   void removeVoucher() {
     voucher = null;
+    voucherDiscount = 0;
     notifyListeners();
   }
 
@@ -1253,7 +1260,11 @@ class PassengerStore extends ChangeNotifier {
           homeDropoff: homeDropoff?.toJson(),
           insuranceSelected: insured,
         ));
-    if (!r.ok) return r.error;
+    if (!r.ok) {
+      // The code stopped applying since it was checked (used up, expired): drop it so the next try is at full price, shown first.
+      if (r.code != null && r.code!.startsWith('VOUCHER_')) removeVoucher();
+      return r.error;
+    }
     final pay = r.value!['payment'] as Map<String, dynamic>;
     final details = pay['payment_details'] as Map<String, dynamic>;
     orderId = pay['order_id'];
@@ -1321,6 +1332,7 @@ class PassengerStore extends ChangeNotifier {
     orderId = null;
     seats.clear();
     voucher = null;
+    voucherDiscount = 0;
     insured = false;
     await loadNotices();
     return true;

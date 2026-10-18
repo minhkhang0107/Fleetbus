@@ -1,4 +1,5 @@
 import { describe, it } from 'node:test';
+import { DEMO_VOUCHERS, discountFor } from '../../source/server/core/vouchers.js';
 import assert from 'node:assert';
 import { PassengerCheckoutService } from '../../source/server/services/passenger/modules/checkout.js';
 
@@ -60,6 +61,10 @@ describe('Phase 5: Passenger Manifest & Checkout Review Test Suite', () => {
       pickupStop: { name: 'Bến xe Giáp Bát' },
       dropoffStop: { name: 'Bến xe Phía Bắc Thanh Hóa' },
       voucherCode: 'BUSGO50K',
+      resolveVoucher: (code, subtotal) => {
+        const voucher = DEMO_VOUCHERS.find(v => v.code === code);
+        return { ok: true, voucher, discount_vnd: discountFor(voucher, subtotal) };
+      },
       insuranceSelected: true
     });
 
