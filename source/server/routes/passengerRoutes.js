@@ -10,7 +10,7 @@ import { tripVisibleTo } from '../core/tenancy.js';
 import { verifyToken } from '../core/tokens.js';
 import { applyHomeRun, findShareHolder, homeTarget } from '../core/homeTracking.js';
 import { homeConfirmed, publicRouteService, resolveHomeBooking, routeServiceConfig } from '../core/serviceAreas.js';
-import { isProduction } from '../config.js';
+import { isProduction, isVipPassengerPhone } from '../config.js';
 import { addDays, checkBookableDeparture, checkTravelDate, serviceCalendar } from '../core/serviceDate.js';
 import { findLiveBanner, listLiveBanners } from '../core/promoBanners.js';
 import { saleBlock, saleStatus } from '../core/tripSales.js';
@@ -489,14 +489,21 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         return;
       }
 
-      const voucherDb = body.voucherCode ? services.tenantDbs.forOperator(req.operatorId) : null;
+      const vip = req.identity?.vip === true && isVipPassengerPhone(req.identity.phone);
+      if (vip) {
+        home.fee_vnd = 0;
+        if (home.home_pickup) home.home_pickup.fee_vnd = 0;
+        if (home.home_dropoff) home.home_dropoff.fee_vnd = 0;
+      }
+
+      const voucherDb = (!vip && body.voucherCode) ? services.tenantDbs.forOperator(req.operatorId) : null;
       const voucherPhone = req.identity?.phone || checkoutValidation.data.payer?.phone || null;
       const orderReview = checkoutService.computeOrderReview({
         trip: tripDetail,
         seats: holdCheck.data.seats,
         seatCodes,
-        voucherCode: body.voucherCode,
-        resolveVoucher: (code, subtotal) => evaluateVoucher(voucherDb, code, { subtotal, phone: voucherPhone }),
+        ...(vip ? { free: true } : { voucherCode: body.voucherCode }),
+        resolveVoucher: vip ? null : ((code, subtotal) => evaluateVoucher(voucherDb, code, { subtotal, phone: voucherPhone })),
         insuranceSelected: Boolean(body.insuranceSelected)
       });
       if (!orderReview.success) {
@@ -532,12 +539,12 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
 
       // Nothing to transfer (a code took the whole fare): banks cannot send 0 đ, so the order is paid now.
       if (totalVnd === 0) {
-        paymentService.settlePayment(paymentOrderResult.data.order_id, `VOUCHER_${applied?.code || 'FREE'}`);
+        paymentService.settlePayment(paymentOrderResult.data.order_id, vip ? 'VIP_FREE' : `VOUCHER_${applied?.code || 'FREE'}`);
       }
 
       sendSuccess(res, {
         // needs_review: an address the company still has to confirm; the app says so before the transfer (D130).
-        order: { ...orderReview.data, home_service_fee_vnd: home.fee_vnd, total_payment_vnd: totalVnd, home_pickup_status: home.home_pickup?.status || null, home_dropoff_status: home.home_dropoff?.status || null, home_needs_review: Boolean(home.needs_review) },
+        order: { ...orderReview.data, home_service_fee_vnd: home.fee_vnd, total_payment_vnd: totalVnd, home_pickup_status: home.home_pickup?.status || null, home_dropoff_status: home.home_dropoff?.status || null, home_needs_review: Boolean(home.needs_review), ...(vip ? { vip: true } : {}) },
         payment: paymentOrderResult.data
       }, 201);
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));

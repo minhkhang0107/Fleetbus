@@ -216,3 +216,169 @@ test('TC-VIP: VIP passenger account lifecycle and permissions', async (t) => {
     }
   });
 });
+
+test('TC-VIP: VIP passenger order pricing and zero-fare settlement', async (t) => {
+  const { server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: null });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  const call = async (path, { method = 'GET', body, token, operatorCode = 'SAOMAI' } = {}) => {
+    const h = { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() };
+    if (operatorCode) h['X-Operator-Code'] = operatorCode;
+    if (token) h.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${base}${path}`, {
+      method,
+      headers: h,
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    return { status: res.status, json: await res.json() };
+  };
+
+  const passengerLogin = async (phone, otp = null) => {
+    const reqRes = await call('/api/v1/auth/passenger/otp/request', { method: 'POST', body: { phone } });
+    const useOtp = otp || reqRes.json.data.mock_otp;
+    const verRes = await call('/api/v1/auth/passenger/otp/verify', { method: 'POST', body: { phone, otp: useOtp } });
+    return verRes.json.data.token;
+  };
+
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    services.tenantDbs?.close();
+  });
+
+  await t.test('TC-VIP-05: VIP books 2 seats with insurance, voucher and home service: 0 đ, PAID at once, tickets issued, no voucher used, home fees 0', async () => {
+    const vipToken = await passengerLogin(VIP_PASSENGER_PHONE, VIP_PASSENGER_OTP);
+    const hold = await call('/api/v1/trips/trp_hn_th_01/seats/hold', {
+      method: 'POST',
+      token: vipToken,
+      body: { seatCodes: ['A10', 'A11'] }
+    });
+    assert.strictEqual(hold.status, 200, JSON.stringify(hold.json));
+    const holdId = hold.json.data.hold_id;
+
+    const bookRes = await call('/api/v1/bookings/create', {
+      method: 'POST',
+      token: vipToken,
+      body: {
+        tripId: 'trp_hn_th_01',
+        holdId,
+        seatCodes: ['A10', 'A11'],
+        voucherCode: 'BUSGO50K',
+        insuranceSelected: true,
+        homePickup: { address: '8 Ngọc Lâm, Long Biên', lat: 21.04, lng: 105.9 },
+        homeDropoff: { address: 'Đại lộ Lê Lợi, TP Thanh Hóa', lat: 19.80, lng: 105.78 },
+        payer: { full_name: 'Khách VIP BusGo', phone: VIP_PASSENGER_PHONE },
+        passengers: [
+          { seat_code: 'A10', full_name: 'Khách VIP Một' },
+          { seat_code: 'A11', full_name: 'Khách VIP Hai' }
+        ]
+      }
+    });
+
+    assert.strictEqual(bookRes.status, 201, JSON.stringify(bookRes.json));
+    const { order, payment } = bookRes.json.data;
+    assert.strictEqual(payment.amount_vnd, 0);
+    assert.strictEqual(order.price_breakdown.final_total_vnd, 0);
+    assert.strictEqual(order.price_breakdown.seat_fare_unit, 0);
+    assert.strictEqual(order.price_breakdown.subtotal_fare, 0);
+    assert.strictEqual(order.price_breakdown.insurance_fare, 0);
+    assert.strictEqual(order.price_breakdown.voucher_discount, 0);
+    assert.strictEqual(order.home_service_fee_vnd, 0);
+    assert.strictEqual(order.total_payment_vnd, 0);
+    assert.strictEqual(order.vip, true);
+    assert.strictEqual(order.free, true);
+    assert.strictEqual(order.applied_voucher, null);
+
+    const orderId = payment.order_id;
+    const paidOrder = services.paymentService.orders.get(orderId);
+    assert.ok(paidOrder);
+    assert.strictEqual(paidOrder.payment_status, 'PAID');
+    assert.strictEqual(paidOrder.ticket_ids.length, 2);
+    assert.strictEqual(paidOrder.payment_ref, 'VIP_FREE');
+    assert.strictEqual(paidOrder.home_pickup.fee_vnd, 0);
+    assert.strictEqual(paidOrder.home_dropoff.fee_vnd, 0);
+
+    for (const ticketId of paidOrder.ticket_ids) {
+      const ticket = services.paymentService.tickets.get(ticketId);
+      assert.strictEqual(ticket.fare_vnd, 0);
+    }
+
+    const redemption = services.tenantDbs.forOperator('op_saomai').prepare('SELECT * FROM voucher_redemptions WHERE order_id = ?').get(orderId);
+    assert.strictEqual(redemption, undefined);
+  });
+
+  await t.test('TC-VIP-06: Normal passenger booking one seat on the same trip still pays the seat price (> 0) and stays PENDING_PAYMENT', async () => {
+    const normalPhone = '0912000777';
+    const normalToken = await passengerLogin(normalPhone);
+    const hold = await call('/api/v1/trips/trp_hn_th_01/seats/hold', {
+      method: 'POST',
+      token: normalToken,
+      body: { seatCodes: ['B04'] }
+    });
+    assert.strictEqual(hold.status, 200, JSON.stringify(hold.json));
+    const holdId = hold.json.data.hold_id;
+
+    const bookRes = await call('/api/v1/bookings/create', {
+      method: 'POST',
+      token: normalToken,
+      body: {
+        tripId: 'trp_hn_th_01',
+        holdId,
+        seatCodes: ['B04'],
+        payer: { full_name: 'Nguyễn Văn Bình', phone: normalPhone },
+        passengers: [{ seat_code: 'B04', full_name: 'Nguyễn Văn Bình' }]
+      }
+    });
+
+    assert.strictEqual(bookRes.status, 201, JSON.stringify(bookRes.json));
+    const { order, payment } = bookRes.json.data;
+    assert.ok(payment.amount_vnd > 0);
+    assert.strictEqual(payment.amount_vnd, 220000);
+    assert.strictEqual(order.price_breakdown.final_total_vnd, 220000);
+    assert.strictEqual(order.vip, undefined);
+    assert.strictEqual(order.free, undefined);
+
+    const normalOrder = services.paymentService.orders.get(payment.order_id);
+    assert.ok(normalOrder);
+    assert.strictEqual(normalOrder.payment_status, 'PENDING_PAYMENT');
+    assert.strictEqual(normalOrder.ticket_ids.length, 0);
+  });
+
+  await t.test('TC-VIP-07: Forged-looking case: a normal passenger token (no vip claim) whose body payer.phone is 0999888777 still pays full price', async () => {
+    const normalPhone = '0912345678';
+    const normalToken = await passengerLogin(normalPhone, '882199');
+    const hold = await call('/api/v1/trips/trp_hn_th_01/seats/hold', {
+      method: 'POST',
+      token: normalToken,
+      body: { seatCodes: ['B05'] }
+    });
+    assert.strictEqual(hold.status, 200, JSON.stringify(hold.json));
+    const holdId = hold.json.data.hold_id;
+
+    const bookRes = await call('/api/v1/bookings/create', {
+      method: 'POST',
+      token: normalToken,
+      body: {
+        tripId: 'trp_hn_th_01',
+        holdId,
+        seatCodes: ['B05'],
+        payer: { full_name: 'Khách Giả Mạo', phone: VIP_PASSENGER_PHONE },
+        passengers: [{ seat_code: 'B05', full_name: 'Khách Giả Mạo' }]
+      }
+    });
+
+    assert.strictEqual(bookRes.status, 201, JSON.stringify(bookRes.json));
+    const { order, payment } = bookRes.json.data;
+    assert.ok(payment.amount_vnd > 0);
+    assert.strictEqual(payment.amount_vnd, 220000);
+    assert.strictEqual(order.price_breakdown.final_total_vnd, 220000);
+    assert.strictEqual(order.vip, undefined);
+    assert.strictEqual(order.free, undefined);
+
+    const forgedOrder = services.paymentService.orders.get(payment.order_id);
+    assert.ok(forgedOrder);
+    assert.strictEqual(forgedOrder.payment_status, 'PENDING_PAYMENT');
+    assert.strictEqual(forgedOrder.ticket_ids.length, 0);
+  });
+});
+

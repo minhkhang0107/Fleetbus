@@ -85,25 +85,28 @@ export class PassengerCheckoutService {
    * [resolveVoucher] (code, subtotal) → { ok, voucher, discount_vnd } or a refusal { ok: false, code, message }:
    * the company's discount codes (core/vouchers.js). A code that does not apply refuses the order, so the
    * passenger never pays a price other than the one the app showed.
+   * [free = false]: when true, sets fares and totals to 0 đ without evaluating vouchers.
    */
-  calculateOrderReview({ trip = {}, seatCodes = [], pickupStop = 'Bến xe Giáp Bát', dropoffStop = 'Bến xe Phía Bắc Thanh Hóa', voucherCode, resolveVoucher = null, insuranceSelected = false, seats, seatPriceVnd }) {
+  calculateOrderReview({ trip = {}, seatCodes = [], pickupStop = 'Bến xe Giáp Bát', dropoffStop = 'Bến xe Phía Bắc Thanh Hóa', voucherCode, resolveVoucher = null, insuranceSelected = false, seats, seatPriceVnd, free = false }) {
     const effectiveSeatCodes = seatCodes.length > 0 ? seatCodes : (seats ? seats.map(s => typeof s === 'string' ? s : s.seat_code) : []);
     const seatPrice = seatPriceVnd || trip.base_fare_vnd || 220000;
     const perSeatPrices = Array.isArray(seats) && seats.length > 0 && seats.every(s => s && Number.isFinite(s.price_vnd))
       ? seats.map(s => s.price_vnd)
       : null;
-    const subtotalFare = perSeatPrices
-      ? perSeatPrices.reduce((sum, price) => sum + price, 0)
-      : effectiveSeatCodes.length * seatPrice;
+    const subtotalFare = free
+      ? 0
+      : (perSeatPrices
+        ? perSeatPrices.reduce((sum, price) => sum + price, 0)
+        : effectiveSeatCodes.length * seatPrice);
     
     // Optional travel insurance (10,000 VND / passenger)
-    const insuranceFare = insuranceSelected ? effectiveSeatCodes.length * 10000 : 0;
+    const insuranceFare = !free && insuranceSelected ? effectiveSeatCodes.length * 10000 : 0;
 
     // Voucher computation
     let voucherDiscount = 0;
     let appliedVoucher = null;
 
-    if (voucherCode) {
+    if (!free && voucherCode) {
       const r = resolveVoucher ? resolveVoucher(voucherCode, subtotalFare) : { ok: false, code: 'VOUCHER_INVALID', message: 'Mã giảm giá không đúng' };
       if (!r.ok) {
         return { success: false, code: r.code, error: r.message };
@@ -116,7 +119,7 @@ export class PassengerCheckoutService {
       };
     }
 
-    const finalTotal = Math.max(0, subtotalFare + insuranceFare - voucherDiscount);
+    const finalTotal = free ? 0 : Math.max(0, subtotalFare + insuranceFare - voucherDiscount);
 
     return {
       success: true,
@@ -131,13 +134,14 @@ export class PassengerCheckoutService {
         dropoff_stop: dropoffStop,
         total_payment_vnd: finalTotal,
         price_breakdown: {
-          seat_fare_unit: perSeatPrices ? perSeatPrices[0] : seatPrice,
+          seat_fare_unit: free ? 0 : (perSeatPrices ? perSeatPrices[0] : seatPrice),
           subtotal_fare: subtotalFare,
           insurance_fare: insuranceFare,
           voucher_discount: voucherDiscount,
           final_total_vnd: finalTotal
         },
-        applied_voucher: appliedVoucher
+        applied_voucher: appliedVoucher,
+        ...(free ? { free: true } : {})
       }
     };
   }
