@@ -90,6 +90,38 @@ Khởi động máy chủ bằng `make start_server` hoặc `npm start`:
 - 🩺 Kiểm tra sức khỏe hệ thống: [http://localhost:3000/health](http://localhost:3000/health)
 - 📑 Tài liệu OpenAPI Spec: [http://localhost:3000/api/v1/openapi.json](http://localhost:3000/api/v1/openapi.json)
 
+### Tài Khoản Dùng Thử (Môi Trường Phát Triển)
+
+Các tài khoản mẫu cấu hình sẵn trên môi trường phát triển (ngoài production) để đăng nhập và thử nghiệm các phân hệ:
+
+#### Web Điều Hành (Manager & Platform)
+
+| Phân hệ / Nhà xe | Vai trò | Tài khoản | Mật khẩu | 2FA TOTP | Ghi chú |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Nền tảng (Platform) | Quản trị nền tảng (`PLATFORM_ADMIN`) | `root@busgo.vn` | `root123` | Bắt buộc (dev secret) | Toàn quyền quản trị hệ thống, tạo nhà xe |
+| Sao Mai (`SAOMAI`) | Giám đốc điều hành (`FLEET_DIRECTOR`) | `admin@busgo.vn` | `admin123` | Bắt buộc (dev secret) | Toàn quyền quản trị nhà xe Sao Mai |
+| Sao Mai (`SAOMAI`) | Điều độ viên (`DISPATCHER`) | `dispatcher@busgo.vn` | `disp123` | Không | Điều phối xe, tài xế, chuyến |
+| Sao Mai (`SAOMAI`) | Thu ngân / Phòng vé (`CASHIER`) | `cashier@busgo.vn` | `cash123` | Không | Bán vé quầy POS, hotline |
+| Xuyên Việt (`XUYENVIET`) | Điều độ viên (`DISPATCHER`) | `dispatcher@xuyenviet.vn` | `xv123` | Không | Điều phối xe, tài xế, chuyến |
+| Xuyên Việt (`XUYENVIET`) | Thu ngân / Phòng vé (`CASHIER`) | `cashier@xuyenviet.vn` | `xv123` | Không | Bán vé quầy POS, hotline |
+| Nhà xe tạo mới | Giám đốc điều hành (`FLEET_DIRECTOR`) | Email khi tạo | Mật khẩu tạm | Bắt buộc đổi MK & cài 2FA | Trả về khi gọi `POST /api/v1/platform/operators` |
+
+#### Buồng Lái Tài Xế (Driver App)
+
+| Nhà xe | Mã nhân viên | Mã PIN | Họ tên | Ghi chú |
+| :--- | :--- | :--- | :--- | :--- |
+| Sao Mai (`SAOMAI`) | `TX8821` | `123456` | Trần Văn Bình | Có sẵn chuyến xe gán hôm nay |
+| Xuyên Việt (`XUYENVIET`) | `TX7701` | `246810` | Đỗ Minh Khoa | Có sẵn chuyến xe gán hôm nay |
+| Nhà xe tạo mới (ngoài production) | `TX8821` | `123456` | Tài xế thử nghiệm | Tự động tạo, sẵn sàng đăng nhập, không cần đổi PIN |
+
+#### Ứng Dụng Hành Khách (Passenger App)
+
+| Loại tài khoản | Số điện thoại | Mã OTP | Ghi chú |
+| :--- | :--- | :--- | :--- |
+| Tiêu chuẩn (`SAOMAI`) | `0912345678` | `882199` | Nguyễn Văn An, áp dụng trên mọi nhà xe |
+| Khách VIP (ngoài production) | `0999888777` | `888777` | Hoạt động trên mọi nhà xe, mọi vé 0 đ (ghế, bảo hiểm, đón/trả tận nhà), đơn hàng thanh toán ngay lập tức, không áp dụng mã giảm giá |
+| Khách vãng lai khác | Số bất kỳ (VN) | Mã trong `mock_otp` | Ngoài production server trả mã OTP trực tiếp trong response |
+
 ### Dùng từ máy khác qua Tailscale
 
 Máy chạy server và máy (hoặc điện thoại) dùng thử cùng đăng nhập một tailnet; không cần chung mạng Wi-Fi, không mở cổng router.

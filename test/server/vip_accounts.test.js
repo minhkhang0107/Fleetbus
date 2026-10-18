@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert';
 import crypto from 'node:crypto';
 import { createFleetBusServer } from '../../source/server/apiServer.js';
-import { VIP_PASSENGER_PHONE, VIP_PASSENGER_OTP, isVipPassengerPhone } from '../../source/server/config.js';
+import { VIP_PASSENGER_PHONE, VIP_PASSENGER_OTP, isVipPassengerPhone, DEV_TOTP_SECRET } from '../../source/server/config.js';
+import { generateTotp } from '../../source/server/core/totp.js';
 import { PassengerAuthService } from '../../source/server/services/passenger/modules/auth.js';
 
 function decodePayload(token) {
@@ -381,4 +382,119 @@ test('TC-VIP: VIP passenger order pricing and zero-fare settlement', async (t) =
     assert.strictEqual(forgedOrder.ticket_ids.length, 0);
   });
 });
+
+test('TC-VIP: Ready-made test driver for newly created bus companies', async (t) => {
+  const { server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: null });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  const request = async (path, { method = 'GET', body, token, headers = {} } = {}) => {
+    const h = { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID(), ...headers };
+    if (token) h.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${base}${path}`, {
+      method,
+      headers: h,
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    const text = await res.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch { /* not json */ }
+    return { status: res.status, body: json, text };
+  };
+
+  const totp = () => generateTotp(DEV_TOTP_SECRET, Date.now());
+  const staffLogin = (username, password, code = totp()) =>
+    request('/api/v1/ops/auth/login', { method: 'POST', body: { username, password, totp: code } });
+
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    services.tenantDbs?.close();
+  });
+
+  const rootRes = await staffLogin('root@busgo.vn', 'root123');
+  assert.strictEqual(rootRes.status, 200);
+  const rootToken = rootRes.body.data.token;
+
+  await t.test('TC-VIP-08: Non-production operator creation provisions test driver TX8821 / 123456 who can log in and call driver APIs without PIN change', async () => {
+    const companyBody = {
+      code: 'HOANGLONG',
+      name: 'Nhà xe Hoàng Long',
+      director_name: 'Đoàn Hoàng Long',
+      director_email: 'director@hoanglong.vn',
+      bank: { bin: '970422', bank_name: 'MB Bank', account_number: '0123456789', account_name: 'NHA XE HOANG LONG' }
+    };
+
+    const created = await request('/api/v1/platform/operators', {
+      method: 'POST',
+      token: rootToken,
+      body: companyBody
+    });
+
+    assert.strictEqual(created.status, 201, JSON.stringify(created.body));
+    assert.strictEqual(created.body.data.operator_id, 'op_hoanglong');
+    assert.ok(created.body.data.test_driver, 'test_driver should be returned in response');
+    assert.strictEqual(created.body.data.test_driver.staff_id, 'TX8821');
+    assert.strictEqual(created.body.data.test_driver.pin, '123456');
+
+    // Driver login with operator code HOANGLONG + TX8821 + 123456
+    const driverLogin = await request('/api/v1/auth/driver/login', {
+      method: 'POST',
+      headers: { 'X-Operator-Code': 'HOANGLONG' },
+      body: { staffIdOrPhone: 'TX8821', pin: '123456' }
+    });
+    assert.strictEqual(driverLogin.status, 200, JSON.stringify(driverLogin.body));
+    assert.ok(driverLogin.body.data.token, 'login should return token');
+    assert.strictEqual(driverLogin.body.data.driver.staff_id, 'TX8821');
+    const driverToken = driverLogin.body.data.token;
+
+    // Call GET /api/v1/driver/trips/today with the driver token -> 200 (not 403 PIN_CHANGE_REQUIRED)
+    const tripsRes = await request('/api/v1/driver/trips/today', {
+      method: 'GET',
+      token: driverToken,
+      headers: { 'X-Operator-Code': 'HOANGLONG' }
+    });
+    assert.strictEqual(tripsRes.status, 200, JSON.stringify(tripsRes.body));
+    assert.ok(Array.isArray(tripsRes.body.data.trips));
+  });
+
+  await t.test('TC-VIP-09: In production, creating a company does not create test driver and has no test_driver field', async () => {
+    const originalEnv = process.env.NODE_ENV;
+    const originalTokenSecret = process.env.FLEETBUS_TOKEN_SECRET;
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.FLEETBUS_TOKEN_SECRET = 'fleetbus_dev_only_token_secret';
+
+      const prodCompany = {
+        code: 'KIMCHI',
+        name: 'Nhà xe Kim Chi',
+        director_name: 'Nguyễn Kim Chi',
+        director_email: 'director@kimchi.vn',
+        bank: { bin: '970422', bank_name: 'MB Bank', account_number: '0987654321', account_name: 'NHA XE KIM CHI' }
+      };
+
+      const created = await request('/api/v1/platform/operators', {
+        method: 'POST',
+        token: rootToken,
+        body: prodCompany
+      });
+
+      assert.strictEqual(created.status, 201, JSON.stringify(created.body));
+      assert.strictEqual(created.body.data.operator_id, 'op_kimchi');
+      assert.strictEqual(created.body.data.test_driver, undefined);
+      assert.strictEqual('test_driver' in created.body.data, false);
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalEnv;
+      }
+      if (originalTokenSecret === undefined) {
+        delete process.env.FLEETBUS_TOKEN_SECRET;
+      } else {
+        process.env.FLEETBUS_TOKEN_SECRET = originalTokenSecret;
+      }
+    }
+  });
+});
+
 

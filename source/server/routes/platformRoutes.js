@@ -4,6 +4,7 @@
  */
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
 import { createOperator, findOperatorByCode, findOperatorById, listOperators, setOperatorActive, updateOperator } from '../core/operators.js';
+import { isProduction } from '../config.js';
 
 const OPERATOR_RE = /^\/api\/v1\/platform\/operators\/([^/]+)$/;
 const ACTIVE_RE = /^\/api\/v1\/platform\/operators\/([^/]+)\/(activate|deactivate)$/;
@@ -43,11 +44,18 @@ export function handlePlatformRoutes(req, res, pathname, parsedUrl, services) {
       const result = createOperator(body);
       if (result.ok) {
         audit(req, managerService, { action: 'OPERATOR_CREATE', resource: result.operator.code, after: result.operator, operator_id: result.operator.operator_id });
-        sendSuccess(res, {
+        const responseData = {
           ...result.operator,
           director: result.director,
           temporary_password: result.temporary_password
-        }, 201);
+        };
+        if (!isProduction()) {
+          const testDriver = managerService.addTestDriver(result.operator.operator_id);
+          if (testDriver?.staff_id && testDriver?.pin) {
+            responseData.test_driver = { staff_id: testDriver.staff_id, pin: testDriver.pin };
+          }
+        }
+        sendSuccess(res, responseData, 201);
       } else {
         sendError(res, result.message, result.code, result.status);
       }

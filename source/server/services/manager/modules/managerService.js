@@ -747,6 +747,30 @@ export class ManagerOperationsService {
     return { success: true, data };
   }
 
+  /** Test/review account, outside production only (the caller decides). */
+  addTestDriver(operatorId = DEFAULT_OPERATOR_ID) {
+    const res = this.addDriver({
+      full_name: 'Tài xế thử nghiệm',
+      phone: '0909998821',
+      staff_id: 'TX8821',
+      license_class: 'E',
+      license_expiry: '2030-12-31'
+    }, operatorId);
+    if (!res.success) {
+      return res;
+    }
+    const driverId = res.data?.driver?.driver_id;
+    const acc = MOCK_DRIVERS_DB.find(d => d.driver_id === driverId);
+    if (acc) {
+      acc.pin = hashSecret('123456');
+      acc.must_change_pin = false;
+    }
+    if (res.data?.driver) {
+      res.data.driver.must_change_pin = false;
+    }
+    return { staff_id: 'TX8821', pin: '123456' };
+  }
+
   updateDriver(driverId, updates = {}, operatorId = DEFAULT_OPERATOR_ID) {
     const driver = this.drivers.find(d => d.driver_id === driverId && (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
     if (!driver) {
