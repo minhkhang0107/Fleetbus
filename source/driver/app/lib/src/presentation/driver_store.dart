@@ -203,13 +203,27 @@ class _DriveLeg {
 
 /// A trip of the shift as listed on the home screen.
 class ShiftTrip {
-  const ShiftTrip(this.id, this.dep, this.route, this.plate, this.booked, this.status);
+  const ShiftTrip(this.id, this.dep, this.route, this.plate, this.booked, this.status, [this.departureTime]);
   final String id;
   final String dep;
   final String route;
   final String plate;
   final int booked;
   final String status;
+  final DateTime? departureTime;
+
+  String dayLabel([DateTime? vnNow]) {
+    if (departureTime == null) return '';
+    final ref = vnNow ?? DateTime.now().toUtc().add(const Duration(hours: 7));
+    if (departureTime!.year == ref.year && departureTime!.month == ref.month && departureTime!.day == ref.day) {
+      return 'Hôm nay';
+    }
+    final tomorrow = DateTime.utc(ref.year, ref.month, ref.day).add(const Duration(days: 1));
+    if (departureTime!.year == tomorrow.year && departureTime!.month == tomorrow.month && departureTime!.day == tomorrow.day) {
+      return 'Ngày mai';
+    }
+    return '${departureTime!.day.toString().padLeft(2, '0')}/${departureTime!.month.toString().padLeft(2, '0')}';
+  }
 }
 
 enum TripState { readyCheck, inTransit, completed }
@@ -256,9 +270,12 @@ int? minutesToStop({
 const _networkError = 'Không kết nối được máy chủ. Thao tác chưa được gửi, thử lại khi có mạng.';
 
 class DriverStore extends ChangeNotifier {
-  DriverStore({DriverApiClientService? api}) : api = api ?? DriverApiClientService();
+  DriverStore({DriverApiClientService? api, DateTime Function()? clock})
+      : api = api ?? DriverApiClientService(),
+        _now = clock ?? DateTime.now;
 
   final DriverApiClientService api;
+  final DateTime Function() _now;
 
   static const debtLimit = 1000000;
   static const noShowGrace = 10;
@@ -597,10 +614,25 @@ class DriverStore extends ChangeNotifier {
     shift = [
       for (final t in trips)
         ShiftTrip(
-            t['trip_id'], _depLabelOf(t), routeLabel(t['route_name'] ?? ''), t['vehicle_plate'] ?? '', (t['manifest'] as List? ?? []).length, t['status'] ?? ''),
+          t['trip_id'],
+          _depLabelOf(t),
+          routeLabel(t['route_name'] ?? ''),
+          t['vehicle_plate'] ?? '',
+          (t['manifest'] as List? ?? []).length,
+          t['status'] ?? '',
+          DateTime.tryParse('${t['planned_departure_time']}')?.toUtc().add(const Duration(hours: 7)),
+        ),
     ];
     final live = trips.where((t) => t['status'] != 'CANCELLED').toList();
-    final current = live.where((t) => t['status'] != 'COMPLETED').firstOrNull ?? live.lastOrNull;
+    final now = _vnNow();
+    final selected = tripId == null ? null : live.where((t) => t['trip_id'] == tripId).firstOrNull;
+    final notStale = live.where((t) {
+      if (t['status'] == 'COMPLETED') return false;
+      final depAt = DateTime.tryParse('${t['planned_departure_time']}')?.toUtc().add(const Duration(hours: 7));
+      if (depAt == null) return false;
+      return !depAt.isBefore(now.subtract(const Duration(hours: 12)));
+    }).firstOrNull;
+    final current = selected ?? notStale ?? live.where((t) => t['status'] != 'COMPLETED').firstOrNull ?? live.lastOrNull;
     if (current != null) _apply(current, fresh: tripId != current['trip_id']);
     notifyListeners();
   }
@@ -609,8 +641,10 @@ class DriverStore extends ChangeNotifier {
   /// that do not carry it.
   final Map<String, String> _plannedTimes = {};
 
-  static DateTime _vnNow() => DateTime.now().toUtc().add(const Duration(hours: 7));
-  static int _realMinutes() {
+  DateTime vnNow() => _now().toUtc().add(const Duration(hours: 7));
+  DateTime _vnNow() => vnNow();
+  String dayLabelOf(ShiftTrip t) => t.dayLabel(vnNow());
+  int _realMinutes() {
     final now = _vnNow();
     return now.hour * 60 + now.minute;
   }
@@ -733,6 +767,21 @@ class DriverStore extends ChangeNotifier {
     if (r.error != null) return r.error;
     _apply(r.data!);
     notifyListeners();
+    return null;
+  }
+
+  /// Switches to another trip in the shift. Refused while the current trip is in transit.
+  Future<String?> selectTrip(String tripId) async {
+    if (trip == TripState.inTransit) {
+      return 'Xe đang chạy, không thể đổi chuyến.';
+    }
+    final r = await _call(() => api.getTrip(tripId));
+    if (r.error != null) return r.error;
+    if (r.data != null) {
+      if (this.tripId != tripId) _stopTimers();
+      _apply(r.data!, fresh: this.tripId != tripId);
+      notifyListeners();
+    }
     return null;
   }
 
@@ -1074,7 +1123,7 @@ class DriverStore extends ChangeNotifier {
     _stopTimers();
     moving = false;
     trip = TripState.completed;
-    shift = [for (final t in shift) t.id == tripId ? ShiftTrip(t.id, t.dep, t.route, t.plate, t.booked, 'COMPLETED') : t];
+    shift = [for (final t in shift) t.id == tripId ? ShiftTrip(t.id, t.dep, t.route, t.plate, t.booked, 'COMPLETED', t.departureTime) : t];
     notifyListeners();
     return null;
   }

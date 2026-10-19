@@ -47,7 +47,7 @@ class DriverReadinessScreen extends StatelessWidget {
   }
 
   /// D143: home pickups are collected before the checks at the stop; setting off starts sending the bus position.
-  Future<void> _homeRun(BuildContext context, DriverStore store) async {
+  static Future<void> runDriverHome(BuildContext context, DriverStore store) async {
     // D145: the passengers follow the bus by its position, so the app needs location first.
     if (!store.homeRunStarted && !await ensureDriverLocation(context)) return;
     if (!context.mounted) return;
@@ -88,7 +88,7 @@ class DriverReadinessScreen extends StatelessWidget {
                   icon: Icons.home_outlined,
                   color: DTokens.warn,
                   foreground: const Color(0xFF1C1917),
-                  onPressed: () => _homeRun(context, store),
+                  onPressed: () => runDriverHome(context, store),
                 ),
               ]),
             ),

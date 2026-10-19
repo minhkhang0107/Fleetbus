@@ -1298,6 +1298,248 @@ void main() {
 
     store.dispose();
   });
+
+  test('loadShift prefers a real upcoming trip over a 2026-08-28 demo trip when both are returned and now is near the upcoming one', () async {
+    final demoTrip = {
+      'trip_id': 'trp_demo_2026',
+      'route_name': 'Hà Nội — Thanh Hóa',
+      'planned_departure_time': '2026-08-28T07:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-882.19',
+      'stops': <Map<String, dynamic>>[],
+      'manifest': <Map<String, dynamic>>[],
+    };
+    final upcomingTrip = {
+      'trip_id': 'trp_upcoming_real',
+      'route_name': 'Hà Nội — Thanh Hóa (Chiều về)',
+      'planned_departure_time': '2026-10-19T08:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-999.88',
+      'stops': <Map<String, dynamic>>[],
+      'manifest': <Map<String, dynamic>>[],
+    };
+
+    final tripsMap = {
+      'trp_demo_2026': demoTrip,
+      'trp_upcoming_real': upcomingTrip,
+    };
+
+    final client = MockClient((req) async {
+      final path = req.url.path;
+      if (path.endsWith('/trips/today')) {
+        return ok({'trips': [demoTrip, upcomingTrip]});
+      }
+      for (final entry in tripsMap.entries) {
+        if (path.endsWith('/trips/${entry.key}')) return ok(entry.value);
+      }
+      return ok(upcomingTrip);
+    });
+
+    final testNow = DateTime.parse('2026-10-19T07:30:00+07:00');
+    final store = DriverStore(
+      api: DriverApiClientService(baseUrl: 'http://test', client: client),
+      clock: () => testNow,
+    );
+
+    await store.loadShift();
+    expect(store.tripId, 'trp_upcoming_real', reason: 'Upcoming trip is within 12h, whereas demo trip is in the distant past');
+    expect(store.shift.length, 2);
+    store.dispose();
+  });
+
+  test('selectTrip switches tripId and is refused while in transit', () async {
+    final tripA = {
+      'trip_id': 'trp_trip_a',
+      'route_name': 'Hà Nội — Thanh Hóa',
+      'planned_departure_time': '2026-08-28T07:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-111.11',
+      'stops': [
+        {'stop_id': 's1', 'name': 'Bến Giáp Bát', 'order': 1, 'status': 'PENDING'},
+        {'stop_id': 's2', 'name': 'Bến Phía Bắc', 'order': 2, 'status': 'PENDING'},
+      ],
+      'manifest': <Map<String, dynamic>>[],
+      'readiness_checklist': {for (final k in DriverStore.checkKeys) k: true},
+    };
+    final tripB = {
+      'trip_id': 'trp_trip_b',
+      'route_name': 'Thanh Hóa — Hà Nội',
+      'planned_departure_time': '2026-08-28T14:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-222.22',
+      'stops': [
+        {'stop_id': 's2', 'name': 'Bến Phía Bắc', 'order': 1, 'status': 'PENDING'},
+        {'stop_id': 's1', 'name': 'Bến Giáp Bát', 'order': 2, 'status': 'PENDING'},
+      ],
+      'manifest': <Map<String, dynamic>>[],
+      'readiness_checklist': {for (final k in DriverStore.checkKeys) k: true},
+    };
+
+    final tripsMap = {'trp_trip_a': tripA, 'trp_trip_b': tripB};
+    final client = MockClient((req) async {
+      final path = req.url.path;
+      if (path.endsWith('/trips/today')) {
+        return ok({'trips': [tripA, tripB]});
+      }
+      if (path.endsWith('/start')) {
+        tripB['status'] = 'IN_TRANSIT';
+        return ok(tripB);
+      }
+      for (final entry in tripsMap.entries) {
+        if (path.contains('/trips/${entry.key}')) return ok(entry.value);
+      }
+      return ok(tripA);
+    });
+
+    final store = DriverStore(api: DriverApiClientService(baseUrl: 'http://test', client: client));
+    await store.loadShift();
+    expect(store.tripId, 'trp_trip_a');
+
+    // Switch to trip B while readyCheck
+    final errSelect = await store.selectTrip('trp_trip_b');
+    expect(errSelect, isNull);
+    expect(store.tripId, 'trp_trip_b');
+
+    // Start trip B -> moves to inTransit
+    final errStart = await store.startTrip();
+    expect(errStart, isNull);
+    expect(store.trip, TripState.inTransit);
+
+    // Attempting to select trip A while in transit must be refused
+    final errRefused = await store.selectTrip('trp_trip_a');
+    expect(errRefused, isNotNull);
+    expect(store.tripId, 'trp_trip_b');
+    store.dispose();
+  });
+
+  testWidgets('widget: trips screen shows home-pickup action when confirmed home pickup exists, and stop-pickup line otherwise', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    });
+
+    // 1) Current trip in storeWithServer has 2 passengers with NO home pickup.
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: Scaffold(body: DriverTodayTripsScreen())),
+    ));
+    await tester.pump();
+
+    // With no home pickups: no "Đi đón khách tận nhà", but shows "Đón tại điểm: 2 khách · bấm Kiểm tra xe để xuất bến rồi Xuất bến để đón"
+    expect(find.textContaining('Đi đón khách tận nhà'), findsNothing);
+    expect(find.textContaining('Đón tại điểm: 2 khách · bấm Kiểm tra xe để xuất bến rồi Xuất bến để đón'), findsOneWidget);
+
+    // 2) Add a confirmed home pickup to manifest
+    (trip['manifest'] as List).add({
+      'ticket_id': 't_home_1',
+      'seat_code': 'A03',
+      'passenger_name': 'Khách Đón Nhà',
+      'phone_masked': '091***789',
+      'pickup_stop_id': 'stp_hn_gb',
+      'dropoff_stop_id': 'stp_th_pb',
+      'boarding_status': 'ISSUED',
+      'payment_method': 'VIETQR',
+      'cod_amount_vnd': 0,
+      'home_pickup': {
+        'address': '123 Phố Huế',
+        'lat': 21.01,
+        'lng': 105.85,
+        'window_from': '2026-08-28T05:00:00Z',
+        'window_to': '2026-08-28T05:40:00Z',
+      },
+    });
+
+    await tester.runAsync(() async {
+      await store.refreshTrip();
+    });
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: Scaffold(body: DriverTodayTripsScreen())),
+    ));
+    await tester.pump();
+
+    // Now has 1 confirmed home pickup: shows "Đi đón khách tận nhà (1)" and does NOT show "Đón tại điểm" line
+    expect(find.text('Đi đón khách tận nhà (1)'), findsOneWidget);
+    expect(find.textContaining('Đón tại điểm:'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('the other-trips list shows "Ngày mai" for a trip departing tomorrow', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+
+    final testNow = DateTime.parse('2026-10-19T07:00:00+07:00');
+    final tripToday = {
+      'trip_id': 'trp_today',
+      'route_name': 'Hà Nội — Thanh Hóa',
+      'planned_departure_time': '2026-10-19T08:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-111.11',
+      'stops': [
+        {'stop_id': 's1', 'name': 'Bến Giáp Bát', 'order': 1, 'status': 'PENDING'},
+      ],
+      'manifest': <Map<String, dynamic>>[],
+    };
+    final tripTomorrow = {
+      'trip_id': 'trp_tomorrow',
+      'route_name': 'Hà Nội — Ninh Bình',
+      'planned_departure_time': '2026-10-20T09:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-222.22',
+      'stops': [
+        {'stop_id': 's1', 'name': 'Bến Giáp Bát', 'order': 1, 'status': 'PENDING'},
+      ],
+      'manifest': <Map<String, dynamic>>[],
+    };
+
+    final client = MockClient((req) async {
+      final path = req.url.path;
+      if (path.endsWith('/trips/today')) {
+        return ok({'trips': [tripToday, tripTomorrow]});
+      }
+      if (path.contains('/trips/trp_tomorrow')) return ok(tripTomorrow);
+      return ok(tripToday);
+    });
+
+    final store = DriverStore(
+      api: DriverApiClientService(baseUrl: 'http://test', client: client),
+      clock: () => testNow,
+    );
+
+    await tester.runAsync(() async {
+      await store.loadShift();
+    });
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: Scaffold(body: DriverTodayTripsScreen())),
+    ));
+    await tester.pump();
+
+    expect(find.text('Chuyến của bạn'), findsOneWidget);
+    expect(find.text('Ngày mai'), findsOneWidget);
+    expect(find.text('Hà Nội → Ninh Bình'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
 }
 
 class FakePermissions implements DevicePermissions {
