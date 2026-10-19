@@ -510,6 +510,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         sendError(res, orderReview.error, orderReview.code, 422);
         return;
       }
+      const applied = orderReview.data.applied_voucher;
       const totalVnd = orderReview.total_payment_vnd + home.fee_vnd;
 
       const paymentOrderResult = paymentService.createPaymentOrder({
@@ -525,11 +526,12 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         pickupStopId: holdCheck.data.pickup_stop_id,
         dropoffStopId: holdCheck.data.dropoff_stop_id,
         pickupStop: (tripDetail.stops || []).find(s => s.stop_id === holdCheck.data.pickup_stop_id)?.name || body.pickupStop || 'Bến xe Giáp Bát',
-        dropoffStop: (tripDetail.stops || []).find(s => s.stop_id === holdCheck.data.dropoff_stop_id)?.name || body.dropoffStop || 'Bến xe Phía Bắc Thanh Hóa'
+        dropoffStop: (tripDetail.stops || []).find(s => s.stop_id === holdCheck.data.dropoff_stop_id)?.name || body.dropoffStop || 'Bến xe Phía Bắc Thanh Hóa',
+        voucherCode: applied?.code || null,
+        discountVnd: applied?.discount_amount || 0
       });
 
       // The code's use is taken now and given back if the payment window closes unpaid.
-      const applied = orderReview.data.applied_voucher;
       if (applied) {
         reserveVoucher(voucherDb, { code: applied.code, orderId: paymentOrderResult.data.order_id, phone: voucherPhone, discountVnd: applied.discount_amount, expiresAt: paymentOrderResult.data.expires_at });
       }

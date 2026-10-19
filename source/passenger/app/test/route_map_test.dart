@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:app/src/presentation/passenger/passenger_live_radar_screen.dart';
+import 'package:app/src/presentation/passenger/passenger_main_shell.dart';
 import 'package:app/src/presentation/passenger/passenger_onboarding_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_route_map.dart';
+import 'package:app/src/presentation/passenger/passenger_splash_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_store.dart';
 import 'package:app/src/presentation/passenger/passenger_wallet_screen.dart';
 import 'package:data/src/service/passenger_api_service.dart';
@@ -698,5 +700,65 @@ void main() {
     await launch();
     expect(find.text('Đặt vé trong một phút'), findsNothing);
     expect(find.text('Nhà xe Sao Mai'), findsOneWidget);
+  });
+
+  testWidgets('launch with a saved valid session lands on the home shell, without one lands on the splash', (tester) async {
+    final token = 'pax_jwt_${base64Url.encode(utf8.encode(jsonEncode({'sub': 'usr_1', 'kind': 'passenger', 'exp': DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch}))).replaceAll('=', '')}.sig';
+    SharedPreferences.setMockInitialValues({
+      'operator_code': 'SAOMAI',
+      'passenger_session': jsonEncode({'token': token, 'operator_code': 'SAOMAI', 'phone': '0987654321', 'name': 'Pham Thu Ha'}),
+    });
+    final client = MockClient((req) async {
+      if (req.url.path.endsWith('/app/config')) {
+        return http.Response(
+          jsonEncode({
+            'status': 'success',
+            'data': {
+              'operator': {
+                'operator_id': 'op_saomai',
+                'code': 'SAOMAI',
+                'name': 'Nhà xe Sao Mai',
+                'short_name': 'Sao Mai',
+                'hotline': '1900 6868',
+                'primary_color': '#E11D48',
+              }
+            }
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      }
+      return http.Response(jsonEncode({'status': 'success', 'data': []}), 200, headers: {'content-type': 'application/json; charset=utf-8'});
+    });
+
+    final store = PassengerStore(api: PassengerApiClientService(baseUrl: 'http://test', client: client));
+    await tester.pumpWidget(PassengerScope(
+      store: store,
+      child: MaterialApp(home: PassengerLaunchScreen(restore: store.restoreOperator)),
+    ));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(PassengerMainShell), findsOneWidget);
+    expect(find.byType(PassengerSplashScreen), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+
+    // Without a saved session
+    SharedPreferences.setMockInitialValues({
+      'operator_code': 'SAOMAI',
+    });
+    final storeNoSession = PassengerStore(api: PassengerApiClientService(baseUrl: 'http://test', client: client));
+    await tester.pumpWidget(PassengerScope(
+      store: storeNoSession,
+      child: MaterialApp(key: UniqueKey(), home: PassengerLaunchScreen(restore: storeNoSession.restoreOperator)),
+    ));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(PassengerSplashScreen), findsOneWidget);
+    expect(find.byType(PassengerMainShell), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
   });
 }

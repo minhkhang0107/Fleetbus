@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'passenger_main_shell.dart';
 import 'passenger_splash_screen.dart';
 import 'passenger_store.dart';
 import 'passenger_widgets.dart';
@@ -28,10 +29,14 @@ class _PassengerLaunchScreenState extends State<PassengerLaunchScreen> {
     await Future.wait([widget.restore().catchError((_) {}), Future<void>.delayed(const Duration(milliseconds: 900))]);
     if (!mounted) return;
     // With a company already chosen the passenger goes straight in; without one, the app introduces itself first.
-    final seen = PassengerScope.read(context).operator != null;
+    final store = PassengerScope.read(context);
+    final seen = store.operator != null;
+    final loggedIn = store.loggedIn;
     Navigator.of(context).pushReplacement(PageRouteBuilder(
       transitionDuration: const Duration(milliseconds: 400),
-      pageBuilder: (_, __, ___) => seen ? const PassengerSplashScreen() : const PassengerOnboardingScreen(),
+      pageBuilder: (_, __, ___) => !seen
+          ? const PassengerOnboardingScreen()
+          : (loggedIn ? const PassengerMainShell() : const PassengerSplashScreen()),
       transitionsBuilder: (_, a, __, child) => FadeTransition(opacity: a, child: child),
     ));
   }

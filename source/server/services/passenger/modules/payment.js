@@ -94,7 +94,7 @@ export class PassengerPaymentService {
   /**
    * PAX-013: Create Payment Order & VietQR Transfer Details
    */
-  createPaymentOrder({ holdId, trip, seatCodes, payer, passengers, amountVnd, pickupStop, dropoffStop, pickupStopId = null, dropoffStopId = null, homePickup = null, homeDropoff = null, mockNow = Date.now() }) {
+  createPaymentOrder({ holdId, trip, seatCodes, payer, passengers, amountVnd, pickupStop, dropoffStop, pickupStopId = null, dropoffStopId = null, homePickup = null, homeDropoff = null, mockNow = Date.now(), voucherCode = null, discountVnd = 0 }) {
     const orderId = `ord_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
     const operatorId = trip.operator_id || DEFAULT_OPERATOR_ID;
     const operator = findOperatorById(operatorId);
@@ -137,6 +137,8 @@ export class PassengerPaymentService {
       payer,
       passengers,
       amount_vnd: amountVnd,
+      // The discount code the passenger used, for the office's booking list (H3).
+      ...(voucherCode ? { voucher_code: voucherCode, discount_vnd: discountVnd } : {}),
       payment_method: 'VIETQR_NAPAS247',
       payment_status: 'PENDING_PAYMENT',
       payment_details: {

@@ -109,6 +109,21 @@ test('TC-MGR-035-02: the director creates a code, the passenger uses it, the ord
     assert.strictEqual(row.status, 'USED');
     const listed = (await call('/api/v1/ops/vouchers', { token: director })).json.data.vouchers.find(v => v.code === 'ONCE20K');
     assert.deepStrictEqual([listed.used_count, listed.status], [1, 'USED_UP']);
+
+    const bookingWithVoucher = services.managerService.bookings.find(b => b.pnr === payment.pnr);
+    assert.ok(bookingWithVoucher, 'booking with voucher exists');
+    assert.strictEqual(bookingWithVoucher.voucher_code, 'ONCE20K');
+    assert.strictEqual(bookingWithVoucher.discount_vnd, 20000);
+
+    const tokenNoCode = await passenger('0912000309');
+    const orderNoCode = await book(tokenNoCode, '0912000309', 'A10');
+    assert.strictEqual(orderNoCode.status, 201);
+    const paymentNoCode = orderNoCode.json.data.payment;
+    await call('/api/v1/webhooks/vietqr/ipn', { method: 'POST', body: { transferMemo: paymentNoCode.payment_details.transfer_memo, amountVnd: paymentNoCode.amount_vnd, bankRef: 'bank_v2' } });
+    const bookingNoCode = services.managerService.bookings.find(b => b.pnr === paymentNoCode.pnr);
+    assert.ok(bookingNoCode, 'booking without voucher exists');
+    assert.strictEqual(bookingNoCode.voucher_code, undefined);
+    assert.strictEqual(bookingNoCode.discount_vnd, undefined);
   });
 
   await t.test('a code that takes the whole fare gives a ticket without a transfer', async () => {

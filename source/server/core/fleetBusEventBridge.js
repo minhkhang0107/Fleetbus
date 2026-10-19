@@ -231,7 +231,8 @@ export class FleetBusEventBridge extends EventEmitter {
               payment_status: 'PAID',
               issued_at: new Date().toISOString(),
               channel: 'PASSENGER_APP',
-              operator_id: operatorOfTrip(this.services, tripId)
+              operator_id: operatorOfTrip(this.services, tripId),
+              ...(order.voucher_code ? { voucher_code: order.voucher_code, discount_vnd: order.discount_vnd } : {})
             });
           }
         }

@@ -698,7 +698,12 @@ const AUDIT_ACTION_LABEL = {
   FIXED_ENDPOINTS_UPDATE: 'Cập nhật điểm đón cố định',
   OPERATOR_CREATE: 'Tạo nhà xe',
   OPERATOR_UPDATE: 'Cập nhật nhà xe',
-  DIRECTOR_PASSWORD_RESET: 'Đặt lại mật khẩu giám đốc'
+  DIRECTOR_PASSWORD_RESET: 'Đặt lại mật khẩu giám đốc',
+  VOUCHER_CREATE: 'Tạo mã giảm giá',
+  VOUCHER_UPDATE: 'Sửa mã giảm giá',
+  VOUCHER_DELETE: 'Xóa mã giảm giá',
+  VOUCHER_ACTIVATE: 'Bật mã giảm giá',
+  VOUCHER_DEACTIVATE: 'Tắt mã giảm giá'
 };
 
 const AUDIT_ROLE_LABEL = {
@@ -730,7 +735,7 @@ function formatAuditResource(x) {
       return `${hhmm(bt.departure_time)} ${dmy(bt.departure_time)} · ${bt.route_name}${extra}`;
     }
   }
-  return x.resource || '';
+  return x.resource || a.code || (x.before && x.before.code) || '';
 }
 
 function newMap(el, center = [20.6, 105.85], zoom = 8) {
@@ -1434,7 +1439,7 @@ async function loadBookings() {
   const r = await api('/api/v1/ops/bookings');
   if (!r.ok) { $('#bookingsBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.status === 403 ? 'Vai trò của bạn không xem được danh sách đặt chỗ.' : r.message)}</p>`; return; }
   const list = r.data.bookings || [];
-  $('#bookingsBox').innerHTML = `<table><thead><tr><th>PNR</th><th>Chuyến</th><th>Khách</th><th>Ghế</th><th>Tiền</th><th>Thanh toán</th></tr></thead><tbody>${list.length ? list.map(b => `<tr><td class="mono">${esc(b.pnr)}</td><td class="mono">${esc(b.trip_id)}</td><td>${esc(b.passenger_name || '')}<div class="muted mono" style="font-size:12px">${esc(b.phone || '')}</div></td><td class="mono">${esc((b.seat_codes || []).join(', '))}</td><td class="mono">${esc(vnd(b.total_fare_vnd))}</td><td>${esc(b.payment_status || '')}</td></tr>`).join('') : '<tr><td colspan="6" class="muted">Chưa có đặt chỗ.</td></tr>'}</tbody></table>`;
+  $('#bookingsBox').innerHTML = `<table><thead><tr><th>PNR</th><th>Chuyến</th><th>Khách</th><th>Ghế</th><th>Tiền</th><th>Thanh toán</th></tr></thead><tbody>${list.length ? list.map(b => `<tr><td class="mono">${esc(b.pnr)}</td><td class="mono">${esc(b.trip_id)}</td><td>${esc(b.passenger_name || '')}<div class="muted mono" style="font-size:12px">${esc(b.phone || '')}</div></td><td class="mono">${esc((b.seat_codes || []).join(', '))}</td><td class="mono">${esc(vnd(b.total_fare_vnd))}${b.voucher_code ? `<div class="muted" style="font-size:12px">${esc(b.voucher_code)} −${esc(vnd(b.discount_vnd))}</div>` : ''}</td><td>${esc(b.payment_status || '')}</td></tr>`).join('') : '<tr><td colspan="6" class="muted">Chưa có đặt chỗ.</td></tr>'}</tbody></table>`;
 }
 
 // ---------- service configuration ----------
