@@ -226,6 +226,122 @@ class ShiftTrip {
   }
 }
 
+/// DRI-021: A trip in the driver's monthly schedule.
+class ScheduleTrip {
+  const ScheduleTrip({
+    required this.tripId,
+    required this.departureTime,
+    required this.departure,
+    this.routeName,
+    this.vehiclePlate,
+    required this.status,
+    required this.source,
+    this.passengers,
+    this.delayMinutes = 0,
+    this.cashHandedInVnd,
+  });
+
+  final String tripId;
+  final String departureTime;
+  final String departure;
+  final String? routeName;
+  final String? vehiclePlate;
+  final String status;
+  final String source;
+  final int? passengers;
+  final int delayMinutes;
+  final int? cashHandedInVnd;
+
+  factory ScheduleTrip.fromJson(Map<String, dynamic> j) {
+    return ScheduleTrip(
+      tripId: j['trip_id']?.toString() ?? '',
+      departureTime: j['departure_time']?.toString() ?? '',
+      departure: j['departure']?.toString() ?? '',
+      routeName: j['route_name']?.toString(),
+      vehiclePlate: j['vehicle_plate']?.toString(),
+      status: j['status']?.toString() ?? 'SCHEDULED',
+      source: j['source']?.toString() ?? 'ASSIGNED',
+      passengers: (j['passengers'] as num?)?.toInt(),
+      delayMinutes: (j['delay_minutes'] as num?)?.toInt() ?? 0,
+      cashHandedInVnd: (j['cash_handed_in_vnd'] as num?)?.toInt(),
+    );
+  }
+}
+
+/// DRI-021: One day in the monthly schedule containing its scheduled trips.
+class ScheduleDay {
+  const ScheduleDay({
+    required this.date,
+    required this.trips,
+  });
+
+  final String date;
+  final List<ScheduleTrip> trips;
+
+  factory ScheduleDay.fromJson(Map<String, dynamic> j) {
+    return ScheduleDay(
+      date: j['date']?.toString() ?? '',
+      trips: (j['trips'] as List? ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(ScheduleTrip.fromJson)
+          .toList(),
+    );
+  }
+}
+
+/// DRI-021: Summary counts for the monthly schedule.
+class ScheduleSummary {
+  const ScheduleSummary({
+    this.total = 0,
+    this.completed = 0,
+    this.upcoming = 0,
+    this.cancelled = 0,
+  });
+
+  final int total;
+  final int completed;
+  final int upcoming;
+  final int cancelled;
+
+  factory ScheduleSummary.fromJson(Map<String, dynamic>? j) {
+    if (j == null) return const ScheduleSummary();
+    return ScheduleSummary(
+      total: (j['total'] as num?)?.toInt() ?? 0,
+      completed: (j['completed'] as num?)?.toInt() ?? 0,
+      upcoming: (j['upcoming'] as num?)?.toInt() ?? 0,
+      cancelled: (j['cancelled'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+/// DRI-021: Monthly schedule payload returned by the server.
+class ScheduleMonthData {
+  ScheduleMonthData({
+    required this.month,
+    required this.today,
+    required this.days,
+    required this.summary,
+  }) : tripsByDate = {for (final d in days) d.date: d.trips};
+
+  final String month;
+  final String today;
+  final List<ScheduleDay> days;
+  final ScheduleSummary summary;
+  final Map<String, List<ScheduleTrip>> tripsByDate;
+
+  factory ScheduleMonthData.fromJson(Map<String, dynamic> j) {
+    return ScheduleMonthData(
+      month: j['month']?.toString() ?? '',
+      today: j['today']?.toString() ?? '',
+      days: (j['days'] as List? ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(ScheduleDay.fromJson)
+          .toList(),
+      summary: ScheduleSummary.fromJson(j['summary'] as Map<String, dynamic>?),
+    );
+  }
+}
+
 enum TripState { readyCheck, inTransit, completed }
 
 String hhmm(int minutes) => '${((minutes ~/ 60) % 24).toString().padLeft(2, '0')}:${(minutes % 60).toString().padLeft(2, '0')}';
@@ -374,6 +490,12 @@ class DriverStore extends ChangeNotifier {
   bool loading = false;
   String? loadError;
 
+  // DRI-021: monthly schedule state
+  ScheduleMonthData? scheduleData;
+  bool scheduleLoading = false;
+  String? scheduleError;
+  String? scheduleReferenceMonth;
+
   // Current trip, as the server last returned it
   String? tripId;
   String route = '';
@@ -512,7 +634,7 @@ class DriverStore extends ChangeNotifier {
   ShiftTrip? get nextTrip => shift.where((t) => t.id != tripId && t.status != 'COMPLETED' && t.status != 'CANCELLED').firstOrNull;
   DriverStop stopById(String id) => stops.firstWhere((s) => s.id == id, orElse: () => DriverStop(id, id, '--:--'));
 
-  String? _error(Map<String, dynamic> json) => json['status'] == 'success' ? null : '${json['message'] ?? 'Có lỗi, thử lại sau.'}';
+  String? _error(Map<String, dynamic> json) => json['status'] == 'success' ? null : '${json['message'] ?? json['error'] ?? 'Có lỗi, thử lại sau.'}';
 
   /// Runs one call; on a network failure the action is listed as waiting for the network.
   Future<({Map<String, dynamic>? data, String? error, String? code})> _call(Future<Map<String, dynamic>> Function() request, {String? label}) async {
@@ -594,6 +716,10 @@ class DriverStore extends ChangeNotifier {
     temporaryPin = null;
     endedCash = null;
     earlyEndReason = null;
+    scheduleData = null;
+    scheduleLoading = false;
+    scheduleError = null;
+    scheduleReferenceMonth = null;
     notifyListeners();
   }
 
@@ -634,6 +760,28 @@ class DriverStore extends ChangeNotifier {
     }).firstOrNull;
     final current = selected ?? notStale ?? live.where((t) => t['status'] != 'COMPLETED').firstOrNull ?? live.lastOrNull;
     if (current != null) _apply(current, fresh: tripId != current['trip_id']);
+    notifyListeners();
+  }
+
+  /// DRI-021: loads the driver's monthly trip schedule from the server.
+  Future<void> loadMonthlySchedule([String month = '']) async {
+    scheduleLoading = true;
+    scheduleError = null;
+    notifyListeners();
+    final r = await _call(() => api.getMonthlySchedule(month));
+    scheduleLoading = false;
+    if (r.error != null) {
+      scheduleError = r.error;
+      notifyListeners();
+      return;
+    }
+    if (r.data != null && r.data!['month'] != null && r.data!['month'].toString().isNotEmpty) {
+      scheduleData = ScheduleMonthData.fromJson(r.data!);
+      if (scheduleData!.today.length >= 7) {
+        scheduleReferenceMonth = scheduleData!.today.substring(0, 7);
+      }
+      scheduleError = null;
+    }
     notifyListeners();
   }
 
@@ -1032,7 +1180,7 @@ class DriverStore extends ChangeNotifier {
     return (error: r.error, code: r.code, data: r.data);
   }
 
-  /// DRI-009: a scanned boarding QR (BUSGO|pnr|ticket|v<n>|hmac).
+  /// DRI-009: a scanned boarding QR (BUSGO|pnr|ticket|`v<n>`|hmac).
   Future<({String? error, String? code, Map<String, dynamic>? data})> boardWithQr(String payload) async {
     final r = await _call(() => api.boardWithQr(tripId!, payload), label: 'Quét vé');
     if (r.error == null) await refreshTrip();

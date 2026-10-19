@@ -13,6 +13,7 @@ import 'package:app/src/presentation/driver_permissions.dart';
 import 'package:app/src/presentation/driver_qr_scanner_screen.dart';
 import 'package:app/src/presentation/driver_readiness_screen.dart';
 import 'package:app/src/presentation/driver_route_map.dart';
+import 'package:app/src/presentation/driver_schedule_screen.dart';
 import 'package:app/src/presentation/driver_store.dart';
 import 'package:app/src/presentation/driver_today_trips_screen.dart';
 import 'package:app/src/presentation/driver_widgets.dart';
@@ -31,11 +32,13 @@ void main() {
   driverMapTiles = false;
   late bool serverForcesPinChange;
   late bool tempDriverMustChangePin;
+  late http.Response? Function(http.Request req)? scheduleHandler;
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     driverPermissions = FakePermissions(LocationAccess.always);
     serverForcesPinChange = false;
     tempDriverMustChangePin = true;
+    scheduleHandler = null;
   });
   late Map<String, dynamic> trip;
   late List<http.Request> sent;
@@ -123,6 +126,85 @@ void main() {
           return fail(403, 'PIN_CHANGE_REQUIRED', 'Đổi mã PIN tạm trước khi dùng app');
         }
         return ok({'trips': [trip]});
+      }
+      if (path.endsWith('/driver/schedule')) {
+        if (scheduleHandler != null) {
+          final res = scheduleHandler!(req);
+          if (res != null) return res;
+        }
+        final monthQuery = req.url.queryParameters['month'];
+        final targetMonth = (monthQuery != null && monthQuery.isNotEmpty) ? monthQuery : '2026-10';
+        if (targetMonth == '2026-10') {
+          return ok({
+            'month': '2026-10',
+            'today': '2026-10-19',
+            'days': [
+              {
+                'date': '2026-10-19',
+                'trips': [
+                  {
+                    'trip_id': 'trp_hn_th_01_20261019',
+                    'departure_time': '2026-10-19T07:00:00+07:00',
+                    'departure': '07:00',
+                    'route_name': 'Hà Nội — Thanh Hóa (Cao tốc)',
+                    'vehicle_plate': '29B-882.19',
+                    'status': 'SCHEDULED',
+                    'source': 'SCHEDULE_DEFAULT',
+                    'passengers': 14,
+                    'delay_minutes': 0,
+                    'cash_handed_in_vnd': null,
+                  },
+                  {
+                    'trip_id': 'trp_th_hn_01_20261019',
+                    'departure_time': '2026-10-19T14:00:00+07:00',
+                    'departure': '14:00',
+                    'route_name': 'Thanh Hóa — Hà Nội',
+                    'vehicle_plate': '29B-123.45',
+                    'status': 'COMPLETED',
+                    'source': 'ASSIGNED',
+                    'passengers': 28,
+                    'delay_minutes': 0,
+                    'cash_handed_in_vnd': 440000,
+                  },
+                ],
+              },
+              {
+                'date': '2026-10-20',
+                'trips': [
+                  {
+                    'trip_id': 'trp_hn_th_01_20261020',
+                    'departure_time': '2026-10-20T07:00:00+07:00',
+                    'departure': '07:00',
+                    'route_name': 'Hà Nội — Thanh Hóa (Cao tốc)',
+                    'vehicle_plate': null,
+                    'status': 'SCHEDULED',
+                    'source': 'ASSIGNED',
+                    'passengers': null,
+                    'delay_minutes': 0,
+                    'cash_handed_in_vnd': null,
+                  },
+                ],
+              },
+            ],
+            'summary': {
+              'total': 3,
+              'completed': 1,
+              'upcoming': 2,
+              'cancelled': 0,
+            },
+          });
+        }
+        return ok({
+          'month': targetMonth,
+          'today': '2026-10-19',
+          'days': <Map<String, dynamic>>[],
+          'summary': {
+            'total': 0,
+            'completed': 0,
+            'upcoming': 0,
+            'cancelled': 0,
+          },
+        });
       }
       if (path.endsWith('/inaccessible')) {
         final ticket = pax(path.split('/')[path.split('/').length - 2]);
@@ -653,7 +735,7 @@ void main() {
       await tester.runAsync(() async {
         expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
       });
-      const screens = <Widget>[DriverLoginScreen(), DriverChangePinScreen(), MainShellScreen(), DriverTodayTripsScreen(), DriverPassengerListScreen(), DriverReadinessScreen(), DriverHomeRunScreen(), DriverCockpitDashboard(), DriverManifestScreen(), DriverQrScannerScreen(), DriverEndTripScreen(), DriverIncidentScreen()];
+      const screens = <Widget>[DriverLoginScreen(), DriverChangePinScreen(), MainShellScreen(), DriverTodayTripsScreen(), DriverScheduleScreen(), DriverPassengerListScreen(), DriverReadinessScreen(), DriverHomeRunScreen(), DriverCockpitDashboard(), DriverManifestScreen(), DriverQrScannerScreen(), DriverEndTripScreen(), DriverIncidentScreen()];
       for (final screen in screens) {
         await tester.pumpWidget(DriverScope(store: store, child: MaterialApp(home: screen)));
         await tester.pump();
@@ -1536,6 +1618,287 @@ void main() {
     expect(find.text('Chuyến của bạn'), findsOneWidget);
     expect(find.text('Ngày mai'), findsOneWidget);
     expect(find.text('Hà Nội → Ninh Bình'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('DRI-021: renders a month with trips and the count on the right days', (tester) async {
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      await store.loadMonthlySchedule('2026-10');
+    });
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverScheduleScreen()),
+    ));
+    await tester.pump();
+
+    // Month header
+    expect(find.text('Tháng 10/2026'), findsOneWidget);
+    // Weekday headers
+    for (final label in ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']) {
+      expect(find.text(label), findsOneWidget);
+    }
+    // Days with trips have count badges
+    expect(find.text('19'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget); // 2 trips on day 19
+    expect(find.text('20'), findsOneWidget);
+    expect(find.text('1'), findsOneWidget); // 1 trip on day 20
+    // Month summary
+    expect(find.text('3 chuyến · 1 đã chạy · 2 sắp chạy'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('DRI-021: selecting a day lists its trips with the right pills and the Lịch mặc định note', (tester) async {
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      await store.loadMonthlySchedule('2026-10');
+    });
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverScheduleScreen()),
+    ));
+    await tester.pump();
+
+    // Day 19 is default selected (today in current month)
+    expect(find.text('Chuyến ngày 19/10/2026 (2 chuyến)'), findsOneWidget);
+
+    // Trip 1
+    expect(find.text('07:00'), findsOneWidget);
+    expect(find.text('Hà Nội — Thanh Hóa (Cao tốc)'), findsOneWidget);
+    expect(find.text('29B-882.19'), findsOneWidget);
+    expect(find.text('Sắp chạy'), findsOneWidget);
+    expect(find.text('14 khách'), findsOneWidget);
+    expect(find.text('Lịch mặc định'), findsOneWidget);
+
+    // Trip 2
+    expect(find.text('14:00'), findsOneWidget);
+    expect(find.text('Thanh Hóa — Hà Nội'), findsOneWidget);
+    expect(find.text('29B-123.45'), findsOneWidget);
+    expect(find.text('Đã chạy'), findsOneWidget);
+    expect(find.text('28 khách · Đã nộp 440.000 đ'), findsOneWidget);
+
+    // Tap day 20
+    await tester.tap(find.text('20'));
+    await tester.pump();
+
+    expect(find.text('Chuyến ngày 20/10/2026 (1 chuyến)'), findsOneWidget);
+    expect(find.text('Chưa có xe'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('DRI-021: next/previous month loads the other month and honors boundaries', (tester) async {
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      await store.loadMonthlySchedule('2026-10');
+    });
+
+    scheduleHandler = (req) {
+      final m = req.url.queryParameters['month'] ?? '2026-10';
+      if (m == '2026-11') {
+        return ok({
+          'month': '2026-11',
+          'today': '2026-10-19',
+          'days': [
+            {
+              'date': '2026-11-05',
+              'trips': [
+                {
+                  'trip_id': 'trp_nov_01',
+                  'departure_time': '2026-11-05T08:00:00+07:00',
+                  'departure': '08:00',
+                  'route_name': 'Hà Nội — Hải Phòng',
+                  'vehicle_plate': '29B-999.99',
+                  'status': 'SCHEDULED',
+                  'source': 'SCHEDULE_DEFAULT',
+                  'passengers': null,
+                  'delay_minutes': 0,
+                  'cash_handed_in_vnd': null,
+                }
+              ]
+            }
+          ],
+          'summary': {'total': 1, 'completed': 0, 'upcoming': 1, 'cancelled': 0},
+        });
+      }
+      return null;
+    };
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverScheduleScreen()),
+    ));
+    await tester.pump();
+
+    expect(find.text('Tháng 10/2026'), findsOneWidget);
+
+    // Tap next month
+    await tester.tap(find.byTooltip('Tháng sau'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tháng 11/2026'), findsOneWidget);
+    expect(find.text('Hà Nội — Hải Phòng'), findsOneWidget);
+
+    // Tap previous month
+    await tester.tap(find.byTooltip('Tháng trước'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tháng 10/2026'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('DRI-021: empty month text and empty selected day text', (tester) async {
+    final store = storeWithServer();
+
+    // 1. Empty month
+    scheduleHandler = (req) => ok({
+          'month': '2026-09',
+          'today': '2026-10-19',
+          'days': <Map<String, dynamic>>[],
+          'summary': {'total': 0, 'completed': 0, 'upcoming': 0, 'cancelled': 0},
+        });
+
+    await tester.runAsync(() async {
+      await store.loadMonthlySchedule('2026-09');
+    });
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverScheduleScreen()),
+    ));
+    await tester.pump();
+
+    expect(find.text('Tháng 9/2026'), findsOneWidget);
+    expect(find.text('Tháng này bạn chưa có chuyến nào.'), findsOneWidget);
+
+    // 2. Month with trips but a day without trips selected
+    scheduleHandler = null; // back to default with trips on 19 and 20
+    await tester.runAsync(() async {
+      await store.loadMonthlySchedule('2026-10');
+    });
+    await tester.pump();
+
+    // Tap day 15 (no trips)
+    await tester.tap(find.text('15'));
+    await tester.pump();
+
+    expect(find.text('Chuyến ngày 15/10/2026'), findsOneWidget);
+    expect(find.text('Không có chuyến trong ngày này.'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('DRI-021: server error shows the message and Thử lại button', (tester) async {
+    final store = storeWithServer();
+    var calls = 0;
+    scheduleHandler = (req) {
+      calls++;
+      if (calls == 1) {
+        return fail(400, 'MONTH_OUT_OF_RANGE', 'Tháng xem lịch phải trong khoảng 3 tháng trước đến 3 tháng sau');
+      }
+      return ok({
+        'month': '2026-10',
+        'today': '2026-10-19',
+        'days': <Map<String, dynamic>>[],
+        'summary': {'total': 0, 'completed': 0, 'upcoming': 0, 'cancelled': 0},
+      });
+    };
+
+    await tester.runAsync(() async {
+      await store.loadMonthlySchedule('2026-10');
+    });
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverScheduleScreen()),
+    ));
+    await tester.pump();
+
+    expect(find.text('Tháng xem lịch phải trong khoảng 3 tháng trước đến 3 tháng sau'), findsOneWidget);
+    expect(find.text('Thử lại'), findsOneWidget);
+
+    // Tap Thử lại
+    await tester.tap(find.text('Thử lại'));
+    await tester.pumpAndSettle();
+
+    expect(calls, 2);
+    expect(find.text('Tháng này bạn chưa có chuyến nào.'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('DRI-021: the shell shows the Lịch tab and opening it shows the screen', (tester) async {
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    });
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: MainShellScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Chuyến'), findsOneWidget);
+    expect(find.text('Lịch'), findsOneWidget);
+    expect(find.text('Đồng bộ'), findsOneWidget);
+    expect(find.text('Hồ sơ'), findsOneWidget);
+
+    // Tap Lịch tab
+    await tester.tap(find.text('Lịch'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DriverScheduleScreen), findsOneWidget);
+    expect(find.text('Lịch chạy'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('DRI-021: no overflow at 360x640 phone and tablet with side rail', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+
+    // 1. Phone 360x640
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+      await store.loadMonthlySchedule('2026-10');
+    });
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: MainShellScreen()),
+    ));
+    await tester.pump();
+
+    await tester.tap(find.text('Lịch'));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull, reason: 'MainShellScreen with DriverScheduleScreen on 360x640 phone');
+
+    // 2. Tablet 1280x720 with side rail
+    tester.view.physicalSize = const Size(1280, 720);
+    await tester.pump();
+    expect(tester.takeException(), isNull, reason: 'MainShellScreen with DriverScheduleScreen on 1280x720 tablet');
 
     await tester.pumpWidget(const SizedBox());
     store.dispose();

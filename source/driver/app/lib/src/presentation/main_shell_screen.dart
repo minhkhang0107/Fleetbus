@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'driver_change_pin_screen.dart';
 import 'driver_login_screen.dart';
 import 'driver_offline_sync_screen.dart';
+import 'driver_schedule_screen.dart';
 import 'driver_store.dart';
 import 'driver_today_trips_screen.dart';
 import 'driver_widgets.dart';
@@ -46,7 +47,7 @@ class _MainShellScreenState extends State<MainShellScreen> {
   @override
   Widget build(BuildContext context) {
     _checkPinChange();
-    const pages = [DriverTodayTripsScreen(), DriverOfflineSyncScreen(), _ProfileTab()];
+    const pages = [DriverTodayTripsScreen(), DriverScheduleScreen(), DriverOfflineSyncScreen(), _ProfileTab()];
     if (dWide(context)) {
       // Landscape tablet: the tabs move to a rail on the left and give the height back to the content.
       return Scaffold(
@@ -57,7 +58,12 @@ class _MainShellScreenState extends State<MainShellScreen> {
             child: SafeArea(
               right: false,
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                for (final (i, icon, label) in const [(0, Icons.directions_bus_outlined, 'Chuyến'), (1, Icons.sync, 'Đồng bộ'), (2, Icons.person_outline, 'Hồ sơ')])
+                for (final (i, icon, label) in const [
+                  (0, Icons.directions_bus_outlined, 'Chuyến'),
+                  (1, Icons.calendar_month_outlined, 'Lịch'),
+                  (2, Icons.sync, 'Đồng bộ'),
+                  (3, Icons.person_outline, 'Hồ sơ')
+                ])
                   SizedBox(height: 88, child: _tab(i, icon, label)),
               ]),
             ),
@@ -76,8 +82,9 @@ class _MainShellScreenState extends State<MainShellScreen> {
             height: 68,
             child: Row(children: [
               Expanded(child: _tab(0, Icons.directions_bus_outlined, 'Chuyến')),
-              Expanded(child: _tab(1, Icons.sync, 'Đồng bộ')),
-              Expanded(child: _tab(2, Icons.person_outline, 'Hồ sơ')),
+              Expanded(child: _tab(1, Icons.calendar_month_outlined, 'Lịch')),
+              Expanded(child: _tab(2, Icons.sync, 'Đồng bộ')),
+              Expanded(child: _tab(3, Icons.person_outline, 'Hồ sơ')),
             ]),
           ),
         ),

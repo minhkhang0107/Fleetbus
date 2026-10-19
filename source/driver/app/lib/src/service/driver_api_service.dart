@@ -65,8 +65,12 @@ class DriverApiClientService {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> _get(String path) async {
-    return _decode(await _client.get(Uri.parse('$baseUrl$path'), headers: _headers()));
+  Future<Map<String, dynamic>> _get(String path, {Map<String, String>? query}) async {
+    var uri = Uri.parse('$baseUrl$path');
+    if (query != null && query.isNotEmpty) {
+      uri = uri.replace(queryParameters: query);
+    }
+    return _decode(await _client.get(uri, headers: _headers()));
   }
 
   Future<Map<String, dynamic>> _post(
@@ -118,6 +122,11 @@ class DriverApiClientService {
    */
   Future<Map<String, dynamic>> getTodayTrips() {
     return _get('/api/v1/driver/trips/today');
+  }
+
+  /// DRI-021: Driver's monthly trip schedule
+  Future<Map<String, dynamic>> getMonthlySchedule(String month) {
+    return _get('/api/v1/driver/schedule', query: month.isNotEmpty ? {'month': month} : null);
   }
 
   /**

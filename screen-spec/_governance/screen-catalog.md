@@ -61,6 +61,7 @@
 | **DRI-017** | Driver | End Trip & Manifest Reconciliation | `/driver/trip/:id/end` | Active Trip Header Finish CTA | `/driver/today-trips` | P0 | Draft | Source-backed |
 | **DRI-018** | Driver | Shift History & Device Profile | `/driver/profile` | Bottom Nav, Drawer | `/driver/login`, `/driver/today-trips` | P2 | Draft | Source-backed |
 | **DRI-019** | Driver | Incident & Delay Quick Report | `/driver/trip/:id/incident` | Active Trip Cockpit SOS / Warning Button | `/driver/trip/:id/active` | P1 | Draft | Derived |
+| **DRI-021** | Driver | Monthly Trip Schedule (Lịch tháng) | `/driver/schedule` | Bottom Tab "Lịch" | `/driver/schedule` | P1 | Draft | Decision D155 |
 
 ---
 

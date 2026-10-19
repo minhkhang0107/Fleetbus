@@ -19,7 +19,8 @@ import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
 import { stopCoords, routeShape } from '../../../core/geo.js';
 import { DEFAULT_OPERATOR_ID, findOperatorById, publicOperatorProfile } from '../../../core/operators.js';
-import { DEMO_DATE, vnDate } from '../../../core/serviceDate.js';
+import { DEMO_DATE, vnDate, runId } from '../../../core/serviceDate.js';
+import { getScheduleTemplates, getScheduleTemplate, runsOn, settingsOn } from '../../passenger/modules/search.js';
 
 export const CHANGE_METHODS = ['CASH_RETURNED', 'REST_STOP_DEBT_RECEIPT', 'WALLET_CREDIT'];
 const NO_SHOW_GRACE_MINUTES = 10;
@@ -601,6 +602,247 @@ export class DriverCockpitService {
         shift_date: new Date().toISOString().split('T')[0],
         total_trips: trips.length,
         trips
+      }
+    };
+  }
+
+  /**
+   * DRI-021: Driver's monthly trip schedule (decision D155).
+   * Lists trips assigned to the driver at trip-level or via schedule default for the requested month.
+   */
+  getMonthlySchedule(driverId, options = {}) {
+    const now = typeof options.now === 'number' ? options.now : Date.now();
+    const today = vnDate(now);
+    const currentMonth = today.slice(0, 7);
+
+    let targetMonth = currentMonth;
+    if (options.month !== undefined && options.month !== null && options.month !== '') {
+      const monthStr = String(options.month).trim();
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthStr)) {
+        return {
+          success: false,
+          error: 'Định dạng tháng không hợp lệ (định dạng YYYY-MM)',
+          code: 'INVALID_MONTH',
+          status: 400
+        };
+      }
+      const [currY, currM] = currentMonth.split('-').map(Number);
+      const [targetY, targetM] = monthStr.split('-').map(Number);
+      const monthDiff = (targetY - currY) * 12 + (targetM - currM);
+      if (monthDiff < -3 || monthDiff > 3) {
+        return {
+          success: false,
+          error: 'Tháng xem lịch phải trong khoảng 3 tháng trước đến 3 tháng sau',
+          code: 'MONTH_OUT_OF_RANGE',
+          status: 400
+        };
+      }
+      targetMonth = monthStr;
+    }
+
+    const [year, mon] = targetMonth.split('-').map(Number);
+    const numDays = new Date(Date.UTC(year, mon, 0)).getUTCDate();
+
+    const operatorId = options.operatorId || this.operatorId || DEFAULT_OPERATOR_ID;
+    const manager = options.managerService || this.managerService;
+
+    const vnDeparture = (iso) => {
+      const ms = Date.parse(iso);
+      if (!Number.isFinite(ms)) return null;
+      return new Date(ms + 7 * 3600 * 1000).toISOString().slice(11, 16);
+    };
+
+    const SCHEDULE_STATUS_MAP = {
+      DISPATCHED: 'SCHEDULED',
+      SCHEDULED: 'SCHEDULED',
+      READY: 'SCHEDULED',
+      IN_TRANSIT: 'IN_TRANSIT',
+      COMPLETED: 'COMPLETED',
+      CANCELLED: 'CANCELLED'
+    };
+
+    // Index manager trips by trip_id once
+    const managerTripsById = new Map();
+    if (manager?.trips) {
+      for (const t of manager.trips) {
+        if (t?.trip_id) managerTripsById.set(t.trip_id, t);
+      }
+    }
+
+    const allTripIds = new Set(managerTripsById.keys());
+    for (const tripId of this.activeTrips.keys()) {
+      allTripIds.add(tripId);
+    }
+
+    // 1. Trip-level assignments
+    const assignedTrips = [];
+    const tripLevelRuns = new Set();
+
+    for (const tripId of allTripIds) {
+      const mgrTrip = managerTripsById.get(tripId) || null;
+      const actTrip = this.activeTrips.get(tripId) || null;
+
+      const tripOperator = actTrip?.operator_id || mgrTrip?.operator_id || DEFAULT_OPERATOR_ID;
+      if (tripOperator !== operatorId) continue;
+
+      const depTime = actTrip?.planned_departure_time || mgrTrip?.departure_time;
+      if (!depTime) continue;
+
+      const depMs = Date.parse(depTime);
+      if (!Number.isFinite(depMs)) continue;
+
+      const tripDate = vnDate(depMs);
+      if (!tripDate.startsWith(targetMonth + '-')) continue;
+
+      tripLevelRuns.add(tripId);
+
+      const assignedDriver = actTrip?.driver_id || mgrTrip?.driver_id;
+      if (assignedDriver === driverId) {
+        let rawStatus = actTrip?.status;
+        if (actTrip?.status === 'CANCELLED' || mgrTrip?.status === 'CANCELLED') {
+          rawStatus = 'CANCELLED';
+        } else if (!rawStatus) {
+          rawStatus = mgrTrip?.status;
+        }
+        const status = SCHEDULE_STATUS_MAP[rawStatus] || 'SCHEDULED';
+
+        let passengers = null;
+        if (typeof actTrip?.booked_passengers_count === 'number') {
+          passengers = actTrip.booked_passengers_count;
+        } else if (typeof mgrTrip?.booked_seats === 'number') {
+          passengers = mgrTrip.booked_seats;
+        }
+
+        const delay_minutes = actTrip?.delay_minutes ?? mgrTrip?.delay_minutes ?? 0;
+
+        let cash_handed_in_vnd = null;
+        if (status === 'COMPLETED') {
+          if (typeof actTrip?.total_cash_to_handover_vnd === 'number') {
+            cash_handed_in_vnd = actTrip.total_cash_to_handover_vnd;
+          } else if (typeof mgrTrip?.cash_handed_in_vnd === 'number') {
+            cash_handed_in_vnd = mgrTrip.cash_handed_in_vnd;
+          }
+        }
+
+        const template = getScheduleTemplate(mgrTrip?.schedule_id || tripId);
+        const routeName = actTrip?.route_name ||
+          mgrTrip?.route_name ||
+          (mgrTrip?.route_id && manager?.routes?.find(r => r.route_id === mgrTrip.route_id)?.name) ||
+          template?.route_name ||
+          null;
+
+        const vehiclePlate = actTrip?.vehicle_plate || mgrTrip?.vehicle_plate || null;
+
+        assignedTrips.push({
+          trip_id: tripId,
+          departure_time: depTime,
+          departure: vnDeparture(depTime),
+          route_name: routeName,
+          vehicle_plate: vehiclePlate,
+          status,
+          source: 'ASSIGNED',
+          passengers,
+          delay_minutes,
+          cash_handed_in_vnd,
+          _date: tripDate
+        });
+      }
+    }
+
+    // 2. Schedule defaults (today and future days only, D155)
+    const templates = getScheduleTemplates();
+    const defaultTrips = [];
+
+    for (const template of templates) {
+      const templateOp = template.operator_id || DEFAULT_OPERATOR_ID;
+      if (templateOp !== operatorId) continue;
+
+      const preset = manager?.scheduleAssignments?.[template.trip_id] ||
+        (template.schedule_id && manager?.scheduleAssignments?.[template.schedule_id]);
+
+      if (!preset || preset.driver_id !== driverId) continue;
+
+      for (let d = 1; d <= numDays; d++) {
+        const dayStr = `${targetMonth}-${String(d).padStart(2, '0')}`;
+        // D155: A schedule default is a promise about the future. Do not list for days before today.
+        if (dayStr < today) continue;
+        if (!runsOn(template, dayStr)) continue;
+
+        const expectedRunId = runId(template.trip_id, dayStr);
+        if (tripLevelRuns.has(expectedRunId)) {
+          continue;
+        }
+
+        const settings = settingsOn(template, dayStr);
+        const timeSuffix = settings.departure_time.slice(10);
+        const departure_time = `${dayStr}${timeSuffix}`;
+
+        const vehicle = preset.vehicle_id ? manager?.vehicles?.find(v => v.vehicle_id === preset.vehicle_id) : null;
+        const vehicle_plate = vehicle?.plate_number || manager?.defaultPlateFor?.(template.trip_id) || null;
+
+        const routeName = settings.route_name ||
+          template.route_name ||
+          (template.route_id && manager?.routes?.find(r => r.route_id === template.route_id)?.name) ||
+          null;
+
+        defaultTrips.push({
+          trip_id: expectedRunId,
+          departure_time,
+          departure: vnDeparture(departure_time),
+          route_name: routeName,
+          vehicle_plate,
+          status: 'SCHEDULED',
+          source: 'SCHEDULE_DEFAULT',
+          passengers: null,
+          delay_minutes: 0,
+          cash_handed_in_vnd: null,
+          _date: dayStr
+        });
+      }
+    }
+
+    const allTrips = [...assignedTrips, ...defaultTrips];
+
+    const daysMap = new Map();
+    for (const trip of allTrips) {
+      const date = trip._date;
+      if (!daysMap.has(date)) {
+        daysMap.set(date, []);
+      }
+      const { _date, ...cleanTrip } = trip;
+      daysMap.get(date).push(cleanTrip);
+    }
+
+    const days = [];
+    const sortedDates = Array.from(daysMap.keys()).sort();
+    for (const date of sortedDates) {
+      const dayTrips = daysMap.get(date);
+      dayTrips.sort((a, b) => {
+        if (a.departure !== b.departure) {
+          return a.departure.localeCompare(b.departure);
+        }
+        return Date.parse(a.departure_time) - Date.parse(b.departure_time);
+      });
+      days.push({
+        date,
+        trips: dayTrips
+      });
+    }
+
+    const summary = {
+      total: allTrips.length,
+      completed: allTrips.filter(t => t.status === 'COMPLETED').length,
+      upcoming: allTrips.filter(t => t.status === 'SCHEDULED' || t.status === 'IN_TRANSIT').length,
+      cancelled: allTrips.filter(t => t.status === 'CANCELLED').length
+    };
+
+    return {
+      success: true,
+      data: {
+        month: targetMonth,
+        today,
+        days,
+        summary
       }
     };
   }

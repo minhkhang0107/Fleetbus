@@ -196,6 +196,15 @@ for (const trip of MOCK_TRIPS_DATABASE) {
 // Schedules: the seed trips, each repeated every day at the same time.
 const SCHEDULE_TEMPLATES = new Map(MOCK_TRIPS_DATABASE.map(t => [t.trip_id, t]));
 
+// Read-only accessor for schedule templates; callers must not mutate the returned array or objects.
+export function getScheduleTemplates() {
+  return Array.from(SCHEDULE_TEMPLATES.values());
+}
+
+export function getScheduleTemplate(templateId) {
+  return SCHEDULE_TEMPLATES.get(templateId) || null;
+}
+
 /** Rebuilds the schedule index after the catalog was reloaded from the database: runs carry a schedule_id. */
 export function reloadScheduleTemplates() {
   SCHEDULE_TEMPLATES.clear();

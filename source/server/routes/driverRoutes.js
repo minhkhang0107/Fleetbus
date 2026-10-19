@@ -86,6 +86,23 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/driver/schedule (DRI-021)
+  if (pathname === '/api/v1/driver/schedule' && req.method === 'GET') {
+    const driverId = req.identity?.sub || req.headers['x-driver-id'] || 'drv_8821a';
+    const month = parsedUrl.searchParams.get('month');
+    const result = driverService.getMonthlySchedule(driverId, {
+      month,
+      operatorId: req.operatorId,
+      managerService: services.managerService
+    });
+    if (result.success) {
+      sendSuccess(res, result.data);
+    } else {
+      sendError(res, result.error, result.code, result.status || 400);
+    }
+    return true;
+  }
+
   // GET /api/v1/driver/trips/:tripId (DRI-003)
   if (req.method === 'GET' && /^\/api\/v1\/driver\/trips\/[^/]+$/.test(pathname)) {
     const result = driverService.getTrip(pathname.split('/')[5]);
