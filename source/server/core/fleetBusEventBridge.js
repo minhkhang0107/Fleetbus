@@ -54,6 +54,8 @@ function addToManifest(driverTrip, tickets) {
   for (const tkt of tickets) {
     const exists = driverTrip.manifest.some(m => m.ticket_id === tkt.ticket_id || (m.pnr === tkt.pnr && m.seat_code === tkt.seat_code));
     if (exists) continue;
+    // A cash ticket is paid on board: put it on the manifest as COD so the driver collects the fare first.
+    const isCod = tkt.payment_status === 'UNPAID_COD' && tkt.cod_amount_vnd > 0;
     driverTrip.manifest.push({
       ticket_id: tkt.ticket_id,
       pnr: tkt.pnr,
@@ -70,8 +72,9 @@ function addToManifest(driverTrip, tickets) {
       home_pickup: homeConfirmed(tkt.home_pickup) ? tkt.home_pickup : null,
       home_dropoff: homeConfirmed(tkt.home_dropoff) ? tkt.home_dropoff : null,
       boarding_status: tkt.status === 'BOARDED' ? 'BOARDED' : 'NOT_BOARDED',
-      payment_method: 'PREPAID',
-      cod_amount_vnd: 0,
+      payment_method: isCod ? 'COD' : 'PREPAID',
+      cod_amount_vnd: isCod ? tkt.cod_amount_vnd : 0,
+      ...(isCod ? { cod_collected: false } : {}),
       boarded_at: tkt.boarded_at || null
     });
   }
@@ -221,6 +224,8 @@ export class FleetBusEventBridge extends EventEmitter {
         if (managerService.bookings) {
           const alreadyLogged = managerService.bookings.some(b => b.pnr === order.pnr);
           if (!alreadyLogged) {
+            // A cash order stays unpaid in the office ledger until the driver collects every seat on board.
+            const isCod = order.payment_status === 'UNPAID_COD';
             managerService.bookings.push({
               pnr: order.pnr,
               trip_id: tripId,
@@ -228,7 +233,8 @@ export class FleetBusEventBridge extends EventEmitter {
               phone: order.payer?.phone || tickets[0]?.passenger_phone,
               seat_codes: order.seat_codes,
               total_fare_vnd: order.amount_vnd,
-              payment_status: 'PAID',
+              payment_status: isCod ? 'UNPAID_COD' : 'PAID',
+              ...(isCod ? { payment_method: 'CASH', cod_amount_vnd: order.amount_vnd, cod_collected_vnd: 0 } : {}),
               issued_at: new Date().toISOString(),
               channel: 'PASSENGER_APP',
               operator_id: operatorOfTrip(this.services, tripId),
@@ -242,9 +248,13 @@ export class FleetBusEventBridge extends EventEmitter {
       if (trackingService && typeof trackingService.sendNotification === 'function') {
         const phone = order.payer?.phone || tickets[0]?.passenger_phone;
         if (phone) {
+          // Cash bookings tell the passenger to pay the driver on boarding instead of confirming prior payment.
+          const isCod = order.payment_status === 'UNPAID_COD';
           trackingService.sendNotification(phone, { operatorId: operatorOfTrip(this.services, tripId),
-            title: 'Thanh toán thành công & Xuất vé điện tử',
-            body: `Mã vé ${order.pnr} cho chuyến xe ${order.route_name || tripId} đã sẵn sàng trong Ví vé!`,
+            title: isCod ? 'Đặt vé thành công' : 'Thanh toán thành công & Xuất vé điện tử',
+            body: isCod
+              ? `Mã vé ${order.pnr} cho chuyến xe ${order.route_name || tripId} đã sẵn sàng. Bạn thanh toán tiền mặt cho tài xế khi lên xe.`
+              : `Mã vé ${order.pnr} cho chuyến xe ${order.route_name || tripId} đã sẵn sàng trong Ví vé!`,
             type: 'PAYMENT_SUCCESS',
             payload: { pnr: order.pnr, trip_id: tripId, ticket_ids: tickets.map(t => t.ticket_id) }
           });
@@ -964,6 +974,23 @@ export class FleetBusEventBridge extends EventEmitter {
     // 8c. COD_COLLECTED / HAIL_BOARDED / WALLET_CREDIT_REQUESTED: driver cash events -> Manager & Passenger wallet
     // -------------------------------------------------------------------------
     this.on('COD_COLLECTED', ({ tripId, ticketId, pnr, fareVnd, seatCode }) => {
+      // A passenger-app cash ticket settles on collection; the order becomes PAID once all its active seats are collected.
+      let orderFullyCollected = false;
+      const ticket = paymentService?.tickets?.get(ticketId);
+      if (ticket && ticket.payment_method === 'CASH') {
+        ticket.cod_collected = true;
+        ticket.payment_status = 'PAID';
+        const order = paymentService.orders?.get(ticket.order_id);
+        if (order && Array.isArray(order.ticket_ids) && order.ticket_ids.length > 0 && order.ticket_ids.every(id => {
+          const t = paymentService.tickets.get(id);
+          return t && (t.cod_collected === true || t.status === 'CANCELLED');
+        })) {
+          order.payment_status = 'PAID';
+          order.paid_at = new Date().toISOString();
+          orderFullyCollected = true;
+        }
+      }
+
       if (!managerService?.bookings) return;
       let booking = managerService.bookings.find(b => b.pnr === pnr);
       if (!booking) {
@@ -987,7 +1014,11 @@ export class FleetBusEventBridge extends EventEmitter {
       booking.collected_ticket_ids = booking.collected_ticket_ids || [];
       if (ticketId && booking.collected_ticket_ids.includes(ticketId)) return;
       if (ticketId) booking.collected_ticket_ids.push(ticketId);
-      booking.payment_status = 'PAID';
+      if (booking.payment_method === 'CASH') {
+        if (orderFullyCollected) booking.payment_status = 'PAID';
+      } else {
+        booking.payment_status = 'PAID';
+      }
       booking.cod_collected_vnd = (booking.cod_collected_vnd || 0) + fareVnd;
       if (booking.channel === 'POS_HOTLINE' && seatCode && !booking.seat_codes.includes(seatCode)) {
         booking.seat_codes.push(seatCode);
