@@ -94,7 +94,7 @@ export class PassengerPaymentService {
   /**
    * PAX-013: Create Payment Order & VietQR Transfer Details
    */
-  createPaymentOrder({ holdId, trip, seatCodes, payer, passengers, amountVnd, pickupStop, dropoffStop, pickupStopId = null, dropoffStopId = null, homePickup = null, homeDropoff = null, mockNow = Date.now(), voucherCode = null, discountVnd = 0 }) {
+  createPaymentOrder({ holdId, trip, seatCodes, payer, passengers, amountVnd, pickupStop, dropoffStop, pickupStopId = null, dropoffStopId = null, homePickup = null, homeDropoff = null, mockNow = Date.now(), voucherCode = null, discountVnd = 0, paymentMethod = 'VIETQR_NAPAS247' }) {
     const orderId = `ord_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
     const operatorId = trip.operator_id || DEFAULT_OPERATOR_ID;
     const operator = findOperatorById(operatorId);
@@ -103,19 +103,37 @@ export class PassengerPaymentService {
       pnr = `BG-${Math.floor(100000 + Math.random() * 900000)}`;
     } while (this.pnrIndex.has(pnr));
 
-    const bankBin = operator.bank.bin;
-    const accountNumber = operator.bank.account_number;
-    const accountName = operator.bank.account_name;
-    const transferMemo = `${operator.memo_prefix} ${pnr.replace('-', '')}`;
+    const isCash = paymentMethod === 'CASH';
+    let paymentDetails = null;
+    if (!isCash) {
+      const bankBin = operator.bank.bin;
+      const accountNumber = operator.bank.account_number;
+      const accountName = operator.bank.account_name;
+      const transferMemo = `${operator.memo_prefix} ${pnr.replace('-', '')}`;
 
-    const vietQrPayload = generateVietQRPayload({
-      bankBin,
-      accountNumber,
-      amount: amountVnd,
-      memo: transferMemo
-    });
+      const vietQrPayload = generateVietQRPayload({
+        bankBin,
+        accountNumber,
+        amount: amountVnd,
+        memo: transferMemo
+      });
+
+      paymentDetails = {
+        bank_name: operator.bank.bank_name,
+        bank_bin: bankBin,
+        account_number: accountNumber,
+        account_name: accountName,
+        transfer_memo: transferMemo,
+        qr_payload: vietQrPayload,
+        qr_image_url: `https://api.vietqr.io/image/${bankBin}-${accountNumber}-compact.png?amount=${amountVnd}&addInfo=${encodeURIComponent(transferMemo)}&accountName=${encodeURIComponent(accountName)}`
+      };
+    }
 
     const timeInfo = resolveStopTime(trip, pickupStopId, this.searchService);
+    const departureMs = trip?.departure_time ? Date.parse(trip.departure_time) : NaN;
+    const expiresAt = isCash && Number.isFinite(departureMs)
+      ? new Date(departureMs).toISOString()
+      : new Date(mockNow + 600000).toISOString();
 
     const order = {
       order_id: orderId,
@@ -139,19 +157,11 @@ export class PassengerPaymentService {
       amount_vnd: amountVnd,
       // The discount code the passenger used, for the office's booking list (H3).
       ...(voucherCode ? { voucher_code: voucherCode, discount_vnd: discountVnd } : {}),
-      payment_method: 'VIETQR_NAPAS247',
+      payment_method: isCash ? 'CASH' : 'VIETQR_NAPAS247',
       payment_status: 'PENDING_PAYMENT',
-      payment_details: {
-        bank_name: operator.bank.bank_name,
-        bank_bin: bankBin,
-        account_number: accountNumber,
-        account_name: accountName,
-        transfer_memo: transferMemo,
-        qr_payload: vietQrPayload,
-        qr_image_url: `https://api.vietqr.io/image/${bankBin}-${accountNumber}-compact.png?amount=${amountVnd}&addInfo=${encodeURIComponent(transferMemo)}&accountName=${encodeURIComponent(accountName)}`
-      },
+      payment_details: paymentDetails,
       created_at: new Date(mockNow).toISOString(),
-      expires_at: new Date(mockNow + 600000).toISOString(), // 10 min payment window
+      expires_at: expiresAt, // 10 min payment window; a cash order stays until departure
       ticket_ids: []
     };
 
@@ -173,17 +183,24 @@ export class PassengerPaymentService {
       return { success: false, error: 'Không tìm thấy đơn hàng', code: 'ORDER_NOT_FOUND' };
     }
 
-    if (order.payment_status === 'PAID') {
+    if (order.payment_status === 'PAID' || order.payment_status === 'UNPAID_COD') {
       return { success: true, message: 'Đơn hàng đã được thanh toán trước đó', data: order };
     }
 
-    if (mockNow > new Date(order.expires_at).getTime()) {
+    const expiresAtMs = new Date(order.expires_at).getTime();
+    const demoCashOrder = order.payment_method === 'CASH' && !isProduction() && Number.isFinite(expiresAtMs) && vnDate(expiresAtMs) === DEMO_DATE;
+    if (!demoCashOrder && mockNow > expiresAtMs) {
       order.payment_status = 'EXPIRED';
       return { success: false, error: 'Đơn hàng đã hết thời gian giữ chỗ thanh toán', code: 'PAYMENT_EXPIRED' };
     }
 
-    order.payment_status = 'PAID';
-    order.paid_at = new Date(mockNow).toISOString();
+    const isCashCod = order.payment_method === 'CASH' && order.amount_vnd > 0;
+    if (isCashCod) {
+      order.payment_status = 'UNPAID_COD';
+    } else {
+      order.payment_status = 'PAID';
+      order.paid_at = new Date(mockNow).toISOString();
+    }
     order.payment_ref = paymentRef;
     const vehiclePlate = this._resolveVehiclePlate(order.trip_id) || null;
 
@@ -194,6 +211,7 @@ export class PassengerPaymentService {
       const passenger = order.passengers[i] || order.payer;
       const ticketId = `tkt_${order.pnr.replace('-', '')}_${seatCode}`;
       const seatInfo = this.seatMapService?.getSeatInfo?.(order.trip_id, seatCode);
+      const fareVnd = Math.round(order.amount_vnd / order.seat_codes.length);
 
       const ticket = {
         ticket_id: ticketId,
@@ -207,7 +225,13 @@ export class PassengerPaymentService {
         pickup_time_estimated: Boolean(order.pickup_time_estimated),
         seat_code: seatCode,
         deck: seatInfo?.deck || 1,
-        fare_vnd: Math.round(order.amount_vnd / order.seat_codes.length),
+        fare_vnd: fareVnd,
+        ...(isCashCod ? {
+          payment_method: 'CASH',
+          payment_status: 'UNPAID_COD',
+          cod_amount_vnd: fareVnd,
+          cod_collected: false
+        } : {}),
         owner_phone: order.payer?.phone || passenger.phone,
         passenger_name: passenger.full_name,
         passenger_phone: passenger.phone,

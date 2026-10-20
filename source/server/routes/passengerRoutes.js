@@ -513,6 +513,15 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       const applied = orderReview.data.applied_voucher;
       const totalVnd = orderReview.total_payment_vnd + home.fee_vnd;
 
+      let paymentMethod = body.paymentMethod === 'CASH' ? 'CASH' : 'VIETQR_NAPAS247';
+      if (paymentMethod === 'CASH' && req.operator?.service_config?.allow_cash_payment === false) {
+        sendError(res, 'Nhà xe không nhận thanh toán tiền mặt', 'PAYMENT_METHOD_NOT_ALLOWED', 422);
+        return;
+      }
+      if (paymentMethod === 'CASH' && totalVnd === 0) {
+        paymentMethod = 'VIETQR_NAPAS247';
+      }
+
       const paymentOrderResult = paymentService.createPaymentOrder({
         holdId: body.holdId,
         trip: tripDetail,
@@ -528,7 +537,8 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         pickupStop: (tripDetail.stops || []).find(s => s.stop_id === holdCheck.data.pickup_stop_id)?.name || body.pickupStop || 'Bến xe Giáp Bát',
         dropoffStop: (tripDetail.stops || []).find(s => s.stop_id === holdCheck.data.dropoff_stop_id)?.name || body.dropoffStop || 'Bến xe Phía Bắc Thanh Hóa',
         voucherCode: applied?.code || null,
-        discountVnd: applied?.discount_amount || 0
+        discountVnd: applied?.discount_amount || 0,
+        paymentMethod
       });
 
       // The code's use is taken now and given back if the payment window closes unpaid.
@@ -542,6 +552,8 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       // Nothing to transfer (a code took the whole fare): banks cannot send 0 đ, so the order is paid now.
       if (totalVnd === 0) {
         paymentService.settlePayment(paymentOrderResult.data.order_id, vip ? 'VIP_FREE' : `VOUCHER_${applied?.code || 'FREE'}`);
+      } else if (paymentMethod === 'CASH') {
+        paymentService.settlePayment(paymentOrderResult.data.order_id, 'CASH_ON_BOARDING');
       }
 
       sendSuccess(res, {
