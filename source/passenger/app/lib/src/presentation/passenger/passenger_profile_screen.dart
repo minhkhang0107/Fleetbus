@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'passenger_about_screen.dart';
 import 'passenger_login_screen.dart';
 import 'passenger_onboarding_screen.dart';
 import 'passenger_splash_screen.dart';
@@ -92,6 +93,12 @@ class PassengerProfileScreen extends StatelessWidget {
           GhostButton(
             label: 'Xem giới thiệu tính năng',
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerOnboardingScreen(replay: true))),
+          ),
+          gap(16),
+          // SH-006: terms of use and licences (D157).
+          GhostButton(
+            label: 'Giới thiệu và điều khoản',
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerAboutScreen())),
           ),
           gap(16),
           GhostButton(

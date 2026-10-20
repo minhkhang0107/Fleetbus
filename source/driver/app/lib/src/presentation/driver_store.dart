@@ -385,6 +385,45 @@ int? minutesToStop({
 
 const _networkError = 'Không kết nối được máy chủ. Thao tác chưa được gửi, thử lại khi có mạng.';
 
+/// SH-006: one titled text of the about screen (terms of use, or the model and data notice).
+class LegalDoc {
+  const LegalDoc(this.title, this.sections);
+  final String title;
+  final List<LegalSection> sections;
+
+  factory LegalDoc.fromJson(Map<String, dynamic> j) => LegalDoc('${j['title'] ?? ''}', [
+        for (final s in (j['sections'] as List? ?? const []))
+          if (s is Map<String, dynamic>) LegalSection.fromJson(s),
+      ]);
+}
+
+class LegalSection {
+  const LegalSection(this.heading, this.body, [this.links = const []]);
+  final String heading;
+  final String body;
+  final List<({String label, String url})> links;
+
+  factory LegalSection.fromJson(Map<String, dynamic> j) => LegalSection('${j['heading'] ?? ''}', '${j['body'] ?? ''}', [
+        for (final l in (j['links'] as List? ?? const []))
+          if (l is Map<String, dynamic>) (label: '${l['label'] ?? ''}', url: '${l['url'] ?? ''}'),
+      ]);
+}
+
+class LegalInfo {
+  const LegalInfo({required this.version, required this.effectiveDate, required this.terms, required this.modelNotice});
+  final String version;
+  final String effectiveDate;
+  final LegalDoc terms;
+  final LegalDoc modelNotice;
+
+  factory LegalInfo.fromJson(Map<String, dynamic> j) => LegalInfo(
+        version: '${j['version'] ?? ''}',
+        effectiveDate: '${j['effective_date'] ?? ''}',
+        terms: LegalDoc.fromJson(j['terms'] as Map<String, dynamic>? ?? const {}),
+        modelNotice: LegalDoc.fromJson(j['model_notice'] as Map<String, dynamic>? ?? const {}),
+      );
+}
+
 class DriverStore extends ChangeNotifier {
   DriverStore({DriverApiClientService? api, DateTime Function()? clock})
       : api = api ?? DriverApiClientService(),
@@ -764,6 +803,13 @@ class DriverStore extends ChangeNotifier {
   }
 
   /// DRI-021: loads the driver's monthly trip schedule from the server.
+  /// SH-006: the terms and notices come from the server so they change without an app release (D157).
+  Future<({LegalInfo? info, String? error})> loadLegal() async {
+    final r = await _call(api.getLegal);
+    if (r.error != null || r.data == null) return (info: null, error: r.error ?? 'Không tải được, thử lại sau');
+    return (info: LegalInfo.fromJson(r.data!), error: null);
+  }
+
   Future<void> loadMonthlySchedule([String month = '']) async {
     scheduleLoading = true;
     scheduleError = null;

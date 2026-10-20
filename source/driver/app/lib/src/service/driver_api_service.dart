@@ -124,6 +124,11 @@ class DriverApiClientService {
     return _get('/api/v1/driver/trips/today');
   }
 
+  /// SH-006: Terms of use and the model and data notice of this app (D157)
+  Future<Map<String, dynamic>> getLegal() {
+    return _get('/api/v1/legal', query: {'app': 'driver'});
+  }
+
   /// DRI-021: Driver's monthly trip schedule
   Future<Map<String, dynamic>> getMonthlySchedule(String month) {
     return _get('/api/v1/driver/schedule', query: month.isNotEmpty ? {'month': month} : null);

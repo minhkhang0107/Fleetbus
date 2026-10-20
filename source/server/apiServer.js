@@ -30,6 +30,7 @@ import { handlePromoBannerRoutes } from './routes/promoBannerRoutes.js';
 import { handleVoucherRoutes } from './routes/voucherRoutes.js';
 import { handleScheduleRoutes } from './routes/scheduleRoutes.js';
 import { handleTripExceptionRoutes } from './routes/tripExceptionRoutes.js';
+import { handleLegalRoutes } from './routes/legalRoutes.js';
 import { renderOnboardingPage, renderOnboardingNotFound } from './web/onboarding.js';
 import { renderTripSharePage } from './web/tripShare.js';
 import { findOperatorByCode, findOperatorById } from './core/operators.js';
@@ -115,6 +116,7 @@ export function createFleetBusServer(customServices = {}) {
 
   function dispatchRoutes(req, res, pathname, parsedUrl) {
     try {
+      if (handleLegalRoutes(req, res, pathname, parsedUrl)) return;
       if (handlePassengerRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleDriverRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleTripExceptionRoutes(req, res, pathname, parsedUrl, services)) return;
@@ -293,7 +295,7 @@ export function createFleetBusServer(customServices = {}) {
       req.identity = auth.identity;
     }
 
-    const exemptFromOperator = pathname === '/health' || pathname === '/openapi.json' || pathname === '/api/v1/openapi.json' || pathname.startsWith('/api/v1/webhooks/') || pathname.startsWith('/api/v1/platform/');
+    const exemptFromOperator = pathname === '/health' || pathname === '/openapi.json' || pathname === '/api/v1/openapi.json' || pathname.startsWith('/api/v1/webhooks/') || pathname.startsWith('/api/v1/platform/') || pathname === '/api/v1/legal';
     if (!exemptFromOperator) {
       const opResult = resolveOperator(req, parsedUrl, req.identity, { production: isProduction() });
       if (!opResult.ok) {

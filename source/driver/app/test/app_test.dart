@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:app/src/presentation/driver_about_screen.dart';
 import 'package:app/src/presentation/driver_change_pin_screen.dart';
 import 'package:app/src/presentation/driver_cockpit_dashboard.dart';
 import 'package:app/src/presentation/driver_cod_dialog.dart';
@@ -33,12 +34,15 @@ void main() {
   late bool serverForcesPinChange;
   late bool tempDriverMustChangePin;
   late http.Response? Function(http.Request req)? scheduleHandler;
+  // SH-006: the legal texts of the fake server; legalDown answers with a network failure.
+  late bool legalDown;
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     driverPermissions = FakePermissions(LocationAccess.always);
     serverForcesPinChange = false;
     tempDriverMustChangePin = true;
     scheduleHandler = null;
+    legalDown = false;
   });
   late Map<String, dynamic> trip;
   late List<http.Request> sent;
@@ -76,6 +80,28 @@ void main() {
       sent.add(req);
       final path = req.url.path;
       final body = req.body.isEmpty ? <String, dynamic>{} : jsonDecode(req.body) as Map<String, dynamic>;
+      if (path == '/api/v1/legal') {
+        if (legalDown) throw http.ClientException('down');
+        return ok({
+          'app': req.url.queryParameters['app'],
+          'version': '1.0',
+          'effective_date': '2026-10-20',
+          'terms': {
+            'title': 'Điều khoản sử dụng',
+            'sections': [
+              {'heading': 'Đối tượng sử dụng', 'body': 'App dành cho tài xế và phụ xe được nhà xe cấp tài khoản.'},
+              {'heading': 'Vị trí trong ca', 'body': 'Vị trí chỉ được ghi từ lúc vào chuyến đến khi kết thúc chuyến.'},
+            ],
+          },
+          'model_notice': {
+            'title': 'Giấy phép mô hình và dữ liệu',
+            'sections': [
+              {'heading': 'Mô hình trí tuệ nhân tạo', 'body': 'BusGo không tích hợp, không gọi và không gửi dữ liệu tới mô hình trí tuệ nhân tạo hay học máy nào.'},
+              {'heading': 'Dữ liệu bản đồ', 'body': 'Dữ liệu bản đồ © những người đóng góp OpenStreetMap.', 'links': [{'label': 'OpenStreetMap — bản quyền', 'url': 'https://www.openstreetmap.org/copyright'}]},
+            ],
+          },
+        });
+      }
       if (serverForcesPinChange && !path.endsWith('/change-pin')) {
         return fail(403, 'PIN_CHANGE_REQUIRED', 'Đổi mã PIN tạm trước khi dùng app');
       }
@@ -735,7 +761,7 @@ void main() {
       await tester.runAsync(() async {
         expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
       });
-      const screens = <Widget>[DriverLoginScreen(), DriverChangePinScreen(), MainShellScreen(), DriverTodayTripsScreen(), DriverScheduleScreen(), DriverPassengerListScreen(), DriverReadinessScreen(), DriverHomeRunScreen(), DriverCockpitDashboard(), DriverManifestScreen(), DriverQrScannerScreen(), DriverEndTripScreen(), DriverIncidentScreen()];
+      const screens = <Widget>[DriverLoginScreen(), DriverChangePinScreen(), MainShellScreen(), DriverTodayTripsScreen(), DriverScheduleScreen(), DriverPassengerListScreen(), DriverReadinessScreen(), DriverHomeRunScreen(), DriverCockpitDashboard(), DriverManifestScreen(), DriverQrScannerScreen(), DriverEndTripScreen(), DriverIncidentScreen(), DriverAboutScreen()];
       for (final screen in screens) {
         await tester.pumpWidget(DriverScope(store: store, child: MaterialApp(home: screen)));
         await tester.pump();
@@ -1918,6 +1944,64 @@ void main() {
     await tester.pump();
     expect(tester.takeException(), isNull, reason: 'MainShellScreen with DriverScheduleScreen on 1280x720 tablet');
 
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('SH-006: the profile tab opens the about screen with the server terms, the model notice and the licences', (tester) async {
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    });
+    await tester.pumpWidget(DriverScope(store: store, child: const MaterialApp(home: MainShellScreen())));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Hồ sơ'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Giới thiệu và điều khoản'), 200);
+    await tester.tap(find.text('Giới thiệu và điều khoản'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Phiên bản 3.0.0'), findsOneWidget);
+    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsOneWidget);
+    expect(sent.where((r) => r.url.path == '/api/v1/legal').single.url.queryParameters['app'], 'driver');
+
+    await tester.tap(find.text('Điều khoản sử dụng'));
+    await tester.pumpAndSettle();
+    expect(find.text('2. Vị trí trong ca'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Giấy phép mô hình và dữ liệu'));
+    await tester.pumpAndSettle();
+    expect(find.text('1. Mô hình trí tuệ nhân tạo'), findsOneWidget);
+    expect(find.text('OpenStreetMap — bản quyền'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Giấy phép mã nguồn mở'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LicensePage), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('SH-006: when the terms cannot load, their rows are closed and Thử lại loads them', (tester) async {
+    final store = storeWithServer();
+    legalDown = true;
+    await tester.pumpWidget(DriverScope(store: store, child: const MaterialApp(home: DriverAboutScreen())));
+    await tester.pumpAndSettle();
+    expect(find.text('Chưa tải được'), findsNWidgets(2));
+    await tester.tap(find.text('Điều khoản sử dụng'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DriverLegalDocScreen), findsNothing);
+    // The open-source licences are in the app and open without the server.
+    expect(tester.widget<InkWell>(find.ancestor(of: find.text('Giấy phép mã nguồn mở'), matching: find.byType(InkWell))).onTap, isNotNull);
+
+    legalDown = false;
+    await tester.tap(find.text('Thử lại'));
+    await tester.pumpAndSettle();
+    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsOneWidget);
+    expect(find.text('Thử lại'), findsNothing);
     await tester.pumpWidget(const SizedBox());
     store.dispose();
   });

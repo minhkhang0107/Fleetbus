@@ -115,3 +115,4 @@
 | **SH-003** | Shared | Network Offline & Server Error | `/shared/network-error` | Connectivity Loss, HTTP 5xx | Auto-retry, Manual Refresh | P0 | Draft | Derived |
 | **SH-004** | Shared | System Maintenance Notice | `/shared/maintenance` | HTTP 503 / Feature Flag Barrier | App Exit, Polling for Service Resumption | P1 | Draft | Derived |
 | **SH-005** | Shared | Force App Version Upgrade | `/shared/version-upgrade` | App Config Handshake Barrier | App Store / Play Store URL | P0 | Draft | Derived |
+| **SH-006** | Shared | About & Legal (Giới thiệu và điều khoản) | `/shared/about` | Passenger "Cá nhân", Driver "Hồ sơ", Manager nav "Giới thiệu" | Terms reader, Licence page, Model & data notice | P1 | Draft | Decision D157 |

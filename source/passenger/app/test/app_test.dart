@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:app/main.dart';
+import 'package:app/src/presentation/passenger/passenger_about_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_date_picker.dart';
 import 'package:app/src/presentation/passenger/passenger_home_address_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_store.dart';
@@ -92,6 +93,27 @@ void main() {
   // Whether qr/reissue is allowed or refused with BOARDING_STARTED.
   bool reissueAllowed = false;
   bool voucherRefused = false;
+  // SH-006: the legal texts of the fake server; legalDown answers with a network failure.
+  bool legalDown = false;
+  final legalAnswer = {
+    'app': 'passenger',
+    'version': '1.0',
+    'effective_date': '2026-10-20',
+    'terms': {
+      'title': 'Điều khoản sử dụng',
+      'sections': [
+        {'heading': 'Phạm vi dịch vụ', 'body': 'BusGo là phần mềm giúp bạn tìm chuyến.'},
+        {'heading': 'Hủy vé và hoàn tiền', 'body': 'Hủy từ 12 giờ trước giờ chạy được hoàn 100%.'},
+      ],
+    },
+    'model_notice': {
+      'title': 'Giấy phép mô hình và dữ liệu',
+      'sections': [
+        {'heading': 'Mô hình trí tuệ nhân tạo', 'body': 'BusGo không tích hợp, không gọi và không gửi dữ liệu tới mô hình trí tuệ nhân tạo hay học máy nào.'},
+        {'heading': 'Dữ liệu bản đồ', 'body': 'Dữ liệu bản đồ © những người đóng góp OpenStreetMap.', 'links': [{'label': 'OpenStreetMap — bản quyền', 'url': 'https://www.openstreetmap.org/copyright'}]},
+      ],
+    },
+  };
 
   Future<PassengerStore> storeWithServer({bool selectOp = true}) async {
     sent = [];
@@ -104,11 +126,16 @@ void main() {
     ticket.remove('vehicle_plate');
     reissueAllowed = false;
     voucherRefused = false;
+    legalDown = false;
     final client = MockClient((req) async {
       sent.add(req);
       Map<String, dynamic>? data;
       Object? list;
       final path = req.url.path;
+      if (path.endsWith('/api/v1/legal')) {
+        if (legalDown) throw http.ClientException('down');
+        data = legalAnswer;
+      }
       if (path.endsWith('/app/config')) {
         final code = req.url.queryParameters['operator'] ?? '';
         if (code == 'SAOMAI') {
@@ -1218,6 +1245,7 @@ void main() {
         PassengerScope(store: store, child: PassengerBookingSuccessScreen(ticket: ticket, phone: '0987654321')),
         PassengerScope(store: store, child: PassengerTicketQrScreen(ticket: ticket)),
         PassengerScope(store: store, child: PassengerLiveRadarScreen(ticket: ticket)),
+        PassengerScope(store: store, child: const PassengerAboutScreen()),
       ];
       for (final screen in screens) {
         await tester.pumpWidget(MaterialApp(builder: phoneColumnBuilder, home: screen));
@@ -1722,6 +1750,59 @@ void main() {
 
     expect(t.plate, '30F-999.99');
     expect(find.text('30F-999.99'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('SH-006: the profile opens the about screen with the server terms, the model notice and the licences', (tester) async {
+    final store = await storeWithServer();
+    // As in the app: the scope sits above the navigator, so pushed screens reach the store.
+    await tester.pumpWidget(PassengerScope(store: store, child: const MaterialApp(home: PassengerMainShell(initialTab: 3))));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Giới thiệu và điều khoản'), 200);
+    await tester.tap(find.text('Giới thiệu và điều khoản'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Phiên bản 3.0.0'), findsOneWidget);
+    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsOneWidget);
+    expect(sent.where((r) => r.url.path == '/api/v1/legal').single.url.queryParameters['app'], 'passenger');
+
+    await tester.tap(find.text('Điều khoản sử dụng'));
+    await tester.pumpAndSettle();
+    expect(find.text('2. Hủy vé và hoàn tiền'), findsOneWidget);
+    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Giấy phép mô hình và dữ liệu'));
+    await tester.pumpAndSettle();
+    expect(find.text('1. Mô hình trí tuệ nhân tạo'), findsOneWidget);
+    expect(find.text('OpenStreetMap — bản quyền'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Giấy phép mã nguồn mở'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LicensePage), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('SH-006: when the terms cannot load, their rows are closed and Thử lại loads them', (tester) async {
+    final store = await storeWithServer();
+    legalDown = true;
+    await tester.pumpWidget(MaterialApp(home: PassengerScope(store: store, child: const PassengerAboutScreen())));
+    await tester.pumpAndSettle();
+    expect(find.text('Chưa tải được'), findsNWidgets(2));
+    await tester.tap(find.text('Điều khoản sử dụng'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LegalDocScreen), findsNothing);
+    // The open-source licences are in the app and open without the server.
+    expect(tester.widget<InkWell>(find.ancestor(of: find.text('Giấy phép mã nguồn mở'), matching: find.byType(InkWell))).onTap, isNotNull);
+
+    legalDown = false;
+    await tester.tap(find.text('Thử lại'));
+    await tester.pumpAndSettle();
+    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsOneWidget);
+    expect(find.text('Thử lại'), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 }

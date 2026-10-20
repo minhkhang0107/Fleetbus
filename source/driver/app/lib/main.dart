@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
+import 'src/presentation/driver_about_screen.dart';
 import 'src/presentation/driver_login_screen.dart';
 import 'src/presentation/driver_store.dart';
 import 'src/presentation/driver_widgets.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  registerDriverFontLicenses();
   runApp(BusGoDriverApp(store: DriverStore()));
 }
 

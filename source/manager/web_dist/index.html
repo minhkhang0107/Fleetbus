@@ -69,6 +69,11 @@
   .stat b { display: block; font-size: 18px; }
   .stat span { font-size: 11px; color: var(--muted); }
   .section-title { font-weight: 700; margin: 14px 0 8px; }
+  .legal p { margin: 4px 0 14px; line-height: 1.55; max-width: 72ch; }
+  .legal h3 { font-size: 15px; margin: 0; }
+  .legal details { border-top: 1px solid var(--line); padding: 10px 0; }
+  .legal summary { cursor: pointer; font-weight: 600; }
+  .legal pre { white-space: pre-wrap; font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; }
   .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
   .toolbar select, .toolbar input { border: 1px solid var(--line-strong); border-radius: 8px; padding: 7px 10px; background: #fff; }
   .list-fallback { max-height: calc(100vh - 150px); overflow: auto; }
@@ -209,6 +214,7 @@
     <button data-view="banners">Quảng cáo</button>
     <button data-view="vouchers">Mã giảm giá</button>
     <button data-view="audit">Nhật ký thao tác</button>
+    <button data-view="about">Giới thiệu</button>
     <button data-view="platform" class="hidden" id="navPlatform">Nhà xe (nền tảng)</button>
     <div class="spacer"></div>
     <div class="who" id="who"></div>
@@ -554,6 +560,67 @@
     <div data-panel="audit" class="hidden">
       <h2>Nhật ký thao tác</h2>
       <div class="card scroll" style="padding:0" id="auditBox"></div>
+    </div>
+
+    <!-- SH-006: about, terms of use, licences (D157) -->
+    <div data-panel="about" class="hidden legal">
+      <h2>Giới thiệu</h2>
+      <div class="card" style="margin-bottom:16px">
+        <div style="font-weight:700;font-size:18px">BusGo Điều hành</div>
+        <div class="muted">Trang điều hành cho nhà xe · <span class="mono">Phiên bản 3.0.0</span></div>
+      </div>
+      <div class="card" style="margin-bottom:16px" id="aboutTerms"></div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="section-title" style="margin-top:0">Giấy phép mã nguồn mở</div>
+        <p class="muted">Thư viện bản đồ dùng trên trang này, nạp từ unpkg.com.</p>
+        <details><summary>Leaflet 1.9.4 · BSD 2-Clause</summary><pre>BSD 2-Clause License
+
+Copyright (c) 2010-2023, Volodymyr Agafonkin
+Copyright (c) 2010-2011, CloudMade
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS &quot;AS IS&quot;
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.</pre></details>
+        <details><summary>Leaflet.markercluster 1.5.3 · MIT</summary><pre>Copyright 2012 David Leaver
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+&quot;Software&quot;), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</pre></details>
+      </div>
+      <div class="card" id="aboutModel"></div>
     </div>
 
     <!-- Platform admin -->
@@ -1006,10 +1073,30 @@ function show(view) {
   stopTimers();
   document.querySelectorAll('nav button[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   document.querySelectorAll('[data-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.panel !== view));
-  if (state.user?.role === 'PLATFORM_ADMIN' && view !== 'platform' && !state.platformCode) {
+  if (state.user?.role === 'PLATFORM_ADMIN' && view !== 'platform' && view !== 'about' && !state.platformCode) {
     toast('Chọn nhà xe ở thanh trên để xem dữ liệu điều hành');
   }
-  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, fleet: loadFleet, drivers: loadDrivers, layouts: loadLayouts, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, vouchers: loadVouchers, audit: loadAudit, platform: loadOperators })[view]?.();
+  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, fleet: loadFleet, drivers: loadDrivers, layouts: loadLayouts, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, vouchers: loadVouchers, audit: loadAudit, about: loadAbout, platform: loadOperators })[view]?.();
+}
+
+// ---------- about (SH-006, D157) ----------
+// The terms and the model and data notice come from the server, so they change without a new page.
+function legalDocHtml(doc, d) {
+  return `<div class="section-title" style="margin-top:0">${esc(doc.title)}</div>
+    <p class="muted" style="margin-top:0">Phiên bản ${esc(d.version)} · hiệu lực từ ${esc(d.effective_date.split('-').reverse().join('/'))}</p>
+    ${doc.sections.map((s, i) => `<h3>${i + 1}. ${esc(s.heading)}</h3><p>${esc(s.body)}${(s.links || []).map(l => ` <a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a>`).join(' ·')}</p>`).join('')}`;
+}
+async function loadAbout() {
+  const r = await api('/api/v1/legal?app=manager');
+  if (!r.ok) {
+    const msg = `<div class="error">${esc(r.message)}</div><button class="btn" style="margin-top:8px" data-about-retry>Thử lại</button>`;
+    $('#aboutTerms').innerHTML = `<div class="section-title" style="margin-top:0">Điều khoản sử dụng</div>${msg}`;
+    $('#aboutModel').innerHTML = '<div class="section-title" style="margin-top:0">Giấy phép mô hình và dữ liệu</div><p class="muted">Chưa tải được.</p>';
+    $('#aboutTerms [data-about-retry]').addEventListener('click', loadAbout);
+    return;
+  }
+  $('#aboutTerms').innerHTML = legalDocHtml(r.data.terms, r.data);
+  $('#aboutModel').innerHTML = legalDocHtml(r.data.model_notice, r.data);
 }
 
 // ---------- overview ----------

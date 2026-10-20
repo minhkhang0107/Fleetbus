@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'driver_change_pin_screen.dart';
 import 'driver_login_screen.dart';
+import 'driver_about_screen.dart';
 import 'driver_offline_sync_screen.dart';
 import 'driver_schedule_screen.dart';
 import 'driver_store.dart';
@@ -139,6 +140,14 @@ class _ProfileTab extends StatelessWidget {
         const SizedBox(height: 12),
         Panel(child: Text('Định vị đã cấp quyền chạy nền', style: dsans(size: 14, color: DTokens.sub))),
         const SizedBox(height: 16),
+        // SH-006: terms of use and licences (D157).
+        BigButton(
+          label: 'Giới thiệu và điều khoản',
+          outline: true,
+          color: DTokens.sub,
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverAboutScreen())),
+        ),
+        const SizedBox(height: 12),
         BigButton(
           label: 'Kết thúc ca và đăng xuất',
           outline: true,

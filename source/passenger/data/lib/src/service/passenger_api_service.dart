@@ -38,6 +38,9 @@ String newIdempotencyKey() {
       .join();
 }
 
+/// Shown on the about screen and sent in every request.
+const passengerAppVersion = '3.0.0';
+
 class PassengerApiClientService {
   final String baseUrl;
   final http.Client _client;
@@ -58,7 +61,7 @@ class PassengerApiClientService {
 
   Map<String, String> _headers({String? idempotencyKey}) => {
     'Content-Type': 'application/json',
-    'x-app-version': '3.0.0',
+    'x-app-version': passengerAppVersion,
     if (authToken != null) 'Authorization': 'Bearer $authToken',
     if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey,
     if (operatorCode != null) 'X-Operator-Code': operatorCode!,
@@ -122,6 +125,13 @@ class PassengerApiClientService {
    */
   Future<Map<String, dynamic>> getAppConfig({String? operatorCode}) {
     return _get('/api/v1/app/config', query: operatorCode != null ? {'operator': operatorCode} : null);
+  }
+
+  /**
+   * SH-006: Terms of use and the model and data notice of this app (D157)
+   */
+  Future<Map<String, dynamic>> getLegal() {
+    return _get('/api/v1/legal', query: {'app': 'passenger'});
   }
 
   /**

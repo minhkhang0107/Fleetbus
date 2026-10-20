@@ -15,6 +15,7 @@ const PUBLIC_RULES = [
   ['GET', /^\/(api\/v1\/)?openapi\.json$/],
   ['GET', /^\/api\/v1\/(app|passenger)\/config$/],
   ['GET', /^\/api\/v1\/service-config$/],
+  ['GET', /^\/api\/v1\/legal$/],
   ['POST', /^\/api\/v1\/service-areas\/check$/],
   ['GET', /^\/api\/v1\/passenger\/home-feed$/],
   ['GET', /^\/api\/v1\/passenger\/promo-banners(\/[^/]+)?$/],

@@ -36,6 +36,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/brand/
+    - assets/licenses/
 
   # To add assets to your package, add an assets section, like this:
   # assets:

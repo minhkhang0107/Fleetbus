@@ -420,6 +420,45 @@ class PromoBanner {
       );
 }
 
+/// SH-006: one titled text of the about screen (terms of use, or the model and data notice).
+class LegalDoc {
+  const LegalDoc(this.title, this.sections);
+  final String title;
+  final List<LegalSection> sections;
+
+  factory LegalDoc.fromJson(Map<String, dynamic> j) => LegalDoc('${j['title'] ?? ''}', [
+        for (final s in (j['sections'] as List? ?? const []))
+          if (s is Map<String, dynamic>) LegalSection.fromJson(s),
+      ]);
+}
+
+class LegalSection {
+  const LegalSection(this.heading, this.body, [this.links = const []]);
+  final String heading;
+  final String body;
+  final List<({String label, String url})> links;
+
+  factory LegalSection.fromJson(Map<String, dynamic> j) => LegalSection('${j['heading'] ?? ''}', '${j['body'] ?? ''}', [
+        for (final l in (j['links'] as List? ?? const []))
+          if (l is Map<String, dynamic>) (label: '${l['label'] ?? ''}', url: '${l['url'] ?? ''}'),
+      ]);
+}
+
+class LegalInfo {
+  const LegalInfo({required this.version, required this.effectiveDate, required this.terms, required this.modelNotice});
+  final String version;
+  final String effectiveDate;
+  final LegalDoc terms;
+  final LegalDoc modelNotice;
+
+  factory LegalInfo.fromJson(Map<String, dynamic> j) => LegalInfo(
+        version: '${j['version'] ?? ''}',
+        effectiveDate: '${j['effective_date'] ?? ''}',
+        terms: LegalDoc.fromJson(j['terms'] as Map<String, dynamic>? ?? const {}),
+        modelNotice: LegalDoc.fromJson(j['model_notice'] as Map<String, dynamic>? ?? const {}),
+      );
+}
+
 Color? _hexColor(Object? hex) {
   if (hex is! String || !RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(hex)) return null;
   return Color(0xFF000000 | int.parse(hex.substring(1), radix: 16));
@@ -610,6 +649,8 @@ class PassengerStore extends ChangeNotifier {
 
   final PassengerApiClientService api;
 
+  static const appVersion = passengerAppVersion;
+
   OperatorInfo? operator;
   Map<String, Place> places = {};
 
@@ -750,6 +791,13 @@ class PassengerStore extends ChangeNotifier {
     final list = r.ok ? r.value!['banners'] : null;
     banners = list is List ? [for (final b in list) if (b is Map<String, dynamic> && b['banner_id'] != null) PromoBanner.fromJson(b)] : [];
     notifyListeners();
+  }
+
+  /// SH-006: the terms and notices come from the server so they change without an app release (D157).
+  Future<ApiResult<LegalInfo>> loadLegal() async {
+    final r = await _call(api.getLegal);
+    if (!r.ok) return ApiResult(null, r.error, r.code);
+    return ApiResult(LegalInfo.fromJson(r.value!));
   }
 
   /// The HTML page of one slide; the error is shown in place of the page.
