@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'passenger_main_shell.dart';
 import 'passenger_payment_processing_screen.dart';
 import 'passenger_store.dart';
 import 'passenger_widgets.dart';
 
 /// PAX-011 / PAX-012: passenger, voucher, optional insurance (off by default, BR-CHECKOUT-003)
-/// and VietQR as the only method of this version (BR-CHECKOUT-004).
+/// and payment method selection (VietQR transfer or cash on board when the operator allows it).
 class PassengerCheckoutScreen extends StatefulWidget {
   const PassengerCheckoutScreen({super.key});
 
@@ -86,6 +87,11 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
       showToast(context, error);
       return;
     }
+    if (store.payByCash) {
+      showToast(context, 'Đặt vé thành công. Bạn thanh toán tiền mặt cho tài xế khi lên xe.');
+      PassengerMainShell.openTab(context, 1);
+      return;
+    }
     Navigator.of(context).push(MaterialPageRoute(
       settings: const RouteSettings(name: 'vietqr'),
       builder: (_) => PassengerPaymentProcessingScreen(name: normalizedName, phone: normalizedPhone),
@@ -98,6 +104,7 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
     final p = store.stop(store.pickup);
     final d = store.stop(store.dropoff);
     final n = store.seats.length;
+    final canPayCash = store.operator?.allowCash != false && store.total > 0;
     return Scaffold(
       appBar: const TopBar(title: 'Xác nhận đặt vé'),
       body: Column(children: [
@@ -189,13 +196,31 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
               ),
             if (store.discount > 0) _line('Mã ${store.voucher}', '−${vnd(store.discount)}', color: PTokens.success),
             const Divider(height: 20, color: PTokens.line),
-            Row(children: [
+            if (canPayCash) ...[
               Text('Thanh toán qua', style: sans(size: 14, weight: FontWeight.w600)),
-              const Spacer(),
-              const Icon(Icons.qr_code_2, size: 18, color: PTokens.primary),
-              const SizedBox(width: 6),
-              Flexible(child: Text('VietQR chuyển khoản', textAlign: TextAlign.end, style: sans(size: 14, weight: FontWeight.w600))),
-            ]),
+              gap(8),
+              _PaymentOption(
+                icon: Icons.qr_code_2,
+                title: 'VietQR chuyển khoản',
+                selected: !store.payByCash,
+                onTap: () => store.setPaymentMethod('VIETQR_NAPAS247'),
+              ),
+              gap(8),
+              _PaymentOption(
+                icon: Icons.payments_outlined,
+                title: 'Tiền mặt khi lên xe',
+                subtitle: 'Trả tiền mặt cho tài xế khi lên xe',
+                selected: store.payByCash,
+                onTap: () => store.setPaymentMethod('CASH'),
+              ),
+            ] else
+              Row(children: [
+                Text('Thanh toán qua', style: sans(size: 14, weight: FontWeight.w600)),
+                const Spacer(),
+                const Icon(Icons.qr_code_2, size: 18, color: PTokens.primary),
+                const SizedBox(width: 6),
+                Flexible(child: Text('VietQR chuyển khoản', textAlign: TextAlign.end, style: sans(size: 14, weight: FontWeight.w600))),
+              ]),
           ]),
         ),
       ]),
@@ -206,7 +231,10 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
             Text(vnd(store.total), style: mono(size: 19, weight: FontWeight.w700)),
           ]),
         ),
-        PrimaryButton(label: _creating ? 'Đang tạo đơn…' : 'Tạo mã thanh toán', onPressed: _creating ? null : () => _pay(store)),
+        PrimaryButton(
+          label: _creating ? 'Đang tạo đơn…' : (canPayCash && store.payByCash ? 'Xác nhận đặt vé' : 'Tạo mã thanh toán'),
+          onPressed: _creating ? null : () => _pay(store),
+        ),
       ]),
     );
   }
@@ -215,4 +243,50 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
         padding: const EdgeInsets.symmetric(vertical: 3),
         child: Row(children: [Text(label, style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(value, style: mono(size: 14, weight: FontWeight.w500, color: color))]),
       );
+}
+
+class _PaymentOption extends StatelessWidget {
+  const _PaymentOption({required this.icon, required this.title, this.subtitle, required this.selected, required this.onTap});
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      selected: selected,
+      inMutuallyExclusiveGroup: true,
+      button: true,
+      child: Material(
+        color: selected ? PTokens.primarySoft : PTokens.surface,
+        borderRadius: BorderRadius.circular(PTokens.radiusControl),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(PTokens.radiusControl),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 48),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(PTokens.radiusControl),
+              border: Border.all(color: selected ? PTokens.primary : PTokens.line),
+            ),
+            child: Row(children: [
+              Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 20, color: selected ? PTokens.primary : PTokens.muted),
+              const SizedBox(width: 10),
+              Icon(icon, size: 18, color: selected ? PTokens.primary : PTokens.muted),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(title, style: sans(size: 14, weight: FontWeight.w600)),
+                  if (subtitle != null) Text(subtitle!, style: sans(size: 12, color: PTokens.muted)),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
 }

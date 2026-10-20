@@ -16,20 +16,25 @@ Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
         Text('Hủy vé ${t.pnr}?', style: sans(size: 18, weight: FontWeight.w700)),
         gap(12),
         AppCard(
-          child: Column(children: [
-            Row(children: [Text('Đã trả', style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(vnd(t.paid), style: mono(size: 14))]),
-            if (known) ...[
-              gap(4),
-              Row(children: [Text('Được hoàn', style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(vnd(amount), style: mono(size: 14, weight: FontWeight.w700))]),
-            ],
-            gap(6),
-            Align(alignment: Alignment.centerLeft, child: Text(r.tier, style: sans(size: 13, color: PTokens.muted, height: 1.4))),
-          ]),
+          child: t.unpaidCash
+              ? Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Vé tiền mặt chưa thanh toán nên không phát sinh hoàn tiền.', style: sans(size: 13, color: PTokens.muted, height: 1.4)),
+                )
+              : Column(children: [
+                  Row(children: [Text('Đã trả', style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(vnd(t.paid), style: mono(size: 14))]),
+                  if (known) ...[
+                    gap(4),
+                    Row(children: [Text('Được hoàn', style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(vnd(amount), style: mono(size: 14, weight: FontWeight.w700))]),
+                  ],
+                  gap(6),
+                  Align(alignment: Alignment.centerLeft, child: Text(r.tier, style: sans(size: 13, color: PTokens.muted, height: 1.4))),
+                ]),
         ),
         gap(10),
         Text('Ghế ${t.seat} được nhả ngay cho người khác và không lấy lại được.', style: sans(size: 13, color: PTokens.muted, height: 1.5)),
         gap(14),
-        PrimaryButton(label: known && amount > 0 ? 'Hủy vé, hoàn ${vnd(amount)}' : 'Hủy vé', color: PTokens.danger, onPressed: () => Navigator.of(ctx).pop(true)),
+        PrimaryButton(label: !t.unpaidCash && known && amount > 0 ? 'Hủy vé, hoàn ${vnd(amount)}' : 'Hủy vé', color: PTokens.danger, onPressed: () => Navigator.of(ctx).pop(true)),
         gap(8),
         GhostButton(label: 'Giữ vé', onPressed: () => Navigator.of(ctx).pop(false)),
       ]));
@@ -85,13 +90,18 @@ class PassengerDelayNoticeScreen extends StatelessWidget {
           decoration: BoxDecoration(color: PTokens.primarySoft, border: Border.all(color: const Color(0xFFBFDBFE)), borderRadius: BorderRadius.circular(PTokens.radius)),
           child: Text.rich(TextSpan(children: [
             TextSpan(text: 'Bạn được hủy vé miễn phí. ', style: sans(size: 13, weight: FontWeight.w700, color: const Color(0xFF1E3A8A))),
-            TextSpan(text: 'Chuyến chậm hơn 30 phút nên hủy lúc này được hoàn đủ ${vnd(t.paid)} về tài khoản đã chuyển, không mất phí.', style: sans(size: 13, color: const Color(0xFF1E40AF), height: 1.5)),
+            TextSpan(
+              text: t.unpaidCash
+                  ? 'Vé tiền mặt chưa thanh toán nên không phát sinh hoàn tiền.'
+                  : 'Chuyến chậm hơn 30 phút nên hủy lúc này được hoàn đủ ${vnd(t.paid)} về tài khoản đã chuyển, không mất phí.',
+              style: sans(size: 13, color: const Color(0xFF1E40AF), height: 1.5),
+            ),
           ])),
         ),
       ])),
       bottomNavigationBar: BottomAction(column: true, children: [
         PrimaryButton(label: 'Giữ vé, đi lúc ${t.departure}', onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => PassengerTicketQrScreen(ticket: t)))),
-        GhostButton(label: 'Hủy vé, hoàn ${vnd(t.paid)}', color: PTokens.danger, borderColor: const Color(0xFFFCA5A5), onPressed: () => confirmCancelTicket(context, t)),
+        GhostButton(label: t.unpaidCash ? 'Hủy vé' : 'Hủy vé, hoàn ${vnd(t.paid)}', color: PTokens.danger, borderColor: const Color(0xFFFCA5A5), onPressed: () => confirmCancelTicket(context, t)),
       ]),
     );
   }

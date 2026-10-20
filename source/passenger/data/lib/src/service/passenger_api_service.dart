@@ -298,6 +298,7 @@ class PassengerApiClientService {
     Map<String, dynamic>? homePickup,
     Map<String, dynamic>? homeDropoff,
     bool insuranceSelected = false,
+    String paymentMethod = 'VIETQR_NAPAS247',
     String? idempotencyKey,
   }) {
     return _post(
@@ -314,6 +315,7 @@ class PassengerApiClientService {
         if (homePickup != null) 'homePickup': homePickup,
         if (homeDropoff != null) 'homeDropoff': homeDropoff,
         'insuranceSelected': insuranceSelected,
+        'paymentMethod': paymentMethod,
       },
       idempotent: true,
       idempotencyKey: idempotencyKey,

@@ -194,6 +194,18 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
           ),
           gap(14),
         ],
+        if (t.unpaidCash) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: PTokens.warnSoft, borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+            child: Text(
+              'Chưa thanh toán — đưa ${vnd(t.codDue)} tiền mặt cho tài xế khi lên xe',
+              style: sans(size: 13, weight: FontWeight.w600, color: PTokens.warnInk, height: 1.4),
+            ),
+          ),
+          gap(14),
+        ],
         if (_loading)
           const Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator()))
         else if (_error != null)

@@ -22,6 +22,7 @@ class OperatorInfo {
     required this.primaryColor,
     this.pickupModes = const ['FIXED_STOP'],
     this.dropoffModes = const ['FIXED_LOCATION'],
+    this.allowCash = true,
   });
   final String code;
   final String name;
@@ -30,6 +31,7 @@ class OperatorInfo {
   final String primaryColor;
   final List<String> pickupModes;
   final List<String> dropoffModes;
+  final bool allowCash;
 
   bool get homePickup => pickupModes.contains('HOME_PICKUP');
   bool get homeDropoff => dropoffModes.contains('HOME_DROPOFF');
@@ -42,6 +44,7 @@ class OperatorInfo {
         primaryColor: j['primary_color'] ?? '',
         pickupModes: [for (final m in (j['pickup_modes'] as List? ?? const ['FIXED_STOP'])) '$m'],
         dropoffModes: [for (final m in (j['dropoff_modes'] as List? ?? const ['FIXED_LOCATION'])) '$m'],
+        allowCash: j['allow_cash_payment'] != false,
       );
 }
 
@@ -290,6 +293,8 @@ class Ticket {
     this.past = false,
     this.pickupTime,
     this.pickupTimeEstimated = false,
+    this.paymentStatus = '',
+    this.codDue = 0,
   }) : ticketIds = ticketIds ?? (id.isNotEmpty ? [id] : const []);
   final String id;
   final String pnr;
@@ -304,6 +309,8 @@ class Ticket {
   final String dropoff;
   final int paid;
   final String name;
+  final String paymentStatus;
+  final int codDue;
   /// Planned pickup stop time if different from first departure.
   final String? pickupTime;
   final bool pickupTimeEstimated;
@@ -332,6 +339,7 @@ class Ticket {
   int? refund;
   bool past;
 
+  bool get unpaidCash => paymentStatus == 'UNPAID_COD' && codDue > 0;
   bool get active => status == TicketStatus.active || status == TicketStatus.boarded;
   bool get isGroup => ticketIds.length > 1 || seat.contains(',');
   String get departure => delay == 0 ? dep : addMinutes(dep, delay);
@@ -390,6 +398,8 @@ class Ticket {
       past: past || j['trip_completed'] == true,
       pickupTime: pTime,
       pickupTimeEstimated: j['pickup_time_estimated'] == true,
+      paymentStatus: '${j['payment_status'] ?? ''}',
+      codDue: (j['cod_amount_vnd'] as num?)?.toInt() ?? 0,
     )..refund = (j['refund_amount_vnd'] as num?)?.toInt();
   }
 }
@@ -693,6 +703,8 @@ class PassengerStore extends ChangeNotifier {
   String? voucher;
   int voucherDiscount = 0;
   bool insured = false;
+  String paymentMethod = 'VIETQR_NAPAS247';
+  bool get payByCash => paymentMethod == 'CASH';
 
   // Order and payment (PAX-013)
   String? orderId;
@@ -772,6 +784,7 @@ class PassengerStore extends ChangeNotifier {
     
     api.operatorCode = code;
     operator = OperatorInfo.fromJson(r.value!['operator'] as Map<String, dynamic>);
+    if (!operator!.allowCash) paymentMethod = 'VIETQR_NAPAS247';
     calendar = ServiceCalendar.fromJson(r.value!['service_calendar'] as Map<String, dynamic>?);
     fixedEndpoints = FixedEndpoints.fromJson(r.value!['fixed_endpoints']);
     
@@ -1120,6 +1133,7 @@ class PassengerStore extends ChangeNotifier {
     seats.clear();
     seatMap = [];
     deck = 1;
+    paymentMethod = 'VIETQR_NAPAS247';
     notifyListeners();
     if (t.homePickup || t.homeDropoff) loadServiceAreas();
   }
@@ -1265,6 +1279,7 @@ class PassengerStore extends ChangeNotifier {
     // Other seats or another trip price differently: a code applied before is checked again at checkout.
     voucher = null;
     voucherDiscount = 0;
+    paymentMethod = 'VIETQR_NAPAS247';
     _startCountdown('hold', (r.value!['seconds_remaining'] as num?)?.toInt() ?? 600);
     return null;
   }
@@ -1284,6 +1299,12 @@ class PassengerStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setPaymentMethod(String m) {
+    if (m == 'CASH' && operator?.allowCash == false) return;
+    paymentMethod = m;
+    notifyListeners();
+  }
+
   /// PAX-012: the company's server says whether the code applies and what it takes off this order.
   Future<String?> applyVoucher(String code) async {
     if (isVip) return 'Tài khoản VIP đã được miễn phí vé.';
@@ -1293,6 +1314,7 @@ class PassengerStore extends ChangeNotifier {
     if (!r.ok) return r.error;
     voucher = '${r.value!['code'] ?? c}';
     voucherDiscount = (r.value!['discount_vnd'] as num?)?.toInt() ?? 0;
+    if (total <= 0) paymentMethod = 'VIETQR_NAPAS247';
     notifyListeners();
     return null;
   }
@@ -1317,6 +1339,7 @@ class PassengerStore extends ChangeNotifier {
           homePickup: homePickup?.toJson(),
           homeDropoff: homeDropoff?.toJson(),
           insuranceSelected: insured,
+          paymentMethod: paymentMethod,
         ));
     if (!r.ok) {
       // The code stopped applying since it was checked (used up, expired): drop it so the next try is at full price, shown first.
@@ -1324,14 +1347,25 @@ class PassengerStore extends ChangeNotifier {
       return r.error;
     }
     final pay = r.value!['payment'] as Map<String, dynamic>;
-    final details = pay['payment_details'] as Map<String, dynamic>;
+    final details = pay['payment_details'] as Map<String, dynamic>?;
     orderId = pay['order_id'];
     orderPnr = pay['pnr'];
     orderAmount = (pay['amount_vnd'] as num).toInt();
-    bankName = details['bank_name'] ?? '';
-    accountNumber = details['account_number'] ?? '';
-    transferMemo = details['transfer_memo'] ?? '';
-    vietQrPayload = details['qr_payload'] ?? '';
+    if (pay['payment_method'] == 'CASH') {
+      paymentMethod = 'CASH';
+      bankName = '';
+      accountNumber = '';
+      transferMemo = '';
+      vietQrPayload = '';
+      stopHold();
+      await loadTickets();
+      return null;
+    }
+    paymentMethod = 'VIETQR_NAPAS247';
+    bankName = details?['bank_name'] ?? '';
+    accountNumber = details?['account_number'] ?? '';
+    transferMemo = details?['transfer_memo'] ?? '';
+    vietQrPayload = details?['qr_payload'] ?? '';
     final expires = DateTime.tryParse('${pay['expires_at']}');
     _startCountdown('pay', expires == null ? 600 : expires.difference(DateTime.now()).inSeconds.clamp(60, 1800));
     return null;
@@ -1382,6 +1416,8 @@ class PassengerStore extends ChangeNotifier {
         homePickup: first.homePickup,
         homeDropoff: first.homeDropoff,
         pickupWindow: first.pickupWindow,
+        paymentStatus: first.paymentStatus,
+        codDue: issued.fold<int>(0, (sum, t) => sum + t.codDue),
       );
       for (final t in issued) {
         if (settledPlate.isNotEmpty) t.plate = settledPlate;
@@ -1392,6 +1428,7 @@ class PassengerStore extends ChangeNotifier {
     voucher = null;
     voucherDiscount = 0;
     insured = false;
+    paymentMethod = 'VIETQR_NAPAS247';
     await loadNotices();
     return true;
   }
@@ -1402,6 +1439,7 @@ class PassengerStore extends ChangeNotifier {
     orderId = null;
     orderPnr = null;
     seats.clear();
+    paymentMethod = 'VIETQR_NAPAS247';
     notifyListeners();
   }
 
@@ -1526,6 +1564,7 @@ class PassengerStore extends ChangeNotifier {
 
   /// Preview of PAX-021 tiers; the server decides the refund.
   ({int percent, String tier}) refundFor(Ticket t) {
+    if (t.unpaidCash) return (percent: 0, tier: 'Vé tiền mặt chưa thanh toán nên không phát sinh hoàn tiền.');
     if (t.delay > 30) return (percent: 100, tier: 'Chuyến chậm hơn 30 phút: hoàn 100%, không phí');
     if (t.homePickupStatus == 'REJECTED' || t.homeDropoffStatus == 'REJECTED') {
       return (percent: 100, tier: 'Nhà xe không nhận đón/trả tận nhà: hoàn 100% tiền còn lại, không phí');
