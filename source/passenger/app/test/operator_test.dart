@@ -246,4 +246,55 @@ void main() {
     final normalSaved = jsonDecode(prefs.getString('passenger_session')!) as Map<String, dynamic>;
     expect(normalSaved['vip'], isFalse);
   });
+
+  test('OperatorInfo.fromJson parses allow_cash_payment and Ticket.fromJson parses UNPAID_COD cash fields', () {
+    final defaultOp = OperatorInfo.fromJson({
+      'code': 'SAOMAI',
+      'name': 'Nhà xe Sao Mai',
+      'short_name': 'Sao Mai',
+      'hotline': '1900 6868',
+      'primary_color': '#2563EB',
+    });
+    expect(defaultOp.allowCash, isTrue);
+
+    final disabledCashOp = OperatorInfo.fromJson({
+      'code': 'SAOMAI',
+      'name': 'Nhà xe Sao Mai',
+      'short_name': 'Sao Mai',
+      'hotline': '1900 6868',
+      'primary_color': '#2563EB',
+      'allow_cash_payment': false,
+    });
+    expect(disabledCashOp.allowCash, isFalse);
+
+    final baseTicketJson = <String, dynamic>{
+      'ticket_id': 'tkt_BG1_A02',
+      'pnr': 'BG-000001',
+      'trip_id': 'trp_hn_th_01',
+      'route_name': 'Hà Nội — Thanh Hóa (Cao tốc)',
+      'departure_time': '2026-08-28T07:00:00+07:00',
+      'seat_code': 'A02',
+      'fare_vnd': 220000,
+      'passenger_name': 'Nguyễn An',
+      'pickup_stop': 'Bến xe Giáp Bát',
+      'dropoff_stop': 'Bến xe Phía Bắc Thanh Hóa',
+      'status': 'ACTIVE',
+      'order_id': 'ord_1',
+    };
+
+    final unpaidTicket = Ticket.fromJson({
+      ...baseTicketJson,
+      'payment_status': 'UNPAID_COD',
+      'cod_amount_vnd': 220000,
+    });
+    expect(unpaidTicket.unpaidCash, isTrue);
+    expect(unpaidTicket.codDue, 220000);
+
+    final paidTicket = Ticket.fromJson({
+      ...baseTicketJson,
+      'payment_status': 'PAID',
+      'cod_amount_vnd': 220000,
+    });
+    expect(paidTicket.unpaidCash, isFalse);
+  });
 }
