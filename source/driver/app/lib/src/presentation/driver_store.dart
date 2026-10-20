@@ -686,7 +686,11 @@ class DriverStore extends ChangeNotifier {
         notifyListeners();
       }
       if (offline && error == null) offline = false;
-      return (data: json['data'] is Map<String, dynamic> ? json['data'] as Map<String, dynamic> : null, error: error, code: code);
+      final data = json['data'] is Map<String, dynamic>
+          ? json['data'] as Map<String, dynamic>
+          // The COD refusal carries the ticket to charge at the top level of the body.
+          : (code == 'COD_PAYMENT_REQUIRED' ? json : null);
+      return (data: data, error: error, code: code);
     } catch (_) {
       offline = true;
       if (label != null) queue.add(QueuedAction(label, clock));

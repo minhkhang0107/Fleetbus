@@ -54,6 +54,21 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
     final store = DriverScope.read(context);
     final r = await store.boardWithQr(payload);
     if (!mounted) return;
+    // BR-COD-006: an unpaid COD ticket opens the cash collection sheet instead of the error sheet.
+    if (r.code == 'COD_PAYMENT_REQUIRED') {
+      final ticketId = r.data?['ticket_id']?.toString();
+      final passenger = (ticketId != null
+              ? store.manifest.where((p) => p.ticketId == ticketId).firstOrNull
+              : null) ??
+          store.manifest.where((p) => p.codDue && payload.contains(p.ticketId)).firstOrNull;
+      if (passenger != null) {
+        await showCodSheet(context, passenger);
+        if (!mounted) return;
+        setState(() => _busy = false);
+        await _scanner?.start();
+        return;
+      }
+    }
     final boardedList = (r.data?['boarded_passengers'] as List?)?.cast<Map<String, dynamic>>() ?? [];
     final seats = boardedList.map((p) => p['seat_code']?.toString()).whereType<String>().toList();
     final seat = r.data?['seat_code'] ?? r.data?['passenger']?['seat_code'];
