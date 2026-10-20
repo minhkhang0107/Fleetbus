@@ -88,7 +88,8 @@ export function publicOperatorProfile(op) {
     primary_color: op.primary_color,
     onboarding_url: `/o/${op.code}`,
     pickup_modes: [...(op.service_config?.pickup_modes || ['FIXED_STOP'])],
-    dropoff_modes: [...(op.service_config?.dropoff_modes || ['FIXED_LOCATION'])]
+    dropoff_modes: [...(op.service_config?.dropoff_modes || ['FIXED_LOCATION'])],
+    allow_cash_payment: op.service_config?.allow_cash_payment !== false
   };
 }
 
