@@ -1522,11 +1522,16 @@ function renderLive() {
 }
 
 // ---------- bookings ----------
+// A cash booking stays unpaid in the office ledger until the driver has collected every seat.
+function paymentLabel(b) {
+  if (b.payment_method === 'CASH') return b.payment_status === 'PAID' ? 'Đã thu · tiền mặt' : 'Chưa thu · tiền mặt';
+  return b.payment_status || '';
+}
 async function loadBookings() {
   const r = await api('/api/v1/ops/bookings');
   if (!r.ok) { $('#bookingsBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.status === 403 ? 'Vai trò của bạn không xem được danh sách đặt chỗ.' : r.message)}</p>`; return; }
   const list = r.data.bookings || [];
-  $('#bookingsBox').innerHTML = `<table><thead><tr><th>PNR</th><th>Chuyến</th><th>Khách</th><th>Ghế</th><th>Tiền</th><th>Thanh toán</th></tr></thead><tbody>${list.length ? list.map(b => `<tr><td class="mono">${esc(b.pnr)}</td><td class="mono">${esc(b.trip_id)}</td><td>${esc(b.passenger_name || '')}<div class="muted mono" style="font-size:12px">${esc(b.phone || '')}</div></td><td class="mono">${esc((b.seat_codes || []).join(', '))}</td><td class="mono">${esc(vnd(b.total_fare_vnd))}${b.voucher_code ? `<div class="muted" style="font-size:12px">${esc(b.voucher_code)} −${esc(vnd(b.discount_vnd))}</div>` : ''}</td><td>${esc(b.payment_status || '')}</td></tr>`).join('') : '<tr><td colspan="6" class="muted">Chưa có đặt chỗ.</td></tr>'}</tbody></table>`;
+  $('#bookingsBox').innerHTML = `<table><thead><tr><th>PNR</th><th>Chuyến</th><th>Khách</th><th>Ghế</th><th>Tiền</th><th>Thanh toán</th></tr></thead><tbody>${list.length ? list.map(b => `<tr><td class="mono">${esc(b.pnr)}</td><td class="mono">${esc(b.trip_id)}</td><td>${esc(b.passenger_name || '')}<div class="muted mono" style="font-size:12px">${esc(b.phone || '')}</div></td><td class="mono">${esc((b.seat_codes || []).join(', '))}</td><td class="mono">${esc(vnd(b.total_fare_vnd))}${b.voucher_code ? `<div class="muted" style="font-size:12px">${esc(b.voucher_code)} −${esc(vnd(b.discount_vnd))}</div>` : ''}</td><td>${esc(paymentLabel(b))}${b.payment_status === 'UNPAID_COD' ? `<div class="muted" style="font-size:12px">Đã thu ${esc(vnd(b.cod_collected_vnd || 0))} / ${esc(vnd(b.cod_amount_vnd || b.total_fare_vnd))}</div>` : ''}</td></tr>`).join('') : '<tr><td colspan="6" class="muted">Chưa có đặt chỗ.</td></tr>'}</tbody></table>`;
 }
 
 // ---------- service configuration ----------
