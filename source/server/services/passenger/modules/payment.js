@@ -614,6 +614,40 @@ export class PassengerPaymentService {
       return { success: false, error: `Không thể hủy vé đang ở trạng thái ${ticket.status}`, code: 'TICKET_NOT_ACTIVE' };
     }
 
+    if (ticket.payment_method === 'CASH' && ticket.cod_collected !== true) {
+      const cancelledAt = new Date(now).toISOString();
+      ticket.status = 'CANCELLED';
+      ticket.cancelled_at = cancelledAt;
+
+      if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+        this.eventBridge.emit('TICKET_CANCELLED', {
+          ticketId: ticket.ticket_id,
+          pnr: ticket.pnr,
+          tripId: ticket.trip_id,
+          seatCode: ticket.seat_code,
+          refundAmountVnd: 0
+        });
+      }
+
+      return {
+        success: true,
+        message: 'Đã hủy vé tiền mặt. Bạn chưa thanh toán nên không phát sinh hoàn tiền',
+        data: {
+          ticket_id: ticket.ticket_id,
+          pnr: ticket.pnr,
+          refund_id: null,
+          total_price_vnd: ticket.fare_vnd,
+          refund_percentage: 0,
+          refund_amount_vnd: 0,
+          fee_amount_vnd: 0,
+          tier: 'CASH_UNPAID',
+          policy_message: 'Vé tiền mặt chưa thu tiền: không phát sinh hoàn tiền',
+          status: 'CANCELLED',
+          cancelled_at: cancelledAt
+        }
+      };
+    }
+
     // PAX-025 (BR-DELAY-001): when the manager declared a delay over 30 minutes the cancellation fee is waived
     const delayMinutes = typeof this.getTripDelayMinutes === 'function' ? this.getTripDelayMinutes(ticket.trip_id) : 0;
     // D130: the company refused the home pickup / drop-off the passenger booked; leaving is free.

@@ -91,28 +91,35 @@ export function cancelTrip(services, operatorId, tripId, { reason, actor = 'offi
 
   // Tickets: full refund, whatever the cancellation tier would have been.
   const refunds = [];
+  let cancelledTickets = 0;
   for (const ticket of [...paymentService.tickets.values()]) {
     if (ticket.trip_id !== tripId || ticket.status !== 'ACTIVE') continue;
     ticket.status = 'CANCELLED';
     ticket.cancelled_at = at;
     ticket.cancel_source = 'OPERATOR';
-    const refund = paymentService.eventBridge?.requestRefund?.({
-      ticket_id: ticket.ticket_id,
-      pnr: ticket.pnr,
-      trip_id: tripId,
-      amount_vnd: ticket.fare_vnd,
-      reason: `Nhà xe hủy chuyến: ${text}`,
-      source: 'OPERATOR_CANCEL',
-      policy: { tier: 'OPERATOR_CANCEL', percentage: 100, fee_vnd: 0 }
-    });
-    if (refund) refunds.push(refund);
+    cancelledTickets += 1;
+    const cashUnpaid = ticket.payment_method === 'CASH' && ticket.cod_collected !== true;
+    if (!cashUnpaid) {
+      const refund = paymentService.eventBridge?.requestRefund?.({
+        ticket_id: ticket.ticket_id,
+        pnr: ticket.pnr,
+        trip_id: tripId,
+        amount_vnd: ticket.fare_vnd,
+        reason: `Nhà xe hủy chuyến: ${text}`,
+        source: 'OPERATOR_CANCEL',
+        policy: { tier: 'OPERATOR_CANCEL', percentage: 100, fee_vnd: 0 }
+      });
+      if (refund) refunds.push(refund);
+    }
     paymentService.eventBridge?.emit?.('TICKET_CANCELLED', { ticketId: ticket.ticket_id, pnr: ticket.pnr, tripId, seatCode: ticket.seat_code });
     trackingService?.sendNotificationOnce?.(`${ticket.ticket_id}:TRIP_CANCELLED`, ticket.owner_phone || ticket.passenger_phone, {
       operatorId: operatorOfTrip(services, tripId),
       title: 'Nhà xe hủy chuyến',
-      body: `Chuyến ${ticket.route_name || ''} ${when} (vé ${ticket.pnr}, ghế ${ticket.seat_code}) đã bị hủy: ${text}. Nhà xe hoàn 100% ${ticket.fare_vnd.toLocaleString('vi-VN')} đ, đang chờ xử lý. Bạn có thể đặt chuyến khác trong ứng dụng.`,
+      body: cashUnpaid
+        ? `Chuyến ${ticket.route_name || ''} ${when} (vé ${ticket.pnr}, ghế ${ticket.seat_code}) đã bị hủy: ${text}. Bạn chưa thanh toán nên không mất khoản nào. Bạn có thể đặt chuyến khác trong ứng dụng.`
+        : `Chuyến ${ticket.route_name || ''} ${when} (vé ${ticket.pnr}, ghế ${ticket.seat_code}) đã bị hủy: ${text}. Nhà xe hoàn 100% ${ticket.fare_vnd.toLocaleString('vi-VN')} đ, đang chờ xử lý. Bạn có thể đặt chuyến khác trong ứng dụng.`,
       type: 'TRIP_CANCELLED',
-      payload: { trip_id: tripId, ticket_id: ticket.ticket_id, pnr: ticket.pnr, refund_amount_vnd: ticket.fare_vnd }
+      payload: { trip_id: tripId, ticket_id: ticket.ticket_id, pnr: ticket.pnr, refund_amount_vnd: cashUnpaid ? 0 : ticket.fare_vnd }
     });
   }
 
@@ -150,7 +157,7 @@ export function cancelTrip(services, operatorId, tripId, { reason, actor = 'offi
       sale_status: 'CANCELLED',
       cancelled_at: at,
       cancel_reason: trip.cancel_reason,
-      cancelled_tickets: refunds.length,
+      cancelled_tickets: cancelledTickets,
       refund_total_vnd: refunds.reduce((sum, r) => sum + (r.amount_vnd || 0), 0),
       closed_orders: closedOrders
     }

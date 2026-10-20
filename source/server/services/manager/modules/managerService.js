@@ -50,6 +50,11 @@ function auditHash(body) {
   return crypto.createHash('sha256').update(JSON.stringify(body)).digest('hex');
 }
 
+/** Revenue counted for a booking: cash bookings count only what the driver has collected. */
+function bookingRevenue(b) {
+  return b.payment_method === 'CASH' ? (b.cod_collected_vnd || 0) : b.total_fare_vnd;
+}
+
 export const MOCK_MANAGERS_DB = [
   {
     user_id: 'mgr_01',
@@ -442,7 +447,7 @@ export class ManagerOperationsService {
    * Money figures over a set of bookings: gross fares, refunds paid back, and what is left.
    */
   _moneyFigures(bookings) {
-    const gross = bookings.reduce((sum, b) => sum + b.total_fare_vnd, 0);
+    const gross = bookings.reduce((sum, b) => sum + bookingRevenue(b), 0);
     const refunded = bookings.reduce((sum, b) => sum + (b.refund_amount_vnd || 0), 0);
     return { gross_revenue_vnd: gross, refunded_vnd: refunded, net_revenue_vnd: gross - refunded };
   }
@@ -1810,7 +1815,7 @@ export class ManagerOperationsService {
     const bookings = this.bookings.filter(b => trips.some(t => t.trip_id === b.trip_id) && inPeriod(b));
     const money = this._moneyFigures(bookings);
     const share = (channels) => money.gross_revenue_vnd > 0
-      ? round1((bookings.filter(b => channels.includes(b.channel)).reduce((sum, b) => sum + b.total_fare_vnd, 0) / money.gross_revenue_vnd) * 100)
+      ? round1((bookings.filter(b => channels.includes(b.channel)).reduce((sum, b) => sum + bookingRevenue(b), 0) / money.gross_revenue_vnd) * 100)
       : 0;
 
     const delays = trips.map(t => t.delay_minutes || 0);
