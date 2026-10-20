@@ -116,9 +116,8 @@ class DriverTodayTripsScreen extends StatelessWidget {
     final current = Panel(
       border: DTokens.line,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Row(children: [
+        Wrap(alignment: WrapAlignment.spaceBetween, crossAxisAlignment: WrapCrossAlignment.center, spacing: 8, runSpacing: 8, children: [
           pill,
-          const Spacer(),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             decoration: BoxDecoration(border: Border.all(color: const Color(0xFF9A3412)), borderRadius: BorderRadius.circular(4)),

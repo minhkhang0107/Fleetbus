@@ -183,17 +183,26 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
     }
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 32, 16, 24),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            _brand(),
-            const SizedBox(height: 28),
-            ..._fields(),
-            const Spacer(),
-            _submitButton(),
-            const SizedBox(height: 10),
-            _hotline(),
-          ]),
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 32, 16, 24),
+                child: IntrinsicHeight(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    _brand(),
+                    const SizedBox(height: 28),
+                    ..._fields(),
+                    const Spacer(),
+                    _submitButton(),
+                    const SizedBox(height: 10),
+                    _hotline(),
+                  ]),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

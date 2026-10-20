@@ -102,8 +102,7 @@ class _DriverRouteMapState extends State<DriverRouteMap> {
       _ready = false;
     }
     final header = Row(children: [
-      Text('Lộ trình còn lại', style: dsans(size: 14, weight: FontWeight.w600, color: DTokens.sub)),
-      const Spacer(),
+      Expanded(child: Text('Lộ trình còn lại', style: dsans(size: 14, weight: FontWeight.w600, color: DTokens.sub))),
       TextButton(onPressed: () => setState(() => _list = !_list), style: TextButton.styleFrom(minimumSize: const Size(48, 40)), child: Text(_list ? 'Xem bản đồ' : 'Xem danh sách', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.primaryInk))),
     ]);
     final list = ListView(padding: EdgeInsets.zero, children: [

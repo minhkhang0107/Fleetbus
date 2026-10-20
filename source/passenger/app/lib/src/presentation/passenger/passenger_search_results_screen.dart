@@ -46,11 +46,9 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
               store.loadTrips();
             }),
             gap(10),
-            Row(children: [
+            Wrap(spacing: 8, runSpacing: 8, children: [
               _Choice(label: 'Sớm nhất', selected: store.sort == 'time', onTap: () => store.setSort('time'), pill: true),
-              const SizedBox(width: 8),
               _Choice(label: 'Giá thấp', selected: store.sort == 'price', onTap: () => store.setSort('price'), pill: true),
-              const SizedBox(width: 8),
               _Choice(label: 'Nhiều chỗ', selected: store.sort == 'seats', onTap: () => store.setSort('seats'), pill: true),
             ]),
           ])),
@@ -178,11 +176,14 @@ class _TripCard extends StatelessWidget {
       },
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(color: trip.vip ? PTokens.primarySoft : const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(4)),
-            child: Text(trip.type, style: sans(size: 12, weight: FontWeight.w600, color: trip.vip ? PTokens.primaryDark : const Color(0xFF334155))),
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: trip.vip ? PTokens.primarySoft : const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(4)),
+              child: Text(trip.type, overflow: TextOverflow.ellipsis, maxLines: 1, style: sans(size: 12, weight: FontWeight.w600, color: trip.vip ? PTokens.primaryDark : const Color(0xFF334155))),
+            ),
           ),
+          const SizedBox(width: 8),
           const Spacer(),
           Text(vnd(store.fareOf(trip)), style: mono(size: 17, weight: FontWeight.w700)),
         ]),

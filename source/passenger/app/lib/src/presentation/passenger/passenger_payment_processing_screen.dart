@@ -225,26 +225,30 @@ class _PassengerBookingSuccessScreenState extends State<PassengerBookingSuccessS
                 child: Column(children: [
                   Padding(
                     padding: const EdgeInsets.all(16),
-                    child: Row(children: [Text('Mã đặt chỗ', style: sans(size: 13, color: PTokens.muted)), const Spacer(), Text(ticket.pnr, style: mono(size: 18, weight: FontWeight.w700, color: PTokens.pnr))]),
+                    child: Row(children: [Expanded(child: Text('Mã đặt chỗ', style: sans(size: 13, color: PTokens.muted))), Text(ticket.pnr, style: mono(size: 18, weight: FontWeight.w700, color: PTokens.pnr))]),
                   ),
                   const Divider(height: 1, color: PTokens.lineStrong),
                   Padding(
                     padding: const EdgeInsets.all(16),
-                    child: GridView.count(
-                      crossAxisCount: 2,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      childAspectRatio: 3.2,
-                      mainAxisSpacing: 8,
-                      children: [
-                        KeyValue('Chuyến', ticket.route),
-                        KeyValue('Khởi hành', '${ticket.pickupTimeLabel} · ${ticket.date.split(' ').last}', isMono: true),
-                        KeyValue(ticket.homePickup != null ? 'Đón tận nhà${ticket.pickupWindow != null ? ' ${ticket.pickupWindow}' : ''}' : 'Điểm đón', ticket.homePickup ?? ticket.pickup),
-                        KeyValue('Ghế', ticket.seat, isMono: true),
-                        KeyValue('Xe', ticket.plate.isEmpty ? 'Nhà xe sẽ báo' : ticket.plate, isMono: ticket.plate.isNotEmpty),
-                        KeyValue('Hành khách', ticket.name),
-                      ],
-                    ),
+                    child: Column(children: [
+                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Expanded(child: KeyValue('Chuyến', ticket.route)),
+                        const SizedBox(width: 12),
+                        Expanded(child: KeyValue('Khởi hành', '${ticket.pickupTimeLabel} · ${ticket.date.split(' ').last}', isMono: true)),
+                      ]),
+                      gap(8),
+                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Expanded(child: KeyValue(ticket.homePickup != null ? 'Đón tận nhà${ticket.pickupWindow != null ? ' ${ticket.pickupWindow}' : ''}' : 'Điểm đón', ticket.homePickup ?? ticket.pickup)),
+                        const SizedBox(width: 12),
+                        Expanded(child: KeyValue('Ghế', ticket.seat, isMono: true)),
+                      ]),
+                      gap(8),
+                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Expanded(child: KeyValue('Xe', ticket.plate.isEmpty ? 'Nhà xe sẽ báo' : ticket.plate, isMono: ticket.plate.isNotEmpty)),
+                        const SizedBox(width: 12),
+                        Expanded(child: KeyValue('Hành khách', ticket.name)),
+                      ]),
+                    ]),
                   ),
                 ]),
               ),

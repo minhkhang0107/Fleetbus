@@ -104,15 +104,17 @@ class BigButton extends StatelessWidget {
     ]);
     final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(height >= 72 ? 12 : 10));
     return SizedBox(
-      height: height,
       width: double.infinity,
-      child: outline
-          ? OutlinedButton(onPressed: onPressed, style: OutlinedButton.styleFrom(foregroundColor: color, side: BorderSide(color: onPressed == null ? DTokens.line : color, width: 1.5), shape: shape), child: child)
-          : FilledButton(
-              onPressed: onPressed,
-              style: FilledButton.styleFrom(backgroundColor: color, foregroundColor: foreground, disabledBackgroundColor: DTokens.panel, shape: shape.copyWith(side: onPressed == null ? const BorderSide(color: Color(0xFF475569)) : BorderSide.none)),
-              child: child,
-            ),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: height),
+        child: outline
+            ? OutlinedButton(onPressed: onPressed, style: OutlinedButton.styleFrom(foregroundColor: color, side: BorderSide(color: onPressed == null ? DTokens.line : color, width: 1.5), shape: shape), child: child)
+            : FilledButton(
+                onPressed: onPressed,
+                style: FilledButton.styleFrom(backgroundColor: color, foregroundColor: foreground, disabledBackgroundColor: DTokens.panel, shape: shape.copyWith(side: onPressed == null ? const BorderSide(color: Color(0xFF475569)) : BorderSide.none)),
+                child: child,
+              ),
+      ),
     );
   }
 }

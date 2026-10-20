@@ -169,10 +169,16 @@ class DriverCockpitDashboard extends StatelessWidget {
               child: Row(children: [
                 Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: store.offline ? const Color(0xFFF59E0B) : const Color(0xFF22C55E))),
                 const SizedBox(width: 6),
-                Text(store.offline ? 'Mất mạng · lưu trên máy' : 'Đang gửi vị trí', style: dsans(size: 13, color: store.offline ? DTokens.warnInk : DTokens.okInk)),
-                Text('  ·  ', style: dsans(size: 13, color: const Color(0xFF475569))),
-                Text(store.queue.isEmpty ? 'Đã đồng bộ' : '${store.queue.length} chờ đồng bộ', style: dsans(size: 13, color: DTokens.sub)),
-                const Spacer(),
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(children: [
+                      TextSpan(text: store.offline ? 'Mất mạng · lưu trên máy' : 'Đang gửi vị trí', style: dsans(size: 13, color: store.offline ? DTokens.warnInk : DTokens.okInk)),
+                      TextSpan(text: '  ·  ', style: dsans(size: 13, color: const Color(0xFF475569))),
+                      TextSpan(text: store.queue.isEmpty ? 'Đã đồng bộ' : '${store.queue.length} chờ đồng bộ', style: dsans(size: 13, color: DTokens.sub)),
+                    ]),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Text(hhmm(store.clock), style: dmono(size: 13, weight: FontWeight.w500, color: DTokens.muted)),
               ]),
             ),

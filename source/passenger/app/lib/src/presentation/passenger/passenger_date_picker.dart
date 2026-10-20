@@ -208,7 +208,7 @@ class _CalendarSheet extends StatelessWidget {
     }
     final lastLabel = TravelDate.of(cal.lastDate).dayMonth;
     return ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.85),
+      constraints: BoxConstraints(maxHeight: (MediaQuery.sizeOf(context).height - MediaQuery.viewInsetsOf(context).bottom) * 0.85),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
         Text('Chọn ngày đi', style: sans(size: 18, weight: FontWeight.w700)),
         gap(4),

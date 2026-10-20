@@ -720,7 +720,7 @@ void main() {
   });
 
   // The dashboard tablet is 1280x720 landscape; phones stay the reference design.
-  for (final (name, size) in const [('tablet 1280x720', Size(1280, 720)), ('phone 390x844', Size(390, 844))]) {
+  for (final (name, size, scale) in const [('tablet 1280x720', Size(1280, 720), 0.6), ('phone 390x844', Size(390, 844), 0.6), ('phone 360x640 with 130 % font', Size(360, 640), 0.78)]) {
     testWidgets('every driver screen lays out without overflow on a $name', (tester) async {
       addTearDown(() {
         tester.view.resetPhysicalSize();
@@ -729,8 +729,8 @@ void main() {
       });
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1.0;
-      // The test font draws every glyph 1 em wide; Geist averages about 0.6 em, so scale text to match it.
-      tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+      // The test font draws every glyph 1 em wide; Geist averages about 0.6 em, so scale text to match it (0.78 ≈ a 130 % system font).
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
       final store = storeWithServer();
       await tester.runAsync(() async {
         expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
@@ -752,6 +752,24 @@ void main() {
       store.dispose();
     });
   }
+
+  testWidgets('driver login lays out without overflow when keyboard is open', (tester) async {
+    addTearDown(() {
+      tester.view.reset();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    tester.view.physicalSize = const Size(360, 740);
+    tester.view.devicePixelRatio = 1.0;
+    // The test font draws every glyph 1 em wide; Geist averages about 0.6 em, so scale text to match it.
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+    tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+    final store = storeWithServer();
+    await tester.pumpWidget(DriverScope(store: store, child: const MaterialApp(home: DriverLoginScreen())));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
 
   testWidgets('the driver map lists the stops still ahead with passengers to pick up and drop off', (tester) async {
     addTearDown(() {

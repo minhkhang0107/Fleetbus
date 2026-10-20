@@ -49,80 +49,86 @@ class _PassengerSplashScreenState extends State<PassengerSplashScreen> {
     return Scaffold(
       backgroundColor: PTokens.surface,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight, maxWidth: 480),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+                  child: IntrinsicHeight(
                     child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Image.asset('assets/brand/logo.png', width: 80, height: 80),
-                        gap(16),
-                        Text(op?.name ?? 'BusGo', style: sans(size: 32, weight: FontWeight.w700), textAlign: TextAlign.center),
-                        gap(8),
-                        Text(
-                          op != null ? 'Đặt vé, giữ ghế 10 phút, theo dõi xe trên đường.' : 'Ứng dụng đặt vé của nhà xe',
-                          textAlign: TextAlign.center,
-                          style: sans(size: 15, color: PTokens.muted, height: 1.5),
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Image.asset('assets/brand/logo.png', width: 80, height: 80),
+                              gap(16),
+                              Text(op?.name ?? 'BusGo', style: sans(size: 32, weight: FontWeight.w700), textAlign: TextAlign.center),
+                              gap(8),
+                              Text(
+                                op != null ? 'Đặt vé, giữ ghế 10 phút, theo dõi xe trên đường.' : 'Ứng dụng đặt vé của nhà xe',
+                                textAlign: TextAlign.center,
+                                style: sans(size: 15, color: PTokens.muted, height: 1.5),
+                              ),
+                              if (op != null && op.hotline.isNotEmpty) ...[
+                                gap(8),
+                                Text('Tổng đài ${op.hotline}', style: sans(size: 15, color: PTokens.muted)),
+                              ],
+                            ],
+                          ),
                         ),
-                        if (op != null && op.hotline.isNotEmpty) ...[
+                        if (op == null) ...[
+                          LabeledField(
+                            label: 'Mã nhà xe',
+                            controller: _codeController,
+                            hint: 'Ví dụ SAOMAI',
+                            maxLength: 20,
+                            textCapitalization: TextCapitalization.characters,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
+                              TextInputFormatter.withFunction((oldValue, newValue) =>
+                                newValue.copyWith(text: newValue.text.toUpperCase()),
+                              ),
+                            ],
+                            textInputAction: TextInputAction.done,
+                            onSubmitted: (_) => _submit(),
+                          ),
+                          if (_error != null) ...[
+                            gap(8),
+                            Text(_error!, style: sans(size: 13, color: PTokens.danger)),
+                          ],
+                          gap(16),
+                          PrimaryButton(
+                            label: _busy ? 'Đang kiểm tra…' : 'Tiếp tục',
+                            onPressed: _busy ? () {} : _submit,
+                          ),
+                        ] else ...[
+                          PrimaryButton(
+                            label: 'Đăng nhập bằng số điện thoại',
+                            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerLoginScreen())),
+                          ),
                           gap(8),
-                          Text('Tổng đài ${op.hotline}', style: sans(size: 15, color: PTokens.muted)),
+                          GhostButton(
+                            label: 'Xem chuyến, đăng nhập sau',
+                            onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const PassengerMainShell())),
+                          ),
+                          gap(8),
+                          LinkButton(
+                            label: 'Đổi nhà xe',
+                            onPressed: () {
+                              _codeController.clear();
+                              _error = null;
+                              store.changeOperator();
+                            },
+                          ),
                         ],
                       ],
                     ),
                   ),
-                  if (op == null) ...[
-                    LabeledField(
-                      label: 'Mã nhà xe',
-                      controller: _codeController,
-                      hint: 'Ví dụ SAOMAI',
-                      maxLength: 20,
-                      textCapitalization: TextCapitalization.characters,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
-                        TextInputFormatter.withFunction((oldValue, newValue) =>
-                          newValue.copyWith(text: newValue.text.toUpperCase()),
-                        ),
-                      ],
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) => _submit(),
-                    ),
-                    if (_error != null) ...[
-                      gap(8),
-                      Text(_error!, style: sans(size: 13, color: PTokens.danger)),
-                    ],
-                    gap(16),
-                    PrimaryButton(
-                      label: _busy ? 'Đang kiểm tra…' : 'Tiếp tục',
-                      onPressed: _busy ? () {} : _submit,
-                    ),
-                  ] else ...[
-                    PrimaryButton(
-                      label: 'Đăng nhập bằng số điện thoại',
-                      onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerLoginScreen())),
-                    ),
-                    gap(8),
-                    GhostButton(
-                      label: 'Xem chuyến, đăng nhập sau',
-                      onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const PassengerMainShell())),
-                    ),
-                    gap(8),
-                    LinkButton(
-                      label: 'Đổi nhà xe',
-                      onPressed: () {
-                        _codeController.clear();
-                        _error = null;
-                        store.changeOperator();
-                      },
-                    ),
-                  ],
-                ],
+                ),
               ),
             ),
           ),

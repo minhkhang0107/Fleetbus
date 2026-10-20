@@ -1171,7 +1171,12 @@ void main() {
   });
 
   // ROD2 tablet in landscape (1200x768 dp) and portrait (768x1200 dp), and a phone.
-  for (final (name, size) in const [('landscape tablet', Size(1200, 768)), ('portrait tablet', Size(768, 1200)), ('phone', Size(390, 844))]) {
+  for (final (name, size, scale) in const [
+    ('landscape tablet', Size(1200, 768), 0.6),
+    ('portrait tablet', Size(768, 1200), 0.6),
+    ('phone', Size(390, 844), 0.6),
+    ('small phone with 130 % font', Size(360, 640), 0.78),
+  ]) {
     testWidgets('every passenger screen lays out without overflow on a $name', (tester) async {
       addTearDown(() {
         tester.view.resetPhysicalSize();
@@ -1180,8 +1185,8 @@ void main() {
       });
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1.0;
-      // The test font draws every glyph 1 em wide; Geist averages about 0.6 em, so scale text to match it.
-      tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+      // The test font draws every glyph 1 em wide; Geist averages about 0.6 em, so scale text to match it (0.78 ≈ a 130 % system font).
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
       final store = await storeWithServer();
       paid = true;
       await store.verifyOtp('0987654321', '123456');
@@ -1224,6 +1229,86 @@ void main() {
       store.stopHold();
     });
   }
+
+  testWidgets('booking success screen lays out without overflow with long passenger name and standard text scale', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    tester.view.physicalSize = const Size(360, 740);
+    tester.view.devicePixelRatio = 1.0;
+    // The test font is about 1.7x wider than Geist, so 1.0 stands in for a large system text size.
+    tester.platformDispatcher.textScaleFactorTestValue = 1.0;
+
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(
+        store: await storeWithServer(),
+        child: PassengerBookingSuccessScreen(
+          ticket: Ticket.fromJson({...ticket, 'passenger_name': 'Nguyễn Thị Minh Khai'}),
+          phone: '0987654321',
+        ),
+      ),
+    ));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('travel date picker calendar sheet lays out without overflow when keyboard is open', (tester) async {
+    addTearDown(() {
+      tester.view.reset();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    tester.view.physicalSize = const Size(360, 740);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+    tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+
+    late BuildContext sheetContext;
+    await tester.pumpWidget(
+      PassengerScope(
+        store: await storeWithServer(),
+        child: MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) {
+                sheetContext = context;
+                return const SizedBox();
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    showTravelDatePicker(sheetContext);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('passenger splash screen lays out without overflow when keyboard is open', (tester) async {
+    addTearDown(() {
+      tester.view.reset();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.78;
+    tester.view.viewInsets = const FakeViewPadding(bottom: 260);
+
+    await tester.pumpWidget(
+      PassengerScope(
+        store: await storeWithServer(selectOp: false),
+        child: const MaterialApp(home: PassengerSplashScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('VietQR payment check failure is visible above the button without scrolling on 1080x2340 (F16)', (tester) async {
     addTearDown(() {
