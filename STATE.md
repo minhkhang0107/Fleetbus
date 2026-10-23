@@ -242,3 +242,30 @@ Record: `decision-log.md` (D158). Joint Gemini & Claude code review.
   - `source/manager/README.md`: clarified that `source/manager/web_dist/index.html` is the active production SPA calling the API, with `source/manager/app/` as the Flutter Web monorepo framework.
 - [x] **Tests**: 566 tests pass (`npm test`), lint clean (`npm run lint`), live E2E flow verified (`npm run e2e`).
 
+## 18. Home Pickup Dynamic ETA, Smooth Map Tracking & Milestones (2026-10-23)
+
+Record: `docs/spec/home_pickup_dynamic_eta_google_maps_spec.md`, `decision-log.md` (D159). Joint Gemini & Claude implementation via 4-phase atomic execution plan.
+
+- [x] **Phase 1: Backend ETA Engine & Threshold Refinement**:
+  - Tách ngưỡng `HOME_NEAR_METERS = 300` (tiếp cận ngõ, chuẩn bị ra cửa) và `HOME_AT_DOOR_METERS = 50` (thực sự trước cửa, tốc độ $\le 5\text{ km/h}$).
+  - Cập nhật payload `homeEta` và HUD telemetry với `near_door`, `at_door`, và `is_at_station = at_door`.
+  - Dynamic Queue ETA Engine: cộng dồn dwell time (3 phút/nhà) và thời gian khách trước xin thêm (`NEED_2`, `NEED_5`).
+  - ETA Hysteresis: lưu `trip.cached_etas[ticket_id]`, chống nhảy số lùi khi có GPS jitter dưới 1 phút.
+- [x] **Phase 2: 4-Milestone Notification Engine (M1 -> M4)**:
+  - M1 (T-30m / Xuất phát): Thông báo thứ tự đón trong hàng đợi `homeQueue` khi `HOME_RUN_STARTED`.
+  - M2 (T-15m / $\le 3\text{ km}$): Thông báo `HOME_PICKUP_NEAR_AREA` nhắc khách sẵn sàng hành lý khi xe tiến vào khu vực. Bổ sung vào `OUTSIDE_APP_TYPES` trong `messaging.js`.
+  - M3 (T-5m / $\le 300\text{ m}$ / `near_door`): Báo `PICKUP_APPROACHING` mời khách chuẩn bị ra cửa.
+  - M4 (Tại cửa $\le 50\text{ m}$ / `at_door`): Báo `HOME_PICKUP_ARRIVED` kích hoạt đếm ngược 5 phút chờ của tài xế.
+  - Phân cấp level (1–4) và cờ `trip.home_milestones[ticket_id]` chặn gửi lùi mốc khi xe đi lệch hướng.
+- [x] **Phase 3: Smooth Map Movement & HUD Live Countdown**:
+  - Polyline snap-to-route (`snapToRoute`): Chiếu vuông góc vị trí xe lên tim đường polyline trong phạm vi 50m; giữ nguyên tọa độ gốc khi xe rẽ vào ngõ đón khách (off-route).
+  - Bearing smoothing: Giữ nguyên góc xoay xe khi tốc độ $< 3\text{ km/h}$ (chống xoay icon xe khi dừng đỗ).
+  - Smooth interpolation: `AnimationController` nội suy chuyển động marker mượt mà qua các pings thay vì teleport giật cục.
+  - Dead reckoning: Ngoại suy vị trí tối đa 15s khi rớt ping và tín hiệu LIVE.
+  - Live HUD Countdown & Queue Badge: widget `_Coming` hiển thị thanh hàng đợi ("Điểm đón thứ 2/4 · 1 điểm trước bạn"), đồng hồ đếm ngược thời gian chờ tại cửa (màu cam chuyển đỏ khi $< 1$ phút), và cảnh báo `_NearDoor`.
+- [x] **Tests & Regression Verification**:
+  - Node.js backend: 577/577 tests pass (`npm test`).
+  - Linter: 138 files pass syntax check (`npm run lint`).
+  - Flutter Passenger App: 90/90 tests pass (`flutter test`).
+  - Flutter Driver App: 66/66 tests pass (`flutter test`).
+
