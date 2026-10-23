@@ -234,11 +234,11 @@ Record: `decision-log.md` (D158). Joint Gemini & Claude code review.
 
 - [x] **StateStore performance**:
   - `OPTIONS` and static client UI routes (`/`, `/passenger`, `/driver`, `/manager`) bypass `store.flush()`.
-  - Static HTML files cached in-memory (`staticCache`), removing blocking `fs.readFileSync` calls.
-  - Frozen collection digest caching (`WeakMap` on `c.freeze`, e.g. `audit_log`, `stations`) eliminates re-hashing immutable records on every flush.
-  - SQLite transient error retry: 3 attempts with exponential backoff on `SQLITE_BUSY` / `SQLITE_LOCKED`.
+  - Static HTML files pre-loaded in memory (`staticSuites`), supporting `GET` and `HEAD`, eliminating all synchronous `fs.existsSync` and `fs.readFileSync` calls on requests.
+  - Frozen collection digest caching (`WeakMap` on `c.freeze`, e.g. `audit_log`) eliminates re-serializing and re-hashing immutable records on every flush.
+  - SQLite transient error retry: 1 retry with 25ms backoff on `errcode 5` (`SQLITE_BUSY`) or `errcode 6` (`SQLITE_LOCKED`), complementing `PRAGMA busy_timeout = 3000`.
 - [x] **Documentation alignment**:
   - `bus_booking_tracking_system_spec_v3_enhanced.md`: added Implementation Baseline & Architectural Evolution note.
   - `source/manager/README.md`: clarified that `source/manager/web_dist/index.html` is the active production SPA calling the API, with `source/manager/app/` as the Flutter Web monorepo framework.
-- [x] **Tests**: 563 tests pass (`npm test`), lint clean (`npm run lint`), live E2E flow verified (`npm run e2e`).
+- [x] **Tests**: 566 tests pass (`npm test`), lint clean (`npm run lint`), live E2E flow verified (`npm run e2e`).
 

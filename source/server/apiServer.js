@@ -176,18 +176,31 @@ export function createFleetBusServer(customServices = {}) {
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
   }
 
-  const staticCache = new Map();
-  function serveStaticFile(targetPath, res) {
-    let content = staticCache.get(targetPath);
-    if (!content) {
-      if (!fs.existsSync(targetPath)) return false;
-      content = fs.readFileSync(targetPath);
-      staticCache.set(targetPath, content);
-    }
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(content);
-    return true;
+  function loadStaticSuite(distRel, designRel) {
+    const distPath = path.resolve(__dirname, distRel);
+    const htmlPath = path.resolve(__dirname, designRel);
+    const target = fs.existsSync(distPath) ? distPath : (fs.existsSync(htmlPath) ? htmlPath : null);
+    return target && fs.existsSync(target) ? fs.readFileSync(target) : null;
   }
+
+  const staticSuites = {
+    passenger: loadStaticSuite('../../source/passenger/web_dist/index.html', '../../docs/designs/passenger_suite.html'),
+    driver: loadStaticSuite('../../source/driver/web_dist/index.html', '../../docs/designs/driver_cockpit.html'),
+    manager: loadStaticSuite('../../source/manager/web_dist/index.html', '../../docs/designs/manager_portal.html'),
+  };
+
+  const STATIC_ROUTES = new Map([
+    ['/', 'passenger'],
+    ['/index.html', 'passenger'],
+    ['/passenger', 'passenger'],
+    ['/driver', 'driver'],
+    ['/driver/cockpit', 'driver'],
+    ['/driver.html', 'driver'],
+    ['/manager', 'manager'],
+    ['/ops', 'manager'],
+    ['/manager.html', 'manager'],
+    ['/admin', 'manager'],
+  ]);
 
   const server = http.createServer((req, res) => {
     const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost:3000'}`);
@@ -201,22 +214,17 @@ export function createFleetBusServer(customServices = {}) {
       return;
     }
 
-    // Static client suite served from in-memory cache without database flush
-    if (req.method === 'GET') {
-      if (pathname === '/' || pathname === '/index.html' || pathname === '/passenger') {
-        const distPath = path.resolve(__dirname, '../../source/passenger/web_dist/index.html');
-        const htmlPath = path.resolve(__dirname, '../../docs/designs/passenger_suite.html');
-        if (serveStaticFile(fs.existsSync(distPath) ? distPath : htmlPath, res)) return;
-      }
-      if (pathname === '/driver' || pathname === '/driver/cockpit' || pathname === '/driver.html') {
-        const distPath = path.resolve(__dirname, '../../source/driver/web_dist/index.html');
-        const htmlPath = path.resolve(__dirname, '../../docs/designs/driver_cockpit.html');
-        if (serveStaticFile(fs.existsSync(distPath) ? distPath : htmlPath, res)) return;
-      }
-      if (pathname === '/manager' || pathname === '/ops' || pathname === '/manager.html' || pathname === '/admin') {
-        const distPath = path.resolve(__dirname, '../../source/manager/web_dist/index.html');
-        const htmlPath = path.resolve(__dirname, '../../docs/designs/manager_portal.html');
-        if (serveStaticFile(fs.existsSync(distPath) ? distPath : htmlPath, res)) return;
+    // Static client suite served from in-memory cache without database flush (GET and HEAD)
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      const suite = STATIC_ROUTES.get(pathname);
+      if (suite && staticSuites[suite]) {
+        const body = staticSuites[suite];
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Length': Buffer.byteLength(body),
+        });
+        res.end(req.method === 'HEAD' ? undefined : body);
+        return;
       }
     }
 

@@ -16,7 +16,7 @@ import { PLATFORM_SCOPE } from './tenantDb.js';
 
 const MARKER = (name) => `collection:${name}`;
 
-const FROZEN_DIGESTS = new WeakMap();
+export const FROZEN_DIGESTS = new WeakMap();
 
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -88,7 +88,7 @@ export class StateStore {
   }
 
   /** Writes what changed since the last flush. Throws (and marks the store failed) when a write fails. */
-  flush({ only = null } = {}) {
+  flush() {
     if (this.failed) throw this.failed;
     const writes = new Map(); // scope -> { upserts: [], deletes: [], markers: Set }
     const pending = [];
@@ -96,8 +96,7 @@ export class StateStore {
       if (!writes.has(scope)) writes.set(scope, { upserts: [], deletes: [], markers: new Set() });
       return writes.get(scope);
     };
-    const targets = only ? this.collections.filter(c => only.has(c.name)) : this.collections;
-    for (const c of targets) {
+    for (const c of this.collections) {
       const before = this.stored.get(c.name);
       const now = new Map();
       for (const rec of c.dump()) {
@@ -131,7 +130,7 @@ export class StateStore {
         const mark = db.prepare("INSERT OR IGNORE INTO tenant_meta (key, value) VALUES (?, '1')");
 
         let attempts = 0;
-        const maxAttempts = 3;
+        const maxAttempts = 2; // single retry if transient busy/locked (busy_timeout is already 3000ms)
         while (true) {
           try {
             db.exec('BEGIN IMMEDIATE');
@@ -147,10 +146,9 @@ export class StateStore {
             }
           } catch (err) {
             attempts++;
-            const msg = (err?.message || '') + (err?.code || '');
-            const isTransient = msg.includes('SQLITE_BUSY') || msg.includes('SQLITE_LOCKED') || msg.includes('database is locked') || msg.includes('busy');
+            const isTransient = err?.errcode === 5 || err?.errcode === 6 || err?.code === 'SQLITE_BUSY' || err?.code === 'SQLITE_LOCKED';
             if (isTransient && attempts < maxAttempts) {
-              sleepSync(attempts * 20);
+              sleepSync(25);
               continue;
             }
             throw err;
@@ -193,6 +191,7 @@ export function mapCollection(name, getMap, scopeOf) {
 export function listCollection(name, getList, scopeOf, { freeze = false, platformFirst = false, afterRestore = null } = {}) {
   return {
     name,
+    freeze,
     platformFirst,
     dump: () => getList().map((value, order) => ({ key: String(order), order, value, scope: scopeOf(value) })),
     restore: (recs) => {
