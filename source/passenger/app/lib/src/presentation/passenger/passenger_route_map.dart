@@ -54,7 +54,16 @@ class PassengerRouteMap extends StatefulWidget {
   State<PassengerRouteMap> createState() => PassengerRouteMapState();
 }
 
-class PassengerRouteMapState extends State<PassengerRouteMap> {
+class PassengerRouteMapState extends State<PassengerRouteMap> with TickerProviderStateMixin {
+  /// A position within this distance of the route is drawn on the road; farther (a lane to a home address) stays as sent.
+  static const snapMaxMeters = 50.0;
+  /// Below this speed the GPS heading is noise: the arrow keeps the last real one.
+  static const minBearingSpeedKmh = 3.0;
+  /// The marker glides to each new position over this time (pings come every ~2 s).
+  static const moveDuration = Duration(milliseconds: 1200);
+  /// Without a new ping the bus is carried forward on its heading and speed, never past this long after the last one.
+  static const deadReckonLimit = Duration(seconds: 15);
+
   // One tile provider for the map's life: the radar rebuilds on every position update, and a new provider per build
   // disposes the previous one (and its HTTP client) before slow tiles arrive (seen on the driver tablet).
   late final TileProvider _tiles = widget.tileProvider ?? NetworkTileProvider(abortObsoleteRequests: false);
@@ -69,10 +78,124 @@ class PassengerRouteMapState extends State<PassengerRouteMap> {
   @visibleForTesting
   bool get isFitted => _fitted;
 
+  late final AnimationController _motion = AnimationController(vsync: this, duration: moveDuration);
+  (double, double)? _lastPing;
+  LatLng? _from;
+  LatLng? _ping;
+  double? _lastValidBearing;
+
+  @visibleForTesting
+  AnimationController get motion => _motion;
+
+  /// Where the bus marker is drawn right now.
+  @visibleForTesting
+  LatLng? get shownBus => _ping == null ? null : _busAt(_motion.value);
+
+  @visibleForTesting
+  double? get shownBearing => _lastValidBearing;
+
+  /// The point on the route nearest to [point], if the route passes within [maxDistanceMeters]; otherwise [point].
+  static LatLng snapToRoute(LatLng point, List<LatLng> polylinePoints, {double maxDistanceMeters = snapMaxMeters}) {
+    if (polylinePoints.isEmpty) return point;
+    // Flat metres around the point: plenty accurate over a road segment.
+    const r = 6371000.0;
+    final kx = math.cos(point.latitude * math.pi / 180) * math.pi / 180 * r;
+    const ky = math.pi / 180 * r;
+    (double, double) xy(LatLng p) => ((p.longitude - point.longitude) * kx, (p.latitude - point.latitude) * ky);
+    var best = double.infinity;
+    LatLng? snapped;
+    void consider(double x, double y) {
+      final d = math.sqrt(x * x + y * y);
+      if (d < best) {
+        best = d;
+        snapped = LatLng(point.latitude + y / ky, point.longitude + x / kx);
+      }
+    }
+    if (polylinePoints.length == 1) {
+      final (x, y) = xy(polylinePoints.first);
+      consider(x, y);
+    }
+    for (var i = 0; i + 1 < polylinePoints.length; i++) {
+      final (ax, ay) = xy(polylinePoints[i]);
+      final (bx, by) = xy(polylinePoints[i + 1]);
+      final dx = bx - ax;
+      final dy = by - ay;
+      final len2 = dx * dx + dy * dy;
+      final t = len2 == 0 ? 0.0 : ((-ax * dx - ay * dy) / len2).clamp(0.0, 1.0);
+      consider(ax + t * dx, ay + t * dy);
+    }
+    return best <= maxDistanceMeters ? snapped! : point;
+  }
+
+  /// [from] carried [elapsed] along [bearing] at [speedKmh], at most [deadReckonLimit] worth.
+  static LatLng deadReckon(LatLng from, double bearing, double speedKmh, Duration elapsed) {
+    final secs = math.min(elapsed.inMilliseconds, deadReckonLimit.inMilliseconds) / 1000;
+    if (secs <= 0 || speedKmh <= 0) return from;
+    const r = 6371000.0;
+    final d = speedKmh / 3.6 * secs;
+    final b = bearing * math.pi / 180;
+    final lat = from.latitude + d * math.cos(b) / r * 180 / math.pi;
+    final lng = from.longitude + d * math.sin(b) / (r * math.cos(from.latitude * math.pi / 180)) * 180 / math.pi;
+    return LatLng(lat, lng);
+  }
+
+  /// The marker [t] of the way through the current motion: first the glide from the old place to the new ping,
+  /// then, while the signal is live, the bus coasting on until the next ping or the dead-reckoning limit.
+  LatLng _busAt(double t) {
+    final ping = _ping!;
+    final elapsed = _motion.duration! * t;
+    if (elapsed < moveDuration) {
+      final from = _from ?? ping;
+      final f = elapsed.inMicroseconds / moveDuration.inMicroseconds;
+      return LatLng(from.latitude + (ping.latitude - from.latitude) * f, from.longitude + (ping.longitude - from.longitude) * f);
+    }
+    final bearing = _lastValidBearing;
+    final speed = _effectiveSpeed;
+    if (!_coasting || bearing == null || speed == null) return ping;
+    return snapToRoute(deadReckon(ping, bearing, speed, elapsed - moveDuration), _routePoints);
+  }
+
+  bool get _coasting => _effectiveSignal == GpsSignal.live && (_effectiveSpeed ?? 0) >= minBearingSpeedKmh && _lastValidBearing != null;
+
+  List<LatLng> get _routePoints => [for (final p in _effectiveRoute) LatLng(p.$1, p.$2)];
+
+  /// Takes the newest ping: keeps the heading when the bus is (almost) still, and starts the glide towards it.
+  void _takePing() {
+    final speed = _effectiveSpeed;
+    final bearing = _effectiveBearing;
+    if (bearing != null && (speed == null || speed >= minBearingSpeedKmh || _lastValidBearing == null)) {
+      _lastValidBearing = bearing;
+    }
+    final lat = _effectiveBusLat;
+    final lng = _effectiveBusLng;
+    if (lat == null || lng == null) {
+      _lastPing = null;
+      _from = null;
+      _ping = null;
+      _motion.stop();
+      return;
+    }
+    if (_lastPing == (lat, lng)) return;
+    final first = _ping == null;
+    _from = first ? null : _busAt(_motion.value);
+    _lastPing = (lat, lng);
+    _ping = snapToRoute(LatLng(lat, lng), _routePoints);
+    if (first) {
+      // The first position is drawn where it is: its age is unknown, so it is not carried forward either.
+      _motion.duration = moveDuration;
+      _motion.value = 1;
+      return;
+    }
+    // The clamp counts from the ping: the glide plus the coast never run past deadReckonLimit.
+    _motion.duration = _coasting ? deadReckonLimit : moveDuration;
+    _motion.forward(from: 0);
+  }
+
   @override
   void initState() {
     super.initState();
     _mapController = MapController();
+    _takePing();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _checkInitialFit();
     });
@@ -81,6 +204,7 @@ class PassengerRouteMapState extends State<PassengerRouteMap> {
   @override
   void didUpdateWidget(PassengerRouteMap oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _takePing();
     _checkInitialFit();
     final focus = widget.focusStopId;
     if (_mapReady && focus != null && focus != oldWidget.focusStopId) {
@@ -91,6 +215,7 @@ class PassengerRouteMapState extends State<PassengerRouteMap> {
 
   @override
   void dispose() {
+    _motion.dispose();
     _mapController.dispose();
     super.dispose();
   }
@@ -173,6 +298,88 @@ class PassengerRouteMapState extends State<PassengerRouteMap> {
     if (lat != null && lng != null) {
       _mapController.move(LatLng(lat, lng), 13);
     }
+  }
+
+  /// The bus: a circle with the heading arrow, the speed label hanging below.
+  Marker _busMarker(LatLng point) {
+    final live = _effectiveSignal == GpsSignal.live;
+    final bearing = _lastValidBearing;
+    final speedText = live
+        ? '${_effectiveSpeed?.round() ?? 0} km/h · vừa cập nhật'
+        : (_effectiveSignal == GpsSignal.none ? 'Chưa có vị trí' : 'Vị trí cũ');
+
+    final busCircleWithArrow = SizedBox(
+      width: 52,
+      height: 52,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: live ? PTokens.primary : Colors.white,
+              border: Border.all(
+                color: live ? Colors.white : const Color(0xFF94A3B8),
+                width: 3,
+              ),
+            ),
+            child: Center(
+              child: Icon(
+                Icons.directions_bus,
+                size: 20,
+                color: live ? Colors.white : const Color(0xFF64748B),
+              ),
+            ),
+          ),
+          if (bearing != null)
+            Transform.rotate(
+              angle: bearing * math.pi / 180,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Icon(
+                  Icons.navigation,
+                  size: 14,
+                  color: live ? PTokens.primary : const Color(0xFF64748B),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    return Marker(
+      point: point,
+      // The marker is the bus circle only, centred on the position; the speed label hangs below it outside the
+      // marker box, so it never shifts the bus off its real place.
+      width: 52,
+      height: 52,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          busCircleWithArrow,
+          Positioned(
+            top: 56,
+            child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: PTokens.lineStrong),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              speedText,
+              maxLines: 1,
+              softWrap: false,
+              style: sans(size: 11, color: const Color(0xFF334155)),
+            ),
+          ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -296,89 +503,6 @@ class PassengerRouteMapState extends State<PassengerRouteMap> {
       );
     }
 
-    if (hasBus) {
-      final live = _effectiveSignal == GpsSignal.live;
-      final bearing = _effectiveBearing;
-      final speedText = live
-          ? '${_effectiveSpeed?.round() ?? 0} km/h · vừa cập nhật'
-          : (_effectiveSignal == GpsSignal.none ? 'Chưa có vị trí' : 'Vị trí cũ');
-
-      final busCircleWithArrow = SizedBox(
-        width: 52,
-        height: 52,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: live ? PTokens.primary : Colors.white,
-                border: Border.all(
-                  color: live ? Colors.white : const Color(0xFF94A3B8),
-                  width: 3,
-                ),
-              ),
-              child: Center(
-                child: Icon(
-                  Icons.directions_bus,
-                  size: 20,
-                  color: live ? Colors.white : const Color(0xFF64748B),
-                ),
-              ),
-            ),
-            if (bearing != null)
-              Transform.rotate(
-                angle: bearing * math.pi / 180,
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  child: Icon(
-                    Icons.navigation,
-                    size: 14,
-                    color: live ? PTokens.primary : const Color(0xFF64748B),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      );
-
-      markers.add(
-        Marker(
-          point: LatLng(_effectiveBusLat!, _effectiveBusLng!),
-          // The marker is the bus circle only, centred on the position; the speed label hangs below it outside the
-          // marker box, so it never shifts the bus off its real place.
-          width: 52,
-          height: 52,
-          child: Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.center,
-            children: [
-              busCircleWithArrow,
-              Positioned(
-                top: 56,
-                child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  border: Border.all(color: PTokens.lineStrong),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  speedText,
-                  maxLines: 1,
-                  softWrap: false,
-                  style: sans(size: 11, color: const Color(0xFF334155)),
-                ),
-              ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     return Stack(
       children: [
         FlutterMap(
@@ -412,6 +536,12 @@ class PassengerRouteMapState extends State<PassengerRouteMap> {
               ),
             PolylineLayer(polylines: polylines),
             MarkerLayer(markers: markers),
+            // Only the bus layer redraws while the marker glides.
+            if (hasBus && _ping != null)
+              AnimatedBuilder(
+                animation: _motion,
+                builder: (context, _) => MarkerLayer(markers: [_busMarker(_busAt(_motion.value))]),
+              ),
             const RichAttributionWidget(
               attributions: [
                 TextSourceAttribution('OpenStreetMap contributors'),

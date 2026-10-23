@@ -138,40 +138,43 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
       child: SafeArea(
         top: false,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          if (isCompleted) ...[
-            Text(
-              'Chuyến đã kết thúc',
-              style: sans(size: 16, weight: FontWeight.w600, color: PTokens.ink),
-            ),
-            gap(12),
-            Row(children: [
-              const Expanded(child: _Metric('Trạng thái', 'Đã đi')),
-              Expanded(child: _Metric('Điểm trả', ticket.dropoff.isNotEmpty ? ticket.dropoff : ticket.route.split(' → ').last)),
-            ]),
-          ] else if (tr?.passedTarget == true)
-            Text(
-              tr!.text.isNotEmpty ? tr.text : 'Xe đã qua điểm đón',
-              style: sans(size: 16, weight: FontWeight.w600, color: PTokens.ink),
-            )
-          else ...[
-            if (ticket.status == TicketStatus.boarded)
+        // D159: the home pickup card grows (queue, door countdown); it scrolls rather than overflow.
+        child: SingleChildScrollView(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            if (isCompleted) ...[
+              Text(
+                'Chuyến đã kết thúc',
+                style: sans(size: 16, weight: FontWeight.w600, color: PTokens.ink),
+              ),
+              gap(12),
               Row(children: [
-                const Expanded(child: _Metric('Trạng thái', 'Đã lên xe')),
+                const Expanded(child: _Metric('Trạng thái', 'Đã đi')),
                 Expanded(child: _Metric('Điểm trả', ticket.dropoff.isNotEmpty ? ticket.dropoff : ticket.route.split(' → ').last)),
-              ])
-            else
-              _Coming(tracking: tr, ticket: ticket, live: live),
-            // Without a position the banner above already says why; the server line would repeat it.
-            // For a home pickup the headline above already says it all.
-            if (tr != null && tr.text.isNotEmpty && tr.signal != GpsSignal.none && tr.target?.isHome != true) ...[
-              const SizedBox(height: 8),
-              Text(tr.text, style: sans(size: 13, color: PTokens.muted)),
+              ]),
+            ] else if (tr?.passedTarget == true)
+              Text(
+                tr!.text.isNotEmpty ? tr.text : 'Xe đã qua điểm đón',
+                style: sans(size: 16, weight: FontWeight.w600, color: PTokens.ink),
+              )
+            else ...[
+              if (ticket.status == TicketStatus.boarded)
+                Row(children: [
+                  const Expanded(child: _Metric('Trạng thái', 'Đã lên xe')),
+                  Expanded(child: _Metric('Điểm trả', ticket.dropoff.isNotEmpty ? ticket.dropoff : ticket.route.split(' → ').last)),
+                ])
+              else
+                _Coming(tracking: tr, ticket: ticket, live: live),
+              // Without a position the banner above already says why; the server line would repeat it.
+              // For a home pickup the headline above already says it all.
+              if (tr != null && tr.text.isNotEmpty && tr.signal != GpsSignal.none && tr.target?.isHome != true) ...[
+                const SizedBox(height: 8),
+                Text(tr.text, style: sans(size: 13, color: PTokens.muted)),
+              ],
             ],
-          ],
-          gap(14),
-          GhostButton(label: 'Gọi tổng đài 1900 6868', onPressed: () => showToast(context, 'Đang gọi 1900 6868')),
-        ]),
+            gap(14),
+            GhostButton(label: 'Gọi tổng đài 1900 6868', onPressed: () => showToast(context, 'Đang gọi 1900 6868')),
+          ]),
+        ),
       ),
     );
     return Scaffold(
@@ -201,7 +204,8 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
           // Wide screens keep the map large and put the figures in a side panel.
           child: wide ? Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Expanded(child: map), SizedBox(width: 360, child: info)]) : map,
         ),
-        if (!wide) info,
+        // Below the map the figures take at most 60 % of the height, so the bus stays in view.
+        if (!wide) ConstrainedBox(constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.6), child: info),
       ]),
     );
   }
@@ -233,8 +237,9 @@ class _Coming extends StatelessWidget {
                     // D144: the bus collects other addresses first; the passenger sees where they are in the run.
                     ? (position != null && position > 1 ? 'Xe đang đón khách khác trước bạn' : 'Bạn là điểm đón tiếp theo')
                     : (tr!.location?.sentence ?? 'Xe đang trên đường tới điểm đón');
+    // D159: the place in the run has its own indicator below.
     final detail = home
-        ? '${moving && position != null && tr!.queueTotal != null ? 'Bạn là điểm đón thứ $position/${tr.queueTotal} · ' : ''}Đón tại $place'
+        ? 'Đón tại $place'
         : (moving ? tr!.location?.stopsLeft : null) ?? 'Điểm đón: ${place.replaceFirst('Bến xe ', '')}';
     final windowText = tr?.windowFrom != null && tr?.windowTo != null ? '${clockOf(tr!.windowFrom!)}–${clockOf(tr.windowTo!)}' : null;
     final appointment = tr?.appointmentAt != null ? clockOf(tr!.appointmentAt!) : null;
@@ -251,6 +256,18 @@ class _Coming extends StatelessWidget {
       Text(headline, style: sans(size: 17, weight: FontWeight.w700, color: PTokens.ink)),
       const SizedBox(height: 2),
       Text(detail, style: sans(size: 14, color: PTokens.muted)),
+      if (tr != null && tr.nearDoor && !tr.atDoor) ...[
+        const SizedBox(height: 10),
+        const _NearDoor(),
+      ],
+      if (home && position != null) ...[
+        const SizedBox(height: 10),
+        _QueueIndicator(position: position, total: tr!.queueTotal ?? position),
+      ],
+      if (waitingAtDoor) ...[
+        const SizedBox(height: 10),
+        _DoorCountdown(until: tr.doorArrivedAt!.add(Duration(minutes: tr.homeWaitMinutes!)), total: Duration(minutes: tr.homeWaitMinutes!)),
+      ],
       const SizedBox(height: 12),
       Row(children: [
         Expanded(
@@ -271,6 +288,131 @@ class _Coming extends StatelessWidget {
       ],
       if (home) _ReadyBox(ticket: ticket, tracking: tr),
     ]);
+  }
+}
+
+/// D159: the bus is a few hundred metres away; the passenger should head for the door now.
+class _NearDoor extends StatelessWidget {
+  const _NearDoor();
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        liveRegion: true,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(color: PTokens.successSoft, border: Border.all(color: PTokens.success), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+          child: Row(children: [
+            const Icon(Icons.directions_walk, size: 18, color: PTokens.success),
+            const SizedBox(width: 8),
+            Expanded(child: Text('Xe đã tới gần chỗ đón · Mời bạn chuẩn bị ra cửa', style: sans(size: 14, weight: FontWeight.w700, color: PTokens.success))),
+          ]),
+        ),
+      );
+}
+
+/// D159: the passenger's place in the home pickup run, as a row of segments and a line of text.
+class _QueueIndicator extends StatelessWidget {
+  const _QueueIndicator({required this.position, required this.total});
+  final int position;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final count = total < position ? position : total;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+      decoration: BoxDecoration(color: PTokens.primarySoft, borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text(
+          'Điểm đón thứ $position/$count · ${position > 1 ? '${position - 1} điểm trước bạn' : 'Bạn là điểm tiếp theo'}',
+          style: sans(size: 13, weight: FontWeight.w700, color: PTokens.primaryDark),
+        ),
+        const SizedBox(height: 6),
+        // Segments before the passenger are the stops still ahead of them; theirs is the dark one.
+        Row(children: [
+          for (var i = 1; i <= count; i++)
+            Expanded(
+              child: Container(
+                height: 6,
+                margin: EdgeInsets.only(right: i < count ? 4 : 0),
+                decoration: BoxDecoration(
+                  color: i < position ? PTokens.primary.withValues(alpha: 0.45) : i == position ? PTokens.primaryDark : PTokens.lineStrong,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ),
+        ]),
+      ]),
+    );
+  }
+}
+
+/// D159: how long the bus still waits at the door; red in the last minute.
+class _DoorCountdown extends StatefulWidget {
+  const _DoorCountdown({required this.until, required this.total});
+  /// Vietnam time, like the other tracking times.
+  final DateTime until;
+  final Duration total;
+
+  @override
+  State<_DoorCountdown> createState() => _DoorCountdownState();
+}
+
+class _DoorCountdownState extends State<_DoorCountdown> {
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now().toUtc().add(const Duration(hours: 7));
+    final left = widget.until.difference(now);
+    final secs = left.isNegative ? 0 : left.inSeconds;
+    if (secs == 0) _tick?.cancel();
+    final urgent = secs < 60;
+    final fg = urgent ? PTokens.danger : PTokens.warnInk;
+    final totalSecs = widget.total.inSeconds;
+    return Semantics(
+      liveRegion: urgent,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+        decoration: BoxDecoration(
+          color: urgent ? PTokens.dangerSoft : PTokens.warnSoft,
+          border: Border.all(color: urgent ? PTokens.danger : PTokens.warn),
+          borderRadius: BorderRadius.circular(PTokens.radiusControl),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            Icon(Icons.timer_outlined, size: 18, color: fg),
+            const SizedBox(width: 8),
+            Expanded(child: Text(secs == 0 ? 'Đã hết thời gian chờ' : 'Xe chờ bạn thêm', style: sans(size: 13, weight: FontWeight.w600, color: fg))),
+            Text('${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}', style: mono(size: 22, weight: FontWeight.w700, color: fg)),
+          ]),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: totalSecs <= 0 ? 0 : (secs / totalSecs).clamp(0.0, 1.0),
+              minHeight: 6,
+              color: fg,
+              backgroundColor: Colors.white,
+            ),
+          ),
+        ]),
+      ),
+    );
   }
 }
 

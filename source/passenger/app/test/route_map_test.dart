@@ -8,6 +8,7 @@ import 'package:app/src/presentation/passenger/passenger_route_map.dart';
 import 'package:app/src/presentation/passenger/passenger_splash_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_store.dart';
 import 'package:app/src/presentation/passenger/passenger_wallet_screen.dart';
+import 'package:app/src/presentation/passenger/passenger_widgets.dart';
 import 'package:data/src/service/passenger_api_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -435,7 +436,8 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.text('Xe đang đón khách khác trước bạn'), findsOneWidget);
-    expect(find.text('Bạn là điểm đón thứ 2/3 · Đón tại 88 Láng Hạ, Đống Đa'), findsOneWidget);
+    expect(find.text('Đón tại 88 Láng Hạ, Đống Đa'), findsOneWidget);
+    expect(find.text('Điểm đón thứ 2/3 · 1 điểm trước bạn'), findsOneWidget);
     expect(find.text('~06:03'), findsOneWidget);
     expect(find.text('Trễ khoảng 8 phút so với giờ hẹn 05:55'), findsOneWidget);
 
@@ -760,5 +762,170 @@ void main() {
     expect(find.byType(PassengerMainShell), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
+  });
+
+  group('smooth bus movement (D159)', () {
+    const road = [LatLng(21.0, 105.80), LatLng(21.0, 105.82)];
+    const distance = Distance();
+
+    test('snapToRoute puts a nearby position on the road and leaves a far one (a lane to a home) as it is', () {
+      // ~22 m north of the road.
+      const near = LatLng(21.0002, 105.81);
+      final snapped = PassengerRouteMapState.snapToRoute(near, road);
+      expect(snapped.latitude, closeTo(21.0, 1e-6));
+      expect(snapped.longitude, closeTo(105.81, 1e-6));
+      // ~110 m north: off the route, never forced onto it.
+      const far = LatLng(21.001, 105.81);
+      expect(PassengerRouteMapState.snapToRoute(far, road), far);
+      expect(PassengerRouteMapState.snapToRoute(far, road, maxDistanceMeters: 200).latitude, closeTo(21.0, 1e-6));
+      // Past the end of the road the nearest point is the end itself.
+      final end = PassengerRouteMapState.snapToRoute(const LatLng(21.0, 105.8203), road);
+      expect(end.longitude, closeTo(105.82, 1e-6));
+      expect(PassengerRouteMapState.snapToRoute(near, const []), near);
+    });
+
+    test('deadReckon carries the bus on its heading and never past 15 s', () {
+      const from = LatLng(21.0, 105.80);
+      // 36 km/h = 10 m/s due east.
+      final after5 = PassengerRouteMapState.deadReckon(from, 90, 36, const Duration(seconds: 5));
+      expect(distance.as(LengthUnit.Meter, from, after5), closeTo(50, 0.5));
+      expect(after5.latitude, closeTo(21.0, 1e-6));
+      expect(after5.longitude, greaterThan(105.80));
+      final after15 = PassengerRouteMapState.deadReckon(from, 90, 36, const Duration(seconds: 15));
+      final after60 = PassengerRouteMapState.deadReckon(from, 90, 36, const Duration(seconds: 60));
+      expect(distance.as(LengthUnit.Meter, from, after60), closeTo(150, 1));
+      expect(after60, after15);
+      expect(PassengerRouteMapState.deadReckon(from, 90, 0, const Duration(seconds: 5)), from);
+    });
+
+    Widget map({required double lng, double speed = 36, double bearing = 90, GpsSignal signal = GpsSignal.live}) => MaterialApp(
+          home: Scaffold(
+            body: PassengerRouteMap(
+              route: const [(21.0, 105.80), (21.0, 105.82)],
+              busLat: 21.0,
+              busLng: lng,
+              speed: speed,
+              bearing: bearing,
+              signal: signal,
+            ),
+          ),
+        );
+
+    testWidgets('the marker glides to a new ping instead of jumping, then coasts at most 15 s', (tester) async {
+      await tester.pumpWidget(map(lng: 105.80));
+      final state = tester.state<PassengerRouteMapState>(find.byType(PassengerRouteMap));
+      expect(state.shownBus, const LatLng(21.0, 105.80), reason: 'the first position is drawn where it is');
+
+      await tester.pumpWidget(map(lng: 105.81));
+      expect(state.shownBus!.longitude, closeTo(105.80, 1e-9), reason: 'no teleport');
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(state.shownBus!.longitude, closeTo(105.805, 1e-4), reason: 'halfway through the glide');
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(state.shownBus!.longitude, closeTo(105.81, 1e-5));
+
+      // No further ping: the bus coasts east along the road, then stops 15 s after the ping.
+      await tester.pump(const Duration(seconds: 5));
+      expect(distance.as(LengthUnit.Meter, const LatLng(21.0, 105.81), state.shownBus!), closeTo(50, 2));
+      await tester.pump(const Duration(seconds: 30));
+      final stopped = state.shownBus!;
+      expect(distance.as(LengthUnit.Meter, const LatLng(21.0, 105.81), stopped), lessThanOrEqualTo(10 * 15 + 1));
+      expect(state.motion.isAnimating, isFalse);
+      await tester.pump(const Duration(seconds: 30));
+      expect(state.shownBus, stopped);
+    });
+
+    testWidgets('a stale signal glides to the ping but is not carried forward', (tester) async {
+      await tester.pumpWidget(map(lng: 105.80, signal: GpsSignal.stale));
+      await tester.pumpWidget(map(lng: 105.81, signal: GpsSignal.stale));
+      await tester.pumpAndSettle();
+      final state = tester.state<PassengerRouteMapState>(find.byType(PassengerRouteMap));
+      expect(state.shownBus!.longitude, closeTo(105.81, 1e-9));
+    });
+
+    testWidgets('below 3 km/h the arrow keeps the last real heading', (tester) async {
+      await tester.pumpWidget(map(lng: 105.80, speed: 30, bearing: 90));
+      final state = tester.state<PassengerRouteMapState>(find.byType(PassengerRouteMap));
+      expect(state.shownBearing, 90);
+      await tester.pumpWidget(map(lng: 105.80001, speed: 1, bearing: 250));
+      expect(state.shownBearing, 90, reason: 'a crawling or stopped bus does not spin');
+      await tester.pumpWidget(map(lng: 105.80002, speed: 20, bearing: 100));
+      expect(state.shownBearing, 100);
+      await tester.pumpAndSettle();
+    });
+  });
+
+  group('home pickup card (D159)', () {
+    Future<void> showHome(WidgetTester tester, Map<String, dynamic> extra) async {
+      final client = MockClient((req) async => http.Response(
+            jsonEncode({'status': 'success', 'data': {
+              'signal_status': 'LIVE',
+              'has_position': true,
+              'view': 'TICKET',
+              'bus_position': {'lat': 21.014, 'lng': 105.816, 'speed_kmh': 0},
+              'target_stop': {'stop_id': null, 'name': '88 Láng Hạ, Đống Đa', 'lat': 21.0136, 'lng': 105.815, 'kind': 'HOME_PICKUP'},
+              'eta_minutes': 1,
+              'distance_meters': 250,
+              'home_wait_minutes': 5,
+              ...extra,
+            }}),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          ));
+      final store = PassengerStore(api: PassengerApiClientService(baseUrl: 'http://test', client: client));
+      final ticket = Ticket.fromJson({
+        'ticket_id': 'tkt_05', 'pnr': 'BG-0005', 'trip_id': 'trp_01', 'route_name': 'Hà Nội — Thanh Hóa',
+        'departure_time': '2026-08-28T07:00:00+07:00', 'seat_code': 'A02', 'fare_vnd': 220000, 'passenger_name': 'Khách B',
+        'pickup_stop': 'Bến xe Mỹ Đình', 'dropoff_stop': 'Bến xe Phía Bắc', 'status': 'ACTIVE',
+      });
+      await tester.pumpWidget(MaterialApp(home: PassengerScope(store: store, child: PassengerLiveRadarScreen(ticket: ticket))));
+      await tester.pump();
+      await tester.pump();
+    }
+
+    Future<void> close(WidgetTester tester) async {
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 4));
+    }
+
+    testWidgets('the next stop in the run is told so, and a bus close to the door asks the passenger out', (tester) async {
+      await showHome(tester, {'home_queue': {'position': 1, 'ahead': 0, 'total': 3}, 'near_door': true, 'at_door': false});
+      expect(find.text('Điểm đón thứ 1/3 · Bạn là điểm tiếp theo'), findsOneWidget);
+      expect(find.text('Xe đã tới gần chỗ đón · Mời bạn chuẩn bị ra cửa'), findsOneWidget);
+      await close(tester);
+    });
+
+    testWidgets('without a total the queue counts the passenger as the last one; far from the door there is no call out', (tester) async {
+      await showHome(tester, {'home_queue': {'position': 3, 'ahead': 2}});
+      expect(find.text('Điểm đón thứ 3/3 · 2 điểm trước bạn'), findsOneWidget);
+      expect(find.textContaining('Mời bạn chuẩn bị ra cửa'), findsNothing);
+      await close(tester);
+    });
+
+    testWidgets('at the door a countdown runs to the end of the wait and turns red in the last minute', (tester) async {
+      final arrived = DateTime.now().toUtc().subtract(const Duration(minutes: 3, seconds: 30));
+      await showHome(tester, {
+        'home_queue': {'position': 1, 'ahead': 0, 'total': 1},
+        'near_door': true,
+        'at_door': true,
+        'is_at_station': true,
+        'door_arrived_at': arrived.toIso8601String(),
+      });
+      expect(find.textContaining('Mời bạn chuẩn bị ra cửa'), findsNothing, reason: 'the bus is already there');
+      expect(find.text('Xe chờ bạn thêm'), findsOneWidget);
+      final clock = find.textContaining(RegExp(r'^\d+:\d\d$'));
+      expect(tester.widget<Text>(clock).data, anyOf('1:30', '1:29', '1:28'));
+      expect(tester.widget<Text>(clock).style!.color, PTokens.warnInk);
+      await close(tester);
+
+      final late = DateTime.now().toUtc().subtract(const Duration(minutes: 4, seconds: 30));
+      await showHome(tester, {
+        'home_queue': {'position': 1, 'ahead': 0, 'total': 1},
+        'at_door': true,
+        'is_at_station': true,
+        'door_arrived_at': late.toIso8601String(),
+      });
+      expect(tester.widget<Text>(clock).style!.color, PTokens.danger);
+      await close(tester);
+    });
   });
 }

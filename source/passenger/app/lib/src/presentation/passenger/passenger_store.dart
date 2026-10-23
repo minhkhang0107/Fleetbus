@@ -580,6 +580,8 @@ class Tracking {
     this.readyMinutes,
     this.homeWaitMinutes,
     this.doorArrivedAt,
+    this.nearDoor = false,
+    this.atDoor = false,
     this.ended = false,
     this.tripStatus,
   });
@@ -615,6 +617,9 @@ class Tracking {
   final int? readyMinutes;
   final int? homeWaitMinutes;
   final DateTime? doorArrivedAt;
+  /// D159, home pickup: the bus is a few hundred metres from the door, or pulled up at it.
+  final bool nearDoor;
+  final bool atDoor;
   final bool ended;
   final String? tripStatus;
 }
@@ -1691,6 +1696,8 @@ class PassengerStore extends ChangeNotifier {
       readyMinutes: (d['pickup_ready']?['minutes'] as num?)?.toInt(),
       homeWaitMinutes: (d['home_wait_minutes'] as num?)?.toInt(),
       doorArrivedAt: vn(d['door_arrived_at']),
+      nearDoor: d['near_door'] == true,
+      atDoor: d['at_door'] == true,
       ended: d['tracking_ended'] == true || d['trip_status'] == 'COMPLETED',
       tripStatus: d['trip_status'] as String?,
       location: loc == null
