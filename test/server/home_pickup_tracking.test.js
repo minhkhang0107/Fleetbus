@@ -94,10 +94,21 @@ describe('Following the bus that comes to pick me up (D143)', () => {
     assert.strictEqual(sent('PICKUP_APPROACHING').length, 1);
     assert.match(sent('PICKUP_APPROACHING')[0].body, /tới 12 Hàng Bài/);
 
+    // ~145 m of road: in the lane (near), not yet at the door (50 m).
     ping(HOME.lat + 0.001, HOME.lng, 5);
     d = (await track(homeTicket)).body.data;
-    assert.strictEqual(d.is_at_station, true);
+    assert.strictEqual(d.near_door, true);
+    assert.strictEqual(d.at_door, false);
+    assert.strictEqual(d.is_at_station, false);
     assert.match(d.hud_status_text, /tới gần chỗ đón/);
+    assert.strictEqual(sent('HOME_PICKUP_ARRIVED').length, 0);
+
+    // ~30 m of road, pulled up: at the door.
+    ping(HOME.lat + 0.0002, HOME.lng, 3);
+    d = (await track(homeTicket)).body.data;
+    assert.strictEqual(d.at_door, true);
+    assert.strictEqual(d.is_at_station, true);
+    assert.match(d.hud_status_text, /tới chỗ đón của bạn/);
     assert.strictEqual(sent('HOME_PICKUP_ARRIVED').length, 1);
   });
 

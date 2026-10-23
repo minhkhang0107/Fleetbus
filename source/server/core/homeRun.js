@@ -16,8 +16,14 @@ export const HOME_ROAD_FACTOR = 1.3;
 export const HOME_CITY_SPEED_KMH = 20;
 /** Time at each door: the passenger walks out, the bags go in. */
 export const HOME_DWELL_MINUTES = 3;
-/** Within this distance the bus is at the passenger's door. */
-export const HOME_AT_DOOR_METERS = 300;
+/** Within this distance (road) the bus is near the passenger's door: in their lane, time to come out. */
+export const HOME_NEAR_METERS = 300;
+/** Within this distance (road), and slowed down, the bus is at the passenger's door. */
+export const HOME_AT_DOOR_METERS = 50;
+/** At or under this speed the bus has pulled up (a bus driving past the door is not at it). */
+export const HOME_AT_DOOR_SPEED_KMH = 5;
+/** A cached ETA older than this is not used to steady the next one. */
+const ETA_CACHE_MS = 2 * 60000;
 /** Minutes the bus waits at a door before the driver may go on without the passenger, unless the company sets it. */
 export const DEFAULT_HOME_WAIT_MINUTES = 5;
 /** What a passenger may ask for before the bus arrives. */
@@ -96,8 +102,24 @@ function doorMinutes(p, now) {
 }
 
 /**
+ * Whole minutes to show, steadied against the last ones shown for the ticket (trip.cached_etas): a new estimate
+ * less than a minute above the shown number is GPS noise, so the number keeps counting down instead of going
+ * 4 -> 5 -> 4. A real delay (a minute or more) shows at once.
+ */
+function steadyEtaMinutes(trip, ticketId, minutes, now) {
+  const rounded = Math.max(0, Math.round(minutes));
+  if (!trip) return rounded;
+  const prev = trip.cached_etas?.[ticketId];
+  const fresh = prev && Number.isFinite(prev.minutes) && now >= prev.at && now - prev.at <= ETA_CACHE_MS;
+  const shown = fresh && rounded > prev.minutes && minutes - prev.minutes < 1 ? prev.minutes : rounded;
+  trip.cached_etas = { ...trip.cached_etas, [ticketId]: { minutes: shown, at: now } };
+  return shown;
+}
+
+/**
  * The passenger's place in the run and the minutes until the bus is at their door, from the bus position [pos]
- * ({lat, lng, speed_kmh}). Null when the ticket is not a waiting home pickup or the bus position is unknown.
+ * ({lat, lng, speed_kmh}). Every door before theirs counts its stop: the dwell left, or the minutes that passenger
+ * asked for. Null when the ticket is not a waiting home pickup or the bus position is unknown.
  */
 export function homeEta(trip, ticketId, pos, now = Date.now()) {
   const queue = homeQueue(trip);
@@ -116,14 +138,16 @@ export function homeEta(trip, ticketId, pos, now = Date.now()) {
     at = p.home_pickup;
   }
   const direct = roadMeters(pos, queue[index].home_pickup);
+  const pulledUp = pos.speed_kmh == null || pos.speed_kmh <= HOME_AT_DOOR_SPEED_KMH;
   return {
     position: index + 1,
     ahead: index,
     total: queue.length,
-    eta_minutes: Math.max(0, Math.round(minutes)),
+    eta_minutes: steadyEtaMinutes(trip, ticketId, minutes, now),
     road_meters: Math.round(meters),
     direct_meters: Math.round(direct),
-    at_door: index === 0 && direct <= HOME_AT_DOOR_METERS
+    near_door: direct <= HOME_NEAR_METERS,
+    at_door: index === 0 && direct <= HOME_AT_DOOR_METERS && pulledUp
   };
 }
 

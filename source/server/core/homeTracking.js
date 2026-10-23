@@ -59,6 +59,9 @@ export function applyHomeRun(data, services, tripId, manifestId, now = Date.now(
   data.eta_minutes = q.eta_minutes;
   data.distance_meters = q.road_meters;
   const atDoor = q.ahead === 0 && (q.at_door || Boolean(p.home_pickup.arrived_at));
+  // Near: the next door, the bus in the lane (300 m), time to come out; at the door: pulled up within 50 m.
+  data.near_door = q.ahead === 0 && (q.near_door || atDoor);
+  data.at_door = atDoor;
   data.is_at_station = atDoor;
   data.is_arriving_soon = q.ahead === 0 && q.eta_minutes <= 5;
   data.expected_at = data.signal_status === 'OFFLINE' ? null : new Date(now + q.eta_minutes * 60000).toISOString();
@@ -67,7 +70,9 @@ export function applyHomeRun(data, services, tripId, manifestId, now = Date.now(
   if (atDoor) {
     data.hud_status_text = p.home_pickup.arrived_at
       ? `Xe đã tới chỗ đón. Tài xế chờ bạn tối đa ${wait} phút (tới ${hhmm(new Date(Date.parse(p.home_pickup.arrived_at) + wait * 60000).toISOString())})`
-      : 'Xe đã tới gần chỗ đón của bạn. Mời bạn ra xe';
+      : 'Xe đã tới chỗ đón của bạn. Mời bạn ra xe';
+  } else if (data.near_door) {
+    data.hud_status_text = 'Xe đã tới gần chỗ đón của bạn. Mời bạn ra xe';
   } else if (q.ahead > 0) {
     data.hud_status_text = `Xe đang đón khách khác. Bạn là điểm đón thứ ${q.position}/${q.total}, còn ${q.ahead} nhà trước bạn (~${q.eta_minutes} phút)`;
   } else {

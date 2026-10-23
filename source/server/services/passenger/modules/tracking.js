@@ -8,15 +8,10 @@ import { calculateHaversineDistance, calculateETA } from '../core/cryptoEngine.j
 import { REST_STOPS, REST_STOP_AFTER_MS, STILL_SPEED_KMH } from '../../../core/restStops.js';
 import { stopCoords, routeShape, distanceAlongRoute, signedDistanceAlongRoute } from '../../../core/geo.js';
 import { DEFAULT_OPERATOR_ID } from '../../../core/operators.js';
+import { HOME_ROAD_FACTOR, HOME_CITY_SPEED_KMH, HOME_NEAR_METERS, HOME_AT_DOOR_METERS, HOME_AT_DOOR_SPEED_KMH } from '../../../core/homeRun.js';
 
 /** Within this distance of a stop, a parked bus is waiting at that stop. */
 const AT_STOP_METERS = 150;
-/** Home pickups are off the route shape: the road is taken as this much longer than the straight line. */
-const HOME_ROAD_FACTOR = 1.3;
-/** City speed assumed for the ETA to a home address while the bus is slower (stopped at another door). */
-const HOME_MIN_SPEED_KMH = 20;
-/** Within this distance of the address, the bus is at the passenger's door. */
-const HOME_AT_DOOR_METERS = 300;
 /**
  * Speed for an ETA: over a long way the bus averages its road speed whatever it does this minute (parked at a stop,
  * slowed in a town), so the minutes do not jump between pings; close by, its own speed.
@@ -295,14 +290,18 @@ export class PassengerTrackingService {
         const roadDist = Math.round(calculateHaversineDistance(pos.lat, pos.lng, home.lat, home.lng) * HOME_ROAD_FACTOR);
         distanceBasis = 'ESTIMATED_ROAD';
         data.distance_meters = roadDist;
-        data.eta_minutes = calculateETA(roadDist, Math.max(pos.speed_kmh || 0, HOME_MIN_SPEED_KMH));
-        data.is_at_station = roadDist <= HOME_AT_DOOR_METERS;
+        data.eta_minutes = calculateETA(roadDist, Math.max(pos.speed_kmh || 0, HOME_CITY_SPEED_KMH));
+        data.near_door = roadDist <= HOME_NEAR_METERS;
+        data.at_door = roadDist <= HOME_AT_DOOR_METERS && (pos.speed_kmh == null || pos.speed_kmh <= HOME_AT_DOOR_SPEED_KMH);
+        data.is_at_station = data.at_door;
         data.is_arriving_soon = roadDist <= 1000;
-        data.hud_status_text = data.is_at_station
-          ? 'Xe đã tới gần chỗ đón của bạn. Mời bạn ra xe'
-          : data.is_arriving_soon
-            ? `Xe sắp tới đón bạn, còn khoảng ${data.eta_minutes} phút. Bạn chuẩn bị ra xe nhé`
-            : `Xe đang trên đường đón bạn (Cách ~${(roadDist / 1000).toFixed(1)} km, ~${data.eta_minutes} phút)`;
+        data.hud_status_text = data.at_door
+          ? 'Xe đã tới chỗ đón của bạn. Mời bạn ra xe'
+          : data.near_door
+            ? 'Xe đã tới gần chỗ đón của bạn. Mời bạn ra xe'
+            : data.is_arriving_soon
+              ? `Xe sắp tới đón bạn, còn khoảng ${data.eta_minutes} phút. Bạn chuẩn bị ra xe nhé`
+              : `Xe đang trên đường đón bạn (Cách ~${(roadDist / 1000).toFixed(1)} km, ~${data.eta_minutes} phút)`;
       } else {
         data.hud_status_text = 'Tài xế chưa bắt đầu đi đón. Vị trí xe sẽ hiện khi tài xế lên đường đón bạn';
       }
