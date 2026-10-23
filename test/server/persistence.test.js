@@ -127,6 +127,27 @@ describe('TC-DB-PERSIST: data kept in sealed company databases', () => {
     assert.throws(() => loadMasterKey({ dataDir: dir, production: true, env: {} }), { code: 'DB_KEY_REQUIRED' });
     assert.throws(() => loadMasterKey({ dataDir: dir, production: true, env: { FLEETBUS_DB_KEY: 'ngan' } }), { code: 'DB_KEY_INVALID' });
   });
+
+  it('OPTIONS and static routes bypass storage flush', async () => {
+    let flushed = false;
+    const { server, services } = createFleetBusServer({ dataDir: null });
+    const originalFlush = services.store.flush.bind(services.store);
+    services.store.flush = () => { flushed = true; return originalFlush(); };
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const testUrl = `http://127.0.0.1:${server.address().port}`;
+
+    flushed = false;
+    const optRes = await fetch(`${testUrl}/api/v1/trips`, { method: 'OPTIONS' });
+    assert.strictEqual(optRes.status, 204);
+    assert.strictEqual(flushed, false, 'OPTIONS must bypass flush');
+
+    flushed = false;
+    const staticRes = await fetch(`${testUrl}/passenger`, { method: 'GET' });
+    assert.strictEqual(staticRes.status, 200);
+    assert.strictEqual(flushed, false, 'static GET must bypass flush');
+
+    await new Promise(resolve => server.close(resolve));
+  });
 });
 
 describe('TC-AUDIT-CHAIN: each company audit log is a hash chain', () => {

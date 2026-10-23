@@ -16,6 +16,12 @@ import { PLATFORM_SCOPE } from './tenantDb.js';
 
 const MARKER = (name) => `collection:${name}`;
 
+const FROZEN_DIGESTS = new WeakMap();
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 export class StateStore {
   /**
    * @param {object} options
@@ -82,7 +88,7 @@ export class StateStore {
   }
 
   /** Writes what changed since the last flush. Throws (and marks the store failed) when a write fails. */
-  flush() {
+  flush({ only = null } = {}) {
     if (this.failed) throw this.failed;
     const writes = new Map(); // scope -> { upserts: [], deletes: [], markers: Set }
     const pending = [];
@@ -90,14 +96,15 @@ export class StateStore {
       if (!writes.has(scope)) writes.set(scope, { upserts: [], deletes: [], markers: new Set() });
       return writes.get(scope);
     };
-    for (const c of this.collections) {
+    const targets = only ? this.collections.filter(c => only.has(c.name)) : this.collections;
+    for (const c of targets) {
       const before = this.stored.get(c.name);
       const now = new Map();
       for (const rec of c.dump()) {
         const scope = rec.scope || PLATFORM_SCOPE;
         const idHash = this.idHash(scope, c.name, rec.key);
         const payload = { k: rec.key, o: rec.order, v: rec.value };
-        const d = digest(c.name, payload);
+        const d = digest(c.name, payload, c.freeze);
         const slot = `${scope}|${idHash}`;
         now.set(slot, d);
         if (before?.get(slot) !== d) plan(scope).upserts.push({ name: c.name, idHash, payload });
@@ -122,15 +129,32 @@ export class StateStore {
         const upsert = db.prepare('INSERT INTO records (collection, id_hash, data, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (collection, id_hash) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at');
         const remove = db.prepare('DELETE FROM records WHERE collection = ? AND id_hash = ?');
         const mark = db.prepare("INSERT OR IGNORE INTO tenant_meta (key, value) VALUES (?, '1')");
-        db.exec('BEGIN IMMEDIATE');
-        try {
-          for (const u of w.upserts) upsert.run(u.name, u.idHash, seal(keys, u.name, u.idHash, u.payload), at);
-          for (const d of w.deletes) remove.run(d.name, d.idHash);
-          for (const name of w.markers) mark.run(MARKER(name));
-          db.exec('COMMIT');
-        } catch (err) {
-          db.exec('ROLLBACK');
-          throw err;
+
+        let attempts = 0;
+        const maxAttempts = 3;
+        while (true) {
+          try {
+            db.exec('BEGIN IMMEDIATE');
+            try {
+              for (const u of w.upserts) upsert.run(u.name, u.idHash, seal(keys, u.name, u.idHash, u.payload), at);
+              for (const d of w.deletes) remove.run(d.name, d.idHash);
+              for (const name of w.markers) mark.run(MARKER(name));
+              db.exec('COMMIT');
+              break;
+            } catch (err) {
+              db.exec('ROLLBACK');
+              throw err;
+            }
+          } catch (err) {
+            attempts++;
+            const msg = (err?.message || '') + (err?.code || '');
+            const isTransient = msg.includes('SQLITE_BUSY') || msg.includes('SQLITE_LOCKED') || msg.includes('database is locked') || msg.includes('busy');
+            if (isTransient && attempts < maxAttempts) {
+              sleepSync(attempts * 20);
+              continue;
+            }
+            throw err;
+          }
         }
       }
     } catch (err) {
@@ -141,7 +165,14 @@ export class StateStore {
   }
 }
 
-function digest(name, payload) {
+function digest(name, payload, freeze = false) {
+  if (freeze && payload?.v && typeof payload.v === 'object') {
+    const cached = FROZEN_DIGESTS.get(payload.v);
+    if (cached) return cached;
+    const d = crypto.createHash('sha256').update(name).update('\0').update(JSON.stringify(payload)).digest('base64');
+    FROZEN_DIGESTS.set(payload.v, d);
+    return d;
+  }
   return crypto.createHash('sha256').update(name).update('\0').update(JSON.stringify(payload)).digest('base64');
 }
 

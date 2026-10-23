@@ -176,11 +176,49 @@ export function createFleetBusServer(customServices = {}) {
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
   }
 
+  const staticCache = new Map();
+  function serveStaticFile(targetPath, res) {
+    let content = staticCache.get(targetPath);
+    if (!content) {
+      if (!fs.existsSync(targetPath)) return false;
+      content = fs.readFileSync(targetPath);
+      staticCache.set(targetPath, content);
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(content);
+    return true;
+  }
+
   const server = http.createServer((req, res) => {
     const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost:3000'}`);
     const pathname = parsedUrl.pathname;
 
     setCorsHeaders(res);
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    // Static client suite served from in-memory cache without database flush
+    if (req.method === 'GET') {
+      if (pathname === '/' || pathname === '/index.html' || pathname === '/passenger') {
+        const distPath = path.resolve(__dirname, '../../source/passenger/web_dist/index.html');
+        const htmlPath = path.resolve(__dirname, '../../docs/designs/passenger_suite.html');
+        if (serveStaticFile(fs.existsSync(distPath) ? distPath : htmlPath, res)) return;
+      }
+      if (pathname === '/driver' || pathname === '/driver/cockpit' || pathname === '/driver.html') {
+        const distPath = path.resolve(__dirname, '../../source/driver/web_dist/index.html');
+        const htmlPath = path.resolve(__dirname, '../../docs/designs/driver_cockpit.html');
+        if (serveStaticFile(fs.existsSync(distPath) ? distPath : htmlPath, res)) return;
+      }
+      if (pathname === '/manager' || pathname === '/ops' || pathname === '/manager.html' || pathname === '/admin') {
+        const distPath = path.resolve(__dirname, '../../source/manager/web_dist/index.html');
+        const htmlPath = path.resolve(__dirname, '../../docs/designs/manager_portal.html');
+        if (serveStaticFile(fs.existsSync(distPath) ? distPath : htmlPath, res)) return;
+      }
+    }
 
     // Storage failed earlier: memory may be ahead of the databases, so answer nothing until a restart.
     if (store.failed) {
@@ -199,37 +237,6 @@ export function createFleetBusServer(customServices = {}) {
       }
       return end(...args);
     };
-
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
-
-    // =========================================================================
-    // 1. STATIC CLIENT SUITE SERVING
-    // =========================================================================
-    if (pathname === '/' || pathname === '/index.html' || pathname === '/passenger') {
-      const distPath = path.resolve(__dirname, '../../source/passenger/web_dist/index.html');
-      const htmlPath = path.resolve(__dirname, '../../docs/designs/passenger_suite.html');
-      const targetPath = fs.existsSync(distPath) ? distPath : htmlPath;
-      if (fs.existsSync(targetPath)) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(fs.readFileSync(targetPath));
-        return;
-      }
-    }
-
-    if (pathname === '/driver' || pathname === '/driver/cockpit' || pathname === '/driver.html') {
-      const distPath = path.resolve(__dirname, '../../source/driver/web_dist/index.html');
-      const htmlPath = path.resolve(__dirname, '../../docs/designs/driver_cockpit.html');
-      const targetPath = fs.existsSync(distPath) ? distPath : htmlPath;
-      if (fs.existsSync(targetPath)) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(fs.readFileSync(targetPath));
-        return;
-      }
-    }
 
     const onboarding = req.method === 'GET' && pathname.match(/^\/o\/([A-Za-z0-9]{1,32})\/?$/);
     if (onboarding) {
@@ -271,16 +278,7 @@ export function createFleetBusServer(customServices = {}) {
       return;
     }
 
-    if (pathname === '/manager' || pathname === '/ops' || pathname === '/manager.html' || pathname === '/admin') {
-      const distPath = path.resolve(__dirname, '../../source/manager/web_dist/index.html');
-      const htmlPath = path.resolve(__dirname, '../../docs/designs/manager_portal.html');
-      const targetPath = fs.existsSync(distPath) ? distPath : htmlPath;
-      if (fs.existsSync(targetPath)) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(fs.readFileSync(targetPath));
-        return;
-      }
-    }
+
 
     // =========================================================================
     // 2. GATEWAY (authentication, roles, idempotency) AND ROUTE DISPATCHERS

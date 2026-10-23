@@ -1,18 +1,22 @@
 # BusGo Operations Control Center Web App (`source/manager/`)
 
-Cổng thông tin điều hành thời gian thực **BusGo Manager Web Portal** (Flutter Web & Responsive Desktop Dashboard) dành cho Giám đốc điều hành hạm đội, Điều độ viên và Nhân viên phòng vé: Giám sát radar xe 60Hz, điều phối tài xế & phương tiện, bán vé qua tổng đài POS Hotline, đổi xe khẩn cấp và báo cáo doanh thu & đúng giờ (MGR-001 đến MGR-030).
+Cổng thông tin điều hành thời gian thực **BusGo Manager Web Portal** dành cho Giám đốc điều hành hạm đội, Điều độ viên và Nhân viên phòng vé: Giám sát radar xe 60Hz, điều phối tài xế & phương tiện, bán vé qua tổng đài POS Hotline, đổi xe khẩn cấp và báo cáo doanh thu & đúng giờ (MGR-001 đến MGR-030).
 
 ---
 
-## 1. Nơi Build Ứng Dụng Manager Web (Build Output Directory)
+## 1. Kiến Trúc Triển Khai Thực Tế
 
-Khi thực thi lệnh build, bản phân phối web tối ưu hóa (Canvaskit WASM + HTML5) sẽ được sinh ra tại:
-- **Thư mục phân phối**: `source/manager/web_dist/` (hoặc `source/manager/app/build/web/`).
-- **Máy chủ tích hợp**: Node.js API Gateway tự động phục vụ bản build web tại đường dẫn `http://localhost:3000/manager`.
+Phân hệ Điều hành hiện có hai cấu phần:
+1. **Bản phân phối Web chính thức (`source/manager/web_dist/index.html`)**:
+   - Single-Page Application (SPA) viết bằng JavaScript thuần + Leaflet / OpenStreetMap (~185KB), nạp tức thì, không cần tải runtime nặng.
+   - Kết nối trực tiếp với Unified Node.js API Gateway tại `/api/v1/ops/*`, bao gồm đầy đủ nghiệp vụ điều độ, POS, mã giảm giá, radar xe, TOTP 2FA.
+   - Được máy chủ API Gateway nạp và phục vụ trực tiếp tại: `http://localhost:3000/manager`.
+2. **Flutter Web Monorepo (`source/manager/app/`)**:
+   - Khung ứng dụng Flutter Web đa gói (Melos) phục vụ thử nghiệm giao diện Canvaskit WASM. Khi cần xuất bản sang Flutter Web, sử dụng lệnh `make manager_build_prod`.
 
 ---
 
-## 2. Cấu Trúc Monorepo Web Tương Ứng Với App Driver/Passenger
+## 2. Cấu Trúc Thư Mục
 
 ```text
 source/manager/

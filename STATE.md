@@ -226,5 +226,19 @@ Record: `decision-log.md` (D112 to D114). Server: `npm start` on port 3000; the 
 - [x] **Driver app** calls the API for login, today's trips, readiness, start, stop arrival, manual and PIN boarding, COD, no-show, hail, incident, telemetry (every 5 s while running) and end; the trip is read again after each action. 6 unit tests against a fake server.
 - [x] **Server**: ticket detail returns the backup PIN (`TC-QR-08`); the stray seeded ticket on `trp_hn_th_01` removed (`TC-SPEC-A60`). Node tests 230/230, lint clean.
 - [x] **End-to-end on the emulator**: book A02, bank webhook from the host, success by polling, ticket with QR and PIN, driver sees the passenger, wrong PIN refused, right PIN boards, passenger wallet shows "Đã lên xe", tracking live, boarding notice.
-- [ ] **Open**: per-stop times are estimates (the API has no time per stop); the driver clock between stops is still simulated while boarding times come from the server; the boarding notice shows the raw trip id; `usesCleartextTraffic` is set in the main manifest and must move to the debug manifest before a release; camera QR plugin; manager app.
+- [ ] **Open**: per-stop times are estimates (the API has no time per stop); the driver clock between stops is still simulated while boarding times come from the server; the boarding notice shows the raw trip id; `usesCleartextTraffic` is set in the main manifest and must move to the debug manifest before a release; manager Flutter app.
+
+## 17. StateStore Performance & Architecture Documentation Alignment (2026-10-23)
+
+Record: `decision-log.md` (D158). Joint Gemini & Claude code review.
+
+- [x] **StateStore performance**:
+  - `OPTIONS` and static client UI routes (`/`, `/passenger`, `/driver`, `/manager`) bypass `store.flush()`.
+  - Static HTML files cached in-memory (`staticCache`), removing blocking `fs.readFileSync` calls.
+  - Frozen collection digest caching (`WeakMap` on `c.freeze`, e.g. `audit_log`, `stations`) eliminates re-hashing immutable records on every flush.
+  - SQLite transient error retry: 3 attempts with exponential backoff on `SQLITE_BUSY` / `SQLITE_LOCKED`.
+- [x] **Documentation alignment**:
+  - `bus_booking_tracking_system_spec_v3_enhanced.md`: added Implementation Baseline & Architectural Evolution note.
+  - `source/manager/README.md`: clarified that `source/manager/web_dist/index.html` is the active production SPA calling the API, with `source/manager/app/` as the Flutter Web monorepo framework.
+- [x] **Tests**: 563 tests pass (`npm test`), lint clean (`npm run lint`), live E2E flow verified (`npm run e2e`).
 
