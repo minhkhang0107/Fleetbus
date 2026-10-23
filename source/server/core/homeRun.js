@@ -22,6 +22,9 @@ export const HOME_NEAR_METERS = 300;
 export const HOME_AT_DOOR_METERS = 50;
 /** At or under this speed the bus has pulled up (a bus driving past the door is not at it). */
 export const HOME_AT_DOOR_SPEED_KMH = 5;
+/** Milestone M2: within these minutes or this road distance the bus is in the passenger's area, time to get the bags ready. */
+export const HOME_AREA_MINUTES = 15;
+export const HOME_AREA_METERS = 3000;
 /** A cached ETA older than this is not used to steady the next one. */
 const ETA_CACHE_MS = 2 * 60000;
 /** Minutes the bus waits at a door before the driver may go on without the passenger, unless the company sets it. */

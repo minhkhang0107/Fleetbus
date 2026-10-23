@@ -73,9 +73,10 @@ export class FcmSender {
   }
 }
 
-/** The notices worth a push or an SMS: the home run, the bus coming, the bus at the door, a missed pickup, a phone booking. */
+/** The notices worth a push or an SMS: the home run, the bus in the area or coming, the bus at the door, a missed pickup, a phone booking. */
 export const OUTSIDE_APP_TYPES = new Set([
   'HOME_RUN_STARTED',
+  'HOME_PICKUP_NEAR_AREA',
   'PICKUP_APPROACHING',
   'PICKUP_ARRIVED',
   'HOME_PICKUP_ARRIVED',

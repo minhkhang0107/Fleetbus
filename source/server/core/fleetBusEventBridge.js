@@ -8,7 +8,7 @@ import { confirmVoucherUse } from './vouchers.js';
 import { operatorOfTrip } from './tenancy.js';
 import { findOperatorById } from './operators.js';
 import { homeConfirmed } from './serviceAreas.js';
-import { homeEta } from './homeRun.js';
+import { homeEta, HOME_AREA_MINUTES, HOME_AREA_METERS } from './homeRun.js';
 import { publicBaseUrl } from './messaging.js';
 import { createShareToken } from '../services/passenger/core/cryptoEngine.js';
 
@@ -622,7 +622,8 @@ export class FleetBusEventBridge extends EventEmitter {
           title: 'Tài xế đã lên đường đón bạn',
           body: `Xe ${vehiclePlate} đang đi đón khách tận nhà. Bạn là điểm đón thứ ${p.position}${when} tại ${p.address}. Xem xe đang ở đâu và bấm "Tôi đã sẵn sàng" khi bạn xong.`,
           type: 'HOME_RUN_STARTED',
-          payload: { trip_id: tripId, ticket_id: p.ticket_id, at: new Date(now).toISOString(), appointment_at: p.appointment_at || null },
+          // D159 milestone M1: the bus set off, the passenger's place in the run.
+          payload: { trip_id: tripId, ticket_id: p.ticket_id, at: new Date(now).toISOString(), appointment_at: p.appointment_at || null, milestone: 'M1', position: p.position, total: passengers.length },
           link: this.trackingLink(p.ticket_id)
         });
       }
@@ -1173,8 +1174,11 @@ export class FleetBusEventBridge extends EventEmitter {
   }
 
   /**
-   * D143: each passenger waiting at home hears once when the bus is within the threshold of the address, and once
-   * when it is at the door, from a live position only.
+   * D143, D159: each passenger waiting at home hears the bus come in milestones, from a live position only and for
+   * the next door only: M2 in their area (HOME_AREA_MINUTES or HOME_AREA_METERS), M3 about to arrive (near the
+   * door or within the company threshold), M4 at the door. M1 is the run starting (HOME_RUN_STARTED). Each milestone
+   * goes out once, and never after a later one (a bus first seen in the lane skips M2; one that backs off after M3
+   * does not say M2 again).
    */
   _notifyHomeApproaching(trip, operatorId, threshold, now) {
     const { driverService, trackingService } = this.services;
@@ -1185,25 +1189,39 @@ export class FleetBusEventBridge extends EventEmitter {
       // D144: only the next door hears "approaching"; the ones after it would go out too early.
       const q = homeEta(trip, p.ticket_id, pos, now);
       if (!q || q.ahead > 0) continue;
+      const level = q.at_door ? 4
+        : q.near_door || q.eta_minutes <= threshold ? 3
+          : q.eta_minutes <= HOME_AREA_MINUTES || q.road_meters <= HOME_AREA_METERS ? 2 : 0;
+      if (level <= (trip.home_milestones?.[p.ticket_id] || 0)) continue;
+      trip.home_milestones = { ...trip.home_milestones, [p.ticket_id]: level };
       const payload = { trip_id: trip.trip_id, ticket_id: p.ticket_id, eta_minutes: q.eta_minutes };
       const link = this.trackingLink(p.ticket_id);
-      if (q.at_door) {
+      if (level === 4) {
         trackingService.sendNotificationOnce(`${p.ticket_id}:HOME_PICKUP_ARRIVED`, p.passenger_phone, {
           operatorId,
-          title: 'Xe đã tới gần chỗ đón',
-          body: `Xe ${trip.vehicle_plate} đã tới gần ${p.home_pickup.address}. Mời bạn ra xe, ghế ${p.seat_code}.`,
+          title: 'Xe đã tới chỗ đón',
+          body: `Xe ${trip.vehicle_plate} đã tới ${p.home_pickup.address}. Mời bạn ra xe, ghế ${p.seat_code}.`,
           type: 'HOME_PICKUP_ARRIVED',
-          payload,
+          payload: { ...payload, milestone: 'M4' },
           link
         });
-      } else if (q.eta_minutes <= threshold) {
+      } else if (level === 3) {
         const stopId = p.pickup_stop_id || 'home';
         trackingService.sendNotificationOnce(`${trip.trip_id}:${stopId}:${p.passenger_phone}:PICKUP_APPROACHING`, p.passenger_phone, {
           operatorId,
           title: 'Xe sắp tới đón bạn',
           body: `Bạn là điểm đón tiếp theo: xe ${trip.vehicle_plate} còn khoảng ${q.eta_minutes} phút nữa tới ${p.home_pickup.address}. Bạn chuẩn bị ra xe nhé.`,
           type: 'PICKUP_APPROACHING',
-          payload,
+          payload: { ...payload, milestone: 'M3' },
+          link
+        });
+      } else if (level === 2) {
+        trackingService.sendNotificationOnce(`${p.ticket_id}:HOME_MILESTONE_M2`, p.passenger_phone, {
+          operatorId,
+          title: 'Xe đang tới gần khu vực của bạn',
+          body: `Xe ${trip.vehicle_plate} đang đến gần khu vực của bạn (còn khoảng ${q.eta_minutes} phút, ~${(q.road_meters / 1000).toFixed(1)} km). Bạn vui lòng chuẩn bị sẵn sàng hành lý, ghế ${p.seat_code}.`,
+          type: 'HOME_PICKUP_NEAR_AREA',
+          payload: { ...payload, milestone: 'M2', road_meters: q.road_meters },
           link
         });
       }
