@@ -180,7 +180,7 @@ export function createFleetBusServer(customServices = {}) {
     const distPath = path.resolve(__dirname, distRel);
     const htmlPath = path.resolve(__dirname, designRel);
     const target = fs.existsSync(distPath) ? distPath : (fs.existsSync(htmlPath) ? htmlPath : null);
-    return target && fs.existsSync(target) ? fs.readFileSync(target) : null;
+    return target ? fs.readFileSync(target) : null;
   }
 
   const staticSuites = {
