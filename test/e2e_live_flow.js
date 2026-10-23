@@ -82,10 +82,12 @@ async function runLiveE2E() {
   expect(seatMap.status === 200, 'seat map', seatMap);
   console.log('✅ Seat Map retrieved: Total seats =', seatMap.body.data.total_seats, '| Decks =', seatMap.body.data.total_decks);
 
+  const chosenSeat = seatMap.body.data.seats.find((s) => s.segment_state === 'AVAILABLE' && s.state === 'AVAILABLE')?.seat_code || 'A02';
+
   const hold = await request(`/api/v1/trips/${tripId}/seats/hold`, {
     method: 'POST',
     token: passengerToken,
-    body: { seatCodes: ['A01'] }
+    body: { seatCodes: [chosenSeat] }
   });
   expect(hold.status === 200 && hold.body.data.hold_id, 'seat hold', hold);
   console.log('✅ 10-Minute Seat Hold Acquired:', hold.body.data.seat_codes);
@@ -96,9 +98,9 @@ async function runLiveE2E() {
     body: {
       tripId,
       holdId: hold.body.data.hold_id,
-      seatCodes: ['A01'],
+      seatCodes: [chosenSeat],
       payer: { full_name: 'Nguyễn Văn An', phone, email: 'an.nguyen@email.com' },
-      passengers: [{ full_name: 'Nguyễn Văn An', phone, cccd: '001200012345', seat_code: 'A01' }],
+      passengers: [{ full_name: 'Nguyễn Văn An', phone, cccd: '001200012345', seat_code: chosenSeat }],
       voucherCode: 'BUSGO50K'
     }
   });
@@ -225,16 +227,19 @@ async function runLiveE2E() {
   expect(radar.status === 200 && radar.body.data.total_tracked_vehicles > 0, 'fleet radar', radar);
   console.log('✅ Live Fleet Radar Tracked Vehicles:', radar.body.data.total_tracked_vehicles);
 
+  const posSeatMap = await request(`/api/v1/trips/${driverTripId}/seat-map`);
+  const posSeat = posSeatMap.body.data.seats.find((s) => s.segment_state === 'AVAILABLE' && s.state === 'AVAILABLE')?.seat_code || 'B03';
+
   const posBooking = await request('/api/v1/ops/pos/orders', {
     method: 'POST',
     token: staffToken,
-    body: { tripId: driverTripId, passengerName: 'Hoàng Văn Thái', phone: '0933445566', seatCodes: ['B03'] }
+    body: { tripId: driverTripId, passengerName: 'Hoàng Văn Thái', phone: '0933445566', seatCodes: [posSeat] }
   });
   expect(posBooking.status === 201, 'POS sale', posBooking);
   const soldTwice = await request('/api/v1/ops/pos/orders', {
     method: 'POST',
     token: staffToken,
-    body: { tripId: driverTripId, passengerName: 'Khách Hai', phone: '0933445577', seatCodes: ['B03'] }
+    body: { tripId: driverTripId, passengerName: 'Khách Hai', phone: '0933445577', seatCodes: [posSeat] }
   });
   expect(soldTwice.status === 409, 'a seat must not be sold twice', soldTwice);
   console.log('✅ POS Ticket Issued! PNR:', posBooking.body.data.pnr, '| the same seat is refused the second time (409)');

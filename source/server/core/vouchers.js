@@ -17,7 +17,7 @@ export const DEMO_VOUCHERS = [
 const COLUMNS = ['code', 'description', 'discount_type', 'discount_value', 'max_discount_vnd', 'min_order_vnd', 'starts_at', 'ends_at', 'usage_limit', 'per_customer_limit', 'active', 'created_at', 'updated_at'];
 
 function insert(db, v) {
-  db.prepare(`INSERT INTO vouchers (${COLUMNS.join(', ')}) VALUES (${COLUMNS.map(() => '?').join(', ')})`)
+  db.prepare(`INSERT OR IGNORE INTO vouchers (${COLUMNS.join(', ')}) VALUES (${COLUMNS.map(() => '?').join(', ')})`)
     .run(...COLUMNS.map(c => (c === 'active' ? (v.active ? 1 : 0) : v[c] ?? null)));
 }
 
