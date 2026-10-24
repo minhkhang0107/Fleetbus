@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -32,15 +33,25 @@ class SystemPermissions implements DevicePermissions {
         _ => LocationAccess.denied,
       };
 
+  // A device without a location provider throws LOCATION_SERVICES_DISABLED instead of answering false: treat it
+  // as location off so the driver sees the sheet rather than a button that does nothing.
+  Future<bool> _serviceOn() async {
+    try {
+      return await Geolocator.isLocationServiceEnabled();
+    } on PlatformException {
+      return false;
+    }
+  }
+
   @override
   Future<LocationAccess> location() async {
-    if (!await Geolocator.isLocationServiceEnabled()) return LocationAccess.off;
+    if (!await _serviceOn()) return LocationAccess.off;
     return _of(await Geolocator.checkPermission());
   }
 
   @override
   Future<LocationAccess> requestLocation() async {
-    if (!await Geolocator.isLocationServiceEnabled()) return LocationAccess.off;
+    if (!await _serviceOn()) return LocationAccess.off;
     return _of(await Geolocator.requestPermission());
   }
 
