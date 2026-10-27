@@ -107,7 +107,33 @@ export function homeOrder(trip) {
   // The tickets of one door stay together whatever order the driver set.
   if (chosen.length) return byDoor([...chosen, ...nearestFirst(chosen[chosen.length - 1].home_pickup, rest)]).flat();
   // The run ends at the first stop: built back from it, the farthest address comes first, the nearest last.
-  return byDoor(nearestFirst(firstStopPoint(trip), rest).reverse()).flat();
+  const end = firstStopPoint(trip);
+  return untangle(byDoor(nearestFirst(end, rest).reverse()), end).flat();
+}
+
+/**
+ * Shortens a run of doors that ends at [end] by reversing stretches of it while that saves road (2-opt). Nearest
+ * next alone can cross the city twice (Cầu Giấy, Long Biên, then back to Hoàn Kiếm). The start is open: the bus
+ * comes from wherever it is.
+ */
+function untangle(doors, end) {
+  if (!end || doors.length < 3) return doors;
+  const at = (k) => (k < doors.length ? doors[k][0].home_pickup : end);
+  let better = true;
+  while (better) {
+    better = false;
+    for (let i = 0; i < doors.length - 1; i++) {
+      for (let j = i + 1; j < doors.length; j++) {
+        const before = (i > 0 ? roadMeters(at(i - 1), at(i)) : 0) + roadMeters(at(j), at(j + 1));
+        const after = (i > 0 ? roadMeters(at(i - 1), at(j)) : 0) + roadMeters(at(i), at(j + 1));
+        if (after + 1 < before) {
+          doors.splice(i, j - i + 1, ...doors.slice(i, j + 1).reverse());
+          better = true;
+        }
+      }
+    }
+  }
+  return doors;
 }
 
 /** Waiting home pickups only, in collection order. */

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { homeAppointments, homeRunOutlook } from '../../source/server/core/homeRun.js';
+import { homeAppointments, homeOrder, homeRunOutlook } from '../../source/server/core/homeRun.js';
 
 /** Appointments are times the bus can keep, and the driver sees when a run no longer fits the departure. */
 describe('Home run appointments and outlook', () => {
@@ -17,6 +17,13 @@ describe('Home run appointments and outlook', () => {
     stops: [{ stop_id: 'stp_hn_gb' }],
     home_order: ['cg', 'lb', 'hk', 'bm'],
     manifest: [home('cg', 21.0362, 105.7906), home('lb', 21.04, 105.89), home('hk', 21.0285, 105.8542), home('bm', 21.0059, 105.8573)]
+  });
+
+  it('TC-HOME-PLAN-00: the order the app proposes does not cross the river twice', () => {
+    const t = trip();
+    delete t.home_order;
+    // Nearest next from Giáp Bát gave Cầu Giấy, Long Biên, Hoàn Kiếm (20.1 km); the shortest run is 18.9 km.
+    assert.deepStrictEqual(homeOrder(t).map(p => p.ticket_id), ['cg', 'hk', 'lb', 'bm']);
   });
 
   it('TC-HOME-PLAN-01: a run longer than the window gets its real times, not all of them at the window end', () => {
