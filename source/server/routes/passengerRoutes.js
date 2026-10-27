@@ -4,8 +4,10 @@
  */
 
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
-import { evaluateVoucher, reserveVoucher } from '../core/vouchers.js';
-import { publicOperatorProfile, DEFAULT_OPERATOR_ID } from '../core/operators.js';
+import { evaluateVoucher, listOfficeVouchers, reserveVoucher } from '../core/vouchers.js';
+import { findOperatorById, operatorPaymentConfig, publicOperatorProfile, DEFAULT_OPERATOR_ID } from '../core/operators.js';
+import { getProvider } from '../core/payments/providers.js';
+import { reconcileOperator } from '../core/payments/reconcile.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { verifyToken } from '../core/tokens.js';
 import { applyHomeRun, findShareHolder, homeTarget } from '../core/homeTracking.js';
@@ -219,7 +221,7 @@ export function trackingFor(req, services, tripId, url) {
 }
 
 export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
-  const { authService, searchService, seatMapService, checkoutService, paymentService, trackingService } = services;
+  const { authService, searchService, seatMapService, checkoutService, paymentService, trackingService, managerService } = services;
 
   // GET /api/v1/passenger/config or /api/v1/app/config (PAX-001)
   if ((pathname === '/api/v1/passenger/config' || pathname === '/api/v1/app/config') && req.method === 'GET') {
@@ -267,16 +269,31 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
 
   // GET /api/v1/passenger/home-feed (PAX-004)
   if (pathname === '/api/v1/passenger/home-feed' && req.method === 'GET') {
+    const popularCorridors = (managerService?.routes || [])
+      .filter(r => (r.operator_id || DEFAULT_OPERATOR_ID) === req.operatorId)
+      .slice(0, 3)
+      .map(r => ({
+        route_id: r.route_id,
+        route_name: r.name,
+        fare_from_vnd: r.base_fare_vnd,
+        duration_hours: r.duration_hours ?? null
+      }));
+
+    const db = services.tenantDbs?.forOperator(req.operatorId);
+    const vouchers = db ? listOfficeVouchers(db) : [];
+    const promotions = vouchers
+      .filter(v => v.status === 'LIVE')
+      .slice(0, 3)
+      .map(v => ({
+        code: v.code,
+        discount: v.discount_type === 'PERCENT' ? `${v.discount_value}%` : `${v.discount_value.toLocaleString('vi-VN')} đ`,
+        description: v.description
+      }));
+
     sendSuccess(res, {
       active_ticket: null,
-      popular_corridors: [
-        { route_id: 'rt_hn_th', route_name: 'Hà Nội — Thanh Hóa', fare_from_vnd: 220000, duration_hours: 3.25 },
-        { route_id: 'rt_hn_hp', route_name: 'Hà Nội — Hải Phòng', fare_from_vnd: 150000, duration_hours: 1.75 },
-        { route_id: 'rt_hn_nd', route_name: 'Hà Nội — Nam Định', fare_from_vnd: 120000, duration_hours: 1.5 }
-      ],
-      promotions: [
-        { code: 'BUSGO50K', discount: '50.000 đ', description: 'Giảm ngay 50k cho đơn từ 200k' }
-      ]
+      popular_corridors: popularCorridors,
+      promotions
     });
     return true;
   }
@@ -513,13 +530,30 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       const applied = orderReview.data.applied_voucher;
       const totalVnd = orderReview.total_payment_vnd + home.fee_vnd;
 
-      let paymentMethod = body.paymentMethod === 'CASH' ? 'CASH' : 'VIETQR_NAPAS247';
-      if (paymentMethod === 'CASH' && req.operator?.service_config?.allow_cash_payment === false) {
-        sendError(res, 'Nhà xe không nhận thanh toán tiền mặt', 'PAYMENT_METHOD_NOT_ALLOWED', 422);
+      const rawMethod = body.paymentMethod;
+      if (rawMethod !== undefined && rawMethod !== null && !['CASH', 'BANK_TRANSFER', 'VIETQR_NAPAS247', 'VIETQR'].includes(rawMethod)) {
+        sendError(res, 'Nhà xe không hỗ trợ phương thức thanh toán này', 'PAYMENT_METHOD_NOT_ALLOWED', 422);
+        return;
+      }
+      let paymentMethod = rawMethod === 'CASH' ? 'CASH' : 'VIETQR_NAPAS247';
+      const methodKey = paymentMethod === 'CASH' ? 'CASH' : 'BANK_TRANSFER';
+      const allowedMethods = operatorPaymentConfig(req.operator).methods;
+      if (!allowedMethods.includes(methodKey)) {
+        sendError(
+          res,
+          methodKey === 'CASH' ? 'Nhà xe không nhận thanh toán tiền mặt' : 'Nhà xe không nhận thanh toán chuyển khoản',
+          'PAYMENT_METHOD_NOT_ALLOWED',
+          422
+        );
         return;
       }
       if (paymentMethod === 'CASH' && totalVnd === 0) {
         paymentMethod = 'VIETQR_NAPAS247';
+      }
+
+      if (paymentMethod !== 'CASH' && totalVnd > 0 && (!req.operator?.bank?.bin || !req.operator?.bank?.account_number)) {
+        sendError(res, 'Nhà xe chưa có tài khoản nhận tiền, vui lòng liên hệ tổng đài nhà xe', 'PAYEE_MISSING', 409);
+        return;
       }
 
       const paymentOrderResult = paymentService.createPaymentOrder({
@@ -660,9 +694,24 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const orderId = parts[5];
     if (forbidOrder(req, res, paymentService, orderId)) return true;
-    parseJsonBody(req).then(body => {
-      const result = paymentService.checkPaymentStatus(orderId, {
-        manualTrigger: Boolean(body.manualTrigger || body.manual_trigger)
+    parseJsonBody(req).then(async body => {
+      const manualTrigger = Boolean(body.manualTrigger || body.manual_trigger);
+      const now = !isProduction() && body.now ? Number(body.now) : Date.now();
+      const order = paymentService.orders.get(orderId) || paymentService.orders.get(paymentService.pnrIndex.get(orderId));
+      if (manualTrigger && order && order.payment_status === 'PENDING_PAYMENT') {
+        const op = findOperatorById(order.operator_id || req.operatorId);
+        const provider = getProvider(operatorPaymentConfig(op).transfer_provider);
+        if (provider?.auto && typeof provider.fetchTransactions === 'function') {
+          const lastAt = order.last_manual_reconcile_at ? Date.parse(order.last_manual_reconcile_at) : 0;
+          if (!lastAt || (now - lastAt >= 15000)) {
+            order.last_manual_reconcile_at = new Date(now).toISOString();
+            await reconcileOperator(services, op.operator_id, { now });
+          }
+        }
+      }
+      const result = paymentService.checkPaymentStatus(order ? order.order_id : orderId, {
+        manualTrigger,
+        mockNow: now
       });
       if (result.success) {
         sendSuccess(res, result);
