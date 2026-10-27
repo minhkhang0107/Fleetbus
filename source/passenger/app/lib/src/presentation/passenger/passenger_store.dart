@@ -20,18 +20,24 @@ class OperatorInfo {
     required this.shortName,
     required this.hotline,
     required this.primaryColor,
+    this.supportEmail = '',
+    this.address = '',
     this.pickupModes = const ['FIXED_STOP'],
     this.dropoffModes = const ['FIXED_LOCATION'],
     this.allowCash = true,
+    this.allowTransfer = true,
   });
   final String code;
   final String name;
   final String shortName;
   final String hotline;
   final String primaryColor;
+  final String supportEmail;
+  final String address;
   final List<String> pickupModes;
   final List<String> dropoffModes;
   final bool allowCash;
+  final bool allowTransfer;
 
   bool get homePickup => pickupModes.contains('HOME_PICKUP');
   bool get homeDropoff => dropoffModes.contains('HOME_DROPOFF');
@@ -42,9 +48,13 @@ class OperatorInfo {
         shortName: j['short_name'] ?? '',
         hotline: j['hotline'] ?? '',
         primaryColor: j['primary_color'] ?? '',
+        supportEmail: j['support_email'] ?? '',
+        address: j['address'] ?? '',
         pickupModes: [for (final m in (j['pickup_modes'] as List? ?? const ['FIXED_STOP'])) '$m'],
         dropoffModes: [for (final m in (j['dropoff_modes'] as List? ?? const ['FIXED_LOCATION'])) '$m'],
         allowCash: j['allow_cash_payment'] != false,
+        // Older servers send no payment_methods: they always took transfers.
+        allowTransfer: (j['payment_methods'] as List?)?.contains('BANK_TRANSFER') ?? true,
       );
 }
 
@@ -710,6 +720,8 @@ class PassengerStore extends ChangeNotifier {
   bool insured = false;
   String paymentMethod = 'VIETQR_NAPAS247';
   bool get payByCash => paymentMethod == 'CASH';
+  /// A company that takes cash only starts on cash; a 0 đ order is always settled as a transfer.
+  String get defaultPaymentMethod => operator?.allowTransfer == false && operator?.allowCash != false ? 'CASH' : 'VIETQR_NAPAS247';
 
   // Order and payment (PAX-013)
   String? orderId;
@@ -789,7 +801,7 @@ class PassengerStore extends ChangeNotifier {
     
     api.operatorCode = code;
     operator = OperatorInfo.fromJson(r.value!['operator'] as Map<String, dynamic>);
-    if (!operator!.allowCash) paymentMethod = 'VIETQR_NAPAS247';
+    paymentMethod = defaultPaymentMethod;
     calendar = ServiceCalendar.fromJson(r.value!['service_calendar'] as Map<String, dynamic>?);
     fixedEndpoints = FixedEndpoints.fromJson(r.value!['fixed_endpoints']);
     
@@ -1138,7 +1150,7 @@ class PassengerStore extends ChangeNotifier {
     seats.clear();
     seatMap = [];
     deck = 1;
-    paymentMethod = 'VIETQR_NAPAS247';
+    paymentMethod = defaultPaymentMethod;
     notifyListeners();
     if (t.homePickup || t.homeDropoff) loadServiceAreas();
   }
@@ -1284,7 +1296,7 @@ class PassengerStore extends ChangeNotifier {
     // Other seats or another trip price differently: a code applied before is checked again at checkout.
     voucher = null;
     voucherDiscount = 0;
-    paymentMethod = 'VIETQR_NAPAS247';
+    paymentMethod = defaultPaymentMethod;
     _startCountdown('hold', (r.value!['seconds_remaining'] as num?)?.toInt() ?? 600);
     return null;
   }
@@ -1306,6 +1318,7 @@ class PassengerStore extends ChangeNotifier {
 
   void setPaymentMethod(String m) {
     if (m == 'CASH' && operator?.allowCash == false) return;
+    if (m != 'CASH' && operator?.allowTransfer == false && total > 0) return;
     paymentMethod = m;
     notifyListeners();
   }
@@ -1327,6 +1340,8 @@ class PassengerStore extends ChangeNotifier {
   void removeVoucher() {
     voucher = null;
     voucherDiscount = 0;
+    // A free order was switched to transfer; with a fare again a cash-only company is back on cash.
+    if (operator?.allowTransfer == false) paymentMethod = defaultPaymentMethod;
     notifyListeners();
   }
 
@@ -1433,7 +1448,7 @@ class PassengerStore extends ChangeNotifier {
     voucher = null;
     voucherDiscount = 0;
     insured = false;
-    paymentMethod = 'VIETQR_NAPAS247';
+    paymentMethod = defaultPaymentMethod;
     await loadNotices();
     return true;
   }
@@ -1444,7 +1459,7 @@ class PassengerStore extends ChangeNotifier {
     orderId = null;
     orderPnr = null;
     seats.clear();
-    paymentMethod = 'VIETQR_NAPAS247';
+    paymentMethod = defaultPaymentMethod;
     notifyListeners();
   }
 

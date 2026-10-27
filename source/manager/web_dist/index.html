@@ -213,7 +213,9 @@
     <button data-view="homereq">Duyệt đón tận nhà <span class="pill warn hidden" id="homeReqCount"></span></button>
     <button data-view="banners">Quảng cáo</button>
     <button data-view="vouchers">Mã giảm giá</button>
+    <button data-view="payments">Thanh toán</button>
     <button data-view="audit">Nhật ký thao tác</button>
+    <button data-view="company" id="navCompany">Thông tin nhà xe</button>
     <button data-view="about">Giới thiệu</button>
     <button data-view="platform" class="hidden" id="navPlatform">Nhà xe (nền tảng)</button>
     <div class="spacer"></div>
@@ -556,10 +558,99 @@
       </div>
     </div>
 
+    <!-- Payments (MGR-037, MGR-038) -->
+    <div data-panel="payments" class="hidden">
+      <h2>Thanh toán</h2>
+
+      <!-- Card a: Hình thức thanh toán -->
+      <div class="card" id="cardPaymentSettings" style="margin-bottom:16px;max-width:700px">
+        <div class="section-title" style="margin-top:0">Hình thức thanh toán</div>
+        <p class="muted" style="margin:-4px 0 14px;font-size:13px">Cấu hình các phương thức thanh toán và cổng thanh toán tự động.</p>
+        <form id="paymentSettingsForm" novalidate>
+          <div class="field">
+            <label>Phương thức thanh toán chấp nhận (chọn ít nhất một)</label>
+            <div class="row" style="margin-top:4px">
+              <label class="row" style="margin:0;cursor:pointer"><input type="checkbox" id="payMethodBank" value="BANK_TRANSFER"> Chuyển khoản (BANK_TRANSFER)</label>
+              <label class="row" style="margin:0;cursor:pointer"><input type="checkbox" id="payMethodCash" value="CASH"> Tiền mặt khi lên xe (CASH)</label>
+            </div>
+          </div>
+          <div class="field">
+            <label for="payTransferProvider">Cách nhận báo có</label>
+            <select id="payTransferProvider"></select>
+          </div>
+          <div id="payCredentialFields"></div>
+
+          <div id="payWebhookBox" class="hidden" style="margin:12px 0;padding:12px;background:#f8fafc;border:1px solid var(--line);border-radius:8px">
+            <div class="field" style="margin-bottom:8px">
+              <label for="payWebhookUrl">Địa chỉ Webhook nhận thông báo</label>
+              <div class="row">
+                <input id="payWebhookUrl" readonly class="mono grow" style="background:#fff">
+                <button type="button" class="btn" id="payCopyWebhookBtn">Sao chép</button>
+              </div>
+            </div>
+            <div id="paySepayGuide" class="muted hidden" style="font-size:12px;margin-bottom:8px">
+              Vào my.sepay.vn → Tích hợp WebHooks → Thêm webhook: URL như trên, sự kiện Có tiền vào, xác thực theo lựa chọn ở đây.
+            </div>
+            <div class="row" style="font-size:12px;color:var(--muted);gap:16px;flex-wrap:wrap">
+              <div id="payLastWebhook">Webhook gần nhất: —</div>
+              <div id="payReconcileStatus">Đối soát: —</div>
+            </div>
+          </div>
+
+          <div class="muted hidden" id="payRoleHint" style="font-size:12px;margin-bottom:8px">Chỉ giám đốc nhà xe được sửa.</div>
+          <div class="error" id="paySettingsError"></div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn primary" type="submit" id="paySaveBtn">Lưu</button>
+            <button class="btn" type="button" id="payTestBtn">Kiểm tra kết nối</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Card b: Đơn chờ thanh toán -->
+      <div class="card" id="cardPendingPayments" style="margin-bottom:16px">
+        <div class="section-title" style="margin-top:0">Đơn chờ thanh toán</div>
+        <p class="muted" style="margin:-4px 0 12px;font-size:13px">Danh sách đơn đặt vé online đang chờ thanh toán hoặc cần xử lý số tiền chuyển.</p>
+        <div class="card scroll" style="padding:0" id="pendingPaymentsBox"></div>
+      </div>
+
+      <!-- Card c: Giao dịch chưa khớp đơn -->
+      <div class="card" id="cardBankTransactions">
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div>
+            <div class="section-title" style="margin:0">Giao dịch chưa khớp đơn</div>
+            <p class="muted" style="margin:2px 0 0;font-size:13px">Các giao dịch chuyển khoản vào tài khoản nhà xe chưa được khớp với đơn đặt chỗ.</p>
+          </div>
+          <label class="row" style="margin:0;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="bankTxShowAll"> Xem tất cả giao dịch
+          </label>
+        </div>
+        <div class="card scroll" style="padding:0" id="bankTransactionsBox"></div>
+      </div>
+    </div>
+
     <!-- Audit -->
     <div data-panel="audit" class="hidden">
       <h2>Nhật ký thao tác</h2>
       <div class="card scroll" style="padding:0" id="auditBox"></div>
+    </div>
+
+    <!-- Company info (MGR-036) -->
+    <div data-panel="company" class="hidden">
+      <h2>Thông tin nhà xe</h2>
+      <div class="card" style="max-width:560px">
+        <div class="field"><label>Tên nhà xe</label><div id="companyViewName" style="font-weight:600">—</div></div>
+        <div class="field"><label>Mã nhà xe</label><div id="companyViewCode" class="mono">—</div></div>
+        <div class="field"><label>Tài khoản nhận tiền</label><div id="companyViewBank" class="mono">—</div></div>
+        <p class="muted" style="margin:4px 0 16px;font-size:12px">Tên, mã và tài khoản nhận tiền do quản trị nền tảng thay đổi.</p>
+        <form id="companyForm">
+          <div class="field"><label>Tổng đài</label><input name="hotline" maxlength="15" inputmode="tel"></div>
+          <div class="field"><label>Email chăm sóc khách hàng</label><input name="support_email" type="email"></div>
+          <div class="field"><label>Địa chỉ văn phòng</label><input name="address" maxlength="200"></div>
+          <div class="muted hidden" id="companyRoleHint" style="font-size:12px;margin-bottom:8px">Chỉ giám đốc nhà xe được sửa.</div>
+          <div class="error" id="companyError"></div>
+          <button class="btn primary" type="submit" id="companySaveBtn">Lưu</button>
+        </form>
+      </div>
     </div>
 
     <!-- SH-006: about, terms of use, licences (D157) -->
@@ -633,11 +724,13 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</pre></details>
       <div class="split">
         <div class="card scroll" style="padding:0" id="operatorsBox"></div>
         <form class="card" id="operatorForm">
-          <div class="section-title" style="margin-top:0">Thêm nhà xe</div>
+          <div class="section-title" style="margin-top:0" id="operatorFormTitle">Thêm nhà xe</div>
           <div class="field"><label>Mã nhà xe (A-Z, 0-9)</label><input name="code" required maxlength="16" style="text-transform:uppercase"></div>
           <div class="field"><label>Tên nhà xe</label><input name="name" required maxlength="200"></div>
           <div class="field"><label>Tên ngắn</label><input name="short_name" maxlength="40"></div>
           <div class="field"><label>Tổng đài</label><input name="hotline" maxlength="15" inputmode="tel"></div>
+          <div class="field"><label>Email chăm sóc khách hàng</label><input name="support_email" type="email"></div>
+          <div class="field"><label>Địa chỉ văn phòng</label><input name="address" maxlength="200"></div>
           <div class="field"><label>Email giám đốc</label><input name="director_email" type="email" required></div>
           <div class="field"><label>Tên giám đốc</label><input name="director_name" required maxlength="60"></div>
           <div class="field"><label>Mã BIN ngân hàng</label><input name="bin" required maxlength="6"></div>
@@ -645,7 +738,10 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</pre></details>
           <div class="field"><label>Số tài khoản</label><input name="account_number" required maxlength="20"></div>
           <div class="field"><label>Chủ tài khoản</label><input name="account_name" required maxlength="200"></div>
           <div class="error" id="operatorError"></div>
-          <button class="btn primary" type="submit">Tạo nhà xe</button>
+          <div class="row" style="margin-top:8px">
+            <button class="btn primary" type="submit" id="operatorSubmitBtn">Tạo nhà xe</button>
+            <button class="btn hidden" type="button" id="operatorCancelBtn">Hủy</button>
+          </div>
         </form>
       </div>
     </div>
@@ -1043,11 +1139,16 @@ async function enter() {
     homereq: ['FLEET_DIRECTOR', 'DISPATCHER'],
     banners: ['FLEET_DIRECTOR'],
     vouchers: ['FLEET_DIRECTOR'],
+    payments: ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'CASHIER'],
     audit: ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'DISPATCHER']
   };
   document.querySelectorAll('nav button[data-view]').forEach(b => {
     const v = b.dataset.view;
     if (v === 'platform') return;
+    if (v === 'company') {
+      b.classList.toggle('hidden', isPlatform);
+      return;
+    }
     const allowed = isPlatform || !NAV_ROLES[v] || (role && NAV_ROLES[v].includes(role));
     b.classList.toggle('hidden', !allowed);
   });
@@ -1076,8 +1177,65 @@ function show(view) {
   if (state.user?.role === 'PLATFORM_ADMIN' && view !== 'platform' && view !== 'about' && !state.platformCode) {
     toast('Chọn nhà xe ở thanh trên để xem dữ liệu điều hành');
   }
-  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, fleet: loadFleet, drivers: loadDrivers, layouts: loadLayouts, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, vouchers: loadVouchers, audit: loadAudit, about: loadAbout, platform: loadOperators })[view]?.();
+  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, fleet: loadFleet, drivers: loadDrivers, layouts: loadLayouts, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, vouchers: loadVouchers, payments: loadPayments, audit: loadAudit, company: loadCompany, about: loadAbout, platform: loadOperators })[view]?.();
 }
+
+// ---------- company info (MGR-036) ----------
+async function loadCompany() {
+  const r = await api('/api/v1/ops/company');
+  if (!r.ok) {
+    $('#companyError').textContent = r.message;
+    return;
+  }
+  const op = r.data?.operator || {};
+  $('#companyViewName').textContent = op.name || '—';
+  $('#companyViewCode').textContent = op.code || '—';
+  const b = op.bank;
+  const bankStr = b ? [b.bank_name, b.account_number, b.account_name].filter(Boolean).join(' · ') : '';
+  $('#companyViewBank').textContent = bankStr || '—';
+
+  const f = $('#companyForm');
+  f.hotline.value = op.hotline || '';
+  f.support_email.value = op.support_email || '';
+  f.address.value = op.address || '';
+  $('#companyError').textContent = '';
+
+  const canEdit = state.user?.role === 'FLEET_DIRECTOR';
+  f.hotline.disabled = !canEdit;
+  f.support_email.disabled = !canEdit;
+  f.address.disabled = !canEdit;
+  $('#companySaveBtn').disabled = !canEdit;
+  $('#companyRoleHint').classList.toggle('hidden', canEdit);
+}
+
+$('#companyForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const body = {
+    hotline: f.hotline.value.trim(),
+    support_email: f.support_email.value.trim(),
+    address: f.address.value.trim()
+  };
+  const r = await api('/api/v1/ops/company', { method: 'PATCH', body });
+  if (!r.ok) {
+    $('#companyError').textContent = r.message;
+    return;
+  }
+  $('#companyError').textContent = '';
+  toast('Đã lưu thông tin nhà xe');
+  const updated = r.data?.operator;
+  if (state.operator && updated) {
+    state.operator.hotline = updated.hotline;
+    state.operator.support_email = updated.support_email;
+    state.operator.address = updated.address;
+    store('busgo_ops_session', JSON.stringify({ token: state.token, user: state.user, operator: state.operator }));
+  }
+  if (updated) {
+    f.hotline.value = updated.hotline || '';
+    f.support_email.value = updated.support_email || '';
+    f.address.value = updated.address || '';
+  }
+});
 
 // ---------- about (SH-006, D157) ----------
 // The terms and the model and data notice come from the server, so they change without a new page.
@@ -2119,6 +2277,427 @@ $('#voucherForm').addEventListener('submit', async (e) => {
 });
 syncVoucherType();
 
+// ---------- payments (MGR-037, MGR-038) ----------
+let paymentSettingsData = null;
+let bankTxShowAll = false;
+
+async function loadPayments() {
+  await Promise.all([
+    loadPaymentSettings(),
+    loadPendingPayments(),
+    loadBankTransactions()
+  ]);
+}
+
+async function loadPaymentSettings() {
+  const cardA = $('#cardPaymentSettings');
+  const role = state.user?.role;
+  if (role === 'CASHIER') {
+    cardA.classList.add('hidden');
+    return;
+  }
+  cardA.classList.remove('hidden');
+
+  const canEdit = role === 'FLEET_DIRECTOR';
+  $('#payRoleHint').classList.toggle('hidden', canEdit);
+  $('#paySaveBtn').disabled = !canEdit;
+  $('#payTestBtn').disabled = !canEdit;
+  $('#payMethodBank').disabled = !canEdit;
+  $('#payMethodCash').disabled = !canEdit;
+  $('#payTransferProvider').disabled = !canEdit;
+
+  const r = await api('/api/v1/ops/payment-settings');
+  if (!r.ok) {
+    $('#paySettingsError').textContent = r.message;
+    return;
+  }
+  $('#paySettingsError').textContent = '';
+  paymentSettingsData = r.data || {};
+  const settings = paymentSettingsData;
+
+  const methods = settings.methods || [];
+  $('#payMethodBank').checked = methods.includes('BANK_TRANSFER');
+  $('#payMethodCash').checked = methods.includes('CASH');
+
+  const sel = $('#payTransferProvider');
+  const providers = settings.providers || [];
+  const currentProviderId = settings.transfer_provider || 'MANUAL';
+  sel.innerHTML = providers.map(p => `<option value="${esc(p.id)}" ${p.id === currentProviderId ? 'selected' : ''}>${esc(p.label)}</option>`).join('');
+
+  renderCredentialFields();
+}
+
+function renderCredentialFields() {
+  const settings = paymentSettingsData || {};
+  const providers = settings.providers || [];
+  const currentProviderId = $('#payTransferProvider')?.value;
+  const provider = providers.find(p => p.id === currentProviderId);
+  const credBox = $('#payCredentialFields');
+  const webhookBox = $('#payWebhookBox');
+  const canEdit = state.user?.role === 'FLEET_DIRECTOR';
+  const creds = settings.credentials || {};
+
+  if (!credBox) return;
+
+  if (!provider || !provider.credential_fields || provider.credential_fields.length === 0) {
+    credBox.innerHTML = '';
+  } else {
+    credBox.innerHTML = provider.credential_fields.map(f => {
+      const val = creds[f.key] || '';
+      if (f.type === 'select') {
+        const opts = (f.options || []).map(opt => `<option value="${esc(opt)}" ${val === opt ? 'selected' : ''}>${esc(opt)}</option>`).join('');
+        return `<div class="field"><label for="cred_${esc(f.key)}">${esc(f.label)}</label><select id="cred_${esc(f.key)}" name="${esc(f.key)}" ${canEdit ? '' : 'disabled'}>${opts}</select></div>`;
+      }
+      if (f.type === 'secret') {
+        const ph = val ? esc(val) : '••••';
+        return `<div class="field"><label for="cred_${esc(f.key)}">${esc(f.label)}</label><input id="cred_${esc(f.key)}" name="${esc(f.key)}" type="password" placeholder="${ph}" autocomplete="new-password" ${canEdit ? '' : 'disabled'}></div>`;
+      }
+      return `<div class="field"><label for="cred_${esc(f.key)}">${esc(f.label)}</label><input id="cred_${esc(f.key)}" name="${esc(f.key)}" type="text" value="${esc(val)}" ${canEdit ? '' : 'disabled'}></div>`;
+    }).join('');
+  }
+
+  if (settings.webhook_url && provider?.auto && webhookBox) {
+    webhookBox.classList.remove('hidden');
+    $('#payWebhookUrl').value = settings.webhook_url;
+    $('#paySepayGuide').classList.toggle('hidden', provider.id !== 'SEPAY');
+    $('#payLastWebhook').textContent = 'Webhook gần nhất: ' + (settings.last_webhook_at ? `${hhmm(settings.last_webhook_at)} ${dmy(settings.last_webhook_at)}` : 'Chưa nhận webhook nào');
+    const rec = settings.reconciliation;
+    let recTxt = 'Đối soát: ' + (rec?.enabled ? 'Đang bật' : 'Chưa kích hoạt');
+    if (rec?.last_run_at) recTxt += ` · Lần chạy gần nhất: ${hhmm(rec.last_run_at)} ${dmy(rec.last_run_at)}`;
+    if (rec?.last_error) recTxt += ` · Lỗi: ${esc(rec.last_error)}`;
+    $('#payReconcileStatus').textContent = recTxt;
+  } else if (webhookBox) {
+    webhookBox.classList.add('hidden');
+  }
+}
+
+$('#payTransferProvider')?.addEventListener('change', renderCredentialFields);
+
+$('#payCopyWebhookBtn')?.addEventListener('click', async () => {
+  const url = $('#payWebhookUrl')?.value;
+  if (!url) return;
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('Đã sao chép URL webhook');
+  } catch (_) {
+    $('#payWebhookUrl')?.select();
+    document.execCommand('copy');
+    toast('Đã sao chép URL webhook');
+  }
+});
+
+$('#paymentSettingsForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const methods = [];
+  if ($('#payMethodBank').checked) methods.push('BANK_TRANSFER');
+  if ($('#payMethodCash').checked) methods.push('CASH');
+  if (methods.length === 0) {
+    $('#paySettingsError').textContent = 'Cần chọn ít nhất một phương thức thanh toán';
+    return;
+  }
+  const providerId = $('#payTransferProvider').value;
+  const provider = (paymentSettingsData?.providers || []).find(p => p.id === providerId);
+  const credentials = {};
+  if (provider?.credential_fields) {
+    for (const f of provider.credential_fields) {
+      const input = $(`#cred_${f.key}`);
+      if (!input) continue;
+      const v = input.value.trim();
+      if (v !== '') credentials[f.key] = v;
+    }
+  }
+  $('#paySaveBtn').disabled = true;
+  const r = await api('/api/v1/ops/payment-settings', {
+    method: 'PUT',
+    body: { methods, transfer_provider: providerId, credentials }
+  });
+  $('#paySaveBtn').disabled = false;
+  if (!r.ok) {
+    $('#paySettingsError').textContent = r.message;
+    toast(r.message);
+  } else {
+    $('#paySettingsError').textContent = '';
+    toast('Đã lưu cấu hình thanh toán');
+    await loadPaymentSettings();
+  }
+});
+
+$('#payTestBtn')?.addEventListener('click', async () => {
+  const providerId = $('#payTransferProvider').value;
+  const provider = (paymentSettingsData?.providers || []).find(p => p.id === providerId);
+  const credentials = {};
+  if (provider?.credential_fields) {
+    for (const f of provider.credential_fields) {
+      const input = $(`#cred_${f.key}`);
+      if (!input) continue;
+      const v = input.value.trim();
+      if (v !== '') credentials[f.key] = v;
+    }
+  }
+  $('#payTestBtn').disabled = true;
+  const r = await api('/api/v1/ops/payment-settings/test', {
+    method: 'POST',
+    body: { transfer_provider: providerId, credentials }
+  });
+  $('#payTestBtn').disabled = false;
+  if (!r.ok) {
+    toast(r.message || 'Kiểm tra kết nối thất bại');
+  } else {
+    toast(r.data?.message || 'Kiểm tra kết nối thành công');
+  }
+});
+
+async function loadPendingPayments() {
+  const box = $('#pendingPaymentsBox');
+  if (!box) return;
+  const r = await api('/api/v1/ops/pending-payments');
+  if (!r.ok) {
+    box.innerHTML = `<p class="muted" style="padding:16px;margin:0">${esc(r.message)}</p>`;
+    return;
+  }
+  const orders = r.data?.orders || r.data || [];
+  if (orders.length === 0) {
+    box.innerHTML = '<p class="muted" style="padding:16px;margin:0">Không có đơn nào đang chờ thanh toán.</p>';
+    return;
+  }
+
+  const statusBadge = (st) => {
+    if (st === 'PENDING_PAYMENT') return '<span class="pill warn">Chờ thanh toán</span>';
+    if (st === 'EXPIRED') return '<span class="pill danger">Hết hạn</span>';
+    if (st === 'UNMATCHED_OVERDUE') return '<span class="pill danger">Quá hạn chưa khớp</span>';
+    return `<span class="pill">${esc(st)}</span>`;
+  };
+
+  box.innerHTML = `<table>
+    <thead>
+      <tr>
+        <th>PNR</th>
+        <th>Khách hàng</th>
+        <th>Số tiền</th>
+        <th>Đã nhận</th>
+        <th>Còn thiếu</th>
+        <th>Hạn TT</th>
+        <th>Trạng thái</th>
+        <th style="text-align:right">Thao tác</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${orders.map(o => `
+        <tr id="orderRow_${esc(o.order_id)}">
+          <td><b class="mono">${esc(o.pnr)}</b>${o.trip_id ? `<br><span class="muted" style="font-size:11px">${esc(o.trip_id)}</span>` : ''}</td>
+          <td>${esc(o.payer_name || '—')}${o.payer_phone ? `<br><span class="mono muted" style="font-size:12px">${esc(o.payer_phone)}</span>` : ''}</td>
+          <td style="font-weight:600">${vnd(o.amount_vnd)}</td>
+          <td style="color:var(--ok)">${vnd(o.paid_amount_vnd)}</td>
+          <td style="color:${(o.remaining_vnd || 0) > 0 ? 'var(--danger)' : 'var(--muted)'};font-weight:600">${vnd(o.remaining_vnd)}</td>
+          <td style="font-size:12px">${esc(hhmm(o.expires_at))} ${esc(dmy(o.expires_at))}</td>
+          <td>${statusBadge(o.payment_status)}</td>
+          <td style="text-align:right">
+            <button class="btn primary" data-confirm-order="${esc(o.order_id)}" style="padding:4px 10px;font-size:13px">Xác nhận đã nhận tiền</button>
+          </td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>`;
+
+  box.querySelectorAll('button[data-confirm-order]').forEach(b => {
+    b.addEventListener('click', () => {
+      const orderId = b.dataset.confirmOrder;
+      const order = orders.find(x => x.order_id === orderId);
+      if (!order) return;
+      toggleConfirmForm(order);
+    });
+  });
+}
+
+function toggleConfirmForm(order) {
+  const existing = $(`#confirmRow_${order.order_id}`);
+  if (existing) {
+    existing.remove();
+    return;
+  }
+  document.querySelectorAll('.confirm-payment-row').forEach(el => el.remove());
+
+  const targetTr = $(`#orderRow_${order.order_id}`);
+  if (!targetTr) return;
+
+  const defaultAmt = order.remaining_vnd > 0 ? order.remaining_vnd : (order.amount_vnd || 0);
+  const formTr = document.createElement('tr');
+  formTr.id = `confirmRow_${order.order_id}`;
+  formTr.className = 'confirm-payment-row';
+  formTr.innerHTML = `
+    <td colspan="8" style="background:#f8fafc;padding:12px 16px;border-bottom:2px solid var(--primary-soft)">
+      <form class="row" style="gap:12px;flex-wrap:wrap;align-items:flex-end" id="formConfirm_${esc(order.order_id)}">
+        <div class="field" style="margin:0;min-width:160px">
+          <label>Số tiền nhận được (đ)</label>
+          <input type="number" name="amount_vnd" required min="1" step="1" value="${defaultAmt}">
+        </div>
+        <div class="field grow" style="margin:0;min-width:260px">
+          <label>Ghi chú xác nhận (3-200 ký tự)</label>
+          <input type="text" name="note" required minlength="3" maxlength="200" placeholder="VD: Đã kiểm tra sao kê VCB lúc 10:05">
+        </div>
+        <div class="row" style="margin:0;gap:8px">
+          <button class="btn primary" type="submit">Xác nhận</button>
+          <button class="btn" type="button" data-cancel-confirm="${esc(order.order_id)}">Hủy</button>
+        </div>
+        <div class="error grow" style="width:100%" id="confirmError_${esc(order.order_id)}"></div>
+      </form>
+    </td>
+  `;
+  targetTr.after(formTr);
+
+  formTr.querySelector(`[data-cancel-confirm="${order.order_id}"]`)?.addEventListener('click', () => {
+    formTr.remove();
+  });
+
+  const f = formTr.querySelector(`#formConfirm_${order.order_id}`);
+  f?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const amount_vnd = Number(f.amount_vnd.value);
+    const note = f.note.value.trim();
+    const errEl = $(`#confirmError_${order.order_id}`);
+    if (note.length < 3 || note.length > 200) {
+      if (errEl) errEl.textContent = 'Ghi chú bắt buộc từ 3-200 ký tự';
+      return;
+    }
+    if (!amount_vnd || amount_vnd <= 0) {
+      if (errEl) errEl.textContent = 'Số tiền nhận được phải lớn hơn 0';
+      return;
+    }
+    if (errEl) errEl.textContent = '';
+    const submitBtn = f.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+
+    const r = await api(`/api/v1/ops/orders/${encodeURIComponent(order.order_id)}/confirm-payment`, {
+      method: 'POST',
+      idempotent: true,
+      body: { amount_vnd, note }
+    });
+    if (submitBtn) submitBtn.disabled = false;
+
+    if (!r.ok) {
+      if (errEl) errEl.textContent = r.message;
+      toast(r.message);
+      return;
+    }
+
+    const outcome = r.data?.outcome;
+    let toastMsg = 'Đã xác nhận thanh toán';
+    if (outcome === 'SETTLED') toastMsg = 'Đã xuất vé';
+    else if (outcome === 'PARTIAL') {
+      const rem = r.data?.remaining_vnd ?? r.data?.remainingVnd ?? 0;
+      toastMsg = `Đã ghi nhận, còn thiếu ${vnd(rem)}`;
+    } else if (outcome === 'OVERPAID_SETTLED') toastMsg = 'Đã xuất vé, đã tạo yêu cầu hoàn phần dư';
+    else if (outcome === 'LATE_SETTLED') toastMsg = 'Đã xuất vé (chuyển trễ, ghế còn trống)';
+    else if (outcome === 'LATE_REFUND') toastMsg = 'Ghế đã bán, đã tạo yêu cầu hoàn tiền';
+
+    toast(toastMsg);
+    await loadPendingPayments();
+  });
+}
+
+async function loadBankTransactions() {
+  const box = $('#bankTransactionsBox');
+  if (!box) return;
+  const outcome = bankTxShowAll ? 'ALL' : 'UNMATCHED';
+  const r = await api(`/api/v1/ops/bank-transactions?outcome=${outcome}`);
+  if (!r.ok) {
+    box.innerHTML = `<p class="muted" style="padding:16px;margin:0">${esc(r.message)}</p>`;
+    return;
+  }
+  const txs = r.data?.transactions || [];
+  if (txs.length === 0) {
+    box.innerHTML = `<p class="muted" style="padding:16px;margin:0">${bankTxShowAll ? 'Không có giao dịch nào.' : 'Không có giao dịch chưa khớp nào.'}</p>`;
+    return;
+  }
+
+  const outcomeBadge = (st) => {
+    if (st === 'UNMATCHED') return '<span class="pill warn">Chưa khớp</span>';
+    if (st === 'SETTLED') return '<span class="pill ok">Đã xuất vé</span>';
+    if (st === 'PARTIAL') return '<span class="pill warn">Thanh toán 1 phần</span>';
+    if (st === 'OVERPAID_SETTLED') return '<span class="pill ok">Đã xuất vé (thừa)</span>';
+    if (st === 'LATE_SETTLED') return '<span class="pill ok">Chuyển trễ (xuất vé)</span>';
+    if (st === 'LATE_REFUND') return '<span class="pill danger">Chuyển trễ (hoàn tiền)</span>';
+    if (st === 'ASSIGNED') return '<span class="pill ok">Đã gán</span>';
+    if (st === 'IGNORED_OUT') return '<span class="pill">Tiền ra (bỏ qua)</span>';
+    return `<span class="pill">${esc(st || '—')}</span>`;
+  };
+
+  const canAssign = ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER'].includes(state.user?.role);
+
+  box.innerHTML = `<table>
+    <thead>
+      <tr>
+        <th>Thời gian</th>
+        <th>Số tiền</th>
+        <th>Nội dung</th>
+        <th>Mã GD</th>
+        <th>${bankTxShowAll ? 'Kết quả' : 'Gán vào đơn (PNR)'}</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${txs.map(tx => `
+        <tr>
+          <td style="font-size:12px">${esc(hhmm(tx.received_at || tx.occurred_at))} ${esc(dmy(tx.received_at || tx.occurred_at))}</td>
+          <td style="font-weight:600;color:var(--ok)">+${vnd(tx.amount_vnd)}</td>
+          <td class="mono" style="font-size:12px">${esc(tx.memo || '—')}</td>
+          <td class="mono muted" style="font-size:12px">${esc(tx.bank_ref || tx.tx_id || '—')}</td>
+          <td>
+            ${bankTxShowAll ? `
+              <div>${outcomeBadge(tx.outcome)}${tx.pnr ? ` <b class="mono" style="font-size:12px;margin-left:6px">${esc(tx.pnr)}</b>` : ''}</div>
+            ` : `
+              <div class="row" style="gap:6px">
+                <input type="text" class="mono" placeholder="VD: BG-123456" data-pnr-input="${esc(tx.tx_id)}" style="width:130px;padding:4px 8px;font-size:13px" ${canAssign ? '' : 'disabled'}>
+                <button class="btn primary" data-assign-tx="${esc(tx.tx_id)}" style="padding:4px 10px;font-size:13px" ${canAssign ? '' : 'disabled'}>Gán</button>
+              </div>
+            `}
+          </td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>`;
+
+  if (!bankTxShowAll) {
+    box.querySelectorAll('button[data-assign-tx]').forEach(b => {
+      b.addEventListener('click', async () => {
+        const txId = b.dataset.assignTx;
+        const input = box.querySelector(`input[data-pnr-input="${CSS.escape(txId)}"]`);
+        const pnr = (input?.value || '').trim();
+        if (!pnr) {
+          toast('Vui lòng nhập mã PNR');
+          return;
+        }
+        b.disabled = true;
+        const r = await api(`/api/v1/ops/bank-transactions/${encodeURIComponent(txId)}/assign`, {
+          method: 'POST',
+          idempotent: true,
+          body: { pnr }
+        });
+        b.disabled = false;
+        if (!r.ok) {
+          toast(r.message || 'Gán giao dịch thất bại');
+          return;
+        }
+        const outcome = r.data?.outcome;
+        let toastMsg = `Đã gán cho đơn ${pnr}`;
+        if (outcome === 'SETTLED') toastMsg = `Đã gán cho đơn ${pnr}: Đã xuất vé`;
+        else if (outcome === 'PARTIAL') toastMsg = `Đã gán cho đơn ${pnr}: Còn thiếu ${vnd(r.data?.remaining_vnd ?? 0)}`;
+        else if (outcome === 'OVERPAID_SETTLED') toastMsg = `Đã gán cho đơn ${pnr}: Đã tạo yêu cầu hoàn phần dư`;
+        else if (outcome === 'LATE_SETTLED') toastMsg = `Đã gán cho đơn ${pnr}: Chuyển trễ, ghế còn trống`;
+        else if (outcome === 'LATE_REFUND') toastMsg = `Đã gán cho đơn ${pnr}: Ghế đã bán, đã tạo hoàn tiền`;
+
+        toast(toastMsg);
+        await loadBankTransactions();
+        await loadPendingPayments();
+      });
+    });
+  }
+}
+
+$('#bankTxShowAll')?.addEventListener('change', (e) => {
+  bankTxShowAll = e.target.checked;
+  loadBankTransactions();
+});
+
 // ---------- fleet (MGR-005, MGR-006) ----------
 const fleetState = { vehicles: [], layouts: [] };
 
@@ -3074,9 +3653,8 @@ async function loadLayouts() {
 }
 
 // ---------- platform admin ----------
-const directorEmails = {
-  op_saomai: 'admin@busgo.vn'
-};
+let platformOperators = [];
+let editingOperatorId = null;
 
 function showPlatformDirectorNotice(email, tempPassword) {
   const box = $('#platformNoticeBox');
@@ -3093,6 +3671,49 @@ $('#platformNoticeAckBtn')?.addEventListener('click', () => {
   if (box) box.classList.add('hidden');
 });
 
+function setOperatorCreateMode() {
+  editingOperatorId = null;
+  const f = $('#operatorForm');
+  f.reset();
+  $('#operatorFormTitle').textContent = 'Thêm nhà xe';
+  f.code.readOnly = false;
+  f.director_email.closest('.field').classList.remove('hidden');
+  f.director_email.required = true;
+  f.director_name.closest('.field').classList.remove('hidden');
+  f.director_name.required = true;
+  $('#operatorSubmitBtn').textContent = 'Tạo nhà xe';
+  $('#operatorCancelBtn').classList.add('hidden');
+  $('#operatorError').textContent = '';
+}
+
+function setOperatorEditMode(o) {
+  editingOperatorId = o.operator_id;
+  const f = $('#operatorForm');
+  $('#operatorFormTitle').textContent = `Sửa nhà xe ${o.code}`;
+  f.code.value = o.code || '';
+  f.code.readOnly = true;
+  f.name.value = o.name || '';
+  f.short_name.value = o.short_name || '';
+  f.hotline.value = o.hotline || '';
+  f.support_email.value = o.support_email || '';
+  f.address.value = o.address || '';
+  f.bin.value = o.bank?.bin || '';
+  f.bank_name.value = o.bank?.bank_name || '';
+  f.account_number.value = o.bank?.account_number || '';
+  f.account_name.value = o.bank?.account_name || '';
+  f.director_email.value = '';
+  f.director_name.value = '';
+  f.director_email.closest('.field').classList.add('hidden');
+  f.director_email.required = false;
+  f.director_name.closest('.field').classList.add('hidden');
+  f.director_name.required = false;
+  $('#operatorSubmitBtn').textContent = 'Lưu thay đổi';
+  $('#operatorCancelBtn').classList.remove('hidden');
+  $('#operatorError').textContent = '';
+}
+
+$('#operatorCancelBtn')?.addEventListener('click', setOperatorCreateMode);
+
 async function loadPlatformOperatorPicker() {
   const r = await api('/api/v1/platform/operators');
   const list = r.ok ? (r.data.operators || r.data || []) : [];
@@ -3100,11 +3721,17 @@ async function loadPlatformOperatorPicker() {
   $('#platformOperator').value = state.platformCode;
 }
 $('#platformOperator').addEventListener('change', (e) => { state.platformCode = e.target.value; if (state.view !== 'platform') show(state.view); });
+
 async function loadOperators() {
   const r = await api('/api/v1/platform/operators');
   if (!r.ok) { $('#operatorsBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.status === 404 ? 'Máy chủ chưa hỗ trợ quản trị nhà xe.' : r.message)}</p>`; return; }
   const list = r.data.operators || r.data || [];
-  $('#operatorsBox').innerHTML = `<table><thead><tr><th>Nhà xe</th><th>Mã</th><th>Tài khoản nhận tiền</th><th>Trạng thái</th><th></th></tr></thead><tbody>${list.map(o => `<tr><td>${esc(o.name)}<div class="muted" style="font-size:12px">Tổng đài ${esc(o.hotline || '—')}</div></td><td class="mono">${esc(o.code)}<div><a href="/o/${encodeURIComponent(o.code)}" target="_blank" rel="noopener">Link + QR</a></div></td><td class="mono">${esc(o.bank?.bank_name || '')}<div>${esc(o.bank?.account_number || '')}</div></td><td>${o.active ? '<span class="pill ok">Hoạt động</span>' : '<span class="pill">Tạm ngừng</span>'}</td><td style="white-space:nowrap"><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn ${o.active ? 'danger' : ''}" data-op="${esc(o.operator_id)}" data-active="${o.active ? 1 : 0}">${o.active ? 'Tạm ngừng' : 'Kích hoạt'}</button><button class="btn" data-reset-dir="${esc(o.operator_id)}" data-op-code="${esc(o.code)}">Cấp lại mật khẩu giám đốc</button></div></td></tr>`).join('')}</tbody></table>`;
+  platformOperators = list;
+  $('#operatorsBox').innerHTML = `<table><thead><tr><th>Nhà xe</th><th>Mã</th><th>Tài khoản nhận tiền</th><th>Trạng thái</th><th></th></tr></thead><tbody>${list.map(o => `<tr><td>${esc(o.name)}${o.hotline ? `<div class="muted" style="font-size:12px">Tổng đài ${esc(o.hotline)}</div>` : ''}</td><td class="mono">${esc(o.code)}<div><a href="/o/${encodeURIComponent(o.code)}" target="_blank" rel="noopener">Link + QR</a></div></td><td class="mono">${esc(o.bank?.bank_name || '')}<div>${esc(o.bank?.account_number || '')}</div></td><td>${o.active ? '<span class="pill ok">Hoạt động</span>' : '<span class="pill">Tạm ngừng</span>'}</td><td style="white-space:nowrap"><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn" data-edit-op="${esc(o.operator_id)}">Sửa</button><button class="btn ${o.active ? 'danger' : ''}" data-op="${esc(o.operator_id)}" data-active="${o.active ? 1 : 0}">${o.active ? 'Tạm ngừng' : 'Kích hoạt'}</button><button class="btn" data-reset-dir="${esc(o.operator_id)}" data-op-code="${esc(o.code)}" data-director-email="${esc(o.director_email || '')}">Cấp lại mật khẩu giám đốc</button></div></td></tr>`).join('')}</tbody></table>`;
+  document.querySelectorAll('#operatorsBox button[data-edit-op]').forEach(b => b.addEventListener('click', () => {
+    const o = platformOperators.find(x => x.operator_id === b.dataset.editOp);
+    if (o) setOperatorEditMode(o);
+  }));
   document.querySelectorAll('#operatorsBox button[data-op]').forEach(b => b.addEventListener('click', async () => {
     const r2 = await api(`/api/v1/platform/operators/${encodeURIComponent(b.dataset.op)}/${b.dataset.active === '1' ? 'deactivate' : 'activate'}`, { method: 'POST', idempotent: true });
     toast(r2.ok ? 'Đã cập nhật nhà xe' : r2.message); if (r2.ok) { loadOperators(); loadPlatformOperatorPicker(); }
@@ -3132,14 +3759,43 @@ async function loadOperators() {
       toast(r2.message);
       return;
     }
-    const email = directorEmails[opId] || opCode;
+    const op = platformOperators.find(o => o.operator_id === opId);
+    const email = b.dataset.directorEmail || op?.director_email || opCode;
     showPlatformDirectorNotice(email, r2.data.temporary_password);
     toast('Đã cấp lại mật khẩu giám đốc');
   }));
 }
+
 $('#operatorForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
+  if (editingOperatorId) {
+    const body = {
+      name: f.name.value.trim(),
+      short_name: f.short_name.value.trim(),
+      hotline: f.hotline.value.trim(),
+      support_email: f.support_email.value.trim(),
+      address: f.address.value.trim(),
+      bank: {
+        bin: f.bin.value.trim(),
+        bank_name: f.bank_name.value.trim(),
+        account_number: f.account_number.value.trim(),
+        account_name: f.account_name.value.trim()
+      }
+    };
+    const r = await api(`/api/v1/platform/operators/${encodeURIComponent(editingOperatorId)}`, {
+      method: 'PATCH',
+      body
+    });
+    $('#operatorError').textContent = r.ok ? '' : r.message;
+    if (r.ok) {
+      toast('Đã lưu nhà xe');
+      setOperatorCreateMode();
+      loadOperators();
+      loadPlatformOperatorPicker();
+    }
+    return;
+  }
   const dirEmail = f.director_email.value.trim();
   const dirName = f.director_name.value.trim();
   const body = {
@@ -3147,6 +3803,8 @@ $('#operatorForm').addEventListener('submit', async (e) => {
     name: f.name.value.trim(),
     short_name: f.short_name.value.trim() || undefined,
     hotline: f.hotline.value.trim() || undefined,
+    support_email: f.support_email.value.trim() || undefined,
+    address: f.address.value.trim() || undefined,
     director_email: dirEmail,
     director_name: dirName,
     bank: {
@@ -3161,9 +3819,6 @@ $('#operatorForm').addEventListener('submit', async (e) => {
   if (r.ok) {
     toast(`Đã tạo nhà xe ${body.code}`);
     const email = r.data?.director?.username || dirEmail;
-    if (r.data?.operator_id) {
-      directorEmails[r.data.operator_id] = email;
-    }
     showPlatformDirectorNotice(email, r.data?.temporary_password);
     f.reset();
     loadOperators();
