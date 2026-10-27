@@ -132,7 +132,7 @@ class _ProfileTab extends StatelessWidget {
             if (store.operatorName.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
-                child: Text('${store.operatorName} · Tổng đài ${store.operatorHotline}', style: dsans(size: 14, color: DTokens.sub)),
+                child: Text(store.operatorHotline.isEmpty ? store.operatorName : '${store.operatorName} · Tổng đài ${store.operatorHotline}', style: dsans(size: 14, color: DTokens.sub)),
               ),
             Text('Bằng lái hạng FC · còn hạn đến 31/12/2028', style: dsans(size: 14, color: DTokens.sub)),
           ]),

@@ -109,6 +109,7 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
   @override
   Widget build(BuildContext context) {
     final ticket = widget.ticket;
+    final hotline = PassengerScope.of(context).operator?.hotline ?? '';
     final tr = _tracking;
     final isCompleted = ticket.past || tr?.ended == true || tr?.tripStatus == 'COMPLETED';
     final signal = tr?.signal ?? GpsSignal.none;
@@ -172,7 +173,7 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
               ],
             ],
             gap(14),
-            GhostButton(label: 'Gọi tổng đài 1900 6868', onPressed: () => showToast(context, 'Đang gọi 1900 6868')),
+            if (hotline.isNotEmpty) GhostButton(label: 'Gọi tổng đài $hotline', onPressed: () => callHotline(context, hotline)),
           ]),
         ),
       ),

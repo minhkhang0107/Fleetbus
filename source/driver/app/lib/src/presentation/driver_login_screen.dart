@@ -88,7 +88,9 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
 
   Widget _hotline() {
     final store = DriverScope.of(context);
-    final number = store.operatorHotline.isNotEmpty ? store.operatorHotline : '1900 6868';
+    final number = store.operatorHotline;
+    // Before the first login the app does not know the company yet, so it names no number.
+    if (number.isEmpty) return Text('Quên PIN? Gọi điều độ nhà xe của bạn', style: dsans(size: 13, color: DTokens.muted), textAlign: TextAlign.center);
     return Text.rich(
       TextSpan(children: [
         TextSpan(text: 'Quên PIN? Gọi điều độ ', style: dsans(size: 13, color: DTokens.muted)),

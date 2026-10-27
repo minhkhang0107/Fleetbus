@@ -153,11 +153,13 @@ export function crc16Ccitt(str) {
 /**
  * Generates VietQR EMVCo compliant Quick Response Payload
  */
-export function generateVietQRPayload({ bankBin, accountNumber, amount, memo }) {
-  const safeBankBin = bankBin || '970415'; // VietinBank default
-  const safeAccount = accountNumber || '1088219999';
+export function generateVietQRPayload({ bankBin, accountNumber, amount, memo } = {}) {
+  // No fallback account: a company without a payee must not collect into another company's account.
+  if (!bankBin || !accountNumber) throw new Error('Thiếu tài khoản nhận tiền của nhà xe');
+  const safeBankBin = bankBin;
+  const safeAccount = accountNumber;
   const safeAmount = Math.round(amount || 0).toString();
-  const safeMemo = (memo || 'BUSGO VETRUC').slice(0, 25);
+  const safeMemo = (memo || '').slice(0, 25);
 
   // Sub-tags for Tag 38 (Payment Network Specific)
   const guid = 'A000000727';
