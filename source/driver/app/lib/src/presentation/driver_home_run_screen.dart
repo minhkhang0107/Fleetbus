@@ -234,7 +234,7 @@ class _HomeCard extends StatelessWidget {
               call,
             ])
           else ...[
-            Text('Xe đang chờ, tới ${_clock(missable!)} được đi tiếp', style: dsans(size: 14, color: DTokens.warnInk)),
+            Text(canMiss ? 'Đã chờ đủ thời gian, có thể đi tiếp' : 'Xe đang chờ, tới ${_clock(missable!)} được đi tiếp', style: dsans(size: 14, color: DTokens.warnInk)),
             const SizedBox(height: 8),
             Row(children: [
               Expanded(

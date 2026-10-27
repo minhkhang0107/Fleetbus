@@ -244,7 +244,10 @@ class PassengerRow extends StatelessWidget {
                 if (p.homePickup != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
-                    child: Text('Đón tận nhà${p.pickupWindow != null ? ' ${p.pickupWindow}' : ''}: ${p.homePickup}${p.homeNote.isNotEmpty ? ' · ${p.homeNote}' : ''}', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.warnInk)),
+                    // A passenger who did not come out at home boards here: say so instead of the address.
+                    child: p.homeMissed
+                        ? Text('Không ra khi xe tới nhà (${p.homePickup}) · lên xe ở bến', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.sub))
+                        : Text('Đón tận nhà${p.pickupWindow != null ? ' ${p.pickupWindow}' : ''}: ${p.homePickup}${p.homeNote.isNotEmpty ? ' · ${p.homeNote}' : ''}', style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.warnInk)),
                   ),
                 if (p.homePickup != null && p.inaccessible)
                   Text('Đã báo không vào được${p.meetingPoint != null ? ' · hẹn ở ${p.meetingPoint}' : ''}', style: dsans(size: 13, color: DTokens.sub)),
