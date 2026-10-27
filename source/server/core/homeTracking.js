@@ -58,19 +58,23 @@ export function applyHomeRun(data, services, tripId, manifestId, now = Date.now(
   data.home_queue = { position: q.position, ahead: q.ahead, total: q.total };
   data.eta_minutes = q.eta_minutes;
   data.distance_meters = q.road_meters;
-  const atDoor = q.ahead === 0 && (q.at_door || Boolean(p.home_pickup.arrived_at));
+  // Over 3 minutes without a ping the last position says nothing about now: only the driver's "at the door" counts.
+  const offline = data.signal_status === 'OFFLINE';
+  const atDoor = q.ahead === 0 && ((q.at_door && !offline) || Boolean(p.home_pickup.arrived_at));
   // Near: the next door, the bus in the lane (300 m), time to come out; at the door: pulled up within 50 m.
-  data.near_door = q.ahead === 0 && (q.near_door || atDoor);
+  data.near_door = q.ahead === 0 && ((q.near_door && !offline) || atDoor);
   data.at_door = atDoor;
   data.is_at_station = atDoor;
-  data.is_arriving_soon = q.ahead === 0 && q.eta_minutes <= 5;
-  data.expected_at = data.signal_status === 'OFFLINE' ? null : new Date(now + q.eta_minutes * 60000).toISOString();
+  data.is_arriving_soon = !offline && q.ahead === 0 && q.eta_minutes <= 5;
+  data.expected_at = offline ? null : new Date(now + q.eta_minutes * 60000).toISOString();
   const promised = Date.parse(appointment || data.target_window?.to || '');
   data.late_minutes = data.expected_at && Number.isFinite(promised) ? Math.max(0, Math.round((Date.parse(data.expected_at) - promised) / 60000)) : null;
   if (atDoor) {
     data.hud_status_text = p.home_pickup.arrived_at
       ? `Xe đã tới chỗ đón. Tài xế chờ bạn tối đa ${wait} phút (tới ${hhmm(new Date(Date.parse(p.home_pickup.arrived_at) + wait * 60000).toISOString())})`
       : 'Xe đã tới chỗ đón của bạn. Mời bạn ra xe';
+  } else if (offline) {
+    data.hud_status_text = `Chưa nhận được vị trí xe từ ${hhmm(data.bus_position.timestamp)}. Bạn là điểm đón thứ ${q.position}/${q.total}, giờ xe tới sẽ cập nhật khi có tín hiệu lại`;
   } else if (data.near_door) {
     data.hud_status_text = 'Xe đã tới gần chỗ đón của bạn. Mời bạn ra xe';
   } else if (q.ahead > 0) {

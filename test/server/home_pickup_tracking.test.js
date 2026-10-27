@@ -112,6 +112,25 @@ describe('Following the bus that comes to pick me up (D143)', () => {
     assert.strictEqual(sent('HOME_PICKUP_ARRIVED').length, 1);
   });
 
+  it('TC-HOME-TRACK-03b: an old position is not read as the bus at the door; the driver saying so is', async () => {
+    const last = services.trackingService.busPositions.get(TRIP);
+    last.timestamp = new Date(Date.now() - 15 * 60000).toISOString();
+    let d = (await track(homeTicket)).body.data;
+    assert.strictEqual(d.freshness.state, 'OFFLINE');
+    assert.strictEqual(d.at_door, false, 'the last ping was at the door 15 minutes ago');
+    assert.strictEqual(d.near_door, false);
+    assert.strictEqual(d.is_arriving_soon, false);
+    assert.strictEqual(d.expected_at, null);
+    assert.match(d.hud_status_text, /^Chưa nhận được vị trí xe từ \d\d:\d\d/);
+    assert.ok(d.home_queue, 'the place in the run still shows');
+
+    const arrived = await request(`/api/v1/driver/trips/${TRIP}/tickets/${homeTicket}/home-arrived`, { method: 'POST', token: driver });
+    assert.strictEqual(arrived.status, 200, JSON.stringify(arrived.body));
+    d = (await track(homeTicket)).body.data;
+    assert.strictEqual(d.at_door, true, 'the driver pressed "at the door"');
+    assert.match(d.hud_status_text, /Tài xế chờ bạn tối đa/);
+  });
+
   it('TC-HOME-TRACK-04: a stop ticket sees its planned time, the expected time, how late, and where the bus is on the route', async () => {
     services.driverService.activeTrips.get(TRIP).status = 'IN_TRANSIT';
     const phuLy = stopCoords('stp_pl_cao_toc') || stopCoords([...services.driverService.activeTrips.get(TRIP).stops].find(s => /Phủ Lý/.test(s.name)).stop_id);
