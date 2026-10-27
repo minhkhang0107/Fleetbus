@@ -4,7 +4,7 @@
  */
 
 import { homeConfirmed } from '../../../core/serviceAreas.js';
-import { doorKey, doorPositions, homeAppointments, homeOrder, homeQueue, homeWaitMinutes, isWaitingHome, missableAt } from '../../../core/homeRun.js';
+import { doorKey, doorPositions, homeAppointments, homeOrder, homeQueue, homeRunOutlook, homeWaitMinutes, isWaitingHome, missableAt } from '../../../core/homeRun.js';
 import crypto from 'crypto';
 import {
   generateBoardingQR,
@@ -1405,6 +1405,8 @@ export class DriverCockpitService {
     return {
       started_at: trip.home_run_started_at || null,
       wait_minutes: homeWaitMinutes(config),
+      // Whether the run still fits the departure: the driver may reorder it or tell the office.
+      outlook: homeRunOutlook(trip),
       stops: order.map(p => ({
         ticket_id: p.ticket_id,
         position: positions[p.ticket_id],
@@ -1440,7 +1442,7 @@ export class DriverCockpitService {
     // A new order on the road moves the times given to the passengers: each one whose time moved is told.
     if (trip.home_run_started_at) {
       const before = trip.home_appointments || {};
-      const after = homeAppointments(trip, { fresh: true });
+      const after = homeAppointments(trip, { fresh: true, now: mockNow });
       trip.home_appointments = after;
       const queue = homeQueue(trip);
       const positions = doorPositions(queue);
@@ -1539,7 +1541,7 @@ export class DriverCockpitService {
       return { success: false, error: 'Chuyến này không còn khách đón tận nhà', code: 'NO_HOME_PICKUPS' };
     }
     // Times given to the passengers are frozen when the bus sets off, with the order it follows.
-    const appointments = homeAppointments(trip);
+    const appointments = homeAppointments(trip, { now: mockNow });
     trip.home_order = homeOrder(trip).map(p => p.ticket_id);
     trip.home_appointments = appointments;
     trip.home_run_started_at = new Date(mockNow).toISOString();

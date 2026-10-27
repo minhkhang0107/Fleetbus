@@ -103,7 +103,7 @@ describe('Home pickup run as bus companies run it (D144)', () => {
     assert.ok(view.appointment_at, 'their own time before the run');
   });
 
-  it('TC-D144-02: each home passenger gets their own appointment, in collection order, inside the window', async () => {
+  it('TC-D144-02: each home passenger gets their own appointment, in collection order, from the window on; a run too long for it is flagged', async () => {
     await buyHome(C);
     const run = (await request(`/api/v1/driver/trips/${TRIP}`, { token: driver })).body.data.home_run;
     assert.strictEqual(run.stops.length, 3);
@@ -112,7 +112,12 @@ describe('Home pickup run as bus companies run it (D144)', () => {
     assert.ok(times.every((t, i) => i === 0 || t >= times[i - 1]), 'later in the run, later time');
     assert.ok(new Set(times).size > 1, 'not one shared window for everyone');
     const window = trip().manifest.find(m => m.ticket_id === A.id).home_pickup;
-    assert.ok(times.every(t => t >= Date.parse(window.window_from) && t <= Date.parse(window.window_to)));
+    assert.ok(times.every(t => t >= Date.parse(window.window_from)), 'never before the window opens');
+    // The real time, not one squeezed into the window: a door the bus reaches after it is flagged to the driver.
+    const late = run.stops.filter(s => Date.parse(s.appointment_at) > Date.parse(window.window_to)).map(s => s.ticket_id);
+    assert.deepStrictEqual(run.outlook.past_window, late);
+    assert.ok(Date.parse(run.outlook.back_at) > times.at(-1), 'back at the first stop after the last door');
+    assert.ok(Number.isInteger(run.outlook.late_departure_minutes));
   });
 
   it('TC-D144-03: the driver may reorder the run; a wrong list is refused', async () => {

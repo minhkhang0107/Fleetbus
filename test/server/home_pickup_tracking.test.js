@@ -61,7 +61,7 @@ describe('Following the bus that comes to pick me up (D143)', () => {
     assert.strictEqual(d.target_stop.name, HOME.address);
     assert.strictEqual(d.has_position, false);
     assert.ok(d.target_window?.from && d.target_window?.to, 'the window the office promised');
-    assert.strictEqual(d.target_planned_time, d.target_window.from);
+    assert.ok(Date.parse(d.target_planned_time) >= Date.parse(d.target_window.from), 'the appointment, never before the window opens');
     assert.match(d.hud_status_text, /chưa bắt đầu đi đón/);
     assert.strictEqual(ping(21.0, 105.84).code, 'TRIP_NOT_ACTIVE', 'no position is taken before the run starts');
   });

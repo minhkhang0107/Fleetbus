@@ -87,6 +87,21 @@ class _DriverHomeRunScreenState extends State<DriverHomeRunScreen> {
       ),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 16), children: [
         live,
+        if (waiting.isNotEmpty && (store.homeLateMinutes > 0 || store.homePastWindow > 0)) ...[
+          const SizedBox(height: 12),
+          Panel(
+            border: const Color(0xFFA16207),
+            child: Text(
+              [
+                if (store.homeLateMinutes > 0 && store.homeBackAt != null)
+                  'Lộ trình này về bến khoảng ${_HomeCard._clock(store.homeBackAt!)}, trễ giờ xuất bến ${store.homeLateMinutes} phút.',
+                if (store.homePastWindow > 0) '${store.homePastWindow} khách được hẹn sau khung đón.',
+                'Đổi thứ tự đón hoặc báo điều hành.',
+              ].join(' '),
+              style: dsans(size: 15, color: DTokens.warnInk, height: 1.4),
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         DriverRouteMap(store: store, height: 200),
         const SizedBox(height: 12),

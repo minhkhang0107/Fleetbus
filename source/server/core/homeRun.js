@@ -180,10 +180,12 @@ export function homeEta(trip, ticketId, pos, now = Date.now()) {
 }
 
 /**
- * The time each home passenger is given before the run (ISO by ticket id): the first door at the opening of the
- * window, each next one after the road and a stop, never past the window's end. Frozen once the run starts.
+ * The time each home passenger is given (ISO by ticket id): the first door when the bus can be there (the opening
+ * of the window, or now when the run starts later), each next one after the road and a stop. A run too long for
+ * the window gets its real times, past the window's end, rather than a time the bus cannot keep; homeRunOutlook
+ * warns the driver. Frozen once the run starts.
  */
-export function homeAppointments(trip, { fresh = false } = {}) {
+export function homeAppointments(trip, { fresh = false, now = Date.now() } = {}) {
   if (!fresh && trip?.home_appointments && trip.home_run_started_at) return trip.home_appointments;
   const order = homeOrder(trip).filter(p => homeConfirmed(p.home_pickup) && !p.home_pickup.inaccessible_at);
   const result = {};
@@ -192,23 +194,48 @@ export function homeAppointments(trip, { fresh = false } = {}) {
   let lastDoor = null;
   for (const p of order) {
     const from = Date.parse(p.home_pickup.window_from || '');
-    const to = Date.parse(p.home_pickup.window_to || '');
     if (!Number.isFinite(from)) continue;
     // Same door as the ticket before: same time, no road and no second stop.
     if (lastDoor && doorKey(p) === lastDoor.key) {
       result[p.ticket_id] = lastDoor.at;
       continue;
     }
-    t = t === null ? from : t + (minutesFor(roadMeters(at, p.home_pickup), HOME_CITY_SPEED_KMH) + HOME_DWELL_MINUTES) * 60000;
+    t = t === null ? Math.max(from, now) : t + (minutesFor(roadMeters(at, p.home_pickup), HOME_CITY_SPEED_KMH) + HOME_DWELL_MINUTES) * 60000;
     t = Math.max(t, from);
-    if (Number.isFinite(to)) t = Math.min(t, to);
     // Rounded to the next 5 minutes: an appointment people can remember.
-    const rounded = Math.ceil(t / 300000) * 300000;
-    result[p.ticket_id] = new Date(Number.isFinite(to) ? Math.min(rounded, to) : rounded).toISOString();
+    result[p.ticket_id] = new Date(Math.ceil(t / 300000) * 300000).toISOString();
     lastDoor = { key: doorKey(p), at: result[p.ticket_id] };
     at = p.home_pickup;
   }
   return result;
+}
+
+/**
+ * Whether the run still fits (ISO back_at, minutes late for departure, tickets given a time past their window):
+ * from the bus position once it set off (else from the first appointment), through the doors still waiting, to the
+ * first stop. Null without waiting doors, a first stop or a departure time.
+ */
+export function homeRunOutlook(trip, now = Date.now()) {
+  const departure = Date.parse(trip?.planned_departure_time || '');
+  const end = firstStopPoint(trip);
+  const queue = homeQueue(trip);
+  if (!queue.length || !end || !Number.isFinite(departure)) return null;
+  const appointments = homeAppointments(trip, { now });
+  const live = trip.home_run_started_at && Number.isFinite(trip.current_lat) && Number.isFinite(trip.current_lng);
+  let at = live ? { lat: trip.current_lat, lng: trip.current_lng } : null;
+  let t = live ? now : null;
+  for (const door of byDoor(queue)) {
+    const from = Date.parse(door[0].home_pickup.window_from || '') || 0;
+    t = t === null ? Date.parse(appointments[door[0].ticket_id]) || now : Math.max(t + minutesFor(roadMeters(at, door[0].home_pickup), HOME_CITY_SPEED_KMH) * 60000, from);
+    t += Math.max(...door.map(p => p.home_pickup.arrived_at ? doorMinutes(p, now) : HOME_DWELL_MINUTES)) * 60000;
+    at = door[0].home_pickup;
+  }
+  t += minutesFor(roadMeters(at, end), HOME_CITY_SPEED_KMH) * 60000;
+  return {
+    back_at: new Date(t).toISOString(),
+    late_departure_minutes: Math.max(0, Math.round((t - departure) / 60000)),
+    past_window: queue.filter(p => Date.parse(appointments[p.ticket_id]) > Date.parse(p.home_pickup.window_to || '')).map(p => p.ticket_id)
+  };
 }
 
 /** Minutes the bus waits at a door for this company. */

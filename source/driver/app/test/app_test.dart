@@ -887,6 +887,7 @@ void main() {
     trip['manifest'] = <Map<String, dynamic>>[...(trip['manifest'] as List).cast<Map<String, dynamic>>(), home('t_h1', 'B01', 21.02), home('t_h2', 'B02', 21.03)];
     trip['home_run'] = {
       'wait_minutes': 5,
+      'outlook': {'back_at': '2026-08-28T00:13:00Z', 'late_departure_minutes': 13, 'past_window': ['t_h1']},
       'stops': [
         {'ticket_id': 't_h2', 'position': 1, 'appointment_at': '2026-08-27T22:45:00Z', 'waiting': true, 'ready': {'status': 'NEED_TIME', 'minutes': 5}},
         {'ticket_id': 't_h1', 'position': 2, 'appointment_at': '2026-08-27T22:55:00Z', 'waiting': true},
@@ -894,6 +895,7 @@ void main() {
     };
     expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
     expect(store.homePickupsWaiting.map((p) => p.seat), ['B02', 'B01'], reason: 'the server order, not the manifest order');
+    expect((store.homeLateMinutes, store.homePastWindow), (13, 1), reason: 'the run does not fit the departure');
     final first = store.homeStopOf(store.homePickupsWaiting.first)!;
     expect((first.appointment, first.readyLabel), ('05:45', 'Cần 5 phút'));
 
@@ -911,6 +913,26 @@ void main() {
 
     final call = await store.contactOf(store.homePickupsWaiting.first);
     expect(call, (phone: '0901000003', error: null));
+    store.dispose();
+  });
+
+  testWidgets('a home run that no longer fits the departure is shown to the driver', (tester) async {
+    final store = storeWithServer();
+    Map<String, dynamic> home(String id, String seat, double lat) => {'ticket_id': id, 'seat_code': seat, 'passenger_name': 'Khách $seat', 'phone_masked': '090***00$seat', 'pickup_stop_id': 'stp_hn_gb', 'dropoff_stop_id': 'stp_th_pb', 'boarding_status': 'ISSUED', 'payment_method': 'VIETQR', 'cod_amount_vnd': 0, 'home_pickup': {'address': 'Nhà $seat', 'lat': lat, 'lng': 105.85, 'window_from': '2026-08-27T22:45:00Z', 'window_to': '2026-08-27T23:30:00Z'}};
+    trip['manifest'] = <Map<String, dynamic>>[...(trip['manifest'] as List).cast<Map<String, dynamic>>(), home('t_h1', 'B01', 21.02)];
+    trip['home_run'] = {
+      'wait_minutes': 5,
+      'outlook': {'back_at': '2026-08-28T00:13:00Z', 'late_departure_minutes': 13, 'past_window': ['t_h1']},
+      'stops': [{'ticket_id': 't_h1', 'position': 1, 'appointment_at': '2026-08-27T23:35:00Z', 'waiting': true}],
+    };
+    await tester.runAsync(() async {
+      expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    });
+    await tester.pumpWidget(DriverScope(store: store, child: const MaterialApp(home: DriverHomeRunScreen())));
+    await tester.pump();
+    expect(find.textContaining('về bến khoảng 07:13, trễ giờ xuất bến 13 phút'), findsOneWidget);
+    expect(find.textContaining('1 khách được hẹn sau khung đón'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
     store.dispose();
   });
 
