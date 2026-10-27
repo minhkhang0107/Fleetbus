@@ -50,6 +50,29 @@ function firstStopPoint(trip) {
   return (first && stopCoords(first.stop_id)) || null;
 }
 
+/** Tickets picked up at the same pinned address are one door: one place in the run, one appointment, one wait. */
+export function doorKey(p) {
+  return `${Number(p.home_pickup.lat).toFixed(5)},${Number(p.home_pickup.lng).toFixed(5)}`;
+}
+
+/** [list] cut into doors, in the order each door first appears. */
+export function byDoor(list) {
+  const doors = new Map();
+  for (const p of list) {
+    const key = doorKey(p);
+    if (!doors.has(key)) doors.set(key, []);
+    doors.get(key).push(p);
+  }
+  return [...doors.values()];
+}
+
+/** Place of each ticket's door in [list] (1-based), by ticket id. */
+export function doorPositions(list) {
+  const positions = {};
+  byDoor(list).forEach((door, i) => door.forEach(p => { positions[p.ticket_id] = i + 1; }));
+  return positions;
+}
+
 /** Nearest address next, from [from]. */
 function nearestFirst(from, list) {
   const left = [...list];
@@ -81,9 +104,10 @@ export function homeOrder(trip) {
   const set = Array.isArray(trip?.home_order) ? trip.home_order : [];
   const chosen = set.map(id => all.find(p => p.ticket_id === id)).filter(Boolean);
   const rest = all.filter(p => !chosen.includes(p));
-  if (chosen.length) return [...chosen, ...nearestFirst(chosen[chosen.length - 1].home_pickup, rest)];
+  // The tickets of one door stay together whatever order the driver set.
+  if (chosen.length) return byDoor([...chosen, ...nearestFirst(chosen[chosen.length - 1].home_pickup, rest)]).flat();
   // The run ends at the first stop: built back from it, the farthest address comes first, the nearest last.
-  return nearestFirst(firstStopPoint(trip), rest).reverse();
+  return byDoor(nearestFirst(firstStopPoint(trip), rest).reverse()).flat();
 }
 
 /** Waiting home pickups only, in collection order. */
@@ -125,27 +149,28 @@ function steadyEtaMinutes(trip, ticketId, minutes, now) {
  * asked for. Null when the ticket is not a waiting home pickup or the bus position is unknown.
  */
 export function homeEta(trip, ticketId, pos, now = Date.now()) {
-  const queue = homeQueue(trip);
-  const index = queue.findIndex(p => p.ticket_id === ticketId);
+  const doors = byDoor(homeQueue(trip));
+  const index = doors.findIndex(door => door.some(p => p.ticket_id === ticketId));
   if (index < 0 || !pos || !Number.isFinite(pos.lat)) return null;
   let at = { lat: pos.lat, lng: pos.lng };
   let minutes = 0;
   let meters = 0;
   for (let i = 0; i <= index; i++) {
-    const p = queue[i];
-    const leg = roadMeters(at, p.home_pickup);
+    const door = doors[i];
+    const leg = roadMeters(at, door[0].home_pickup);
     meters += leg;
     // The bus drives the first leg at its own speed, the next ones at city speed.
     minutes += minutesFor(leg, i === 0 ? pos.speed_kmh : HOME_CITY_SPEED_KMH);
-    if (i < index) minutes += doorMinutes(p, now);
-    at = p.home_pickup;
+    // One stop per door: the bus leaves when the slowest of its passengers is in.
+    if (i < index) minutes += Math.max(...door.map(p => doorMinutes(p, now)));
+    at = door[0].home_pickup;
   }
-  const direct = roadMeters(pos, queue[index].home_pickup);
+  const direct = roadMeters(pos, doors[index][0].home_pickup);
   const pulledUp = pos.speed_kmh == null || pos.speed_kmh <= HOME_AT_DOOR_SPEED_KMH;
   return {
     position: index + 1,
     ahead: index,
-    total: queue.length,
+    total: doors.length,
     eta_minutes: steadyEtaMinutes(trip, ticketId, minutes, now),
     road_meters: Math.round(meters),
     direct_meters: Math.round(direct),
@@ -164,16 +189,23 @@ export function homeAppointments(trip, { fresh = false } = {}) {
   const result = {};
   let at = null;
   let t = null;
+  let lastDoor = null;
   for (const p of order) {
     const from = Date.parse(p.home_pickup.window_from || '');
     const to = Date.parse(p.home_pickup.window_to || '');
     if (!Number.isFinite(from)) continue;
+    // Same door as the ticket before: same time, no road and no second stop.
+    if (lastDoor && doorKey(p) === lastDoor.key) {
+      result[p.ticket_id] = lastDoor.at;
+      continue;
+    }
     t = t === null ? from : t + (minutesFor(roadMeters(at, p.home_pickup), HOME_CITY_SPEED_KMH) + HOME_DWELL_MINUTES) * 60000;
     t = Math.max(t, from);
     if (Number.isFinite(to)) t = Math.min(t, to);
     // Rounded to the next 5 minutes: an appointment people can remember.
     const rounded = Math.ceil(t / 300000) * 300000;
     result[p.ticket_id] = new Date(Number.isFinite(to) ? Math.min(rounded, to) : rounded).toISOString();
+    lastDoor = { key: doorKey(p), at: result[p.ticket_id] };
     at = p.home_pickup;
   }
   return result;

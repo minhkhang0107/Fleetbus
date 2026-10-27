@@ -4,7 +4,7 @@
  */
 
 import { homeConfirmed } from '../../../core/serviceAreas.js';
-import { homeAppointments, homeOrder, homeQueue, homeWaitMinutes, isWaitingHome, missableAt } from '../../../core/homeRun.js';
+import { doorKey, doorPositions, homeAppointments, homeOrder, homeQueue, homeWaitMinutes, isWaitingHome, missableAt } from '../../../core/homeRun.js';
 import crypto from 'crypto';
 import {
   generateBoardingQR,
@@ -1401,12 +1401,13 @@ export class DriverCockpitService {
     if (order.length === 0) return null;
     const config = this._configOf(trip);
     const appointments = homeAppointments(trip);
+    const positions = doorPositions(order);
     return {
       started_at: trip.home_run_started_at || null,
       wait_minutes: homeWaitMinutes(config),
-      stops: order.map((p, i) => ({
+      stops: order.map(p => ({
         ticket_id: p.ticket_id,
-        position: i + 1,
+        position: positions[p.ticket_id],
         appointment_at: appointments[p.ticket_id] || null,
         arrived_at: p.home_pickup.arrived_at || null,
         missable_at: missableAt(p, config),
@@ -1442,11 +1443,12 @@ export class DriverCockpitService {
       const after = homeAppointments(trip, { fresh: true });
       trip.home_appointments = after;
       const queue = homeQueue(trip);
+      const positions = doorPositions(queue);
       const moved = queue.filter(p => before[p.ticket_id] && after[p.ticket_id] && Math.abs(Date.parse(after[p.ticket_id]) - Date.parse(before[p.ticket_id])) >= 5 * 60000);
       if (moved.length) {
         this.eventBridge?.emit?.('HOME_APPOINTMENT_CHANGED', {
           tripId, vehiclePlate: trip.vehicle_plate,
-          passengers: moved.map(p => ({ ticket_id: p.ticket_id, phone: p.passenger_phone || null, address: p.home_pickup.address, appointment_at: after[p.ticket_id], position: queue.indexOf(p) + 1 })),
+          passengers: moved.map(p => ({ ticket_id: p.ticket_id, phone: p.passenger_phone || null, address: p.home_pickup.address, appointment_at: after[p.ticket_id], position: positions[p.ticket_id] })),
           now: mockNow
         });
       }
@@ -1459,11 +1461,13 @@ export class DriverCockpitService {
     const { trip, p, error } = this._homePassenger(tripId, ticketId);
     if (error) return error;
     if (!isWaitingHome(p)) return { success: false, error: 'Khách này không còn chờ đón tận nhà', code: 'HOME_PICKUP_CLOSED' };
-    if (!p.home_pickup.arrived_at) {
-      p.home_pickup = { ...p.home_pickup, arrived_at: new Date(mockNow).toISOString() };
-      this._event(trip, 'HOME_ARRIVED', { ticket_id: ticketId, seat_code: p.seat_code }, mockNow);
+    // The bus at a door is there for every passenger waiting at it: the wait starts for all of them.
+    const door = doorKey(p);
+    for (const q of homeQueue(trip).filter(x => doorKey(x) === door && !x.home_pickup.arrived_at)) {
+      q.home_pickup = { ...q.home_pickup, arrived_at: new Date(mockNow).toISOString() };
+      this._event(trip, 'HOME_ARRIVED', { ticket_id: q.ticket_id, seat_code: q.seat_code }, mockNow);
       this.eventBridge?.emit?.('HOME_PICKUP_DOOR', {
-        tripId, ticketId, seatCode: p.seat_code, phone: p.passenger_phone || null, address: p.home_pickup.address,
+        tripId, ticketId: q.ticket_id, seatCode: q.seat_code, phone: q.passenger_phone || null, address: q.home_pickup.address,
         vehiclePlate: trip.vehicle_plate, waitMinutes: homeWaitMinutes(this._configOf(trip)), now: mockNow
       });
     }
@@ -1543,7 +1547,11 @@ export class DriverCockpitService {
     this.eventBridge?.emit?.('HOME_RUN_STARTED', {
       tripId,
       vehiclePlate: trip.vehicle_plate,
-      passengers: homeQueue(trip).map((p, i) => ({ ticket_id: p.ticket_id, seat_code: p.seat_code, phone: p.passenger_phone || null, address: p.home_pickup.address, position: i + 1, appointment_at: appointments[p.ticket_id] || null })),
+      passengers: (() => {
+        const queue = homeQueue(trip);
+        const positions = doorPositions(queue);
+        return queue.map(p => ({ ticket_id: p.ticket_id, seat_code: p.seat_code, phone: p.passenger_phone || null, address: p.home_pickup.address, position: positions[p.ticket_id], appointment_at: appointments[p.ticket_id] || null }));
+      })(),
       now: mockNow
     });
     return { success: true, data: this._publicTrip(trip) };

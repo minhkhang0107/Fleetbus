@@ -62,6 +62,8 @@ class _DriverHomeRunScreenState extends State<DriverHomeRunScreen> {
     final homes = store.homePickupsInOrder;
     final waiting = store.homePickupsWaiting;
     final window = store.homeWindow;
+    // Every ticket of the next door is next: a family at one gate is one stop of the run.
+    final nextDoor = waiting.isEmpty ? null : store.homeStopOf(waiting.first)?.position;
     final live = Panel(
       border: const Color(0xFF166534),
       child: Row(children: [
@@ -92,7 +94,7 @@ class _DriverHomeRunScreenState extends State<DriverHomeRunScreen> {
           _HomeCard(
             p: homes[i],
             stop: store.homeStopOf(homes[i]),
-            next: waiting.isNotEmpty && waiting.first.ticketId == homes[i].ticketId,
+            next: waiting.isNotEmpty && (waiting.first.ticketId == homes[i].ticketId || (nextDoor != null && store.homeStopOf(homes[i])?.position == nextDoor && waiting.contains(homes[i]))),
             canMoveUp: i > 0 && homes[i].status == PaxStatus.waiting,
             canMoveDown: i < homes.length - 1 && homes[i].status == PaxStatus.waiting,
             onUp: () => _run(() => store.moveHome(homes[i], -1), 'Đã đổi thứ tự đón'),
