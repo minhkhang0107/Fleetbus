@@ -324,7 +324,11 @@ describe('Driver Monthly Schedule (DRI-021, D155)', () => {
   });
 
   it('TC-DRI-SCHED-08: a schedule default only lists runs for today and later, never for past days without a record (D155)', async () => {
-    // Current month is 2026-10; today is 2026-10-19.
+    // Days relative to today: the test must not age (it once assumed today was 2026-10-19).
+    const todayVn = vnDate();
+    const month = todayVn.slice(0, 7);
+    const lastDay = `${month}-${String(new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate()).padStart(2, '0')}`;
+    const pastDates = [`${month}-01`, `${month}-10`, `${month}-18`].filter((d) => d < todayVn);
     const templateId = 'trp_test_daily_promise';
     MOCK_TRIPS_DATABASE.push({
       trip_id: templateId,
@@ -343,7 +347,7 @@ describe('Driver Monthly Schedule (DRI-021, D155)', () => {
       driver_id: 'drv_8821a'
     };
 
-    const res = await getSchedule('?month=2026-10');
+    const res = await getSchedule(`?month=${month}`);
     assert.strictEqual(res.status, 200);
     const { today, days } = res.body.data;
 
@@ -357,15 +361,15 @@ describe('Driver Monthly Schedule (DRI-021, D155)', () => {
       assert.strictEqual(run.source, 'SCHEDULE_DEFAULT');
     }
 
-    // Past days (e.g. 2026-10-01, 2026-10-10, 2026-10-18) must have no entry from this template
-    for (const pastDate of ['2026-10-01', '2026-10-10', '2026-10-18']) {
+    // Past days of the month must have no entry from this template
+    for (const pastDate of pastDates) {
       const day = days.find((d) => d.date === pastDate);
       const run = day?.trips.find((t) => t.trip_id.startsWith(templateId));
       assert.strictEqual(run, undefined, `Past day ${pastDate} must not list schedule default run`);
     }
 
-    // Today and later days (e.g. today, 2026-10-25, 2026-10-31) must have schedule default runs
-    for (const futureDate of [today, '2026-10-25', '2026-10-31']) {
+    // Today and the last day of the month must have schedule default runs
+    for (const futureDate of [today, lastDay]) {
       const day = days.find((d) => d.date === futureDate);
       const run = day?.trips.find((t) => t.trip_id === runId(templateId, futureDate));
       assert.ok(run, `Future day ${futureDate} must have schedule default run`);

@@ -575,6 +575,12 @@ class DriverStore extends ChangeNotifier {
   /// D144: the home pickups in the order the bus collects them, with times and answers.
   List<HomeRunStop> homeRun = [];
   int homeWaitMinutes = 5;
+
+  /// Whether the home run still fits the departure (server outlook): back at the first stop at [homeBackAt],
+  /// [homeLateMinutes] late, and how many passengers were given a time past their window.
+  DateTime? homeBackAt;
+  int homeLateMinutes = 0;
+  int homePastWindow = 0;
   int _homeSpeed = 0;
 
   /// Simulated clock only: when this session saw each passenger board, on the cab clock.
@@ -934,6 +940,10 @@ class DriverStore extends ChangeNotifier {
     final run = t['home_run'] as Map<String, dynamic>?;
     homeRun = [for (final s in (run?['stops'] as List? ?? []).cast<Map<String, dynamic>>()) HomeRunStop.fromJson(s)];
     homeWaitMinutes = (run?['wait_minutes'] as num?)?.toInt() ?? 5;
+    final outlook = run?['outlook'] as Map<String, dynamic>?;
+    homeBackAt = DateTime.tryParse('${outlook?['back_at'] ?? ''}');
+    homeLateMinutes = (outlook?['late_departure_minutes'] as num?)?.toInt() ?? 0;
+    homePastWindow = (outlook?['past_window'] as List?)?.length ?? 0;
     trip = switch (t['status']) { 'IN_TRANSIT' => TripState.inTransit, 'COMPLETED' => TripState.completed, _ => TripState.readyCheck };
     if (trip == TripState.completed) {
       endedCash = (t['total_cash_to_handover_vnd'] as num?)?.toInt() ?? codCash + hailCash;

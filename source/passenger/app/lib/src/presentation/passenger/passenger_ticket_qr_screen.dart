@@ -83,7 +83,7 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
       await showAppSheet<void>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('Không đổi được mã lúc này', style: sans(size: 18, weight: FontWeight.w700)),
             gap(8),
-            Text('Chuyến đã xuất bến. Nếu có người dùng mã của bạn, báo tài xế kiểm tra bằng tên và số ghế ${t.seat}, hoặc gọi 1900 6868.', style: sans(size: 14, color: PTokens.muted, height: 1.5)),
+            Text('Chuyến đã xuất bến. Nếu có người dùng mã của bạn, báo tài xế kiểm tra bằng tên và số ghế ${t.seat}${(store.operator?.hotline ?? '').isEmpty ? '' : ', hoặc gọi ${store.operator!.hotline}'}.', style: sans(size: 14, color: PTokens.muted, height: 1.5)),
             gap(14),
             PrimaryButton(label: 'Đã hiểu', onPressed: () => Navigator.of(ctx).pop()),
           ]));

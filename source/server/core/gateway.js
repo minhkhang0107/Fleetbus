@@ -37,19 +37,27 @@ const PASSENGER_RULES = [
 const IDEMPOTENT_RULES = {
   passenger: /\/(seats\/hold|hold-seats|bookings\/create|checkout\/create-order|delegate|qr\/reissue|cancel|home-request\/withdraw|tickets\/[^/]+\/stops)$/,
   driver: /\/(readiness|start|home-run|home-order|home-arrived|home-missed|arrive|depart|inaccessible|boarding|boarding\/manual|board-qr|payments\/cod-collect|collect-cod|onboard-hail|incidents?|end|no-show|batch-replay|change-pin)$/,
-  staff: /\/(platform\/operators(\/[^/]+\/(activate|deactivate|director\/reset-password))?|auth\/(change-password|totp\/(setup|confirm))|pos\/(orders|bookings|hotline-hold|hotline-holds\/[^/]+\/cancel)|refunds\/[^/]+\/process|service-areas(\/[^/]+\/(activate|deactivate))?|promo-banners(\/[^/]+\/(activate|deactivate))?|vouchers(\/[^/]+\/(activate|deactivate))?|schedules|trips\/[^/]+\/(assign|cancel|sales)|home-requests\/[^/]+\/[^/]+\/(confirm|reject)|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem|seat-layouts(\/[^/]+)?|vehicles(\/[^/]+)?|drivers(\/[^/]+\/reset-pin)?)$/
+  staff: /\/(platform\/operators(\/[^/]+\/(activate|deactivate|director\/reset-password))?|auth\/(change-password|totp\/(setup|confirm))|pos\/(orders|bookings|hotline-hold|hotline-holds\/[^/]+\/cancel)|orders\/[^/]+\/confirm-payment|bank-transactions\/[^/]+\/assign|refunds\/[^/]+\/process|service-areas(\/[^/]+\/(activate|deactivate))?|promo-banners(\/[^/]+\/(activate|deactivate))?|vouchers(\/[^/]+\/(activate|deactivate))?|schedules|trips\/[^/]+\/(assign|cancel|sales)|home-requests\/[^/]+\/[^/]+\/(confirm|reject)|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem|seat-layouts(\/[^/]+)?|vehicles(\/[^/]+)?|drivers(\/[^/]+\/reset-pin)?)$/
 };
 
 // Staff permissions by role (MGR-029). The first matching rule decides; no rule means any staff role.
 const STAFF_RULES = [
+  [['PATCH'], /^\/api\/v1\/ops\/company$/, ['FLEET_DIRECTOR']],
   [/^\/api\/v1\/ops\/(crew|drivers)(\/.*)?$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/seat-layouts/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [['POST', 'PATCH'], /^\/api\/v1\/ops\/vehicles(\/[^/]+)?$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/(pos\/hotline-hold|trips\/[^/]+\/hotline-holds)/, ['FLEET_DIRECTOR', 'CASHIER', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/pos\//, ['FLEET_DIRECTOR', 'CASHIER']],
   [/^\/api\/v1\/ops\/audit-logs/, ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'DISPATCHER']],
+  [/^\/api\/v1\/ops\/pending-payments$/, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']],
   [/^\/api\/v1\/ops\/(refunds|reports|payments)/, ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER']],
   [/^\/api\/v1\/ops\/bookings/, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']],
+  [/^\/api\/v1\/ops\/orders\/[^/]+\/confirm-payment$/, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']],
+  [/^\/api\/v1\/ops\/bank-transactions\/[^/]+\/assign$/, ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER']],
+  [/^\/api\/v1\/ops\/bank-transactions$/, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']],
+  [['GET'], /^\/api\/v1\/ops\/payment-settings$/, ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER']],
+  [['PUT'], /^\/api\/v1\/ops\/payment-settings$/, ['FLEET_DIRECTOR']],
+  [['POST'], /^\/api\/v1\/ops\/payment-settings\/test$/, ['FLEET_DIRECTOR']],
   [/^\/api\/v1\/ops\/trips\/[^/]+\/(delay|replace-vehicle|swap-vehicle|seats\/override-lock)$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/service-(config|areas)/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/schedules/, ['FLEET_DIRECTOR', 'DISPATCHER']],

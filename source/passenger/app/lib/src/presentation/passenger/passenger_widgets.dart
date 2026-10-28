@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'passenger_store.dart';
 
@@ -418,6 +419,14 @@ void showToast(BuildContext context, String message) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(message, style: sans(size: 14, color: Colors.white)), duration: const Duration(seconds: 3)));
+}
+
+/// Dials the company's hotline from the server profile; never a number baked into the app.
+Future<void> callHotline(BuildContext context, String hotline) async {
+  final digits = hotline.replaceAll(RegExp(r'[^0-9+]'), '');
+  if (digits.isEmpty || !await launchUrl(Uri(scheme: 'tel', path: digits))) {
+    if (context.mounted) showToast(context, 'Không gọi được tổng đài ${hotline.isEmpty ? 'nhà xe' : hotline}.');
+  }
 }
 
 Widget gap(double h) => SizedBox(height: h);

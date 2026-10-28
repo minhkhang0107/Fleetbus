@@ -64,6 +64,8 @@ export function stateCollections(services, { idempotency } = {}) {
     mapCollection('orders', () => paymentService.orders, own),
     mapCollection('tickets', () => paymentService.tickets, own),
     mapCollection('pnr_index', () => paymentService.pnrIndex, (orderId) => own(paymentService.orders.get(orderId))),
+    mapCollection('bank_transactions', () => paymentService.bankTransactions, own),
+    mapCollection('payment_gateway_credentials', () => paymentService.gatewayCredentials, (_, key) => registered(key)),
     listCollection('wallet_credits', () => paymentService.walletCredits, own),
     groupedCollection('notifications', () => trackingService.notifications, own),
     listCollection('message_outbox', () => services.messenger?.outbox || [], own),

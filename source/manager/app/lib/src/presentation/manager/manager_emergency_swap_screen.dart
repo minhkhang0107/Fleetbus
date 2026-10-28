@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../../resources/lib/src/theme/app_colors.dart';
+import 'package:resources/resources.dart';
 
 class ManagerEmergencySwapScreen extends StatefulWidget {
   const ManagerEmergencySwapScreen({super.key});
@@ -43,7 +43,7 @@ class _ManagerEmergencySwapScreenState extends State<ManagerEmergencySwapScreen>
                   decoration: BoxDecoration(
                     color: ManagerColors.badgeRedBg,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: ManagerColors.redCritical.withOpacity(0.3)),
+                    border: Border.all(color: ManagerColors.redCritical.withValues(alpha: 0.3)),
                   ),
                   child: const Row(
                     children: [
@@ -60,7 +60,7 @@ class _ManagerEmergencySwapScreenState extends State<ManagerEmergencySwapScreen>
                 ),
                 const SizedBox(height: 20),
                 DropdownButtonFormField<String>(
-                  value: _selectedReason,
+                  initialValue: _selectedReason,
                   dropdownColor: ManagerColors.surfaceElevated,
                   style: const TextStyle(color: ManagerColors.textPrimary),
                   decoration: InputDecoration(

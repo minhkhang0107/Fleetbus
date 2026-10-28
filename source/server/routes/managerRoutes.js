@@ -636,6 +636,25 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/ops/refunds?status=ALL (MGR-022): open refund requests by default, newest first
+  if (pathname === '/api/v1/ops/refunds' && req.method === 'GET') {
+    const status = parsedUrl.searchParams.get('status') || 'REFUND_REQUESTED';
+    const orders = [...(services.paymentService?.orders?.values() || [])];
+    const refunds = managerService.listRefundRequests({ operatorId: req.operatorId || DEFAULT_OPERATOR_ID, status })
+      .map(r => {
+        const order = orders.find(o => o.pnr === r.pnr);
+        const payer = visibleBooking(req, { phone: order?.payer?.phone || '' });
+        return {
+          ...r,
+          payer_name: order?.payer?.full_name || order?.payer?.name || '',
+          payer_phone: payer.phone || '',
+          payment_method: order?.payment_method || null
+        };
+      });
+    sendSuccess(res, { total: refunds.length, refunds });
+    return true;
+  }
+
   // POST /api/v1/ops/refunds/:refundId/process (MGR-021, MGR-022)
   if (pathname.startsWith('/api/v1/ops/refunds/') && pathname.endsWith('/process') && req.method === 'POST') {
     const parts = pathname.split('/');
@@ -646,7 +665,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         sendError(res, 'Cần chỉ rõ approved: true hoặc false', 'APPROVED_REQUIRED', 400);
         return;
       }
-      const result = managerService.processRefundApproval(refundId, body.approved, body.notes, req.operatorId);
+      const result = managerService.processRefundApproval(refundId, body.approved, body.notes, req.operatorId, req.identity?.sub || null);
       if (result.success) {
         audit(req, managerService, { action: body.approved ? 'REFUND_APPROVED' : 'REFUND_REJECTED', resource: refundId, before: { status: 'REFUND_REQUESTED' }, after: { status: result.data.status, amount_vnd: result.data.amount_vnd } });
         sendSuccess(res, result.data || result);
@@ -680,7 +699,11 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     const bookingId = pathname.split('/')[5];
     const booking = managerService.bookings.find(b => b.pnr === bookingId && (!req.operatorId || managerService.findTrip(b.trip_id)?.operator_id === req.operatorId));
     if (booking) {
-      sendSuccess(res, visibleBooking(req, booking));
+      // What was paid stays total_fare_vnd; what goes back (a refused home fee, a cancellation) is listed beside it.
+      const refunds = managerService.refundRequests.filter(r => r.pnr === booking.pnr)
+        .map(({ refund_id, amount_vnd, status, reason, source, requested_at, processed_at }) => ({ refund_id, amount_vnd, status, reason, source, requested_at, processed_at: processed_at || null }));
+      const sum = (status) => refunds.filter(r => r.status === status).reduce((n, r) => n + (r.amount_vnd || 0), 0);
+      sendSuccess(res, { ...visibleBooking(req, booking), refunds, refund_pending_vnd: sum('REFUND_REQUESTED'), refunded_vnd: sum('REFUNDED') });
     } else {
       sendError(res, 'Không tìm thấy thông tin đơn đặt vé', 'BOOKING_NOT_FOUND', 404);
     }
@@ -853,6 +876,125 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       audit_logs: [...managerService.auditLog].filter(a => (a.operator_id || DEFAULT_OPERATOR_ID) === req.operatorId).reverse(),
       chain: managerService.verifyAuditChain(req.operatorId)
     });
+    return true;
+  }
+
+  // GET /api/v1/ops/pending-payments (MGR-037)
+  if (pathname === '/api/v1/ops/pending-payments' && req.method === 'GET') {
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const rawNow = !isProduction() && parsedUrl.searchParams.get('now');
+    const now = rawNow ? (Number(rawNow) || Date.parse(rawNow) || Date.now()) : Date.now();
+    const cutoff = now - 3 * 86400000;
+    const ALLOWED_STATUSES = ['PENDING_PAYMENT', 'EXPIRED', 'UNMATCHED_OVERDUE'];
+
+    const orders = [];
+    if (services.paymentService?.orders) {
+      for (const order of services.paymentService.orders.values()) {
+        if ((order.operator_id || DEFAULT_OPERATOR_ID) !== operatorId) continue;
+        if (!ALLOWED_STATUSES.includes(order.payment_status)) continue;
+        if (order.payment_method === 'CASH') continue;
+        const createdMs = Date.parse(order.created_at || '') || 0;
+        if (createdMs < cutoff) continue;
+
+        const payer_phone = visibleBooking(req, { phone: order.payer?.phone || '' }).phone || '';
+        const paid = order.paid_amount_vnd ?? 0;
+        const remaining = order.remaining_vnd !== undefined
+          ? order.remaining_vnd
+          : Math.max(0, (order.amount_vnd || 0) - paid);
+
+        orders.push({
+          order_id: order.order_id,
+          pnr: order.pnr,
+          trip_id: order.trip_id,
+          amount_vnd: order.amount_vnd,
+          paid_amount_vnd: paid,
+          remaining_vnd: remaining,
+          payment_status: order.payment_status,
+          expires_at: order.expires_at,
+          created_at: order.created_at,
+          payer_name: order.payer?.full_name || order.payer?.name || '',
+          payer_phone,
+          transfer_memo: order.transfer_memo || order.payment_details?.transfer_memo || ''
+        });
+      }
+    }
+
+    orders.sort((a, b) => (Date.parse(b.created_at || '') || 0) - (Date.parse(a.created_at || '') || 0));
+    sendSuccess(res, { total: orders.length, orders });
+    return true;
+  }
+
+  // POST /api/v1/ops/orders/:orderId/confirm-payment (MGR-037)
+  const confirmPaymentMatch = pathname.match(/^\/api\/v1\/ops\/orders\/([^/]+)\/confirm-payment$/);
+  if (confirmPaymentMatch && req.method === 'POST') {
+    const orderId = decodeURIComponent(confirmPaymentMatch[1]);
+    parseJsonBody(req).then(body => {
+      const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+      const now = !isProduction() && body?.now ? body.now : Date.now();
+      const result = services.paymentService.confirmPaymentManually(orderId, {
+        operatorId,
+        amountVnd: body?.amount_vnd ?? body?.amountVnd,
+        note: body?.note,
+        staff: req.identity?.sub || null
+      }, now);
+      if (!result.success) {
+        sendError(res, result.error, result.code, result.status || 400);
+        return;
+      }
+      audit(req, managerService, {
+        action: 'PAYMENT_MANUAL_CONFIRM',
+        resource: result.order_id || orderId,
+        after: {
+          order_id: result.order_id,
+          pnr: result.pnr,
+          outcome: result.outcome,
+          amount_vnd: Number(body?.amount_vnd ?? body?.amountVnd),
+          note: String(body?.note || '').trim()
+        }
+      });
+      sendSuccess(res, result);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/ops/bank-transactions?outcome=UNMATCHED (MGR-037)
+  if (pathname === '/api/v1/ops/bank-transactions' && req.method === 'GET') {
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const outcome = parsedUrl.searchParams.get('outcome') || null;
+    const transactions = services.paymentService.listBankTransactions({ operatorId, outcome });
+    sendSuccess(res, { total: transactions.length, transactions });
+    return true;
+  }
+
+  // POST /api/v1/ops/bank-transactions/:txId/assign (MGR-037)
+  const assignBankTxMatch = pathname.match(/^\/api\/v1\/ops\/bank-transactions\/([^/]+)\/assign$/);
+  if (assignBankTxMatch && req.method === 'POST') {
+    const txId = decodeURIComponent(assignBankTxMatch[1]);
+    parseJsonBody(req).then(body => {
+      const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+      const now = !isProduction() && body?.now ? body.now : Date.now();
+      const result = services.paymentService.assignBankTransaction(txId, body?.pnr, {
+        operatorId,
+        staff: req.identity?.sub || null
+      }, now);
+      if (!result.success) {
+        sendError(res, result.error, result.code, result.status || 400);
+        return;
+      }
+      audit(req, managerService, {
+        action: 'BANK_TX_ASSIGN',
+        resource: result.tx_id || txId,
+        before: { outcome: 'UNMATCHED' },
+        after: {
+          tx_id: result.tx_id || txId,
+          order_id: result.order_id,
+          pnr: result.pnr,
+          outcome: result.outcome,
+          assigned_by: result.assigned_by
+        }
+      });
+      sendSuccess(res, result);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 

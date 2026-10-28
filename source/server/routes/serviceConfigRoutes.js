@@ -4,7 +4,7 @@
  */
 import crypto from 'crypto';
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
-import { defaultServiceConfig } from '../core/operators.js';
+import { defaultServiceConfig, updateOperatorContact } from '../core/operators.js';
 import { STOP_STYLES, checkHomeService, publicServiceConfig, routeServiceConfig, validateArea, validateModes, validateRouteSettings } from '../core/serviceAreas.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { validateRouteStops } from '../core/routeStops.js';
@@ -17,6 +17,29 @@ const AREA_ACTIVE_RE = /^\/api\/v1\/ops\/service-areas\/([^/]+)\/(activate|deact
 function configOf(req) {
   if (!req.operator.service_config) req.operator.service_config = defaultServiceConfig();
   return req.operator.service_config;
+}
+
+function companyProfile(op) {
+  return {
+    operator: {
+      operator_id: op.operator_id,
+      code: op.code,
+      name: op.name,
+      short_name: op.short_name,
+      hotline: op.hotline ?? null,
+      support_email: op.support_email ?? null,
+      address: op.address ?? null,
+      primary_color: op.primary_color,
+      bank: {
+        bin: op.bank?.bin || '',
+        bank_name: op.bank?.bank_name || '',
+        account_number: op.bank?.account_number || '',
+        account_name: op.bank?.account_name || ''
+      },
+      memo_prefix: op.memo_prefix
+    },
+    editable: ['hotline', 'support_email', 'address']
+  };
 }
 
 function audit(req, managerService, entry) {
@@ -89,7 +112,42 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
     return true;
   }
 
-  if (!pathname.startsWith('/api/v1/ops/service-')) return false;
+  if (!pathname.startsWith('/api/v1/ops/service-') && pathname !== '/api/v1/ops/company') return false;
+
+  // GET /api/v1/ops/company: view company profile and contact info
+  if (pathname === '/api/v1/ops/company' && req.method === 'GET') {
+    sendSuccess(res, companyProfile(req.operator));
+    return true;
+  }
+
+  // PATCH /api/v1/ops/company: update hotline, support_email, address
+  if (pathname === '/api/v1/ops/company' && req.method === 'PATCH') {
+    parseJsonBody(req).then(body => {
+      const before = {
+        hotline: req.operator.hotline ?? null,
+        support_email: req.operator.support_email ?? null,
+        address: req.operator.address ?? null
+      };
+      const result = updateOperatorContact(req.operator.operator_id, body);
+      if (!result.ok) {
+        sendError(res, result.message, result.code, result.status);
+        return;
+      }
+      const after = {
+        hotline: result.operator.hotline ?? null,
+        support_email: result.operator.support_email ?? null,
+        address: result.operator.address ?? null
+      };
+      audit(req, managerService, {
+        action: 'OPERATOR_CONTACT_UPDATE',
+        resource: req.operator.code,
+        before,
+        after
+      });
+      sendSuccess(res, companyProfile(result.operator));
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
 
   if (pathname === '/api/v1/ops/service-config' && req.method === 'GET') {
     sendSuccess(res, snapshot(configOf(req)));

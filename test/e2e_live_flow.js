@@ -121,12 +121,12 @@ async function runLiveE2E() {
   console.log('\n--- 3. NAPAS247 / VIETQR PAYMENT SETTLEMENT ---');
   const underpaid = await request('/api/v1/webhooks/vietqr/ipn', {
     method: 'POST',
-    body: { transferMemo: payment.payment_details.transfer_memo, amountVnd: 1000, bankRef: `FT${Date.now()}` }
+    body: { transferMemo: payment.payment_details.transfer_memo, amountVnd: 1000, bankRef: `FT${Date.now()}_part` }
   });
-  expect(underpaid.status === 400 && underpaid.body.code === 'AMOUNT_MISMATCH', 'a wrong amount must not issue tickets', underpaid);
+  expect(underpaid.status === 200 && underpaid.body.data.settled === false && underpaid.body.data.status === 'PARTIAL', 'a partial amount must not issue tickets yet', underpaid);
   const settlement = await request('/api/v1/webhooks/vietqr/ipn', {
     method: 'POST',
-    body: { transferMemo: payment.payment_details.transfer_memo, amountVnd: totalAmount, bankRef: `FT${Date.now()}` }
+    body: { transferMemo: payment.payment_details.transfer_memo, amountVnd: totalAmount - 1000, bankRef: `FT${Date.now()}_rest` }
   });
   expect(settlement.status === 200 && settlement.body.data.settled === true, 'settlement', settlement);
   const ticketId = settlement.body.data.issued_tickets[0].ticket_id;

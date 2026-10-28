@@ -59,6 +59,11 @@ class ManagerApiService {
     return _decode(response);
   }
 
+  Future<Map<String, dynamic>> _put(String path, {Object? body}) async {
+    final response = await _client.put(Uri.parse('$baseUrl$path'), headers: _headers(), body: body == null ? null : jsonEncode(body));
+    return _decode(response);
+  }
+
   Future<Map<String, dynamic>> _patch(String path, {Object? body}) async {
     final response = await _client.patch(Uri.parse('$baseUrl$path'), headers: _headers(), body: body == null ? null : jsonEncode(body));
     return _decode(response);
@@ -366,6 +371,11 @@ class ManagerApiService {
     );
   }
 
+  // MGR-022: Refund requests of the company, newest first (open ones by default, status ALL for every one)
+  Future<Map<String, dynamic>> getRefunds({String? status}) {
+    return _get('/ops/refunds', query: status == null ? null : {'status': status});
+  }
+
   // MGR-022: Approve or reject a refund request, once
   Future<Map<String, dynamic>> processRefund(String refundId, {required bool approved, String? notes, String? idempotencyKey}) {
     return _post(
@@ -488,6 +498,16 @@ class ManagerApiService {
     return _post('/ops/vouchers/$id/deactivate', idempotent: true, idempotencyKey: idempotencyKey);
   }
 
+  // MGR-036: The company's own profile: name, code and payee are read-only, contact info is editable
+  Future<Map<String, dynamic>> getCompany() {
+    return _get('/ops/company');
+  }
+
+  // MGR-036: Change the company's hotline, support_email or address (director only)
+  Future<Map<String, dynamic>> updateCompanyContact(Map<String, dynamic> fields) {
+    return _patch('/ops/company', body: fields);
+  }
+
   // MGR-035: Delete a code nobody has used (409 VOUCHER_IN_USE otherwise: switch it off instead)
   Future<Map<String, dynamic>> deleteVoucher(String code) {
     return _delete('/ops/vouchers/${Uri.encodeComponent(code)}');
@@ -556,5 +576,59 @@ class ManagerApiService {
   // MGR-007: Delete seat layout template
   Future<Map<String, dynamic>> deleteSeatLayout(String layoutId) {
     return _delete('/ops/seat-layouts/${Uri.encodeComponent(layoutId)}');
+  }
+
+  // MGR-037: Online orders waiting for money (director, cashier, finance controller)
+  Future<Map<String, dynamic>> getPendingPayments() {
+    return _get('/ops/pending-payments');
+  }
+
+  // MGR-037: Manually confirm payment for a pending order (director, cashier, finance controller)
+  Future<Map<String, dynamic>> confirmOrderPayment(
+    String orderId, {
+    required int amountVnd,
+    required String note,
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/orders/${Uri.encodeComponent(orderId)}/confirm-payment',
+      body: {'amount_vnd': amountVnd, 'note': note},
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  // MGR-037: Bank transfer records of the company, newest first (optional outcome filter, e.g. UNMATCHED)
+  Future<Map<String, dynamic>> getBankTransactions({String? outcome}) {
+    return _get('/ops/bank-transactions', query: outcome == null ? null : {'outcome': outcome});
+  }
+
+  // MGR-037: Assign an unmatched bank transfer to a booking PNR (director, finance controller)
+  Future<Map<String, dynamic>> assignBankTransaction(
+    String txId, {
+    required String pnr,
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/bank-transactions/${Uri.encodeComponent(txId)}/assign',
+      body: {'pnr': pnr},
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  // MGR-038: Payment methods and transfer provider configuration (director, finance controller)
+  Future<Map<String, dynamic>> getPaymentSettings() {
+    return _get('/ops/payment-settings');
+  }
+
+  // MGR-038: Update payment methods, transfer provider and gateway credentials (director only)
+  Future<Map<String, dynamic>> updatePaymentSettings(Map<String, dynamic> settings) {
+    return _put('/ops/payment-settings', body: settings);
+  }
+
+  // MGR-038: Test connection to the configured payment gateway (director only)
+  Future<Map<String, dynamic>> testPaymentSettings({Map<String, dynamic>? body}) {
+    return _post('/ops/payment-settings/test', body: body);
   }
 }

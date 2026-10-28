@@ -4,6 +4,7 @@
  */
 import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
 import { createOperator, findOperatorByCode, findOperatorById, listOperators, setOperatorActive, updateOperator } from '../core/operators.js';
+import { MOCK_MANAGERS_DB } from '../services/manager/modules/managerService.js';
 import { isProduction } from '../config.js';
 
 const OPERATOR_RE = /^\/api\/v1\/platform\/operators\/([^/]+)$/;
@@ -34,7 +35,13 @@ export function handlePlatformRoutes(req, res, pathname, parsedUrl, services) {
   }
 
   if (pathname === '/api/v1/platform/operators' && req.method === 'GET') {
-    const operators = listOperators();
+    const operators = listOperators().map(op => {
+      const director = MOCK_MANAGERS_DB.find(m => m.operator_id === op.operator_id && m.role === 'FLEET_DIRECTOR');
+      return {
+        ...op,
+        director_email: director?.username || null
+      };
+    });
     sendSuccess(res, { total: operators.length, operators });
     return true;
   }

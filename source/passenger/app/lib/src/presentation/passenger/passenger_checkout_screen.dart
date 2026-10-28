@@ -105,6 +105,8 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
     final d = store.stop(store.dropoff);
     final n = store.seats.length;
     final canPayCash = store.operator?.allowCash != false && store.total > 0;
+    // Nothing to transfer for a 0 đ order, so it is always shown as settled by transfer.
+    final canPayTransfer = store.operator?.allowTransfer != false || store.total <= 0;
     return Scaffold(
       appBar: const TopBar(title: 'Xác nhận đặt vé'),
       body: Column(children: [
@@ -196,7 +198,7 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
               ),
             if (store.discount > 0) _line('Mã ${store.voucher}', '−${vnd(store.discount)}', color: PTokens.success),
             const Divider(height: 20, color: PTokens.line),
-            if (canPayCash) ...[
+            if (canPayCash && canPayTransfer) ...[
               Text('Thanh toán qua', style: sans(size: 14, weight: FontWeight.w600)),
               gap(8),
               _PaymentOption(
@@ -217,9 +219,9 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
               Row(children: [
                 Text('Thanh toán qua', style: sans(size: 14, weight: FontWeight.w600)),
                 const Spacer(),
-                const Icon(Icons.qr_code_2, size: 18, color: PTokens.primary),
+                Icon(canPayTransfer ? Icons.qr_code_2 : Icons.payments_outlined, size: 18, color: PTokens.primary),
                 const SizedBox(width: 6),
-                Flexible(child: Text('VietQR chuyển khoản', textAlign: TextAlign.end, style: sans(size: 14, weight: FontWeight.w600))),
+                Flexible(child: Text(canPayTransfer ? 'VietQR chuyển khoản' : 'Tiền mặt khi lên xe', textAlign: TextAlign.end, style: sans(size: 14, weight: FontWeight.w600))),
               ]),
           ]),
         ),
@@ -232,7 +234,7 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
           ]),
         ),
         PrimaryButton(
-          label: _creating ? 'Đang tạo đơn…' : (canPayCash && store.payByCash ? 'Xác nhận đặt vé' : 'Tạo mã thanh toán'),
+          label: _creating ? 'Đang tạo đơn…' : (canPayCash && (store.payByCash || !canPayTransfer) ? 'Xác nhận đặt vé' : 'Tạo mã thanh toán'),
           onPressed: _creating ? null : () => _pay(store),
         ),
       ]),

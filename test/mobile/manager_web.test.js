@@ -112,4 +112,68 @@ describe('Phase Manager Web: Flutter Web Platform & Dashboard Integrity Test Sui
     const content = fs.readFileSync(webDistPath, 'utf8');
     assert.ok(content.includes('BusGo Operations') || content.includes('BusGo Manager'), 'Must contain BusGo Operations title');
   });
+
+  it('TC-MGR-WEB-09: Manager Web Distribution must support Company Profile and Platform Operator Editing (MGR-036)', () => {
+    const webDistPath = path.join(managerDir, 'web_dist/index.html');
+    assert.ok(fs.existsSync(webDistPath), 'source/manager/web_dist/index.html must exist');
+    const content = fs.readFileSync(webDistPath, 'utf8');
+
+    // HTML contains the company panel
+    assert.ok(content.includes('data-panel="company"'), 'HTML must contain the company panel');
+    assert.ok(content.includes('data-view="company"'), 'HTML must contain company nav button');
+
+    // PATCH /api/v1/ops/company call
+    assert.ok(
+      content.includes('/api/v1/ops/company') && content.includes("method: 'PATCH'"),
+      'HTML must contain PATCH /api/v1/ops/company call'
+    );
+
+    // Platform PATCH call
+    assert.ok(
+      content.includes('/api/v1/platform/operators/') && content.includes("method: 'PATCH'"),
+      'HTML must contain platform operators PATCH call'
+    );
+
+    // No longer contains op_saomai: 'admin@busgo.vn'
+    assert.ok(
+      !content.includes("op_saomai: 'admin@busgo.vn'"),
+      'HTML must no longer contain hardcoded op_saomai director email'
+    );
+  });
+
+  it('TC-MGR-WEB-10: Manager Web Distribution must support Payment Settings & Settlement Cockpit (MGR-037, MGR-038)', () => {
+    const webDistPath = path.join(managerDir, 'web_dist/index.html');
+    assert.ok(fs.existsSync(webDistPath), 'source/manager/web_dist/index.html must exist');
+    const content = fs.readFileSync(webDistPath, 'utf8');
+
+    // payments panel and nav button exist
+    assert.ok(content.includes('data-panel="payments"'), 'HTML must contain the payments panel');
+    assert.ok(content.includes('data-view="payments"'), 'HTML must contain payments nav button');
+
+    // form is built from credential_fields (no hardcoded 'webhook_secret' input in HTML)
+    assert.ok(!content.includes('<input name="webhook_secret"'), 'Must not have hardcoded webhook_secret input in HTML');
+    assert.ok(content.includes('credential_fields'), 'Form must be generated from credential_fields');
+
+    // calls to /ops/payment-settings
+    assert.ok(content.includes('/api/v1/ops/payment-settings'), 'Must call /api/v1/ops/payment-settings');
+
+    // calls to /payment-settings/test
+    assert.ok(content.includes('/api/v1/ops/payment-settings/test'), 'Must call /api/v1/ops/payment-settings/test');
+
+    // calls to /ops/pending-payments
+    assert.ok(content.includes('/api/v1/ops/pending-payments'), 'Must call /api/v1/ops/pending-payments');
+
+    // confirm-payment
+    assert.ok(content.includes('confirm-payment'), 'Must call confirm-payment');
+
+    // bank-transactions assign
+    assert.ok(content.includes('/api/v1/ops/bank-transactions') && content.includes('/assign'), 'Must call bank-transactions assign');
+  });
+
+  it('TC-MGR-WEB-11: Manager Web Distribution must list and process refund requests in the payments panel (MGR-022)', () => {
+    const content = fs.readFileSync(path.join(managerDir, 'web_dist/index.html'), 'utf8');
+    assert.ok(content.includes('id="refundsBox"'), 'payments panel must hold the refund list');
+    assert.ok(content.includes('/api/v1/ops/refunds?status='), 'Must call GET /api/v1/ops/refunds');
+    assert.ok(content.includes('/process`'), 'Must call refunds process');
+  });
 });

@@ -118,6 +118,13 @@ describe('Fixed routes, schedules and home service rules', () => {
       assert.deepStrictEqual([t.home_pickup.status, t.home_pickup.reject_reason, t.fare_vnd], ['REJECTED', 'Xe 34 chỗ không vào được ngõ', fare - 80000]);
       assert.strictEqual(manifestItem('trp_hn_th_01', ticket.ticket_id).pickup_stop_id, 'stp_hn_gb', 'the ticket rides from its stop');
       assert.ok(notifications().some(n => n.type === 'HOME_PICKUP_REJECTED' && n.body.includes('không vào được ngõ') && n.body.includes('Giáp Bát')));
+      // The cashier looking the booking up sees the refund waiting for approval, not only the price paid.
+      const lookup = await request(`/api/v1/ops/bookings/${order.pnr}`, { token: cashier });
+      assert.strictEqual(lookup.status, 200, JSON.stringify(lookup.body));
+      const looked = lookup.body.data;
+      assert.strictEqual(looked.refund_pending_vnd, 80000);
+      assert.strictEqual(looked.refunded_vnd, 0);
+      assert.deepStrictEqual(looked.refunds.map(r => [r.amount_vnd, r.status, r.source]), [[80000, 'REFUND_REQUESTED', 'HOME_SERVICE_REFUSED']]);
 
       const cancel = await request(`/api/v1/passenger/tickets/${ticket.ticket_id}/cancel`, { method: 'POST', token: pax, body: {} });
       assert.strictEqual(cancel.status, 200, JSON.stringify(cancel.body));
