@@ -148,6 +148,8 @@ export function publicServiceConfig(config) {
     dropoff_modes: [...(config?.dropoff_modes || [])],
     allow_home_to_home: Boolean(config?.allow_home_to_home),
     allow_cash_payment: config?.allow_cash_payment !== false,
+    insurance_enabled: Boolean(config?.insurance_enabled),
+    wallet_enabled: Boolean(config?.wallet_enabled),
     stop_style: config?.stop_style || 'STATIONS',
     service_areas: (config?.service_areas || []).filter(a => a.active !== false).map(({ area_id, name, kind, polygon, fee_vnd, lead_time_minutes, service_hours, confirmation }) => ({ area_id, name, kind, polygon, fee_vnd, lead_time_minutes, service_hours, confirmation: confirmation || 'AUTO' }))
   };

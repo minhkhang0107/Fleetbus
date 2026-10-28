@@ -9,6 +9,21 @@ export function isProduction() {
   return process.env.NODE_ENV === 'production';
 }
 
+/**
+ * Returns the server clock in production; outside production accepts a caller-supplied timestamp (ms or ISO string).
+ */
+export function clientNow(source) {
+  if (isProduction() || !source) return Date.now();
+  const raw = typeof source?.get === 'function'
+    ? source.get('now')
+    : (typeof source === 'object' ? source.now : source);
+  if (raw === undefined || raw === null || raw === '' || raw === false) return Date.now();
+  const num = Number(raw);
+  if (Number.isFinite(num) && num > 0) return num;
+  const parsed = typeof raw === 'string' ? Date.parse(raw) : NaN;
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
 export function getTicketSecret() {
   const fromEnv = process.env.FLEETBUS_TICKET_SECRET;
   if (fromEnv) return fromEnv;

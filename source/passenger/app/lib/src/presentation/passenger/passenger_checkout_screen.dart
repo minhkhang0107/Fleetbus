@@ -165,23 +165,25 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
             if (_voucherMessage != null) ...[gap(6), Text(_voucherMessage!, style: sans(size: 13, weight: FontWeight.w500, color: _voucherOk ? PTokens.success : PTokens.danger))],
           ], right: [
             if (!pWide(context)) gap(16),
-            AppCard(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              // Its own Material so the tile ripple shows above the card colour.
-              child: Material(
-                color: Colors.transparent,
-                child: SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: store.insured,
-                  onChanged: store.setInsured,
-                  title: Text('Bảo hiểm chuyến đi', style: sans(size: 14, weight: FontWeight.w600)),
-                  subtitle: Text('Không bắt buộc · 10.000 đ mỗi ghế', style: sans(size: 12, color: PTokens.muted)),
+            if (store.insuranceEnabled) ...[
+              AppCard(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                // Its own Material so the tile ripple shows above the card colour.
+                child: Material(
+                  color: Colors.transparent,
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: store.insured,
+                    onChanged: store.setInsured,
+                    title: Text('Bảo hiểm chuyến đi', style: sans(size: 14, weight: FontWeight.w600)),
+                    subtitle: Text('Không bắt buộc · 10.000 đ mỗi ghế', style: sans(size: 12, color: PTokens.muted)),
+                  ),
                 ),
               ),
-            ),
-            gap(16),
+              gap(16),
+            ],
             _line('Giá vé ($n ghế)', vnd(store.baseFare)),
-            if (store.insured) _line('Bảo hiểm', vnd(store.insuranceFee)),
+            if (store.insuranceEnabled && store.insured) _line('Bảo hiểm', vnd(store.insuranceFee)),
             if (store.homePickup != null) _line('Phụ phí đón tận nhà', vnd(store.feeOf(store.homePickup!.feeVnd))),
             if (store.homeDropoff != null) _line('Phụ phí trả tận nhà', vnd(store.feeOf(store.homeDropoff!.feeVnd))),
             // D130: disclosed before the transfer, never shown as confirmed while the company has not answered.
@@ -243,7 +245,11 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
 
   Widget _line(String label, String value, {Color color = PTokens.ink}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(children: [Text(label, style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(value, style: mono(size: 14, weight: FontWeight.w500, color: color))]),
+        child: Row(children: [
+          Expanded(child: Text(label, style: sans(size: 14, color: PTokens.muted))),
+          const SizedBox(width: 8),
+          Text(value, style: mono(size: 14, weight: FontWeight.w500, color: color)),
+        ]),
       );
 }
 

@@ -187,9 +187,39 @@ String? _window(dynamic home) {
 }
 
 class QueuedAction {
-  QueuedAction(this.label, this.at);
+  QueuedAction(
+    this.label,
+    this.at, {
+    this.method = 'POST',
+    this.path = '',
+    this.body,
+    String? idempotencyKey,
+  }) : idempotencyKey = idempotencyKey ?? newDriverIdempotencyKey();
+
   final String label;
   final int at;
+  final String method;
+  final String path;
+  final Map<String, dynamic>? body;
+  final String idempotencyKey;
+
+  Map<String, dynamic> toJson() => {
+        'label': label,
+        'at': at,
+        'method': method,
+        'path': path,
+        if (body != null) 'body': body,
+        'idempotency_key': idempotencyKey,
+      };
+
+  factory QueuedAction.fromJson(Map<String, dynamic> j) => QueuedAction(
+        '${j['label'] ?? ''}',
+        (j['at'] as num?)?.toInt() ?? 0,
+        method: '${j['method'] ?? 'POST'}',
+        path: '${j['path'] ?? ''}',
+        body: j['body'] is Map ? Map<String, dynamic>.from(j['body'] as Map) : null,
+        idempotencyKey: j['idempotency_key']?.toString(),
+      );
 }
 
 class _DriveLeg {
@@ -427,7 +457,9 @@ class LegalInfo {
 class DriverStore extends ChangeNotifier {
   DriverStore({DriverApiClientService? api, DateTime Function()? clock})
       : api = api ?? DriverApiClientService(),
-        _now = clock ?? DateTime.now;
+        _now = clock ?? DateTime.now {
+    unawaited(_loadInitialQueue());
+  }
 
   final DriverApiClientService api;
   final DateTime Function() _now;
@@ -459,6 +491,8 @@ class DriverStore extends ChangeNotifier {
   String operatorCode = '';
   String operatorName = '';
   String operatorHotline = '';
+  /// Change may go to the passenger's BusGo wallet only when the company turned the wallet on (H-03).
+  bool walletEnabled = false;
   String driverName = '';
   String staffId = '';
   bool mustChangePin = false;
@@ -473,6 +507,58 @@ class DriverStore extends ChangeNotifier {
 
   static const _sessionKey = 'driver_session';
 
+  static String queueKeyFor(String staffId) => 'driver_queue_${staffId.isEmpty ? 'default' : staffId}';
+  String get _queueKey => queueKeyFor(staffId);
+
+  static List<QueuedAction> _decodeQueue(String raw) {
+    try {
+      final list = jsonDecode(raw) as List;
+      return [
+        for (final item in list)
+          if (item is Map) QueuedAction.fromJson(Map<String, dynamic>.from(item)),
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _saveQueue() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_queueKey, jsonEncode([for (final q in queue) q.toJson()]));
+  }
+
+  Future<void> _loadInitialQueue() async {
+    final prefs = await SharedPreferences.getInstance();
+    var targetStaff = staffId;
+    if (targetStaff.isEmpty) {
+      final rawSession = prefs.getString(_sessionKey);
+      if (rawSession != null) {
+        try {
+          final s = jsonDecode(rawSession) as Map<String, dynamic>;
+          targetStaff = '${s['staff_id'] ?? ''}';
+        } catch (_) {}
+      }
+    }
+    if (targetStaff.isEmpty) return;
+    final raw = prefs.getString(queueKeyFor(targetStaff));
+    if (raw == null) return;
+    final loaded = _decodeQueue(raw);
+    if (loaded.isEmpty) return;
+    final existingKeys = {for (final q in queue) q.idempotencyKey};
+    queue.insertAll(0, [for (final q in loaded) if (!existingKeys.contains(q.idempotencyKey)) q]);
+    notifyListeners();
+  }
+
+  Future<void> _loadQueueForDriver() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_queueKey);
+    queue
+      ..clear()
+      ..addAll(raw == null ? const [] : _decodeQueue(raw));
+    _syncRetryTimer();
+    notifyListeners();
+  }
+
   /// Keeps the signed-in session on the device so reopening the app skips the login screen.
   Future<void> _saveSession() async {
     final prefs = await SharedPreferences.getInstance();
@@ -481,6 +567,7 @@ class DriverStore extends ChangeNotifier {
       'operator_code': operatorCode,
       'operator_name': operatorName,
       'operator_hotline': operatorHotline,
+      'wallet_enabled': walletEnabled,
       'driver_name': driverName,
       'staff_id': staffId,
     }));
@@ -503,14 +590,16 @@ class DriverStore extends ChangeNotifier {
       api.operatorCode = operatorCode.isEmpty ? null : operatorCode;
       operatorName = s['operator_name'] ?? '';
       operatorHotline = s['operator_hotline'] ?? '';
+      walletEnabled = s['wallet_enabled'] == true;
       driverName = s['driver_name'] ?? '';
       staffId = s['staff_id'] ?? '';
     } catch (_) {
       await prefs.remove(_sessionKey);
       return false;
     }
+    await _loadQueueForDriver();
     notifyListeners();
-    unawaited(loadShift());
+    unawaited(loadShift(autoFlush: false));
     return true;
   }
 
@@ -589,7 +678,11 @@ class DriverStore extends ChangeNotifier {
   bool moving = false;
   final Map<int, int> arrivedAt = {};
   final List<QueuedAction> queue = [];
+  final List<({String label, String error, int at})> syncErrors = [];
   bool offline = false;
+  bool _flushing = false;
+  Future<int>? _flushFuture;
+  Timer? _retryTimer;
   ({String type, int delay, int at})? incident;
   String? earlyEndReason;
   RoutePath? _road;
@@ -681,8 +774,21 @@ class DriverStore extends ChangeNotifier {
 
   String? _error(Map<String, dynamic> json) => json['status'] == 'success' ? null : '${json['message'] ?? json['error'] ?? 'Có lỗi, thử lại sau.'}';
 
+  static const _sessionEndCodes = {'TOKEN_REVOKED', 'TOKEN_EXPIRED', 'INVALID_TOKEN'};
+
+  /// Why the session was ended by the server; the app shows it once on the login screen.
+  String? sessionEnded;
+
   /// Runs one call; on a network failure the action is listed as waiting for the network.
-  Future<({Map<String, dynamic>? data, String? error, String? code})> _call(Future<Map<String, dynamic>> Function() request, {String? label}) async {
+  Future<({Map<String, dynamic>? data, String? error, String? code})> _call(
+    Future<Map<String, dynamic>> Function() request, {
+    String? label,
+    String method = 'POST',
+    String? path,
+    Map<String, dynamic>? body,
+    String? idempotencyKey,
+    bool autoFlush = true,
+  }) async {
     try {
       final json = await request();
       final error = _error(json);
@@ -691,7 +797,19 @@ class DriverStore extends ChangeNotifier {
         mustChangePin = true;
         notifyListeners();
       }
-      if (offline && error == null) offline = false;
+      // The office locked the account, the PIN changed elsewhere, or the session expired: back to the login.
+      if (_sessionEndCodes.contains(code) && api.authToken != null) {
+        sessionEnded = error;
+        logout();
+        return (data: null, error: error, code: code);
+      }
+      if (offline && error == null) {
+        offline = false;
+        _syncRetryTimer();
+      }
+      if (autoFlush && queue.isNotEmpty && !_flushing) {
+        unawaited(flushQueue());
+      }
       final data = json['data'] is Map<String, dynamic>
           ? json['data'] as Map<String, dynamic>
           // The COD refusal carries the ticket to charge at the top level of the body.
@@ -699,7 +817,18 @@ class DriverStore extends ChangeNotifier {
       return (data: data, error: error, code: code);
     } catch (_) {
       offline = true;
-      if (label != null) queue.add(QueuedAction(label, clock));
+      if (label != null) {
+        queue.add(QueuedAction(
+          label,
+          clock,
+          method: method,
+          path: path ?? '',
+          body: body,
+          idempotencyKey: idempotencyKey,
+        ));
+        await _saveQueue();
+        _syncRetryTimer();
+      }
       notifyListeners();
       return (data: null, error: _networkError, code: 'NETWORK');
     }
@@ -728,6 +857,7 @@ class DriverStore extends ChangeNotifier {
         operatorCode = op['code'] ?? api.operatorCode ?? '';
         operatorName = op['name'] ?? '';
         operatorHotline = op['hotline'] ?? '';
+        walletEnabled = op['wallet_enabled'] == true;
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('driver_operator_code', operatorCode);
@@ -737,8 +867,9 @@ class DriverStore extends ChangeNotifier {
     }
     if (!mustChangePin) {
       await _saveSession();
-      await loadShift();
+      await loadShift(autoFlush: false);
     }
+    await _loadQueueForDriver();
     return null;
   }
 
@@ -746,6 +877,9 @@ class DriverStore extends ChangeNotifier {
   Future<String?> changePin(String currentPin, String newPin) async {
     final r = await _call(() => api.changePin(currentPin: currentPin, newPin: newPin));
     if (r.error != null) return r.error;
+    // A PIN change ends every session (H-06); this phone goes on with the token it gets back.
+    final token = r.data?['token'];
+    if (token is String && token.isNotEmpty) api.authToken = token;
     mustChangePin = false;
     temporaryPin = null;
     await _saveSession();
@@ -757,6 +891,8 @@ class DriverStore extends ChangeNotifier {
     api.authToken = null;
     unawaited(SharedPreferences.getInstance().then((prefs) => prefs.remove(_sessionKey)));
     _stopTimers();
+    _retryTimer?.cancel();
+    _retryTimer = null;
     tripId = null;
     shift = [];
     manifest = [];
@@ -773,11 +909,11 @@ class DriverStore extends ChangeNotifier {
   }
 
   /// DRI-003: the trips of today; the current one is the earliest that is not completed.
-  Future<void> loadShift() async {
+  Future<void> loadShift({bool autoFlush = true}) async {
     loading = true;
     loadError = null;
     notifyListeners();
-    final r = await _call(api.getTodayTrips);
+    final r = await _call(api.getTodayTrips, autoFlush: autoFlush);
     loading = false;
     if (r.error != null) {
       loadError = r.error;
@@ -994,8 +1130,20 @@ class DriverStore extends ChangeNotifier {
   }
 
   /// Runs an action on the trip, then reads the trip again from the server.
-  Future<String?> _act(String label, Future<Map<String, dynamic>> Function() request) async {
-    final r = await _call(request, label: label);
+  Future<String?> _act(
+    String label,
+    String path, {
+    Map<String, dynamic>? body,
+    Future<Map<String, dynamic>> Function(String key)? request,
+  }) async {
+    final key = newDriverIdempotencyKey();
+    final r = await _call(
+      () => request != null ? request(key) : api.replay('POST', path, body, key),
+      label: label,
+      path: path,
+      body: body,
+      idempotencyKey: key,
+    );
     if (r.error == null) await refreshTrip();
     notifyListeners();
     return r.error;
@@ -1068,10 +1216,18 @@ class DriverStore extends ChangeNotifier {
   }
 
   /// D144: the bus is at the passenger's door; the wait starts and the passenger is told.
-  Future<String?> homeArrived(Passenger p) => _act('Tới nhà khách ghế ${p.seat}', () => api.homeArrived(tripId!, p.ticketId));
+  Future<String?> homeArrived(Passenger p) => _act(
+        'Tới nhà khách ghế ${p.seat}',
+        '/api/v1/driver/trips/$tripId/tickets/${p.ticketId}/home-arrived',
+        request: (key) => api.homeArrived(tripId!, p.ticketId, idempotencyKey: key),
+      );
 
   /// D144: the passenger did not come out in time; the bus goes on, the passenger is sent to the first stop.
-  Future<String?> homeMissed(Passenger p) => _act('Khách ghế ${p.seat} không ra', () => api.homeMissed(tripId!, p.ticketId));
+  Future<String?> homeMissed(Passenger p) => _act(
+        'Khách ghế ${p.seat} không ra',
+        '/api/v1/driver/trips/$tripId/tickets/${p.ticketId}/home-missed',
+        request: (key) => api.homeMissed(tripId!, p.ticketId, idempotencyKey: key),
+      );
 
   /// D144: the passenger's number, for a call while the bus is stopped. The server logs every request.
   Future<({String? phone, String? error})> contactOf(Passenger p) async {
@@ -1162,7 +1318,12 @@ class DriverStore extends ChangeNotifier {
   // ---------- Stops (DRI-008) ----------
   Future<String?> arrive() async {
     if (atStop) return null;
-    final error = await _act('Đến ${stop.name}', () => api.arriveAtStop(tripId!, stop.id));
+    final stopId = stop.id;
+    final error = await _act(
+      'Đến ${stop.name}',
+      '/api/v1/driver/trips/$tripId/stops/$stopId/arrive',
+      request: (key) => api.arriveAtStop(tripId!, stopId, idempotencyKey: key),
+    );
     if (error != null && !offline) return error;
     atStop = true;
     moving = false;
@@ -1178,7 +1339,11 @@ class DriverStore extends ChangeNotifier {
     atStop = false;
     moving = true;
     if (tripId != null && current != null) {
-      unawaited(_act('Rời ${current.name}', () => api.departStop(tripId!, current.id)));
+      unawaited(_act(
+        'Rời ${current.name}',
+        '/api/v1/driver/trips/$tripId/stops/${current.id}/depart',
+        request: (key) => api.departStop(tripId!, current.id, idempotencyKey: key),
+      ));
     }
     stopIndex = (stopIndex + 1).clamp(0, stops.length - 1);
     final nextStop = stops.isNotEmpty ? stops[stopIndex] : null;
@@ -1231,27 +1396,56 @@ class DriverStore extends ChangeNotifier {
 
   // ---------- Boarding (DRI-009 to DRI-012) ----------
   /// The server refuses an unpaid COD ticket (409 COD_PAYMENT_REQUIRED, BR-COD-006).
-  Future<String?> board(Passenger p) => _act('Cho lên xe ghế ${p.seat}', () => api.boardManually(tripId!, ticketId: p.ticketId));
+  Future<String?> board(Passenger p) => _act(
+        'Cho lên xe ghế ${p.seat}',
+        '/api/v1/driver/trips/$tripId/boarding/manual',
+        body: {'ticket_id': p.ticketId},
+        request: (key) => api.boardManually(tripId!, ticketId: p.ticketId, idempotencyKey: key),
+      );
 
   /// DRI-010: the backup PIN is checked by the server against the ticket's current QR version.
   Future<({String? error, String? code, Map<String, dynamic>? data})> boardWithPin(Passenger p, String pin) async {
-    final r = await _call(() => api.boardWithQr(tripId!, 'PIN:${p.ticketId}:$pin'), label: 'PIN ghế ${p.seat}');
+    final payload = 'PIN:${p.ticketId}:$pin';
+    final key = newDriverIdempotencyKey();
+    final r = await _call(
+      () => api.boardWithQr(tripId!, payload, idempotencyKey: key),
+      label: 'PIN ghế ${p.seat}',
+      path: '/api/v1/driver/trips/$tripId/boarding',
+      body: {'qrPayload': payload},
+      idempotencyKey: key,
+    );
     if (r.error == null) await refreshTrip();
     return (error: r.error, code: r.code, data: r.data);
   }
 
   /// DRI-009: a scanned boarding QR (BUSGO|pnr|ticket|`v<n>`|hmac).
   Future<({String? error, String? code, Map<String, dynamic>? data})> boardWithQr(String payload) async {
-    final r = await _call(() => api.boardWithQr(tripId!, payload), label: 'Quét vé');
+    final key = newDriverIdempotencyKey();
+    final r = await _call(
+      () => api.boardWithQr(tripId!, payload, idempotencyKey: key),
+      label: 'Quét vé',
+      path: '/api/v1/driver/trips/$tripId/boarding',
+      body: {'qrPayload': payload},
+      idempotencyKey: key,
+    );
     if (r.error == null) await refreshTrip();
     return (error: r.error, code: r.code, data: r.data);
   }
 
   /// Spec A9: the bus cannot reach this home pickup; the manifest reloads to show it.
-  Future<String?> reportInaccessible(Passenger p, String reason, String meetingPoint) =>
-      _act('Không vào được địa chỉ ghế ${p.seat}', () => api.reportInaccessible(tripId!, p.ticketId, reason: reason, meetingPoint: meetingPoint));
+  Future<String?> reportInaccessible(Passenger p, String reason, String meetingPoint) => _act(
+        'Không vào được địa chỉ ghế ${p.seat}',
+        '/api/v1/driver/trips/$tripId/tickets/${p.ticketId}/inaccessible',
+        body: {'reason': reason, if (meetingPoint.isNotEmpty) 'meeting_point': meetingPoint},
+        request: (key) => api.reportInaccessible(tripId!, p.ticketId, reason: reason, meetingPoint: meetingPoint, idempotencyKey: key),
+      );
 
-  Future<String?> markNoShow(Passenger p) => _act('Vắng mặt ghế ${p.seat}', () => api.markNoShow(tripId!, p.ticketId));
+  Future<String?> markNoShow(Passenger p) => _act(
+        'Vắng mặt ghế ${p.seat}',
+        '/api/v1/driver/trips/$tripId/tickets/${p.ticketId}/no-show',
+        body: {'passenger_requested_cancel': false},
+        request: (key) => api.markNoShow(tripId!, p.ticketId, idempotencyKey: key),
+      );
 
   static const changeSettlementMethods = {
     'CASH': 'CASH_RETURNED',
@@ -1260,8 +1454,19 @@ class DriverStore extends ChangeNotifier {
   };
 
   /// DRI-012: collect the fare; change returned in cash, credited to the wallet, or as a debt receipt.
-  Future<String?> collectCod(Passenger p, {required int given, required String method}) =>
-      _act('Thu COD ghế ${p.seat}', () => api.collectCod(tripId!, p.ticketId, given, changeSettlementMethod: changeSettlementMethods[method]!));
+  Future<String?> collectCod(Passenger p, {required int given, required String method}) {
+    final settlement = changeSettlementMethods[method]!;
+    return _act(
+      'Thu COD ghế ${p.seat}',
+      '/api/v1/driver/trips/$tripId/payments/cod-collect',
+      body: {
+        'ticket_id': p.ticketId,
+        'amount_collected_vnd': given,
+        'change_settlement_method': settlement,
+      },
+      request: (key) => api.collectCod(tripId!, p.ticketId, given, changeSettlementMethod: settlement, idempotencyKey: key),
+    );
+  }
 
   /// DRI-006: free seats for a hailing passenger, from the seat map minus the manifest.
   Future<void> loadFreeSeats() async {
@@ -1283,23 +1488,63 @@ class DriverStore extends ChangeNotifier {
     String? method,
     String? phone,
     String? name,
-  }) =>
-      _act('Bán vé khách vẫy ghế $seat', () => api.onboardHailPassenger(
+  }) {
+    final amount = given ?? fare;
+    final settlement = method != null ? (changeSettlementMethods[method] ?? method) : 'CASH_RETURNED';
+    final cleanPhone = (phone != null && phone.trim().isNotEmpty) ? phone.trim() : null;
+    final cleanName = (name != null && name.trim().isNotEmpty) ? name.trim() : 'Khách vẫy dọc đường';
+    return _act(
+      'Bán vé khách vẫy ghế $seat',
+      '/api/v1/driver/trips/$tripId/onboard-hail',
+      body: {
+        'seat_code': seat,
+        'amount_collected_vnd': amount,
+        'passenger_name': cleanName,
+        if (cleanPhone != null) 'phone': cleanPhone,
+        'dropoff_stop_id': toStop,
+        'change_settlement_method': settlement,
+      },
+      request: (key) => api.onboardHailPassenger(
         tripId!,
         seatCode: seat,
-        amountCollectedVnd: given ?? fare,
+        amountCollectedVnd: amount,
         dropoffStopId: toStop,
-        changeSettlementMethod: method != null ? (changeSettlementMethods[method] ?? method) : 'CASH_RETURNED',
-        phone: (phone != null && phone.trim().isNotEmpty) ? phone.trim() : null,
-        passengerName: (name != null && name.trim().isNotEmpty) ? name.trim() : 'Khách vẫy dọc đường',
-      ));
+        changeSettlementMethod: settlement,
+        phone: cleanPhone,
+        passengerName: cleanName,
+        idempotencyKey: key,
+      ),
+    );
+  }
 
   // ---------- Incident, sync, end (DRI-015, DRI-017, DRI-019) ----------
-  Future<String?> reportIncident(String type, int delay) async {
+  Future<String?> reportIncident(String type, int delay, [String note = '']) async {
     const types = {'Kẹt xe': 'TRAFFIC_JAM', 'Xe hỏng': 'BREAKDOWN', 'Tai nạn': 'ACCIDENT'};
+    final incidentType = types[type] ?? 'OTHER';
+    final description = note.trim().isEmpty ? type : note.trim();
+    final lat = _lat;
+    final lng = _lng;
+    final key = newDriverIdempotencyKey();
     final r = await _call(
-      () => api.reportIncident(tripId!, incidentType: types[type] ?? 'OTHER', description: type, lat: _lat, lng: _lng, estimatedDelayMinutes: delay),
+      () => api.reportIncident(
+        tripId!,
+        incidentType: incidentType,
+        description: description,
+        lat: lat,
+        lng: lng,
+        estimatedDelayMinutes: delay,
+        idempotencyKey: key,
+      ),
       label: 'Báo sự cố: $type',
+      path: '/api/v1/driver/trips/$tripId/incidents',
+      body: {
+        'incident_type': incidentType,
+        'description': description,
+        'estimatedDelayMinutes': delay,
+        'lat': lat,
+        'lng': lng,
+      },
+      idempotencyKey: key,
     );
     if (r.error != null && !offline) return r.error;
     incident = (type: type, delay: delay, at: clock);
@@ -1309,22 +1554,88 @@ class DriverStore extends ChangeNotifier {
 
   void setOffline(bool value) {
     offline = value;
+    _syncRetryTimer();
     notifyListeners();
   }
 
-  /// Tries the server again; the listed actions are cleared once it answers.
-  Future<int> flushQueue() async {
-    final error = await refreshTrip();
-    if (error != null) return 0;
-    final n = queue.length;
-    queue.clear();
-    offline = false;
-    notifyListeners();
-    return n;
+  void _syncRetryTimer() {
+    if (offline && queue.isNotEmpty) {
+      _retryTimer ??= Timer.periodic(const Duration(seconds: 30), (_) {
+        if (offline && queue.isNotEmpty && !_flushing) {
+          unawaited(flushQueue());
+        }
+      });
+    } else {
+      _retryTimer?.cancel();
+      _retryTimer = null;
+    }
+  }
+
+  /// Sends queued actions oldest first; stops at the first network failure and keeps the rest.
+  Future<int> flushQueue() => _flushFuture ??= _doFlush().whenComplete(() => _flushFuture = null);
+
+  Future<int> _doFlush() async {
+    if (queue.isEmpty) {
+      final error = await refreshTrip();
+      if (error == null) {
+        offline = false;
+        _syncRetryTimer();
+        notifyListeners();
+      }
+      return 0;
+    }
+    _flushing = true;
+    var sent = 0;
+    var networkFailed = false;
+    try {
+      while (queue.isNotEmpty) {
+        final action = queue.first;
+        try {
+          final json = await api.replay(
+            action.method,
+            action.path,
+            action.body,
+            action.idempotencyKey,
+          );
+          final error = _error(json);
+          final code = json['code']?.toString();
+          if (code == 'PIN_CHANGE_REQUIRED') {
+            mustChangePin = true;
+          }
+          if (error != null) {
+            syncErrors.add((label: action.label, error: error, at: action.at));
+          }
+          queue.removeAt(0);
+          sent++;
+          offline = false;
+          await _saveQueue();
+        } catch (_) {
+          offline = true;
+          networkFailed = true;
+          break;
+        }
+      }
+      if (sent > 0 && !networkFailed) {
+        await refreshTrip();
+      }
+    } finally {
+      _flushing = false;
+      _syncRetryTimer();
+      notifyListeners();
+    }
+    return sent;
   }
 
   Future<String?> endTrip() async {
-    final r = await _call(() => api.endTrip(tripId!, earlyEndReason: lastStop && atStop ? null : earlyEndReason), label: 'Kết thúc chuyến');
+    final reason = lastStop && atStop ? null : earlyEndReason;
+    final key = newDriverIdempotencyKey();
+    final r = await _call(
+      () => api.endTrip(tripId!, earlyEndReason: reason, idempotencyKey: key),
+      label: 'Kết thúc chuyến',
+      path: '/api/v1/driver/trips/$tripId/end',
+      body: {if (reason != null) 'early_end_reason': reason},
+      idempotencyKey: key,
+    );
     if (r.error != null) return r.error;
     endedCash = (r.data!['total_cash_to_handover_vnd'] as num?)?.toInt() ?? codCash + hailCash;
     earlyEndReason = null;
@@ -1350,6 +1661,8 @@ class DriverStore extends ChangeNotifier {
   @override
   void dispose() {
     _stopTimers();
+    _retryTimer?.cancel();
+    _retryTimer = null;
     super.dispose();
   }
 }

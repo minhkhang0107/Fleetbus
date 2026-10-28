@@ -7,6 +7,7 @@ import { verifyToken } from './tokens.js';
 import { DEFAULT_OPERATOR_ID, OPERATOR_INACTIVE, findOperatorByCode, findOperatorById, normalizeOperatorCode } from './operators.js';
 import { MOCK_DRIVERS_DB } from '../services/driver/modules/driverService.js';
 import { MOCK_MANAGERS_DB, TOTP_ROLES } from '../services/manager/modules/managerService.js';
+import { isPassengerRevoked } from '../services/passenger/modules/auth.js';
 
 const API = '/api/v1';
 
@@ -37,15 +38,19 @@ const PASSENGER_RULES = [
 const IDEMPOTENT_RULES = {
   passenger: /\/(seats\/hold|hold-seats|bookings\/create|checkout\/create-order|delegate|qr\/reissue|cancel|home-request\/withdraw|tickets\/[^/]+\/stops)$/,
   driver: /\/(readiness|start|home-run|home-order|home-arrived|home-missed|arrive|depart|inaccessible|boarding|boarding\/manual|board-qr|payments\/cod-collect|collect-cod|onboard-hail|incidents?|end|no-show|batch-replay|change-pin)$/,
-  staff: /\/(platform\/operators(\/[^/]+\/(activate|deactivate|director\/reset-password))?|auth\/(change-password|totp\/(setup|confirm))|pos\/(orders|bookings|hotline-hold|hotline-holds\/[^/]+\/cancel)|orders\/[^/]+\/confirm-payment|bank-transactions\/[^/]+\/assign|refunds\/[^/]+\/process|service-areas(\/[^/]+\/(activate|deactivate))?|promo-banners(\/[^/]+\/(activate|deactivate))?|vouchers(\/[^/]+\/(activate|deactivate))?|schedules|trips\/[^/]+\/(assign|cancel|sales)|home-requests\/[^/]+\/[^/]+\/(confirm|reject)|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem|seat-layouts(\/[^/]+)?|vehicles(\/[^/]+)?|drivers(\/[^/]+\/reset-pin)?)$/
+  staff: /\/(platform\/operators(\/[^/]+\/(activate|deactivate|director\/reset-password))?|auth\/(change-password|totp\/(setup|confirm))|pos\/(orders|bookings|hotline-hold|hotline-holds\/[^/]+\/cancel)|orders\/[^/]+\/confirm-payment|bank-transactions\/[^/]+\/assign|refunds\/[^/]+\/process|service-areas(\/[^/]+\/(activate|deactivate))?|promo-banners(\/[^/]+\/(activate|deactivate))?|vouchers(\/[^/]+\/(activate|deactivate))?|schedules|trips\/[^/]+\/(assign|cancel|sales)|home-requests\/[^/]+\/[^/]+\/(confirm|reject)|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem|cash-handovers\/[^/]+\/confirm|seat-layouts(\/[^/]+)?|vehicles(\/[^/]+)?|drivers(\/[^/]+\/reset-pin)?|staff(\/[^/]+\/reset-password)?|stations|routes(\/[^/]+)?)$/
 };
 
 // Staff permissions by role (MGR-029). The first matching rule decides; no rule means any staff role.
 const STAFF_RULES = [
+  [/^\/api\/v1\/ops\/cash-handovers(\/.*)?$/, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']],
+  [/^\/api\/v1\/ops\/staff(\/.*)?$/, ['FLEET_DIRECTOR']],
   [['PATCH'], /^\/api\/v1\/ops\/company$/, ['FLEET_DIRECTOR']],
   [/^\/api\/v1\/ops\/(crew|drivers)(\/.*)?$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/seat-layouts/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [['POST', 'PATCH'], /^\/api\/v1\/ops\/vehicles(\/[^/]+)?$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
+  [/^\/api\/v1\/ops\/stations(\/.*)?$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
+  [/^\/api\/v1\/ops\/routes(\/.*)?$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/(pos\/hotline-hold|trips\/[^/]+\/hotline-holds)/, ['FLEET_DIRECTOR', 'CASHIER', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/pos\//, ['FLEET_DIRECTOR', 'CASHIER']],
   [/^\/api\/v1\/ops\/audit-logs/, ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'DISPATCHER']],
@@ -92,6 +97,17 @@ export function resolveAccess(method, pathname) {
   return { kind, idempotent };
 }
 
+const REVOKED = { ok: false, status: 401, code: 'TOKEN_REVOKED', message: 'Phiên đăng nhập đã hết hiệu lực, vui lòng đăng nhập lại' };
+
+/**
+ * A token ends when its account is locked, deleted, or has a newer token version (password or PIN changed,
+ * role changed). Tokens signed before versions existed carry none and count as version 0 (H-06).
+ */
+function revoked(account, identity) {
+  if (!account) return identity.tv !== undefined;
+  return account.active === false || (identity.tv ?? 0) !== (account.token_version ?? 0);
+}
+
 /**
  * Check the Bearer token of a request. Returns { ok, identity } or { ok: false, status, code, message }.
  */
@@ -113,8 +129,13 @@ export function authenticate(req, access, pathname) {
     return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Tài khoản không có quyền truy cập chức năng này' };
   }
 
+  if (access.kind === 'passenger') {
+    if (isPassengerRevoked(identity)) return REVOKED;
+  }
+
   if (access.kind === 'driver') {
     const driver = MOCK_DRIVERS_DB.find(d => d.driver_id === identity.sub);
+    if (revoked(driver, identity)) return REVOKED;
     if (driver?.status === 'LOCKED') {
       return { ok: false, status: 403, code: 'DRIVER_LOCKED', message: 'Tài khoản đã bị nhà xe khóa. Liên hệ điều độ.' };
     }
@@ -124,11 +145,12 @@ export function authenticate(req, access, pathname) {
   }
 
   if (access.kind === 'staff') {
+    const staff = MOCK_MANAGERS_DB.find(m => m.user_id === identity.sub);
+    if (revoked(staff, identity)) return REVOKED;
     // Platform endpoints are for the platform admin only; it may also use every ops endpoint of the company it names.
     if (pathname.startsWith(`${API}/platform/`) && identity.role !== PLATFORM_ROLE) {
       return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Vai trò của bạn không được phép thực hiện thao tác này' };
     }
-    const staff = MOCK_MANAGERS_DB.find(m => m.user_id === identity.sub);
     if (staff?.must_change_password && pathname !== '/api/v1/ops/auth/change-password') {
       return { ok: false, status: 403, code: 'PASSWORD_CHANGE_REQUIRED', message: 'Đổi mật khẩu tạm trước khi tiếp tục' };
     }

@@ -437,7 +437,18 @@ describe('Cross-app flows (FLOW-01 to FLOW-07)', () => {
       const dly = await api(`/api/v1/ops/trips/${TRIP}/delay`, { method: 'POST', token: dispatcher, body: { delayMinutes: 45, reason: 'Sự cố kỹ thuật' } });
       assert.strictEqual(dly.status, 200);
 
-      const cancel = await api(`/api/v1/passenger/tickets/${ticketId}/cancel`, { method: 'POST', token: pax.token, body: { reason: 'Chậm quá' } });
+      const cancel = await api(`/api/v1/passenger/tickets/${ticketId}/cancel`, {
+        method: 'POST',
+        token: pax.token,
+        body: {
+          reason: 'Chậm quá',
+          refund_account: {
+            bank_bin: '970415',
+            account_number: '1088219999',
+            account_name: 'NGUYEN VAN A'
+          }
+        }
+      });
       assert.strictEqual(cancel.status, 200, JSON.stringify(cancel.body));
       assert.strictEqual(cancel.body.data.refund_percentage, 100);
       assert.strictEqual(cancel.body.data.refund_amount_vnd, cancel.body.data.total_price_vnd);
@@ -449,7 +460,17 @@ describe('Cross-app flows (FLOW-01 to FLOW-07)', () => {
       const pax = await newPassenger();
       const { tickets } = await buyTickets(pax, ['A02']);
       await api(`/api/v1/ops/trips/${TRIP}/delay`, { method: 'POST', token: dispatcher, body: { delayMinutes: 30, reason: 'Kẹt xe' } });
-      const cancel = await api(`/api/v1/passenger/tickets/${tickets[0].ticket_id}/cancel`, { method: 'POST', token: pax.token, body: {} });
+      const cancel = await api(`/api/v1/passenger/tickets/${tickets[0].ticket_id}/cancel`, {
+        method: 'POST',
+        token: pax.token,
+        body: {
+          refund_account: {
+            bank_bin: '970415',
+            account_number: '1088219999',
+            account_name: 'NGUYEN VAN A'
+          }
+        }
+      });
       assert.strictEqual(cancel.status, 200);
       assert.notStrictEqual(cancel.body.data.tier, 'DELAY_WAIVER');
       await api(`/api/v1/ops/trips/${TRIP}/delay`, { method: 'POST', token: dispatcher, body: { delayMinutes: 0, reason: 'Hết chậm' } });

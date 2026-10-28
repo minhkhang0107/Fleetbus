@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'driver_store.dart';
 import 'driver_widgets.dart';
@@ -20,6 +21,18 @@ class _DriverIncidentScreenState extends State<DriverIncidentScreen> {
   void dispose() {
     _note.dispose();
     super.dispose();
+  }
+
+  Future<void> _call112() async {
+    var ok = false;
+    try {
+      ok = await launchUrl(Uri.parse('tel:112'));
+    } catch (_) {
+      ok = false;
+    }
+    if (!ok && mounted) {
+      dToast(context, 'Không mở được trình gọi điện, hãy gọi 112 trực tiếp');
+    }
   }
 
   @override
@@ -58,7 +71,7 @@ class _DriverIncidentScreenState extends State<DriverIncidentScreen> {
       color: DTokens.danger,
       height: 72,
       onPressed: () async {
-        final error = await DriverScope.read(context).reportIncident(_type, _delay);
+        final error = await DriverScope.read(context).reportIncident(_type, _delay, _note.text);
         if (!context.mounted) return;
         if (error != null) {
           dToast(context, error);
@@ -72,7 +85,7 @@ class _DriverIncidentScreenState extends State<DriverIncidentScreen> {
   title: 'Báo sự cố',
   close: true,
   trailing: FilledButton(
-    onPressed: () => dToast(context, 'Đang gọi 112'),
+    onPressed: _call112,
     style: FilledButton.styleFrom(backgroundColor: DTokens.danger, minimumSize: const Size(64, 44), shape: const StadiumBorder()),
     child: Text('Gọi 112', style: dsans(size: 14, weight: FontWeight.w700, color: Colors.white)),
   ),

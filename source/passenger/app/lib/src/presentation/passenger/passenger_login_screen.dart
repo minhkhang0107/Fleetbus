@@ -79,6 +79,45 @@ class _OtpFormState extends State<OtpForm> {
 
   bool _busy = false;
 
+  void _startTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      setState(() {
+        _resendIn--;
+        if (_resendIn <= 0) t.cancel();
+      });
+    });
+  }
+
+  Future<void> _resendOtp() async {
+    if (_busy || _resendIn > 0) return;
+    final store = PassengerScope.read(context);
+    final phone = normalizePhone(_phone.text);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final error = await store.requestOtp(phone);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (error != null) {
+        _error = error;
+        if (store.lastRemainingCooldown != null && store.lastRemainingCooldown! > 0) {
+          _resendIn = store.lastRemainingCooldown!;
+          _startTimer();
+        }
+        return;
+      }
+      _resendIn = store.otpCooldownSeconds;
+      if (store.devOtp != null) _otp.text = store.devOtp!;
+    });
+    if (error != null) return;
+    _startTimer();
+    showToast(context, 'Đã gửi lại mã');
+  }
+
   Future<void> _submit() async {
     final store = PassengerScope.read(context);
     if (!_codeSent) {
@@ -93,18 +132,21 @@ class _OtpFormState extends State<OtpForm> {
       setState(() {
         _busy = false;
         _error = error;
-        if (error != null) return;
+        if (error != null) {
+          if (store.lastRemainingCooldown != null && store.lastRemainingCooldown! > 0) {
+            _codeSent = true;
+            _resendIn = store.lastRemainingCooldown!;
+            _startTimer();
+          }
+          return;
+        }
         _codeSent = true;
-        _resendIn = 60;
+        _resendIn = store.otpCooldownSeconds;
         // Development server: the code arrives in the response, filled in like an SMS autofill.
         if (store.devOtp != null) _otp.text = store.devOtp!;
       });
       if (error != null) return;
-      _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-        if (!mounted) return;
-        setState(() => _resendIn--);
-        if (_resendIn <= 0) t.cancel();
-      });
+      _startTimer();
       return;
     }
     final code = _otp.text.trim();
@@ -159,8 +201,8 @@ class _OtpFormState extends State<OtpForm> {
         Align(
           alignment: Alignment.centerLeft,
           child: LinkButton(
-            label: _resendIn > 0 ? 'Gửi lại mã sau $_resendIn giây' : 'Gửi lại mã',
-            onPressed: _resendIn > 0 ? null : () => showToast(context, 'Đã gửi lại mã'),
+            label: _resendIn > 0 ? 'Gửi lại mã sau ${_resendIn}s' : 'Gửi lại mã',
+            onPressed: (_resendIn > 0 || _busy) ? null : _resendOtp,
           ),
         ),
       ],

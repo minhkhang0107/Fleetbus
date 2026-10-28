@@ -181,7 +181,8 @@ test('TC-VIP: VIP passenger account lifecycle and permissions', async (t) => {
       assert.strictEqual(isVipPassengerPhone('0999888777'), false);
       assert.strictEqual(isVipPassengerPhone(VIP_PASSENGER_PHONE), false);
 
-      const prodAuth = new PassengerAuthService();
+      // Production sends the code by SMS; a provider is configured here.
+      const prodAuth = new PassengerAuthService({ messenger: { smsUrl: 'https://sms.example', sendOtp() {} } });
       const reqRes = prodAuth.requestOTP('0999888777');
       assert.strictEqual(reqRes.success, true);
       assert.strictEqual(reqRes.data.mock_otp, undefined, 'no mock_otp in production');

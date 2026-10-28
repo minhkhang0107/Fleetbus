@@ -1168,6 +1168,8 @@ void main() {
     addTearDown(tester.view.reset);
 
     final store = await started();
+    // The company turned the BusGo wallet on (H-03); otherwise the wallet choice is not offered.
+    store.walletEnabled = true;
 
     await tester.pumpWidget(DriverScope(
       store: store,

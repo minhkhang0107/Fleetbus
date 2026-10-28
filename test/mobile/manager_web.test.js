@@ -175,5 +175,52 @@ describe('Phase Manager Web: Flutter Web Platform & Dashboard Integrity Test Sui
     assert.ok(content.includes('id="refundsBox"'), 'payments panel must hold the refund list');
     assert.ok(content.includes('/api/v1/ops/refunds?status='), 'Must call GET /api/v1/ops/refunds');
     assert.ok(content.includes('/process`'), 'Must call refunds process');
+    assert.ok(content.includes('Sao chép STK'), 'Refund list must include Sao chep STK button');
+    assert.ok(content.includes('api.vietqr.io'), 'Refund list must render VietQR image for destination account');
+  });
+
+  it('TC-MGR-WEB-12: Manager Web Distribution must support Staff Accounts Management panel (MGR-038)', () => {
+    const webDistPath = path.join(managerDir, 'web_dist/index.html');
+    assert.ok(fs.existsSync(webDistPath), 'source/manager/web_dist/index.html must exist');
+    const content = fs.readFileSync(webDistPath, 'utf8');
+
+    // staff panel and nav button exist
+    assert.ok(content.includes('data-panel="staff"'), 'HTML must contain the staff panel');
+    assert.ok(content.includes('data-view="staff"'), 'HTML must contain staff nav button');
+
+    // Director-only role in NAV_ROLES
+    assert.ok(/staff:\s*\[['"]FLEET_DIRECTOR['"]\]/.test(content), 'Staff nav view must be FLEET_DIRECTOR only');
+
+    // calls to /api/v1/ops/staff
+    assert.ok(content.includes('/api/v1/ops/staff'), 'Must call /api/v1/ops/staff');
+    assert.ok(content.includes('/reset-password'), 'Must call reset-password');
+  });
+
+  it('TC-MGR-WEB-13: Manager Web Distribution must support Station and Route Builder forms (MGR-011)', () => {
+    const webDistPath = path.join(managerDir, 'web_dist/index.html');
+    assert.ok(fs.existsSync(webDistPath), 'source/manager/web_dist/index.html must exist');
+    const content = fs.readFileSync(webDistPath, 'utf8');
+
+    // Forms present
+    assert.ok(content.includes('id="stationForm"'), 'HTML must contain stationForm');
+    assert.ok(content.includes('id="routeForm"'), 'HTML must contain routeForm');
+    assert.ok(content.includes('Thêm bến/điểm đón'), 'HTML must contain "Thêm bến/điểm đón"');
+    assert.ok(content.includes('Tạo tuyến mới'), 'HTML must contain "Tạo tuyến mới"');
+
+    // Calls to /api/v1/ops/stations and /api/v1/ops/routes
+    assert.ok(content.includes('/api/v1/ops/stations'), 'Must call /api/v1/ops/stations');
+    assert.ok(content.includes('/api/v1/ops/routes'), 'Must call /api/v1/ops/routes');
+  });
+
+  it('TC-MGR-WEB-14: Manager Web Distribution must support Cash Handover Settlement card (H-02)', () => {
+    const webDistPath = path.join(managerDir, 'web_dist/index.html');
+    assert.ok(fs.existsSync(webDistPath), 'source/manager/web_dist/index.html must exist');
+    const content = fs.readFileSync(webDistPath, 'utf8');
+
+    assert.ok(content.includes('id="cardCashHandovers"'), 'HTML must contain cardCashHandovers');
+    assert.ok(content.includes('id="cashHandoversBox"'), 'HTML must contain cashHandoversBox');
+    assert.ok(content.includes('/api/v1/ops/cash-handovers?'), 'Must call GET /api/v1/ops/cash-handovers');
+    assert.ok(content.includes('/api/v1/ops/cash-handovers/') && content.includes('/confirm'), 'Must call cash-handovers confirm');
+    assert.ok(content.includes('Nộp tiền cuối chuyến'), 'Must display "Nộp tiền cuối chuyến"');
   });
 });

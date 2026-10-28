@@ -2,7 +2,7 @@
  * Platform administration (spec 2.3): the platform admin creates, edits and (de)activates bus companies.
  * The gateway lets only PLATFORM_ADMIN tokens through and requires an Idempotency-Key on POSTs.
  */
-import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { sendSuccess, sendError, parseJsonBody, clientIp } from '../middleware/httpUtils.js';
 import { createOperator, findOperatorByCode, findOperatorById, listOperators, setOperatorActive, updateOperator } from '../core/operators.js';
 import { MOCK_MANAGERS_DB } from '../services/manager/modules/managerService.js';
 import { isProduction } from '../config.js';
@@ -15,7 +15,7 @@ function audit(req, managerService, entry) {
   managerService.recordAudit({
     actor: req.identity?.sub || 'anonymous',
     role: req.identity?.role || null,
-    ip: req.socket?.remoteAddress || null,
+    ip: clientIp(req),
     ...entry
   });
 }

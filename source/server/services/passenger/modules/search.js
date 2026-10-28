@@ -7,7 +7,8 @@ import { effectiveStops } from '../../../core/routeStops.js';
 import { findOperatorById } from '../../../core/operators.js';
 import crypto from 'crypto';
 import { DEMO_DATE, addDays, parseRunId, parseServiceDate, runId, serviceCalendar, vnDate } from '../../../core/serviceDate.js';
-import { stopCoords, routeShape, aliasShape } from '../../../core/geo.js';
+import { stopCoords, routeShape, aliasShape, setStationsProvider, setRouteShape, setStopCoords } from '../../../core/geo.js';
+import { findLayout, BUILTIN_LAYOUTS } from '../../../core/seatLayouts.js';
 
 export const STATIONS_DATABASE = [
   {
@@ -212,8 +213,15 @@ export function reloadScheduleTemplates() {
     if (t.schedule_id) continue;
     SCHEDULE_TEMPLATES.set(t.trip_id, t);
     aliasShape(t.trip_id, t.shape_id);
+    // A route a company drew itself has no surveyed road: a line through its stops, as when it was created.
+    if (!routeShape(t.trip_id)) {
+      const line = (t.stops || []).filter(st => Number.isFinite(st.lat) && Number.isFinite(st.lng)).map(st => [st.lat, st.lng]);
+      if (line.length >= 2) setRouteShape(t.shape_id || t.trip_id, line);
+    }
   }
 }
+
+setStationsProvider((id) => STATIONS_DATABASE.find(s => s.station_id === id));
 
 // ---------- Fixed timetable of a company (D128, D129) ----------
 // A schedule is a fixed departure of a route: a clock time, the weekdays it runs (1 = Monday .. 7 = Sunday),
@@ -353,13 +361,14 @@ export class PassengerSearchService {
     }
     
     if (!q) {
-      return stations.filter(s => s.popular).slice(0, limit);
+      const popular = stations.filter(s => s.popular);
+      return (popular.length ? popular : stations).slice(0, limit);
     }
 
     return stations.filter(station => {
       const matchName = this._normalizeVietnamese(station.name).includes(q);
       const matchCity = this._normalizeVietnamese(station.city).includes(q);
-      const matchAddress = this._normalizeVietnamese(station.address).includes(q);
+      const matchAddress = this._normalizeVietnamese(station.address || '').includes(q);
       return matchName || matchCity || matchAddress;
     }).slice(0, limit);
   }
@@ -537,6 +546,156 @@ export class PassengerSearchService {
       .filter(t => t.operator_id === operatorId)
       .map(t => scheduleView(t, when))
       .sort((a, b) => a.route_id.localeCompare(b.route_id) || a.departure.localeCompare(b.departure));
+  }
+
+  /**
+   * Creates a new route with its first schedule template (MGR-011).
+   */
+  createRoute(operatorId, input = {}, { changeFrom, today = vnDate(), operatorCode = null, customLayouts = [] } = {}) {
+    if (!input.name || typeof input.name !== 'string' || input.name.trim().length < 3) {
+      return invalid('Tên tuyến từ 3 ký tự trở lên');
+    }
+
+    if (!Array.isArray(input.stops) || input.stops.length < 2) {
+      return invalid('Tuyến phải có ít nhất 2 điểm dừng');
+    }
+
+    const stopIds = input.stops.map(s => s?.stop_id);
+    if (new Set(stopIds).size !== stopIds.length) {
+      return invalid('Điểm dừng không được trùng lặp');
+    }
+
+    const usableStations = STATIONS_DATABASE.filter(s => s.operator_ids && s.operator_ids.includes(operatorId));
+    const stationMap = new Map(usableStations.map(s => [s.station_id, s]));
+
+    for (const s of input.stops) {
+      if (!s?.stop_id || !stationMap.has(s.stop_id)) {
+        return invalid(`Điểm dừng ${s?.stop_id || ''} không thuộc danh sách bến của nhà xe`);
+      }
+    }
+
+    if (input.stops[0].pickup_allowed === false) {
+      return invalid('Điểm đầu tuyến phải cho phép đón khách');
+    }
+
+    if (input.stops[input.stops.length - 1].dropoff_allowed === false) {
+      return invalid('Điểm cuối tuyến phải cho phép trả khách');
+    }
+
+    const sch = input.schedule;
+    if (!sch || typeof sch !== 'object') {
+      return invalid('Cần thông tin lịch chạy ban đầu');
+    }
+
+    const knownVehicleTypes = new Set([
+      ...BUILTIN_LAYOUTS.map(l => l.vehicle_type),
+      ...BUILTIN_LAYOUTS.map(l => l.layout_id),
+      ...customLayouts.map(l => l.vehicle_type),
+      ...customLayouts.map(l => l.layout_id),
+      'VIP_CABIN',
+      'SLEEPER_34'
+    ]);
+
+    if (!sch.vehicle_type || !knownVehicleTypes.has(sch.vehicle_type)) {
+      return invalid('Loại xe không hợp lệ');
+    }
+
+    // The seat count is the layout's when the bus type has one; a legacy type gives its own count.
+    const layout = findLayout(sch.vehicle_type, customLayouts) || BUILTIN_LAYOUTS.find(l => l.vehicle_type === sch.vehicle_type);
+    const totalSeats = layout?.seats?.length || sch.total_seats;
+    if (!Number.isInteger(totalSeats) || totalSeats <= 0) {
+      return invalid('Số lượng ghế phải là số nguyên dương');
+    }
+
+    const extra = sch.extra_date !== undefined && sch.extra_date !== null;
+    if (extra) {
+      if (!parseServiceDate(sch.extra_date)) return invalid('Ngày chạy tăng cường dạng YYYY-MM-DD');
+      if (sch.extra_date < today) return invalid('Ngày chạy tăng cường đã qua');
+    }
+    const validFrom = extra ? sch.extra_date : sch.valid_from || changeFrom;
+    if (!extra && validFrom < changeFrom) {
+      return invalid(`Lịch mới áp dụng sớm nhất từ ${dmy(changeFrom)}, sau các ngày đang mở bán`);
+    }
+
+    const fields = {
+      departure: sch.departure,
+      duration_minutes: sch.duration_minutes,
+      days_of_week: extra ? ALL_WEEKDAYS : sch.days_of_week ?? ALL_WEEKDAYS,
+      valid_from: validFrom,
+      valid_to: extra ? validFrom : sch.valid_to ?? null,
+      base_fare_vnd: sch.base_fare_vnd,
+      active: sch.active ?? true
+    };
+    const error = checkScheduleFields(fields);
+    if (error) return error;
+
+    const codeStr = (operatorCode || operatorId).toLowerCase().replace(/^op_/, '');
+    const routeId = `rt_${codeStr}_${crypto.randomBytes(3).toString('hex')}`;
+    const scheduleId = `sch_${crypto.randomBytes(5).toString('hex')}`;
+
+    const builtStops = input.stops.map((s, idx) => {
+      const st = stationMap.get(s.stop_id);
+      return {
+        stop_id: s.stop_id,
+        name: st.name,
+        city: st.city,
+        order: idx + 1,
+        pickup_allowed: s.pickup_allowed !== false,
+        dropoff_allowed: s.dropoff_allowed !== false,
+        kind: st.kind || 'STATION',
+        lat: st.lat,
+        lng: st.lng
+      };
+    });
+
+    const vehicleTitle = sch.vehicle_title || (layout ? layout.name : 'Xe Limousine');
+
+    const template = {
+      trip_id: scheduleId,
+      operator_id: operatorId,
+      route_id: routeId,
+      route_name: input.name.trim(),
+      vehicle_type: sch.vehicle_type,
+      vehicle_title: vehicleTitle,
+      plate_number: null,
+      duration_minutes: fields.duration_minutes,
+      base_fare_vnd: fields.base_fare_vnd,
+      total_seats: totalSeats,
+      available_seats_count: totalSeats,
+      rating: 5.0,
+      amenities: [],
+      stops: builtStops,
+      shape_id: routeId,
+      ...versionOf(fields),
+      valid_from: validFrom,
+      extra,
+      versions: []
+    };
+    delete template.schedule_id;
+
+    MOCK_TRIPS_DATABASE.push(template);
+    SCHEDULE_TEMPLATES.set(scheduleId, template);
+
+    const straightLine = builtStops.filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng)).map(s => [s.lat, s.lng]);
+    if (straightLine.length >= 2) {
+      setRouteShape(routeId, straightLine);
+    }
+    aliasShape(scheduleId, routeId);
+
+    for (const s of builtStops) {
+      if (Number.isFinite(s.lat) && Number.isFinite(s.lng)) {
+        setStopCoords(s.stop_id, { lat: s.lat, lng: s.lng });
+      }
+    }
+
+    return {
+      ok: true,
+      route_id: routeId,
+      schedule_id: scheduleId,
+      template,
+      stops: builtStops,
+      fields
+    };
   }
 
   /**

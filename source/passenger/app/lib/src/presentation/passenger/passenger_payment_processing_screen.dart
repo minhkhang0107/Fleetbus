@@ -6,6 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import 'passenger_permissions.dart';
 import 'passenger_main_shell.dart';
+import 'passenger_qr_saver.dart';
 import 'passenger_store.dart';
 import 'passenger_ticket_qr_screen.dart';
 import 'passenger_widgets.dart';
@@ -13,9 +14,10 @@ import 'passenger_widgets.dart';
 /// PAX-013: VietQR transfer. "Tôi đã chuyển tiền" asks for a check; the ticket is issued when the
 /// bank confirms (BR-PAY-004). There is no simulation button on this screen (D101).
 class PassengerPaymentProcessingScreen extends StatefulWidget {
-  const PassengerPaymentProcessingScreen({super.key, required this.name, required this.phone});
+  const PassengerPaymentProcessingScreen({super.key, required this.name, required this.phone, this.qrSaver});
   final String name;
   final String phone;
+  final QrImageSaver? qrSaver;
 
   @override
   State<PassengerPaymentProcessingScreen> createState() => _PassengerPaymentProcessingScreenState();
@@ -23,6 +25,7 @@ class PassengerPaymentProcessingScreen extends StatefulWidget {
 
 class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProcessingScreen> {
   bool _checking = false;
+  bool _savingQr = false;
   String? _notYet;
   Timer? _poll;
 
@@ -67,6 +70,22 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
   void _copy(String value) {
     Clipboard.setData(ClipboardData(text: value));
     showToast(context, 'Đã sao chép $value');
+  }
+
+  Future<void> _saveQr(PassengerStore store) async {
+    if (_savingQr) return;
+    setState(() => _savingQr = true);
+    try {
+      final saver = widget.qrSaver ?? defaultQrImageSaver;
+      await saver.savePaymentQr(
+        context: context,
+        qrData: store.vietQrPayload,
+        amount: store.orderAmount,
+        memo: store.transferMemo,
+      );
+    } finally {
+      if (mounted) setState(() => _savingQr = false);
+    }
   }
 
   Future<void> _cancel(PassengerStore store) async {
@@ -115,7 +134,7 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
                   gap(10),
                   Text('Quét bằng app ngân hàng bất kỳ', style: sans(size: 13, color: PTokens.muted)),
                   gap(10),
-                  SizedBox(width: 180, child: GhostButton(label: 'Lưu ảnh mã QR', onPressed: () => showToast(context, 'Đã lưu ảnh mã QR vào thư viện'))),
+                  SizedBox(width: 180, child: GhostButton(label: 'Lưu ảnh mã QR', onPressed: _savingQr ? null : () => _saveQr(store))),
                 ]),
               ),
             ], right: [

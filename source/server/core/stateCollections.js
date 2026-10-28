@@ -12,6 +12,7 @@ import { groupedCollection, listCollection, mapCollection, objectCollection, set
 import { MOCK_TRIPS_DATABASE, STATIONS_DATABASE, reloadScheduleTemplates } from '../services/passenger/modules/search.js';
 import { MOCK_MANAGERS_DB } from '../services/manager/modules/managerService.js';
 import { MOCK_DRIVERS_DB } from '../services/driver/modules/driverService.js';
+import { PASSENGER_REVOCATIONS } from '../services/passenger/modules/auth.js';
 
 export function stateCollections(services, { idempotency } = {}) {
   const { authService, seatMapService, paymentService, trackingService, driverService, managerService } = services;
@@ -59,6 +60,7 @@ export function stateCollections(services, { idempotency } = {}) {
     // Passengers
     mapCollection('passenger_sessions', () => authService.sessions, (u) => u.operator_id || u.operator?.operator_id || DEFAULT_OPERATOR_ID),
     mapCollection('passenger_otp', () => authService.otpStore, (_, key) => registered(key.split(':')[0])),
+    mapCollection('passenger_revocations', () => PASSENGER_REVOCATIONS, (_, key) => registered(key.split(':')[0])),
     mapCollection('seat_holds', () => seatMapService.seatHolds, (h) => tripOwner(h.tripId)),
     mapCollection('seat_layouts', () => seatMapService.tripLayouts, (_, tripId) => tripOwner(tripId)),
     mapCollection('orders', () => paymentService.orders, own),

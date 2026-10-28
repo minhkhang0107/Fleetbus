@@ -32,12 +32,12 @@ function normalize(template) {
 function calls(client) {
   const src = read(client);
   const found = [];
-  const re = /\b_(get|post|put|patch|delete|stream)\(\s*'([^']+)'([^;]*);/g;
+  const re = /\b_(get|getText|post|put|patch|delete|stream)\(\s*'([^']+)'([^;]*);/g;
   let match;
   while ((match = re.exec(src)) !== null) {
     found.push({
-      // _stream is a GET answered with server-sent events.
-      method: match[1] === 'stream' ? 'GET' : match[1].toUpperCase(),
+      // _stream is a GET answered with server-sent events; _getText a GET answered with a file.
+      method: ['stream', 'getText'].includes(match[1]) ? 'GET' : match[1].toUpperCase(),
       path: normalize(CLIENTS[client].prefix + match[2]),
       idempotent: /idempotent:\s*true/.test(match[3]),
       text: match[0]

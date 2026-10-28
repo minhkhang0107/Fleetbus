@@ -19,7 +19,9 @@ import { findShareHolder } from './core/homeTracking.js';
 import { DriverCockpitService } from './services/driver/modules/driverService.js';
 import { ManagerOperationsService } from './services/manager/modules/managerService.js';
 
-import { setCorsHeaders, sendError, readRawBody } from './middleware/httpUtils.js';
+import { setCorsHeaders, sendError, readRawBody, clientIp } from './middleware/httpUtils.js';
+import { createAuthRateLimiters } from './core/rateLimit.js';
+import { backupConfig, startBackups } from './core/backup.js';
 import { handlePassengerRoutes, trackingFor } from './routes/passengerRoutes.js';
 import { handleDriverRoutes } from './routes/driverRoutes.js';
 import { handleManagerRoutes } from './routes/managerRoutes.js';
@@ -30,6 +32,7 @@ import { handlePaymentSettingsRoutes } from './routes/paymentSettingsRoutes.js';
 import { handlePromoBannerRoutes } from './routes/promoBannerRoutes.js';
 import { handleVoucherRoutes } from './routes/voucherRoutes.js';
 import { handleScheduleRoutes } from './routes/scheduleRoutes.js';
+import { handleStaffRoutes } from './routes/staffRoutes.js';
 import { handleTripExceptionRoutes } from './routes/tripExceptionRoutes.js';
 import { handleLegalRoutes } from './routes/legalRoutes.js';
 import { renderOnboardingPage, renderOnboardingNotFound } from './web/onboarding.js';
@@ -81,11 +84,13 @@ export function createFleetBusServer(customServices = {}) {
     checkoutService: customServices.checkoutService || new PassengerCheckoutService(),
     paymentService: customServices.paymentService || new PassengerPaymentService(),
     trackingService: customServices.trackingService || new PassengerTrackingService(),
-    messenger: customServices.messenger || new Messenger(),
+    messenger: customServices.messenger || new Messenger({ env: customServices.env, fetchImpl: customServices.fetchImpl }),
     driverService: customServices.driverService || new DriverCockpitService(),
     managerService: customServices.managerService || new ManagerOperationsService(),
     tenantDbs: customServices.tenantDbs || openTenantDbs(customServices.dataDir !== undefined ? customServices.dataDir : defaultDataDir(), customServices.env),
     fetchImpl: customServices.fetchImpl || globalThis.fetch,
+    rateLimits: createAuthRateLimiters(customServices.rateLimits),
+    env: customServices.env || process.env,
     eventBridge,
     config: {
       webhookSecret: customServices.webhookSecret !== undefined ? customServices.webhookSecret : getWebhookSecret(),
@@ -97,6 +102,11 @@ export function createFleetBusServer(customServices = {}) {
 
   // Notices that must reach a closed app or a phone without the app go out by push or SMS (D144).
   services.trackingService.messenger = services.messenger;
+  services.authService.messenger = services.messenger;
+
+  if (isProduction() && !services.messenger.smsUrl) {
+    console.warn('[sms] Cảnh báo: Chưa cấu hình FLEETBUS_SMS_WEBHOOK_URL trong production — không thể gửi mã OTP qua SMS');
+  }
 
   const idempotency = new IdempotencyStore();
 
@@ -123,6 +133,7 @@ export function createFleetBusServer(customServices = {}) {
       if (handlePassengerRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleDriverRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleTripExceptionRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handleStaffRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleManagerRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleWebhookRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handlePlatformRoutes(req, res, pathname, parsedUrl, services)) return;
@@ -316,7 +327,7 @@ export function createFleetBusServer(customServices = {}) {
       req.operatorId = opResult.operator.operator_id;
       // Every ops request the platform admin makes inside a company is recorded (spec 2.3).
       if (req.identity?.role === 'PLATFORM_ADMIN') {
-        services.managerService.recordAudit({ actor: req.identity.sub, role: 'PLATFORM_ADMIN', action: `PLATFORM_ACCESS ${req.method}`, resource: pathname, ip: req.socket?.remoteAddress || null, operator_id: req.operatorId });
+        services.managerService.recordAudit({ actor: req.identity.sub, role: 'PLATFORM_ADMIN', action: `PLATFORM_ACCESS ${req.method}`, resource: pathname, ip: clientIp(req, services.env), operator_id: req.operatorId });
       }
     }
 
@@ -365,6 +376,9 @@ if (IS_MAIN) {
 }
 
 if (process.env.NODE_ENV !== 'test' && IS_MAIN) {
+  // Copies of every database on a timer (H-08); FLEETBUS_BACKUP=off turns it off.
+  const backups = backupConfig(services.tenantDbs.dataDir);
+  if (backups) startBackups(services.tenantDbs, backups);
   server.listen(PORT, () => {
     console.log(`
 ╔════════════════════════════════════════════════════════════════════╗

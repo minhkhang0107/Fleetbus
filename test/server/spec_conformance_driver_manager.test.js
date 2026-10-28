@@ -6,6 +6,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import http from 'node:http';
 import { createFleetBusServer } from '../../source/server/apiServer.js';
+import { findOperatorById } from '../../source/server/core/operators.js';
 
 const PASSENGER_TRIP = 'trp_hn_th_01';
 const SHIFT_TRIP = 'trp_991823';
@@ -25,6 +26,8 @@ describe('Spec conformance: driver lifecycle, COD, privacy and fleet', () => {
 
   before(async () => {
     ({ server, services } = createFleetBusServer({ authMode: 'off' }));
+    const op = findOperatorById('op_saomai');
+    if (op?.service_config) op.service_config.wallet_enabled = true;
     await new Promise((resolve) => {
       server.listen(0, '127.0.0.1', () => {
         baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -273,7 +276,13 @@ describe('Spec conformance: driver lifecycle, COD, privacy and fleet', () => {
     const ticket = await buyTicket('B04', 'u_count', '0987000321');
     assert.strictEqual(mgrTrip.booked_seats, before + 1);
     const dep = Date.parse(ticket.departure_time);
-    const cancel = await api(`/api/v1/passenger/tickets/${ticket.ticket_id}/cancel`, { method: 'POST', body: { now: dep - 20 * 3600 * 1000 } });
+    const cancel = await api(`/api/v1/passenger/tickets/${ticket.ticket_id}/cancel`, {
+      method: 'POST',
+      body: {
+        now: dep - 20 * 3600 * 1000,
+        refund_account: { bank_bin: '970415', account_number: '1088219999', account_name: 'KHACH RIENG TU' }
+      }
+    });
     assert.strictEqual(cancel.status, 200);
     assert.strictEqual(mgrTrip.booked_seats, before);
   });

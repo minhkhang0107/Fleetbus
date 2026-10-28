@@ -3,7 +3,7 @@
  * checks one at checkout. Always the request's company only (its own database, D126); every office change
  * is written to the audit log.
  */
-import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { sendSuccess, sendError, parseJsonBody, clientIp } from '../middleware/httpUtils.js';
 import { createVoucher, deleteVoucher, evaluateVoucher, listOfficeVouchers, setVoucherActive, updateVoucher } from '../core/vouchers.js';
 
 const ONE_RE = /^\/api\/v1\/ops\/vouchers\/([^/]+)$/;
@@ -26,7 +26,7 @@ export function handleVoucherRoutes(req, res, pathname, parsedUrl, services) {
     managerService.recordAudit({
       actor: req.identity?.sub || 'anonymous',
       role: req.identity?.role || null,
-      ip: req.socket?.remoteAddress || null,
+      ip: clientIp(req),
       operator_id: req.operatorId,
       action,
       resource: result.voucher?.code || result.before?.code,

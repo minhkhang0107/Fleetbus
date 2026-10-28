@@ -3,7 +3,7 @@
  */
 
 import crypto from 'crypto';
-import { sendJson, sendSuccess, sendError, readRawBody, parseJson } from '../middleware/httpUtils.js';
+import { sendJson, sendSuccess, sendError, readRawBody, parseJson, clientNow } from '../middleware/httpUtils.js';
 import { API_CATALOG } from '../core/apiCatalog.js';
 import { findOperatorByCode, operatorPaymentConfig, DEFAULT_OPERATOR_ID } from '../core/operators.js';
 import { getProvider } from '../core/payments/providers.js';
@@ -49,7 +49,7 @@ export function handleWebhookRoutes(req, res, pathname, parsedUrl, services) {
         return;
       }
 
-      const now = !isProduction() && body?.now ? Number(body.now) : Date.now();
+      const now = clientNow(body);
       const verified = provider.verifyWebhook({
         headers: req.headers,
         rawBody: raw,
@@ -101,7 +101,7 @@ export function handleWebhookRoutes(req, res, pathname, parsedUrl, services) {
       }
 
       const body = parseJson(raw);
-      const now = !isProduction() && body.now ? body.now : Date.now();
+      const now = clientNow(body);
       const result = paymentService.handleVietQrCallback({
         transferMemo: body.transferMemo ?? body.memo,
         amountVnd: body.amountVnd ?? body.amount_vnd,

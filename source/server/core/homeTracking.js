@@ -15,7 +15,9 @@ export function findShareHolder(services, token, tripId = null) {
   if (!token) return null;
   const { paymentService, managerService, driverService } = services;
   for (const t of paymentService?.tickets?.values() || []) {
-    if (t.share_token === token && t.status !== 'CANCELLED' && (!tripId || t.trip_id === tripId) && paymentService.shareLinkValid(t)) {
+    const shared = t.share_token === token && paymentService.shareLinkValid(t);
+    const delegated = t.delegated_to?.share_token === token && paymentService.delegateLinkValid(t);
+    if ((shared || delegated) && t.status !== 'CANCELLED' && (!tripId || t.trip_id === tripId)) {
       return { tripId: t.trip_id, manifestId: t.ticket_id, pickupStopId: t.pickup_stop_id || null, dropoffStopId: t.dropoff_stop_id || null, boarded: t.status === 'BOARDED', home: t.home_pickup || null, operatorId: t.operator_id };
     }
   }

@@ -45,6 +45,12 @@ class ManagerApiService {
     return _decode(await _client.get(uri, headers: _headers()));
   }
 
+  /// A GET answered with a file (CSV), returned as text.
+  Future<String> _getText(String path, {Map<String, String>? query}) async {
+    final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
+    return utf8.decode((await _client.get(uri, headers: _headers())).bodyBytes);
+  }
+
   Future<Map<String, dynamic>> _post(
     String path, {
     Object? body,
@@ -247,6 +253,48 @@ class ManagerApiService {
     return _get('/ops/routes');
   }
 
+  // MGR-011: Usable stations of the company
+  Future<Map<String, dynamic>> getStations() {
+    return _get('/ops/stations');
+  }
+
+  // MGR-011: Add a station or roadside stop
+  Future<Map<String, dynamic>> addStation(
+    Map<String, dynamic> station, {
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/stations',
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+      body: station,
+    );
+  }
+
+  // MGR-011: Create a new route with its first schedule
+  Future<Map<String, dynamic>> addRoute(
+    Map<String, dynamic> route, {
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/routes',
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+      body: route,
+    );
+  }
+
+  // MGR-011: Rename or close a route
+  Future<Map<String, dynamic>> updateRoute(
+    String routeId,
+    Map<String, dynamic> changes,
+  ) {
+    return _patch(
+      '/ops/routes/${Uri.encodeComponent(routeId)}',
+      body: changes,
+    );
+  }
+
   // MGR-010: Trip list
   Future<Map<String, dynamic>> getTrips() {
     return _get('/ops/trips');
@@ -386,6 +434,32 @@ class ManagerApiService {
     );
   }
 
+  // MGR-022: Completed trips cash handovers for depot/cashier settlement
+  Future<Map<String, dynamic>> getCashHandovers({String status = 'PENDING', String? date}) {
+    return _get('/ops/cash-handovers', query: {
+      'status': status,
+      if (date != null) 'date': date,
+    });
+  }
+
+  // MGR-022: Confirm driver's cash handover
+  Future<Map<String, dynamic>> confirmCashHandover(
+    String tripId, {
+    required int receivedVnd,
+    String? note,
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/cash-handovers/$tripId/confirm',
+      body: {
+        'received_vnd': receivedVnd,
+        if (note != null) 'note': note,
+      },
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
   // MGR-023: Emergency Vehicle Replacement Wizard. The vehicle must be free and have enough seats.
   Future<Map<String, dynamic>> swapEmergencyVehicle({
     required String tripId,
@@ -442,6 +516,11 @@ class ManagerApiService {
       if (from != null) 'from': from,
       if (to != null) 'to': to,
     });
+  }
+
+  // MGR-025: money in and out of a period as CSV text for the accountant (UTF-8 with BOM)
+  Future<String> getPaymentsCsv({required String from, required String to}) {
+    return _getText('/ops/reports/payments.csv', query: {'from': from, 'to': to});
   }
 
   // MGR-028: Audit log (who did what, to what, from where, before and after)
@@ -630,5 +709,25 @@ class ManagerApiService {
   // MGR-038: Test connection to the configured payment gateway (director only)
   Future<Map<String, dynamic>> testPaymentSettings({Map<String, dynamic>? body}) {
     return _post('/ops/payment-settings/test', body: body);
+  }
+
+  // MGR-038: Staff accounts (director only)
+  Future<Map<String, dynamic>> getStaff() {
+    return _get('/ops/staff');
+  }
+
+  // MGR-038: Create a staff account (director only)
+  Future<Map<String, dynamic>> createStaff(Map<String, dynamic> staff, {String? idempotencyKey}) {
+    return _post('/ops/staff', body: staff, idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-038: Update staff account details or status (director only)
+  Future<Map<String, dynamic>> updateStaff(String userId, Map<String, dynamic> patch) {
+    return _patch('/ops/staff/${Uri.encodeComponent(userId)}', body: patch);
+  }
+
+  // MGR-038: Reset staff temporary password (director only)
+  Future<Map<String, dynamic>> resetStaffPassword(String userId, {String? idempotencyKey}) {
+    return _post('/ops/staff/${Uri.encodeComponent(userId)}/reset-password', body: {}, idempotent: true, idempotencyKey: idempotencyKey);
   }
 }

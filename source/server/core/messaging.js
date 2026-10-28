@@ -92,6 +92,10 @@ export const OUTSIDE_APP_TYPES = new Set([
 const MAX_OUTBOX = 5000;
 const SMS_MAX_CHARS = 320;
 
+function stripDiacritics(str) {
+  return String(str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
+}
+
 export class Messenger {
   constructor({ env = process.env, fetchImpl = globalThis.fetch, fcm = undefined } = {}) {
     this.outbox = [];
@@ -111,6 +115,54 @@ export class Messenger {
   registerDevice(phone, { token = null, platform = null, operatorId }) {
     const entry = { phone, operator_id: operatorId, token: token || null, platform: platform || null, registered_at: new Date().toISOString() };
     this.devices.set(phone, entry);
+    return entry;
+  }
+
+  /**
+   * Sends an OTP via the SMS webhook without diacritics and records a masked entry in the outbox.
+   */
+  sendOtp({ operatorId = null, phone, otp, brand = 'BusGo' } = {}) {
+    if (!phone || !otp) return null;
+    const prefix = stripDiacritics(brand || 'BusGo');
+    const text = `${prefix}: Ma xac thuc cua ban la ${otp}, hieu luc 5 phut. Khong chia se ma nay.`;
+    const maskedText = `${prefix}: Ma xac thuc cua ban la ******, hieu luc 5 phut. Khong chia se ma nay.`;
+    const url = this.smsUrl;
+    const entry = {
+      id: `msg_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
+      operator_id: operatorId,
+      trip_id: null,
+      ticket_id: null,
+      type: 'OTP',
+      channel: 'SMS',
+      to: phone,
+      text: maskedText,
+      link: null,
+      status: url ? 'SENDING' : 'LOGGED',
+      created_at: new Date().toISOString(),
+      sent_at: null,
+      error: null
+    };
+    this.outbox.push(entry);
+    if (this.outbox.length > MAX_OUTBOX) this.outbox.shift();
+    const sending = url && typeof this.fetch === 'function'
+      ? this.fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: phone, text, type: 'OTP' })
+      })
+      : null;
+    if (sending) {
+      Promise.resolve(sending)
+        .then((r) => {
+          entry.status = r?.ok ? 'SENT' : 'FAILED';
+          entry.sent_at = new Date().toISOString();
+          if (!r?.ok) entry.error = `HTTP ${r?.status}`;
+        })
+        .catch((err) => {
+          entry.status = 'FAILED';
+          entry.error = err.message;
+        });
+    }
     return entry;
   }
 

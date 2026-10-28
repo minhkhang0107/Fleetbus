@@ -8,10 +8,89 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'passenger_dates.dart';
 
+export 'passenger_banks.dart';
 export 'passenger_dates.dart';
+import 'passenger_banks.dart';
 
 /// State of the passenger app, backed by the FleetBus API (`PassengerApiClientService`, OQ-029).
 /// Screens follow the Claude Design canvas "FleetBus — Thiết kế lại 3 app".
+
+class RefundAccount {
+  const RefundAccount({
+    required this.bankBin,
+    this.bankName,
+    this.bankShortName,
+    required this.accountNumber,
+    required this.accountName,
+  });
+
+  final String bankBin;
+  final String? bankName;
+  final String? bankShortName;
+  final String accountNumber;
+  final String accountName;
+
+  String get displayBankName {
+    if (bankName != null && bankName!.isNotEmpty) return bankName!;
+    if (bankShortName != null && bankShortName!.isNotEmpty) return bankShortName!;
+    final found = vietQrBanks.where((b) => b.bin == bankBin).firstOrNull;
+    if (found != null) return found.shortName;
+    return bankBin;
+  }
+
+  factory RefundAccount.fromJson(Map<String, dynamic> j) => RefundAccount(
+        bankBin: '${j['bank_bin'] ?? j['bin'] ?? ''}',
+        bankName: j['bank_name'] as String?,
+        bankShortName: j['bank_short_name'] as String?,
+        accountNumber: '${j['account_number'] ?? ''}',
+        accountName: '${j['account_name'] ?? ''}',
+      );
+
+  Map<String, dynamic> toJson() => {
+        'bank_bin': bankBin,
+        if (bankName != null) 'bank_name': bankName,
+        if (bankShortName != null) 'bank_short_name': bankShortName,
+        'account_number': accountNumber,
+        'account_name': accountName,
+      };
+}
+
+class TicketRefund {
+  TicketRefund({
+    required this.refundId,
+    required this.status,
+    required this.amountVnd,
+    this.rejectNote,
+    this.account,
+  });
+
+  final String refundId;
+  final String status;
+  final int amountVnd;
+  final String? rejectNote;
+  final RefundAccount? account;
+
+  bool get isPending => status == 'REFUND_REQUESTED';
+  bool get isRefunded => status == 'REFUNDED';
+  bool get isRejected => status == 'REFUND_REJECTED' || status == 'REJECTED';
+
+  String get statusLabel => switch (status) {
+        'REFUND_REQUESTED' => 'Đang chờ hoàn tiền',
+        'REFUNDED' => 'Đã hoàn tiền',
+        'REFUND_REJECTED' || 'REJECTED' => 'Từ chối',
+        _ => status,
+      };
+
+  factory TicketRefund.fromJson(Map<String, dynamic> j) => TicketRefund(
+        refundId: '${j['refund_id'] ?? ''}',
+        status: '${j['status'] ?? ''}',
+        amountVnd: (j['amount_vnd'] as num?)?.toInt() ?? 0,
+        rejectNote: (j['reject_note'] ?? j['notes'] ?? j['reason']) as String?,
+        account: j['refund_account'] is Map<String, dynamic>
+            ? RefundAccount.fromJson(j['refund_account'] as Map<String, dynamic>)
+            : null,
+      );
+}
 
 class OperatorInfo {
   const OperatorInfo({
@@ -26,6 +105,8 @@ class OperatorInfo {
     this.dropoffModes = const ['FIXED_LOCATION'],
     this.allowCash = true,
     this.allowTransfer = true,
+    this.insuranceEnabled = false,
+    this.walletEnabled = false,
   });
   final String code;
   final String name;
@@ -38,6 +119,8 @@ class OperatorInfo {
   final List<String> dropoffModes;
   final bool allowCash;
   final bool allowTransfer;
+  final bool insuranceEnabled;
+  final bool walletEnabled;
 
   bool get homePickup => pickupModes.contains('HOME_PICKUP');
   bool get homeDropoff => dropoffModes.contains('HOME_DROPOFF');
@@ -55,6 +138,8 @@ class OperatorInfo {
         allowCash: j['allow_cash_payment'] != false,
         // Older servers send no payment_methods: they always took transfers.
         allowTransfer: (j['payment_methods'] as List?)?.contains('BANK_TRANSFER') ?? true,
+        insuranceEnabled: j['insurance_enabled'] == true,
+        walletEnabled: j['wallet_enabled'] == true,
       );
 }
 
@@ -285,6 +370,7 @@ class Ticket {
     required this.route,
     required this.date,
     required this.dep,
+    this.departureTime,
     required this.seat,
     required this.pickup,
     this.dropoff = '',
@@ -304,7 +390,9 @@ class Ticket {
     this.pickupTime,
     this.pickupTimeEstimated = false,
     this.paymentStatus = '',
+    this.paymentMethod = 'VIETQR_NAPAS247',
     this.codDue = 0,
+    this.refundInfo,
   }) : ticketIds = ticketIds ?? (id.isNotEmpty ? [id] : const []);
   final String id;
   final String pnr;
@@ -314,12 +402,14 @@ class Ticket {
   final String route;
   final String date;
   final String dep;
+  final String? departureTime;
   final String seat;
   final String pickup;
   final String dropoff;
   final int paid;
   final String name;
   final String paymentStatus;
+  final String paymentMethod;
   final int codDue;
   /// Planned pickup stop time if different from first departure.
   final String? pickupTime;
@@ -347,9 +437,11 @@ class Ticket {
   String? qrValue;
   String? pin;
   int? refund;
+  TicketRefund? refundInfo;
   bool past;
 
   bool get unpaidCash => paymentStatus == 'UNPAID_COD' && codDue > 0;
+  bool get isTransferPayment => !unpaidCash && paymentMethod != 'CASH';
   bool get active => status == TicketStatus.active || status == TicketStatus.boarded;
   bool get isGroup => ticketIds.length > 1 || seat.contains(',');
   String get departure => delay == 0 ? dep : addMinutes(dep, delay);
@@ -388,6 +480,7 @@ class Ticket {
       route: routeLabel(j['route_name'] ?? ''),
       date: '${const ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][dep.weekday % 7]} ${_two(dep.day)}/${_two(dep.month)}',
       dep: _hhmm(dep),
+      departureTime: j['departure_time']?.toString(),
       seat: j['seat_code'] ?? '',
       pickup: '${j['pickup_stop'] ?? ''}'.replaceFirst('Bến xe ', ''),
       dropoff: '${j['dropoff_stop'] ?? ''}'.replaceFirst('Bến xe ', ''),
@@ -409,8 +502,12 @@ class Ticket {
       pickupTime: pTime,
       pickupTimeEstimated: j['pickup_time_estimated'] == true,
       paymentStatus: '${j['payment_status'] ?? ''}',
+      paymentMethod: '${j['payment_method'] ?? (j['payment_status'] == 'UNPAID_COD' ? 'CASH' : 'VIETQR_NAPAS247')}',
       codDue: (j['cod_amount_vnd'] as num?)?.toInt() ?? 0,
-    )..refund = (j['refund_amount_vnd'] as num?)?.toInt();
+      refundInfo: j['refund'] is Map<String, dynamic>
+          ? TicketRefund.fromJson(j['refund'] as Map<String, dynamic>)
+          : (j['refund_id'] != null || j['refund_status'] != null ? TicketRefund.fromJson(j) : null),
+    )..refund = (j['refund'] is Map<String, dynamic> ? (j['refund']['amount_vnd'] as num?)?.toInt() : null) ?? (j['refund_amount_vnd'] as num?)?.toInt();
   }
 }
 
@@ -636,10 +733,11 @@ class Tracking {
 
 /// Result of a call: null message means success.
 class ApiResult<T> {
-  const ApiResult(this.value, [this.error, this.code]);
+  const ApiResult(this.value, [this.error, this.code, this.raw]);
   final T? value;
   final String? error;
   final String? code;
+  final Map<String, dynamic>? raw;
   bool get ok => error == null;
 }
 
@@ -678,6 +776,11 @@ class PassengerStore extends ChangeNotifier {
 
   OperatorInfo? operator;
   Map<String, Place> places = {};
+
+  bool get insuranceEnabled => operator?.insuranceEnabled ?? false;
+  bool get walletEnabled => operator?.walletEnabled ?? false;
+
+  int walletBalanceVnd = 0;
 
   static const maxSeats = 5;
 
@@ -788,7 +891,7 @@ class PassengerStore extends ChangeNotifier {
       logout();
     }
     if (json['status'] == 'success') return ApiResult(json['data'] is Map<String, dynamic> ? json['data'] as Map<String, dynamic> : {'value': json['data']});
-    return ApiResult(null, '${json['message'] ?? 'Có lỗi, thử lại sau.'}', '${json['code'] ?? ''}');
+    return ApiResult(null, '${json['message'] ?? 'Có lỗi, thử lại sau.'}', '${json['code'] ?? ''}', json);
   }
 
   Future<ApiResult<Map<String, dynamic>>> _call(Future<Map<String, dynamic>> Function() request) async {
@@ -974,10 +1077,24 @@ class PassengerStore extends ChangeNotifier {
 
 
   // ---------- Login (PAX-002 / PAX-003) ----------
+  int otpCooldownSeconds = 60;
+  int? lastRemainingCooldown;
+
   Future<String?> requestOtp(String phone) async {
     final r = await _call(() => api.requestOtp(phone));
-    if (!r.ok) return r.error;
+    if (!r.ok) {
+      // COOLDOWN_ACTIVE tells how long to wait; the resend button counts it down.
+      final details = r.raw?['details'];
+      final cd = details is Map ? details['remainingCooldown'] : null;
+      lastRemainingCooldown = cd is num && cd > 0 ? cd.toInt() : null;
+      return r.error;
+    }
+    lastRemainingCooldown = null;
     devOtp = r.value!['mock_otp']?.toString();
+    final cd = r.value!['cooldown_seconds'];
+    if (cd is num && cd > 0) {
+      otpCooldownSeconds = cd.toInt();
+    }
     return null;
   }
 
@@ -997,13 +1114,34 @@ class PassengerStore extends ChangeNotifier {
     userName = name is String && name != 'Hành khách BusGo' ? name : null;
     isVip = r.value!['user']?['is_vip'] == true;
     devOtp = null;
+    final op = r.value!['user']?['operator'];
+    if (op is Map<String, dynamic>) {
+      operator = OperatorInfo.fromJson(op);
+    }
     await _saveSession();
     notifyListeners();
+    unawaited(loadProfile());
     unawaited(loadTickets());
     unawaited(loadNotices());
     // D144: the server learns this phone runs the app (a push token joins once push is set up).
     unawaited(_registerDevice());
     return null;
+  }
+
+  Future<void> loadProfile() async {
+    if (!loggedIn) return;
+    final r = await _call(() => api.getProfile());
+    if (r.ok && r.value != null) {
+      final bal = r.value!['wallet_balance_vnd'];
+      if (bal is num) {
+        walletBalanceVnd = bal.toInt();
+      }
+      final op = r.value!['operator'];
+      if (op is Map<String, dynamic>) {
+        operator = OperatorInfo.fromJson(op);
+      }
+      notifyListeners();
+    }
   }
 
   void logout() {
@@ -1367,7 +1505,7 @@ class PassengerStore extends ChangeNotifier {
           dropoffStop: dropoff,
           homePickup: homePickup?.toJson(),
           homeDropoff: homeDropoff?.toJson(),
-          insuranceSelected: insured,
+          insuranceSelected: insuranceEnabled && insured,
           paymentMethod: paymentMethod,
         ));
     if (!r.ok) {
@@ -1598,6 +1736,19 @@ class PassengerStore extends ChangeNotifier {
     if (t.homePickupStatus == 'REJECTED' || t.homeDropoffStatus == 'REJECTED') {
       return (percent: 100, tier: 'Nhà xe không nhận đón/trả tận nhà: hoàn 100% tiền còn lại, không phí');
     }
+    if (t.departureTime != null) {
+      final depTime = DateTime.tryParse(t.departureTime!);
+      if (depTime != null) {
+        final hoursUntilDeparture = depTime.difference(DateTime.now()).inMinutes / 60.0;
+        if (hoursUntilDeparture >= 12) {
+          return (percent: 100, tier: 'Hủy từ 12 giờ trở lên trước giờ chạy: Hoàn tiền 100%');
+        } else if (hoursUntilDeparture >= 6) {
+          return (percent: 80, tier: 'Hủy trước giờ chạy 6–12 giờ: Hoàn tiền 80% (Phí hủy 20%)');
+        } else {
+          return (percent: 0, tier: 'Hủy dưới 6 giờ trước giờ chạy: Không hoàn tiền');
+        }
+      }
+    }
     return (percent: -1, tier: 'Mức hoàn tính theo số giờ trước giờ chạy: từ 12 giờ hoàn 100%, 6 đến 12 giờ hoàn 80%, dưới 6 giờ không hoàn.');
   }
 
@@ -1610,13 +1761,73 @@ class PassengerStore extends ChangeNotifier {
     return const ApiResult(null);
   }
 
-  Future<ApiResult<int>> cancelTicket(Ticket t) async {
-    final r = await _call(() => api.cancelTicket(t.id));
+  Future<RefundAccount?> getLastRefundAccount() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('last_refund_account');
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final j = jsonDecode(raw);
+      if (j is Map<String, dynamic>) return RefundAccount.fromJson(j);
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> saveLastRefundAccount(RefundAccount account) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('last_refund_account', jsonEncode(account.toJson()));
+  }
+
+  Future<ApiResult<int>> cancelTicket(Ticket t, {Map<String, dynamic>? refundAccount}) async {
+    final r = await _call(() => api.cancelTicket(t.id, refundAccount: refundAccount));
     if (!r.ok) return ApiResult(null, r.error, r.code);
+    if (refundAccount != null) {
+      await saveLastRefundAccount(RefundAccount.fromJson(refundAccount));
+    }
     final amount = (r.value!['refund_amount_vnd'] as num?)?.toInt() ?? 0;
     await loadTickets();
     await loadNotices();
     return ApiResult(amount);
+  }
+
+  Future<ApiResult<Map<String, dynamic>>> updateRefundAccount(Ticket t, Map<String, dynamic> refundAccount) async {
+    final r = await _call(() => api.updateRefundAccount(t.id, refundAccount: refundAccount));
+    if (!r.ok) return ApiResult(null, r.error, r.code);
+    await saveLastRefundAccount(RefundAccount.fromJson(refundAccount));
+    if (r.value != null && r.value!['refund_account'] is Map<String, dynamic>) {
+      final masked = RefundAccount.fromJson(r.value!['refund_account'] as Map<String, dynamic>);
+      if (t.refundInfo != null) {
+        t.refundInfo = TicketRefund(
+          refundId: t.refundInfo!.refundId,
+          status: t.refundInfo!.status,
+          amountVnd: t.refundInfo!.amountVnd,
+          rejectNote: t.refundInfo!.rejectNote,
+          account: masked,
+        );
+      }
+    }
+    await loadTickets();
+    notifyListeners();
+    return ApiResult(r.value);
+  }
+
+  Future<ApiResult<void>> deleteAccount() async {
+    final r = await _call(() => api.deleteAccount());
+    if (!r.ok) return ApiResult(null, r.error, r.code);
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_sessionKey);
+    await prefs.remove('last_refund_account');
+
+    api.authToken = null;
+    userPhone = null;
+    userName = null;
+    isVip = false;
+    tickets = [];
+    notices = [];
+    walletBalanceVnd = 0;
+    sessionExpired = false;
+    notifyListeners();
+    return const ApiResult(null);
   }
 
   // ---------- Tracking and notices (PAX-018, PAX-020) ----------

@@ -1,6 +1,10 @@
 /**
  * FleetBus Server HTTP Utilities & Middlewares
  */
+import { clientNow } from '../config.js';
+import { clientIp } from '../core/rateLimit.js';
+
+export { clientNow, clientIp };
 
 export function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
