@@ -60,15 +60,6 @@ class PassengerProfileScreen extends StatelessWidget {
             ]),
           ),
           gap(16),
-          AppCard(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Column(children: [
-              _row('Hành khách thường đi', '2'),
-              const Divider(height: 1, color: Color(0xFFF1F5F9)),
-              _row('Điểm đón đã lưu', 'Giáp Bát'),
-            ]),
-          ),
-          gap(16),
           if (store.operator != null) ...[
             AppCard(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -76,7 +67,13 @@ class PassengerProfileScreen extends StatelessWidget {
                 Text('Nhà xe', style: sans(size: 13, color: PTokens.muted)),
                 gap(4),
                 Text(store.operator!.name, style: sans(size: 15, weight: FontWeight.w600)),
-                Text('Tổng đài ${store.operator!.hotline}', style: sans(size: 14, color: PTokens.muted)),
+                if (store.operator!.hotline.isNotEmpty)
+                  GestureDetector(
+                    onTap: () => callHotline(context, store.operator!.hotline),
+                    child: Text('Tổng đài ${store.operator!.hotline}', style: sans(size: 14, color: PTokens.muted)),
+                  ),
+                if (store.operator!.supportEmail.isNotEmpty) Text('Email ${store.operator!.supportEmail}', style: sans(size: 14, color: PTokens.muted)),
+                if (store.operator!.address.isNotEmpty) Text(store.operator!.address, style: sans(size: 14, color: PTokens.muted)),
               ]),
             ),
             gap(16),
@@ -116,9 +113,4 @@ class PassengerProfileScreen extends StatelessWidget {
       ),
     ]);
   }
-
-  Widget _row(String label, String value) => SizedBox(
-        height: 48,
-        child: Row(children: [Expanded(child: Text(label, style: sans(size: 15))), Text(value, style: sans(size: 14, color: PTokens.muted))]),
-      );
 }

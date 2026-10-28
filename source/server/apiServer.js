@@ -26,6 +26,7 @@ import { handleManagerRoutes } from './routes/managerRoutes.js';
 import { handleWebhookRoutes } from './routes/webhookRoutes.js';
 import { handlePlatformRoutes } from './routes/platformRoutes.js';
 import { handleServiceConfigRoutes } from './routes/serviceConfigRoutes.js';
+import { handlePaymentSettingsRoutes } from './routes/paymentSettingsRoutes.js';
 import { handlePromoBannerRoutes } from './routes/promoBannerRoutes.js';
 import { handleVoucherRoutes } from './routes/voucherRoutes.js';
 import { handleScheduleRoutes } from './routes/scheduleRoutes.js';
@@ -34,6 +35,7 @@ import { handleLegalRoutes } from './routes/legalRoutes.js';
 import { renderOnboardingPage, renderOnboardingNotFound } from './web/onboarding.js';
 import { renderTripSharePage } from './web/tripShare.js';
 import { findOperatorByCode, findOperatorById } from './core/operators.js';
+import { reconcileSweep } from './core/payments/reconcile.js';
 import { FleetBusEventBridge } from './core/fleetBusEventBridge.js';
 import { getWebhookSecret, getAuthMode, isProduction } from './config.js';
 import { resolveAccess, authenticate, IdempotencyStore, resolveOperator } from './core/gateway.js';
@@ -83,6 +85,7 @@ export function createFleetBusServer(customServices = {}) {
     driverService: customServices.driverService || new DriverCockpitService(),
     managerService: customServices.managerService || new ManagerOperationsService(),
     tenantDbs: customServices.tenantDbs || openTenantDbs(customServices.dataDir !== undefined ? customServices.dataDir : defaultDataDir(), customServices.env),
+    fetchImpl: customServices.fetchImpl || globalThis.fetch,
     eventBridge,
     config: {
       webhookSecret: customServices.webhookSecret !== undefined ? customServices.webhookSecret : getWebhookSecret(),
@@ -124,6 +127,7 @@ export function createFleetBusServer(customServices = {}) {
       if (handleWebhookRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handlePlatformRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleServiceConfigRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handlePaymentSettingsRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handlePromoBannerRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleVoucherRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleScheduleRoutes(req, res, pathname, parsedUrl, services)) return;
@@ -324,12 +328,34 @@ export function createFleetBusServer(customServices = {}) {
     dispatchRoutes(req, res, pathname, parsedUrl);
   });
 
-  server.on('close', () => services.tenantDbs.close());
+  const reconcileIntervalMs = customServices.reconcileIntervalMs !== undefined
+    ? Number(customServices.reconcileIntervalMs)
+    : 0;
+  let reconcileTimer = null;
+  if (reconcileIntervalMs > 0) {
+    let sweepRunning = false;
+    reconcileTimer = setInterval(() => {
+      if (sweepRunning) return;
+      sweepRunning = true;
+      reconcileSweep(services).finally(() => {
+        sweepRunning = false;
+      });
+    }, reconcileIntervalMs);
+    reconcileTimer.unref();
+  }
+
+  server.on('close', () => {
+    if (reconcileTimer) clearInterval(reconcileTimer);
+    services.tenantDbs.close();
+  });
 
   return { server, services };
 }
 
-export const { server, services } = createFleetBusServer();
+const defaultReconcileMs = IS_MAIN
+  ? (process.env.FLEETBUS_RECONCILE_MS !== undefined ? Number(process.env.FLEETBUS_RECONCILE_MS) : 60000)
+  : 0;
+export const { server, services } = createFleetBusServer({ reconcileIntervalMs: defaultReconcileMs });
 
 const PORT = process.env.PORT || 3000;
 

@@ -971,6 +971,20 @@ export class FleetBusEventBridge extends EventEmitter {
       }
     });
 
+    this.on('PAYMENT_UNMATCHED', ({ operatorId, amountVnd, memo, bankRef }) => {
+      if (managerService && managerService.alerts) {
+        managerService.alerts.unshift({
+          alert_id: `alt_unmatched_${Date.now()}`,
+          vehicle_plate: null,
+          type: 'PAYMENT_UNMATCHED',
+          severity: 'AMBER',
+          message: `Giao dịch ${bankRef || 'ngân hàng'} nhận ${amountVnd} đ không khớp mã đặt vé (${memo || 'trống'})`,
+          created_at: new Date().toISOString(),
+          operator_id: operatorId
+        });
+      }
+    });
+
     // -------------------------------------------------------------------------
     // 8c. COD_COLLECTED / HAIL_BOARDED / WALLET_CREDIT_REQUESTED: driver cash events -> Manager & Passenger wallet
     // -------------------------------------------------------------------------

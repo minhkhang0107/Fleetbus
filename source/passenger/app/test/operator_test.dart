@@ -266,6 +266,18 @@ void main() {
       'allow_cash_payment': false,
     });
     expect(disabledCashOp.allowCash, isFalse);
+    expect(defaultOp.allowTransfer, isTrue, reason: 'no payment_methods (older server) still takes transfers');
+
+    final cashOnlyOp = OperatorInfo.fromJson({
+      'code': 'SAOMAI',
+      'name': 'Nhà xe Sao Mai',
+      'short_name': 'Sao Mai',
+      'hotline': '1900 6868',
+      'primary_color': '#2563EB',
+      'payment_methods': ['CASH'],
+    });
+    expect(cashOnlyOp.allowTransfer, isFalse);
+    expect(cashOnlyOp.allowCash, isTrue);
 
     final baseTicketJson = <String, dynamic>{
       'ticket_id': 'tkt_BG1_A02',

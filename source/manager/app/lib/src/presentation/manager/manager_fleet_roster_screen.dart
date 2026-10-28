@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../../resources/lib/src/theme/app_colors.dart';
+import 'package:resources/resources.dart';
 
 class ManagerFleetRosterScreen extends StatelessWidget {
   const ManagerFleetRosterScreen({super.key});
@@ -76,7 +76,7 @@ class ManagerFleetRosterScreen extends StatelessWidget {
         Expanded(flex: 3, child: Text(note, style: const TextStyle(color: ManagerColors.textMuted, fontSize: 12))),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(color: color.withOpacity(0.15), borderRadius: BorderRadius.circular(6)),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
           child: Text(status, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 11)),
         ),
       ],

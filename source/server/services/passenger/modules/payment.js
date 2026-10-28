@@ -42,6 +42,8 @@ export class PassengerPaymentService {
     this.orders = new Map(); // orderId -> Order
     this.tickets = new Map(); // ticketId -> Ticket
     this.pnrIndex = new Map(); // PNR -> orderId
+    this.bankTransactions = new Map(); // txKey -> BankTransaction
+    this.gatewayCredentials = new Map(); // operatorId -> { provider, values, updated_at, updated_by, last_webhook_at, reconciliation }
     this.walletCredits = []; // change credited to a passenger wallet (REV-04)
   }
 
@@ -174,10 +176,94 @@ export class PassengerPaymentService {
     };
   }
 
+  _issuedTicketsOf(order) {
+    return (order?.ticket_ids || []).map(id => this.tickets.get(id)).filter(Boolean);
+  }
+
+  _requestOrderRefund(order, { amount_vnd, reason, source, policy = null }) {
+    const req = {
+      pnr: order.pnr,
+      trip_id: order.trip_id,
+      amount_vnd,
+      reason,
+      source,
+      policy,
+      operator_id: order.operator_id || DEFAULT_OPERATOR_ID
+    };
+    if (this.eventBridge && typeof this.eventBridge.requestRefund === 'function') {
+      return this.eventBridge.requestRefund(req);
+    }
+    return { refund_id: `ref_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`, status: 'REFUND_REQUESTED', ...req };
+  }
+
+  /** Marks an order EXPIRED and refunds any partial transfer received before expiry. */
+  _expireOrder(order) {
+    order.payment_status = 'EXPIRED';
+    const refundAmount = order.paid_amount_vnd || 0;
+    if (refundAmount > 0) {
+      order.refunded_vnd = (order.refunded_vnd || 0) + refundAmount;
+      order.paid_amount_vnd = 0;
+      const refund = this._requestOrderRefund(order, {
+        amount_vnd: refundAmount,
+        reason: `Đơn ${order.pnr} hết hạn khi mới thanh toán ${refundAmount} đ (UNDERPAID_EXPIRED)`,
+        source: 'UNDERPAID_EXPIRED'
+      });
+      order.underpaid_refund_id = refund.refund_id;
+    }
+  }
+
+  /** Whether a late transfer on an expired order can still settle (trip on sale and seats still free). */
+  _isLateOrderSellable(order, now = Date.now()) {
+    if (order.closed_reason === 'TRIP_CANCELLED') return false;
+    const services = this.eventBridge?.services;
+    const opsTrip = services?.managerService?.findTrip?.(order.trip_id)
+      || services?.managerService?.trips?.find(t => t.trip_id === order.trip_id);
+    if (opsTrip && (opsTrip.status === 'CANCELLED' || opsTrip.status === 'COMPLETED' || opsTrip.sales_closed)) {
+      return false;
+    }
+    const drvTrip = services?.driverService?.activeTrips?.get?.(order.trip_id);
+    if (drvTrip && (drvTrip.status === 'CANCELLED' || drvTrip.status === 'COMPLETED')) {
+      return false;
+    }
+    if (this.seatMapService && typeof this.seatMapService.checkSellable === 'function') {
+      if (order.hold_id && this.seatMapService.seatHolds) {
+        for (const [k, h] of this.seatMapService.seatHolds.entries()) {
+          if (h.tripId === order.trip_id && h.holdId === order.hold_id) {
+            this.seatMapService.seatHolds.delete(k);
+          }
+        }
+      }
+      const check = this.seatMapService.checkSellable(
+        order.trip_id,
+        order.seat_codes,
+        now,
+        null,
+        { pickupStopId: order.pickup_stop_id, dropoffStopId: order.dropoff_stop_id }
+      );
+      if (!check.success) return false;
+    }
+    return true;
+  }
+
+  _resultFromStoredTx(record, { replay = false } = {}) {
+    const order = record.order_id ? this.orders.get(record.order_id) : null;
+    const settledOutcomes = ['SETTLED', 'OVERPAID_SETTLED', 'LATE_SETTLED'];
+    return {
+      success: true,
+      outcome: record.outcome,
+      ...(replay ? { replay: true } : {}),
+      ...(record.order_id ? { order_id: record.order_id } : {}),
+      ...(record.pnr ? { pnr: record.pnr } : {}),
+      ...(settledOutcomes.includes(record.outcome) && order ? { issued_tickets: this._issuedTicketsOf(order) } : {}),
+      ...(record.outcome === 'PARTIAL' && order && order.remaining_vnd !== undefined ? { remaining_vnd: order.remaining_vnd } : {}),
+      ...(record.refund_id ? { refund_id: record.refund_id } : {})
+    };
+  }
+
   /**
    * PAX-014 / PAX-015: Process Webhook payment settlement callback & generate E-Tickets
    */
-  settlePayment(orderId, paymentRef = `tx_${Date.now()}`, mockNow = Date.now()) {
+  settlePayment(orderId, paymentRef = `tx_${Date.now()}`, mockNow = Date.now(), { allowExpired = false } = {}) {
     const order = this.orders.get(orderId);
     if (!order) {
       return { success: false, error: 'Không tìm thấy đơn hàng', code: 'ORDER_NOT_FOUND' };
@@ -189,8 +275,8 @@ export class PassengerPaymentService {
 
     const expiresAtMs = new Date(order.expires_at).getTime();
     const demoCashOrder = order.payment_method === 'CASH' && !isProduction() && Number.isFinite(expiresAtMs) && vnDate(expiresAtMs) === DEMO_DATE;
-    if (!demoCashOrder && mockNow > expiresAtMs) {
-      order.payment_status = 'EXPIRED';
+    if (!demoCashOrder && !allowExpired && mockNow > expiresAtMs) {
+      this._expireOrder(order);
       return { success: false, error: 'Đơn hàng đã hết thời gian giữ chỗ thanh toán', code: 'PAYMENT_EXPIRED' };
     }
 
@@ -269,69 +355,404 @@ export class PassengerPaymentService {
   }
 
   /**
-   * Handle VietQR Webhook Callback (PAX-014, OQ-008)
-   * The order is matched on the PNR inside the transfer memo and the received amount must equal the order amount.
+   * Unified settlement engine for every incoming bank transfer (VietQR webhook, SePay, office manual confirm).
    */
-  handleVietQrCallback({ transferMemo, amountVnd, bankRef, operatorId = DEFAULT_OPERATOR_ID, now = Date.now() }) {
-    const pnrMatch = /BG-?(\d{6})/i.exec(String(transferMemo || ''));
-    const orderId = pnrMatch ? this.pnrIndex.get(`BG-${pnrMatch[1]}`) : null;
-    const matchedOrder = orderId ? this.orders.get(orderId) : null;
+  applyBankTransfer(tx = {}, now = Date.now()) {
+    const operatorId = tx.operatorId || DEFAULT_OPERATOR_ID;
+    const provider = tx.provider || 'VIETQR_HMAC';
+    const providerTxId = tx.providerTxId ?? null;
+    const bankRef = tx.bankRef ?? null;
+    const amount = Number(tx.amountVnd);
+    const memo = String(tx.memo ?? '');
+    const accountNumber = tx.accountNumber ?? null;
+    const occurredAt = tx.occurredAt ?? null;
+    const direction = tx.direction || 'IN';
+    const note = tx.note ?? null;
 
-    if (!matchedOrder || (matchedOrder.operator_id || DEFAULT_OPERATOR_ID) !== operatorId) {
-      return { success: false, error: 'Không tìm thấy đơn hàng khớp với nội dung chuyển khoản', code: 'ORDER_NOT_MATCHED' };
+    // a. Outgoing bank notification is ignored and not stored as money in.
+    if (direction === 'OUT') {
+      return { success: true, outcome: 'IGNORED_OUT' };
     }
 
-    const issuedTicketsOf = (order) => (order.ticket_ids || []).map(id => this.tickets.get(id)).filter(Boolean);
+    // b. Deduplicate when providerTxId or bankRef is present.
+    const dedupeId = providerTxId || bankRef || null;
+    if (dedupeId) {
+      const existingKey = `${operatorId}:${provider}:${dedupeId}`;
+      const existing = this.bankTransactions.get(existingKey);
+      if (existing) {
+        return this._resultFromStoredTx(existing, { replay: true });
+      }
+    }
 
+    const txKey = tx._txKey || (dedupeId
+      ? `${operatorId}:${provider}:${dedupeId}`
+      : `${operatorId}:${provider}:anon_${now}_${Math.floor(1000 + Math.random() * 9000)}`);
+
+    const storeTx = (outcome, { order = null, refundId = null } = {}) => {
+      const record = {
+        tx_id: txKey,
+        operator_id: operatorId,
+        provider,
+        provider_tx_id: providerTxId,
+        bank_ref: bankRef,
+        amount_vnd: amount,
+        memo,
+        account_number: accountNumber,
+        occurred_at: occurredAt,
+        received_at: tx._receivedAt || new Date(now).toISOString(),
+        outcome,
+        order_id: order ? order.order_id : null,
+        pnr: order ? order.pnr : null,
+        refund_id: refundId || null,
+        note,
+        ...(tx.staff ? { staff: tx.staff } : {})
+      };
+      this.bankTransactions.set(txKey, record);
+      return record;
+    };
+
+    // c. Wrong account number (compare digits only).
+    if (accountNumber !== null && accountNumber !== undefined && String(accountNumber).trim() !== '') {
+      const operator = findOperatorById(operatorId);
+      const expectedDigits = String(operator?.bank?.account_number || '').replace(/\D/g, '');
+      const receivedDigits = String(accountNumber).replace(/\D/g, '');
+      if (expectedDigits && receivedDigits !== expectedDigits) {
+        storeTx('WRONG_ACCOUNT');
+        return { success: true, outcome: 'WRONG_ACCOUNT' };
+      }
+    }
+
+    // d. Match order directly by orderId or by scanning normalized memo for BG(\d{6}) candidates of this operator.
+    let matchedOrder = null;
+    if (tx.orderId) {
+      const ord = this.orders.get(tx.orderId);
+      if (ord && (ord.operator_id || DEFAULT_OPERATOR_ID) === operatorId) {
+        matchedOrder = ord;
+      }
+    } else {
+      const normMemo = memo.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const re = /BG(\d{6})/g;
+      let m;
+      while ((m = re.exec(normMemo)) !== null) {
+        const pnr = `BG-${m[1]}`;
+        const ordId = this.pnrIndex.get(pnr);
+        const ord = ordId ? this.orders.get(ordId) : null;
+        if (ord && (ord.operator_id || DEFAULT_OPERATOR_ID) === operatorId) {
+          matchedOrder = ord;
+          break;
+        }
+      }
+    }
+
+    if (!matchedOrder) {
+      storeTx('UNMATCHED');
+      if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+        this.eventBridge.emit('PAYMENT_UNMATCHED', {
+          operatorId,
+          amountVnd: amount,
+          memo,
+          bankRef: bankRef || providerTxId || txKey
+        });
+      }
+      return { success: true, outcome: 'UNMATCHED' };
+    }
+
+    // e. Order already PAID: if payment_ref differs from this tx, open a full refund (DUPLICATE_TRANSFER).
     if (matchedOrder.payment_status === 'PAID') {
-      return { success: true, pnr: matchedOrder.pnr, order_id: matchedOrder.order_id, issued_tickets: issuedTicketsOf(matchedOrder) };
+      const refMatches = matchedOrder.payment_ref && (
+        matchedOrder.payment_ref === bankRef
+        || matchedOrder.payment_ref === providerTxId
+        || matchedOrder.payment_ref === txKey
+      );
+      if (refMatches) {
+        storeTx('SETTLED', { order: matchedOrder });
+        return {
+          success: true,
+          outcome: 'SETTLED',
+          replay: true,
+          order_id: matchedOrder.order_id,
+          pnr: matchedOrder.pnr,
+          issued_tickets: this._issuedTicketsOf(matchedOrder)
+        };
+      }
+      matchedOrder.refunded_vnd = (matchedOrder.refunded_vnd || 0) + amount;
+      const refund = this._requestOrderRefund(matchedOrder, {
+        amount_vnd: amount,
+        reason: `Chuyển khoản trùng cho đơn đã thanh toán ${matchedOrder.pnr} (DUPLICATE_TRANSFER)`,
+        source: 'DUPLICATE_TRANSFER'
+      });
+      storeTx('DUPLICATE_REFUND', { order: matchedOrder, refundId: refund.refund_id });
+      return {
+        success: true,
+        outcome: 'DUPLICATE_REFUND',
+        order_id: matchedOrder.order_id,
+        pnr: matchedOrder.pnr,
+        refund_id: refund.refund_id
+      };
     }
 
-    if (matchedOrder.payment_status === 'UNMATCHED_OVERDUE') {
-      return { success: true, settled: false, status: 'UNMATCHED_OVERDUE', pnr: matchedOrder.pnr, order_id: matchedOrder.order_id };
+    // f. Accumulate paid amount and log transaction on the order.
+    matchedOrder.paid_amount_vnd = (matchedOrder.paid_amount_vnd || 0) + amount;
+    matchedOrder.payment_txs = matchedOrder.payment_txs || [];
+    matchedOrder.payment_txs.push({
+      tx_id: txKey,
+      amount_vnd: amount,
+      at: new Date(now).toISOString()
+    });
+
+    // g. Late transfer: if seats are still free on a sellable trip, continue to settle; else refund paid_amount_vnd.
+    const expiresAtMs = new Date(matchedOrder.expires_at).getTime();
+    const isLate = (Number.isFinite(expiresAtMs) && now > expiresAtMs)
+      || matchedOrder.payment_status === 'EXPIRED'
+      || matchedOrder.payment_status === 'UNMATCHED_OVERDUE';
+
+    if (isLate) {
+      if (!this._isLateOrderSellable(matchedOrder, now)) {
+        matchedOrder.payment_status = 'UNMATCHED_OVERDUE';
+        const refundAmount = matchedOrder.paid_amount_vnd;
+        matchedOrder.refunded_vnd = (matchedOrder.refunded_vnd || 0) + refundAmount;
+        matchedOrder.paid_amount_vnd = 0;
+        matchedOrder.overdue_received_vnd = refundAmount;
+        matchedOrder.overdue_bank_ref = bankRef || providerTxId || txKey;
+        const refunds = this.eventBridge?.services?.managerService?.refundRequests;
+        const beforeLen = refunds ? refunds.length : 0;
+        if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+          this.eventBridge.emit('PAYMENT_OVERDUE', {
+            order: matchedOrder,
+            amountVnd: refundAmount,
+            bankRef: bankRef || providerTxId || txKey
+          });
+        }
+        const refund = (refunds && refunds.length > beforeLen)
+          ? refunds.at(-1)
+          : this._requestOrderRefund(matchedOrder, {
+            amount_vnd: refundAmount,
+            reason: 'Thanh toán đến sau khi hết hạn giữ chỗ (UNMATCHED_OVERDUE)',
+            source: 'UNMATCHED_OVERDUE'
+          });
+        storeTx('LATE_REFUND', { order: matchedOrder, refundId: refund.refund_id });
+        return {
+          success: true,
+          outcome: 'LATE_REFUND',
+          order_id: matchedOrder.order_id,
+          pnr: matchedOrder.pnr,
+          refund_id: refund.refund_id
+        };
+      }
     }
 
-    if (Number(amountVnd) !== matchedOrder.amount_vnd) {
+    // h. Partial payment: keep PENDING_PAYMENT, record remaining_vnd and alert the office.
+    if (matchedOrder.paid_amount_vnd < matchedOrder.amount_vnd) {
+      matchedOrder.payment_status = 'PENDING_PAYMENT';
+      matchedOrder.remaining_vnd = matchedOrder.amount_vnd - matchedOrder.paid_amount_vnd;
       matchedOrder.payment_anomalies = matchedOrder.payment_anomalies || [];
       matchedOrder.payment_anomalies.push({
         type: 'AMOUNT_MISMATCH',
         expected_vnd: matchedOrder.amount_vnd,
-        received_vnd: Number(amountVnd),
-        bank_ref: bankRef || null,
+        received_vnd: amount,
+        paid_amount_vnd: matchedOrder.paid_amount_vnd,
+        remaining_vnd: matchedOrder.remaining_vnd,
+        bank_ref: bankRef || providerTxId || null,
         at: new Date(now).toISOString()
       });
       if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
-        this.eventBridge.emit('PAYMENT_ANOMALY', { order: matchedOrder, receivedVnd: Number(amountVnd), bankRef });
+        this.eventBridge.emit('PAYMENT_ANOMALY', {
+          order: matchedOrder,
+          receivedVnd: amount,
+          bankRef: bankRef || providerTxId || txKey
+        });
       }
+      storeTx('PARTIAL', { order: matchedOrder });
       return {
-        success: false,
-        error: 'Số tiền chuyển khoản không khớp với đơn hàng',
-        code: 'AMOUNT_MISMATCH',
-        expected_vnd: matchedOrder.amount_vnd,
-        received_vnd: Number(amountVnd)
+        success: true,
+        outcome: 'PARTIAL',
+        order_id: matchedOrder.order_id,
+        pnr: matchedOrder.pnr,
+        remaining_vnd: matchedOrder.remaining_vnd
       };
     }
 
-    if (now > new Date(matchedOrder.expires_at).getTime()) {
-      matchedOrder.payment_status = 'UNMATCHED_OVERDUE';
-      matchedOrder.overdue_received_vnd = Number(amountVnd);
-      matchedOrder.overdue_bank_ref = bankRef || null;
-      if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
-        this.eventBridge.emit('PAYMENT_OVERDUE', { order: matchedOrder, amountVnd: Number(amountVnd), bankRef });
-      }
-      return { success: true, settled: false, status: 'UNMATCHED_OVERDUE', pnr: matchedOrder.pnr, order_id: matchedOrder.order_id };
+    // i. Paid in full (or overpaid): settle order, and open a refund for any excess.
+    matchedOrder.remaining_vnd = 0;
+    const settleRes = this.settlePayment(matchedOrder.order_id, bankRef || txKey, now, { allowExpired: isLate });
+    const excess = matchedOrder.paid_amount_vnd - matchedOrder.amount_vnd;
+    let refundId = null;
+    if (excess > 0) {
+      matchedOrder.refunded_vnd = (matchedOrder.refunded_vnd || 0) + excess;
+      matchedOrder.paid_amount_vnd = matchedOrder.amount_vnd;
+      const refund = this._requestOrderRefund(matchedOrder, {
+        amount_vnd: excess,
+        reason: `Chuyển khoản dư ${excess} đ cho đơn ${matchedOrder.pnr} (OVERPAID_EXCESS)`,
+        source: 'OVERPAID_EXCESS'
+      });
+      refundId = refund.refund_id;
+    }
+    const outcome = isLate
+      ? 'LATE_SETTLED'
+      : (excess > 0 ? 'OVERPAID_SETTLED' : 'SETTLED');
+    storeTx(outcome, { order: matchedOrder, refundId });
+    return {
+      success: true,
+      outcome,
+      order_id: matchedOrder.order_id,
+      pnr: matchedOrder.pnr,
+      issued_tickets: settleRes.data?.tickets || this._issuedTicketsOf(matchedOrder),
+      ...(refundId ? { refund_id: refundId } : {})
+    };
+  }
+
+  /**
+   * MGR-037: Manual payment confirmation by the office (cashier, finance controller, director).
+   */
+  confirmPaymentManually(orderId, { operatorId = DEFAULT_OPERATOR_ID, amountVnd, note, staff = null } = {}, now = Date.now()) {
+    const order = this.orders.get(orderId) || this.orders.get(this.pnrIndex.get(orderId));
+    if (!order || (operatorId && (order.operator_id || DEFAULT_OPERATOR_ID) !== operatorId)) {
+      return { success: false, error: 'Không tìm thấy đơn hàng', code: 'ORDER_NOT_FOUND', status: 404 };
+    }
+    const cleanNote = typeof note === 'string' ? note.trim() : '';
+    if (cleanNote.length < 3 || cleanNote.length > 200) {
+      return { success: false, error: 'Ghi chú xác nhận cần từ 3 đến 200 ký tự', code: 'VALIDATION_ERROR', status: 400 };
+    }
+    const amount = Number(amountVnd);
+    if (!Number.isInteger(amount) || amount <= 0) {
+      return { success: false, error: 'Số tiền xác nhận phải là số nguyên dương', code: 'VALIDATION_ERROR', status: 400 };
+    }
+    const n = (order.manual_confirm_count = (order.manual_confirm_count || 0) + 1);
+    return this.applyBankTransfer({
+      operatorId: order.operator_id || DEFAULT_OPERATOR_ID,
+      provider: 'MANUAL',
+      providerTxId: `manual_${order.order_id}_${n}`,
+      bankRef: null,
+      amountVnd: amount,
+      memo: cleanNote,
+      note: cleanNote,
+      accountNumber: null,
+      occurredAt: new Date(now).toISOString(),
+      direction: 'IN',
+      staff,
+      orderId: order.order_id
+    }, now);
+  }
+
+  /**
+   * MGR-037: List stored bank transactions for an operator, newest first.
+   */
+  listBankTransactions({ operatorId = DEFAULT_OPERATOR_ID, outcome = null } = {}) {
+    const entries = [...this.bankTransactions.values()].filter(r => {
+      if ((r.operator_id || DEFAULT_OPERATOR_ID) !== operatorId) return false;
+      if (outcome && outcome !== 'ALL' && r.outcome !== outcome) return false;
+      return true;
+    });
+    return entries.reverse().sort((a, b) => {
+      const ta = Date.parse(a.received_at || a.occurred_at || '') || 0;
+      const tb = Date.parse(b.received_at || b.occurred_at || '') || 0;
+      return tb - ta;
+    });
+  }
+
+  /**
+   * MGR-037: Re-apply a stored UNMATCHED bank transaction to the order with the given PNR (same company only).
+   */
+  assignBankTransaction(txId, pnr, { operatorId = DEFAULT_OPERATOR_ID, staff = null } = {}, now = Date.now()) {
+    const record = this.bankTransactions.get(txId);
+    if (!record || (operatorId && (record.operator_id || DEFAULT_OPERATOR_ID) !== operatorId)) {
+      return { success: false, error: 'Không tìm thấy giao dịch ngân hàng', code: 'BANK_TX_NOT_FOUND', status: 404 };
+    }
+    if (record.outcome !== 'UNMATCHED') {
+      return { success: false, error: 'Chỉ gán được giao dịch đang ở trạng thái UNMATCHED', code: 'BANK_TX_NOT_UNMATCHED', status: 409 };
+    }
+    const cleanPnr = typeof pnr === 'string' ? pnr.trim().toUpperCase() : '';
+    if (!cleanPnr) {
+      return { success: false, error: 'Cần mã đặt vé (PNR) để gán giao dịch', code: 'VALIDATION_ERROR', status: 400 };
+    }
+    const ordId = this.pnrIndex.get(cleanPnr) || (this.orders.has(cleanPnr) ? cleanPnr : null);
+    const order = ordId ? this.orders.get(ordId) : null;
+    if (!order || (order.operator_id || DEFAULT_OPERATOR_ID) !== (record.operator_id || DEFAULT_OPERATOR_ID)) {
+      return { success: false, error: 'Không tìm thấy đơn đặt vé thuộc nhà xe này', code: 'ORDER_NOT_FOUND', status: 404 };
     }
 
-    const settleResult = this.settlePayment(matchedOrder.order_id, bankRef, now);
-    if (!settleResult.success) {
-      return settleResult;
+    this.bankTransactions.delete(record.tx_id);
+    const res = this.applyBankTransfer({
+      _txKey: record.tx_id,
+      _receivedAt: record.received_at,
+      operatorId: record.operator_id || DEFAULT_OPERATOR_ID,
+      provider: record.provider,
+      providerTxId: record.provider_tx_id,
+      bankRef: record.bank_ref,
+      amountVnd: record.amount_vnd,
+      memo: record.memo,
+      accountNumber: record.account_number,
+      occurredAt: record.occurred_at,
+      direction: 'IN',
+      orderId: order.order_id,
+      note: record.note
+    }, now);
+
+    const updated = this.bankTransactions.get(record.tx_id);
+    if (updated) {
+      updated.assigned_by = staff || null;
+      updated.assigned_at = new Date(now).toISOString();
+    }
+
+    return {
+      ...res,
+      tx_id: record.tx_id,
+      assigned_by: staff || null
+    };
+  }
+
+  /**
+   * Handle VietQR Webhook Callback (PAX-014, OQ-008): thin wrapper over applyBankTransfer.
+   */
+  handleVietQrCallback({
+    transferMemo,
+    memo,
+    amountVnd,
+    bankRef = null,
+    providerTxId = null,
+    accountNumber = null,
+    occurredAt = null,
+    direction = 'IN',
+    operatorId = DEFAULT_OPERATOR_ID,
+    now = Date.now()
+  } = {}) {
+    const res = this.applyBankTransfer({
+      operatorId,
+      provider: 'VIETQR_HMAC',
+      providerTxId: providerTxId || bankRef || null,
+      bankRef: bankRef || null,
+      amountVnd: Number(amountVnd),
+      memo: transferMemo ?? memo ?? '',
+      accountNumber,
+      occurredAt,
+      direction
+    }, now);
+
+    const settledOutcomes = ['SETTLED', 'OVERPAID_SETTLED', 'LATE_SETTLED'];
+    if (settledOutcomes.includes(res.outcome)) {
+      return {
+        success: true,
+        settled: true,
+        status: res.outcome,
+        outcome: res.outcome,
+        replay: Boolean(res.replay),
+        pnr: res.pnr || null,
+        order_id: res.order_id || null,
+        issued_tickets: res.issued_tickets || [],
+        ...(res.refund_id ? { refund_id: res.refund_id } : {})
+      };
     }
 
     return {
       success: true,
-      pnr: matchedOrder.pnr,
-      order_id: matchedOrder.order_id,
-      issued_tickets: settleResult.data.tickets || []
+      settled: false,
+      status: res.outcome,
+      outcome: res.outcome,
+      replay: Boolean(res.replay),
+      pnr: res.pnr || null,
+      order_id: res.order_id || null,
+      ...(res.remaining_vnd !== undefined ? { remaining_vnd: res.remaining_vnd } : {}),
+      ...(res.refund_id ? { refund_id: res.refund_id } : {})
     };
   }
 
@@ -472,7 +893,7 @@ export class PassengerPaymentService {
 
     // Check expiry
     if (order.payment_status === 'PENDING_PAYMENT' && mockNow > new Date(order.expires_at).getTime()) {
-      order.payment_status = 'EXPIRED';
+      this._expireOrder(order);
       return { success: false, error: 'Đơn hàng đã hết hạn thanh toán', code: 'PAYMENT_EXPIRED', data: order };
     }
 

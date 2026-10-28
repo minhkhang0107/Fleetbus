@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../../resources/lib/src/theme/app_colors.dart';
+import 'package:resources/resources.dart';
 
 class ManagerDashboardScreen extends StatelessWidget {
   const ManagerDashboardScreen({super.key});
@@ -35,7 +35,7 @@ class ManagerDashboardScreen extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: ManagerColors.badgeGreenBg,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: ManagerColors.emeraldSafe.withOpacity(0.3)),
+                  border: Border.all(color: ManagerColors.emeraldSafe.withValues(alpha: 0.3)),
                 ),
                 child: const Row(
                   children: [
@@ -124,7 +124,7 @@ class ManagerDashboardScreen extends StatelessWidget {
         Expanded(flex: 2, child: Text(load, style: const TextStyle(color: ManagerColors.cyanAccent, fontWeight: FontWeight.w600, fontSize: 13))),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(color: statusColor.withOpacity(0.15), borderRadius: BorderRadius.circular(6)),
+          decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
           child: Text(status, style: TextStyle(color: statusColor, fontWeight: FontWeight.w700, fontSize: 11)),
         ),
       ],

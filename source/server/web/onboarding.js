@@ -27,6 +27,8 @@ export function renderOnboardingPage(op, pageUrl) {
 <main>
   <h1>${esc(op.name)}</h1>
   ${op.hotline ? `<div class="muted">Tổng đài ${esc(op.hotline)}</div>` : ''}
+  ${op.support_email ? `<div class="muted">${esc(op.support_email)}</div>` : ''}
+  ${op.address ? `<div class="muted">${esc(op.address)}</div>` : ''}
   <div class="code">${esc(op.code)}</div>
   <div class="muted">Mã nhà xe</div>
   <div id="qr" aria-label="Mã QR của trang này"></div>

@@ -18,6 +18,8 @@ export const OPERATORS = [
     name: 'Nhà xe Sao Mai',
     short_name: 'Sao Mai',
     hotline: '1900 6868',
+    support_email: 'cskh@saomai.vn',
+    address: 'Bến xe Giáp Bát, Giải Phóng, Hoàng Mai, Hà Nội',
     primary_color: '#2563EB',
     bank: { bin: '970415', bank_name: 'VietinBank', account_number: '1088219999', account_name: 'NHA XE SAO MAI' },
     memo_prefix: 'SAOMAI',
@@ -50,6 +52,8 @@ export const OPERATORS = [
     name: 'Xuyên Việt Lines',
     short_name: 'Xuyên Việt',
     hotline: '1900 2468',
+    support_email: 'hotro@xuyenviet.vn',
+    address: 'Bến xe Mỹ Đình, Phạm Hùng, Nam Từ Liêm, Hà Nội',
     primary_color: '#0F766E',
     bank: { bin: '970436', bank_name: 'Vietcombank', account_number: '0071000123456', account_name: 'XUYEN VIET LINES' },
     memo_prefix: 'XUYENVIET',
@@ -77,25 +81,44 @@ export function findOperatorById(id) {
   return OPERATORS.find(op => op.operator_id === id) || null;
 }
 
+export function operatorPaymentConfig(op) {
+  const cfg = op?.service_config;
+  const allowCash = cfg?.allow_cash_payment !== false;
+  const defaultMethods = allowCash ? ['BANK_TRANSFER', 'CASH'] : ['BANK_TRANSFER'];
+  const rawMethods = Array.isArray(cfg?.payment?.methods) && cfg.payment.methods.length > 0
+    ? cfg.payment.methods.filter(m => m === 'BANK_TRANSFER' || (m === 'CASH' && allowCash))
+    : defaultMethods;
+  const methods = rawMethods.length > 0 ? [...new Set(rawMethods)] : defaultMethods;
+  const transfer_provider = typeof cfg?.payment?.transfer_provider === 'string' && cfg.payment.transfer_provider
+    ? cfg.payment.transfer_provider.toUpperCase()
+    : 'MANUAL';
+  return { methods, transfer_provider };
+}
+
 export function publicOperatorProfile(op) {
   if (!op) return null;
+  const payment = operatorPaymentConfig(op);
   return {
     operator_id: op.operator_id,
     code: op.code,
     name: op.name,
     short_name: op.short_name,
     hotline: op.hotline,
+    support_email: op.support_email ?? null,
+    address: op.address ?? null,
     primary_color: op.primary_color,
     onboarding_url: `/o/${op.code}`,
     pickup_modes: [...(op.service_config?.pickup_modes || ['FIXED_STOP'])],
     dropoff_modes: [...(op.service_config?.dropoff_modes || ['FIXED_LOCATION'])],
-    allow_cash_payment: op.service_config?.allow_cash_payment !== false
+    allow_cash_payment: payment.methods.includes('CASH'),
+    payment_methods: payment.methods
   };
 }
 
 const CODE_RE = /^[A-Z0-9]{3,16}$/;
 const COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
 const BANK_FIELDS = ['bin', 'bank_name', 'account_number', 'account_name'];
+const EMAIL_RE = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/;
 
 function invalid(message) {
   return { ok: false, status: 400, code: 'VALIDATION_ERROR', message };
@@ -114,6 +137,24 @@ function validateFields(fields) {
   if (!/^\d{6}$/.test(text(bank.bin))) return invalid('Mã BIN ngân hàng gồm 6 chữ số');
   if (!/^\d{6,19}$/.test(text(bank.account_number))) return invalid('Số tài khoản chỉ gồm 6-19 chữ số');
   if (fields.memo_prefix !== undefined && !CODE_RE.test(fields.memo_prefix)) return invalid('Tiền tố nội dung chuyển khoản gồm 3-16 ký tự A-Z, 0-9');
+  if (fields.hotline !== undefined && fields.hotline !== null) {
+    if (typeof fields.hotline !== 'string') return invalid('Số tổng đài không hợp lệ');
+    const h = fields.hotline.trim();
+    if (h !== '') {
+      const digits = (h.match(/\d/g) || []).length;
+      if (!/^[0-9 .+]{8,15}$/.test(h) || digits < 8) return invalid('Số tổng đài không hợp lệ');
+    }
+  }
+  if (fields.support_email !== undefined && fields.support_email !== null) {
+    if (typeof fields.support_email !== 'string') return invalid('Email chăm sóc khách hàng không hợp lệ');
+    const e = fields.support_email.trim();
+    if (e !== '' && !EMAIL_RE.test(e)) return invalid('Email chăm sóc khách hàng không hợp lệ');
+  }
+  if (fields.address !== undefined && fields.address !== null) {
+    if (typeof fields.address !== 'string') return invalid('Địa chỉ tối đa 200 ký tự');
+    const a = fields.address.trim();
+    if (a.length > 200) return invalid('Địa chỉ tối đa 200 ký tự');
+  }
   return null;
 }
 
@@ -121,7 +162,6 @@ function cleanBank(bank) {
   return Object.fromEntries(BANK_FIELDS.map(key => [key, text(bank[key])]));
 }
 
-const EMAIL_RE = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/;
 const TEMPORARY_PW_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
 export function generateTemporaryPassword(length = 12) {
@@ -164,6 +204,8 @@ export function createOperator(input = {}, now = Date.now()) {
     name: text(fields.name),
     short_name: text(fields.short_name) || text(fields.name),
     hotline: text(fields.hotline) || null,
+    support_email: text(fields.support_email) || null,
+    address: text(fields.address) || null,
     primary_color: fields.primary_color || '#2563EB',
     bank: cleanBank(fields.bank),
     memo_prefix: fields.memo_prefix,
@@ -206,15 +248,34 @@ export function updateOperator(id, patch = {}) {
   const next = {
     name: patch.name ?? op.name,
     short_name: patch.short_name ?? op.short_name,
-    hotline: patch.hotline ?? op.hotline,
+    hotline: patch.hotline === undefined ? op.hotline : patch.hotline,
+    support_email: patch.support_email === undefined ? op.support_email : patch.support_email,
+    address: patch.address === undefined ? op.address : patch.address,
     primary_color: patch.primary_color ?? op.primary_color,
     memo_prefix: patch.memo_prefix === undefined ? op.memo_prefix : normalizeOperatorCode(patch.memo_prefix),
     bank: { ...op.bank, ...(patch.bank || {}) }
   };
   const error = validateFields(next);
   if (error) return error;
-  Object.assign(op, { ...next, name: text(next.name), short_name: text(next.short_name) || text(next.name), hotline: text(next.hotline) || null, bank: cleanBank(next.bank) });
+  Object.assign(op, {
+    ...next,
+    name: text(next.name),
+    short_name: text(next.short_name) || text(next.name),
+    hotline: text(next.hotline) || null,
+    support_email: text(next.support_email) || null,
+    address: text(next.address) || null,
+    bank: cleanBank(next.bank)
+  });
   return { ok: true, operator: op };
+}
+
+/** Updates an operator's contact info only (hotline, support_email, address). */
+export function updateOperatorContact(id, patch = {}) {
+  const contactPatch = {};
+  if (patch.hotline !== undefined) contactPatch.hotline = patch.hotline;
+  if (patch.support_email !== undefined) contactPatch.support_email = patch.support_email;
+  if (patch.address !== undefined) contactPatch.address = patch.address;
+  return updateOperator(id, contactPatch);
 }
 
 export function setOperatorActive(id, active) {

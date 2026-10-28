@@ -80,7 +80,7 @@ describe('Spec conformance: money, tickets and boarding', () => {
   async function settle(order, amountVnd = order.payment.amount_vnd) {
     return api('/api/v1/webhooks/vietqr/ipn', {
       method: 'POST',
-      body: { transferMemo: order.payment.payment_details.transfer_memo, amountVnd, bankRef: `bank_${Date.now()}` }
+      body: { transferMemo: order.payment.payment_details.transfer_memo, amountVnd, bankRef: `bank_${crypto.randomUUID()}` }
     });
   }
 
@@ -148,12 +148,14 @@ describe('Spec conformance: money, tickets and boarding', () => {
     const created = await book(['A06'], 'u_amount');
     const order = created.body.data;
     const underpaid = await settle(order, 1000);
-    assert.strictEqual(underpaid.status, 400);
-    assert.strictEqual(underpaid.body.code, 'AMOUNT_MISMATCH');
+    assert.strictEqual(underpaid.status, 200);
+    assert.strictEqual(underpaid.body.data.settled, false);
+    assert.strictEqual(underpaid.body.data.status, 'PARTIAL');
     const status = await api(`/api/v1/passenger/payments/${order.payment.order_id}/verify-status`, { method: 'POST', body: {} });
     assert.strictEqual(status.body.data.payment_status, 'PENDING_PAYMENT');
-    const exact = await settle(order);
+    const exact = await settle(order, order.payment.amount_vnd - 1000);
     assert.strictEqual(exact.status, 200);
+    assert.strictEqual(exact.body.data.settled, true);
     assert.strictEqual(exact.body.data.issued_tickets.length, 1);
   });
 

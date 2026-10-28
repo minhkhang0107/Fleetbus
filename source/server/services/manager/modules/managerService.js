@@ -1772,9 +1772,18 @@ export class ManagerOperationsService {
   }
 
   /**
+   * MGR-022: Refund requests of one company, newest first. status 'ALL' lists every request.
+   */
+  listRefundRequests({ operatorId = DEFAULT_OPERATOR_ID, status = 'REFUND_REQUESTED' } = {}) {
+    return this.refundRequests
+      .filter(r => (r.operator_id || DEFAULT_OPERATOR_ID) === operatorId && (status === 'ALL' || r.status === status))
+      .sort((a, b) => (Date.parse(b.requested_at || '') || 0) - (Date.parse(a.requested_at || '') || 0));
+  }
+
+  /**
    * MGR-022: Approve or reject an open refund request, exactly once.
    */
-  processRefundApproval(refundId, approved, notes = '', operatorId = DEFAULT_OPERATOR_ID) {
+  processRefundApproval(refundId, approved, notes = '', operatorId = DEFAULT_OPERATOR_ID, staff = null) {
     const request = this.refundRequests.find(r => r.refund_id === refundId && (!operatorId || r.operator_id === operatorId));
     if (!request) {
       return { success: false, error: 'Không tìm thấy yêu cầu hoàn tiền', code: 'REFUND_NOT_FOUND' };
@@ -1782,10 +1791,14 @@ export class ManagerOperationsService {
     if (request.status !== 'REFUND_REQUESTED') {
       return { success: false, error: `Yêu cầu hoàn tiền đã được xử lý (${request.status})`, code: 'REFUND_ALREADY_PROCESSED' };
     }
+    if (!approved && String(notes || '').trim().length < 3) {
+      return { success: false, error: 'Từ chối hoàn tiền cần ghi lý do (ít nhất 3 ký tự)', code: 'REASON_REQUIRED' };
+    }
 
     request.status = approved ? 'REFUNDED' : 'REFUND_REJECTED';
     request.notes = notes;
     request.processed_at = new Date().toISOString();
+    request.processed_by = staff;
 
     if (approved) {
       const booking = this.bookings.find(b => b.pnr === request.pnr);
