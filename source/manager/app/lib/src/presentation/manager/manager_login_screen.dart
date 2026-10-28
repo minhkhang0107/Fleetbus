@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../../resources/lib/src/theme/app_colors.dart';
+import 'package:resources/resources.dart';
 
 class ManagerLoginScreen extends StatefulWidget {
   final VoidCallback onLoginSuccess;
@@ -50,7 +50,7 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: ManagerColors.cyanAccent.withOpacity(0.15),
+                      color: ManagerColors.cyanAccent.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: const Icon(Icons.hub_rounded, color: ManagerColors.cyanAccent, size: 26),

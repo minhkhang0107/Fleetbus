@@ -371,6 +371,11 @@ class ManagerApiService {
     );
   }
 
+  // MGR-022: Refund requests of the company, newest first (open ones by default, status ALL for every one)
+  Future<Map<String, dynamic>> getRefunds({String? status}) {
+    return _get('/ops/refunds', query: status == null ? null : {'status': status});
+  }
+
   // MGR-022: Approve or reject a refund request, once
   Future<Map<String, dynamic>> processRefund(String refundId, {required bool approved, String? notes, String? idempotencyKey}) {
     return _post(
