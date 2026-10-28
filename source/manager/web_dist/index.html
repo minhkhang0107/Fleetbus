@@ -626,6 +626,20 @@
         </div>
         <div class="card scroll" style="padding:0" id="bankTransactionsBox"></div>
       </div>
+
+      <!-- Card d: Yêu cầu hoàn tiền (MGR-022) -->
+      <div class="card" id="cardRefunds" style="margin-top:16px">
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div>
+            <div class="section-title" style="margin:0">Yêu cầu hoàn tiền</div>
+            <p class="muted" style="margin:2px 0 0;font-size:13px">Chuyển trả tiền cho khách rồi bấm "Đã hoàn tiền". Từ chối cần ghi lý do.</p>
+          </div>
+          <label class="row" style="margin:0;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="refundShowAll"> Xem cả yêu cầu đã xử lý
+          </label>
+        </div>
+        <div class="card scroll" style="padding:0" id="refundsBox"></div>
+      </div>
     </div>
 
     <!-- Audit -->
@@ -2285,7 +2299,8 @@ async function loadPayments() {
   await Promise.all([
     loadPaymentSettings(),
     loadPendingPayments(),
-    loadBankTransactions()
+    loadBankTransactions(),
+    loadRefunds()
   ]);
 }
 
@@ -2592,6 +2607,7 @@ function toggleConfirmForm(order) {
 
     toast(toastMsg);
     await loadPendingPayments();
+    await loadRefunds();
   });
 }
 
@@ -2688,6 +2704,7 @@ async function loadBankTransactions() {
         toast(toastMsg);
         await loadBankTransactions();
         await loadPendingPayments();
+        await loadRefunds();
       });
     });
   }
@@ -2696,6 +2713,107 @@ async function loadBankTransactions() {
 $('#bankTxShowAll')?.addEventListener('change', (e) => {
   bankTxShowAll = e.target.checked;
   loadBankTransactions();
+});
+
+// Refund requests (MGR-022): money goes back to the passenger by hand, then the office marks it done.
+let refundShowAll = false;
+const REFUND_SOURCES = {
+  PASSENGER_CANCEL: 'Khách hủy vé',
+  OPERATOR_CANCEL: 'Nhà xe hủy chuyến',
+  HOME_SERVICE_REFUSED: 'Từ chối đón/trả tận nhà',
+  OVERPAID_EXCESS: 'Chuyển thừa',
+  DUPLICATE_TRANSFER: 'Chuyển trùng',
+  UNDERPAID_EXPIRED: 'Chuyển thiếu, đơn hết hạn',
+  UNMATCHED_OVERDUE: 'Chuyển trễ, ghế đã bán'
+};
+
+async function loadRefunds() {
+  const card = $('#cardRefunds');
+  const box = $('#refundsBox');
+  if (!box) return;
+  if (!['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER'].includes(state.user?.role)) {
+    card.classList.add('hidden');
+    return;
+  }
+  card.classList.remove('hidden');
+  const r = await api(`/api/v1/ops/refunds?status=${refundShowAll ? 'ALL' : 'REFUND_REQUESTED'}`);
+  if (!r.ok) {
+    box.innerHTML = `<p class="muted" style="padding:16px;margin:0">${esc(r.message)}</p>`;
+    return;
+  }
+  const refunds = r.data?.refunds || [];
+  if (refunds.length === 0) {
+    box.innerHTML = `<p class="muted" style="padding:16px;margin:0">${refundShowAll ? 'Chưa có yêu cầu hoàn tiền nào.' : 'Không có yêu cầu hoàn tiền nào đang chờ.'}</p>`;
+    return;
+  }
+
+  const statusBadge = (st) => {
+    if (st === 'REFUND_REQUESTED') return '<span class="pill warn">Chờ hoàn</span>';
+    if (st === 'REFUNDED') return '<span class="pill ok">Đã hoàn</span>';
+    if (st === 'REFUND_REJECTED') return '<span class="pill danger">Từ chối</span>';
+    return `<span class="pill">${esc(st)}</span>`;
+  };
+
+  box.innerHTML = `<table>
+    <thead>
+      <tr>
+        <th>Yêu cầu lúc</th>
+        <th>PNR</th>
+        <th>Khách hàng</th>
+        <th>Số tiền</th>
+        <th>Lý do</th>
+        <th style="text-align:right">${refundShowAll ? 'Trạng thái' : 'Thao tác'}</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${refunds.map(f => `
+        <tr>
+          <td style="font-size:12px">${esc(hhmm(f.requested_at))} ${esc(dmy(f.requested_at))}</td>
+          <td><b class="mono">${esc(f.pnr || '—')}</b></td>
+          <td>${esc(f.payer_name || '—')}${f.payer_phone ? `<br><span class="mono muted" style="font-size:12px">${esc(f.payer_phone)}</span>` : ''}</td>
+          <td style="font-weight:600;color:var(--danger)">${vnd(f.amount_vnd)}</td>
+          <td style="font-size:13px">${esc(REFUND_SOURCES[f.source] || f.source || '')}${f.reason ? `<br><span class="muted" style="font-size:12px">${esc(f.reason)}</span>` : ''}</td>
+          <td style="text-align:right">
+            ${f.status === 'REFUND_REQUESTED' ? `
+              <div class="row" style="gap:6px;justify-content:flex-end">
+                <input type="text" placeholder="Ghi chú / lý do từ chối" data-refund-note="${esc(f.refund_id)}" style="width:180px;padding:4px 8px;font-size:13px">
+                <button class="btn primary" data-refund-approve="${esc(f.refund_id)}" style="padding:4px 10px;font-size:13px">Đã hoàn tiền</button>
+                <button class="btn" data-refund-reject="${esc(f.refund_id)}" style="padding:4px 10px;font-size:13px">Từ chối</button>
+              </div>
+            ` : `${statusBadge(f.status)}${f.notes ? `<br><span class="muted" style="font-size:12px">${esc(f.notes)}</span>` : ''}`}
+          </td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>`;
+
+  const process = async (btn, refundId, approved) => {
+    const notes = (box.querySelector(`input[data-refund-note="${CSS.escape(refundId)}"]`)?.value || '').trim();
+    if (!approved && notes.length < 3) {
+      toast('Ghi lý do từ chối (ít nhất 3 ký tự)');
+      return;
+    }
+    btn.disabled = true;
+    const r = await api(`/api/v1/ops/refunds/${encodeURIComponent(refundId)}/process`, {
+      method: 'POST',
+      idempotent: true,
+      body: { approved, notes }
+    });
+    btn.disabled = false;
+    if (!r.ok) {
+      toast(r.message || 'Xử lý yêu cầu hoàn tiền thất bại');
+      return;
+    }
+    toast(approved ? `Đã ghi nhận hoàn ${vnd(r.data?.amount_vnd)}` : 'Đã từ chối yêu cầu hoàn tiền');
+    await loadRefunds();
+  };
+  box.querySelectorAll('button[data-refund-approve]').forEach(b => b.addEventListener('click', () => process(b, b.dataset.refundApprove, true)));
+  box.querySelectorAll('button[data-refund-reject]').forEach(b => b.addEventListener('click', () => process(b, b.dataset.refundReject, false)));
+}
+
+$('#refundShowAll')?.addEventListener('change', (e) => {
+  refundShowAll = e.target.checked;
+  loadRefunds();
 });
 
 // ---------- fleet (MGR-005, MGR-006) ----------

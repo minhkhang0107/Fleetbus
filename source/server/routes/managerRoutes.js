@@ -636,6 +636,25 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/ops/refunds?status=ALL (MGR-022): open refund requests by default, newest first
+  if (pathname === '/api/v1/ops/refunds' && req.method === 'GET') {
+    const status = parsedUrl.searchParams.get('status') || 'REFUND_REQUESTED';
+    const orders = [...(services.paymentService?.orders?.values() || [])];
+    const refunds = managerService.listRefundRequests({ operatorId: req.operatorId || DEFAULT_OPERATOR_ID, status })
+      .map(r => {
+        const order = orders.find(o => o.pnr === r.pnr);
+        const payer = visibleBooking(req, { phone: order?.payer?.phone || '' });
+        return {
+          ...r,
+          payer_name: order?.payer?.full_name || order?.payer?.name || '',
+          payer_phone: payer.phone || '',
+          payment_method: order?.payment_method || null
+        };
+      });
+    sendSuccess(res, { total: refunds.length, refunds });
+    return true;
+  }
+
   // POST /api/v1/ops/refunds/:refundId/process (MGR-021, MGR-022)
   if (pathname.startsWith('/api/v1/ops/refunds/') && pathname.endsWith('/process') && req.method === 'POST') {
     const parts = pathname.split('/');
@@ -646,7 +665,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         sendError(res, 'Cần chỉ rõ approved: true hoặc false', 'APPROVED_REQUIRED', 400);
         return;
       }
-      const result = managerService.processRefundApproval(refundId, body.approved, body.notes, req.operatorId);
+      const result = managerService.processRefundApproval(refundId, body.approved, body.notes, req.operatorId, req.identity?.sub || null);
       if (result.success) {
         audit(req, managerService, { action: body.approved ? 'REFUND_APPROVED' : 'REFUND_REJECTED', resource: refundId, before: { status: 'REFUND_REQUESTED' }, after: { status: result.data.status, amount_vnd: result.data.amount_vnd } });
         sendSuccess(res, result.data || result);

@@ -97,6 +97,7 @@ export const API_CATALOG = [
   { method: 'POST', path: '/api/v1/ops/pos/hotline-hold', screen: 'MGR-020', summary: 'Hotline seat hold' },
   { method: 'POST', path: '/api/v1/ops/pos/hotline-holds/{reservationId}/cancel', screen: 'MGR-020', summary: 'Cancel hotline seat hold' },
   { method: 'POST', path: '/api/v1/ops/debt-receipts/{receiptCode}/redeem', screen: 'MGR-022', summary: 'Pay out a change debt receipt at the cash desk' },
+  { method: 'GET', path: '/api/v1/ops/refunds', screen: 'MGR-022', summary: 'Refund requests of the company, open ones by default' },
   { method: 'POST', path: '/api/v1/ops/refunds/{refundId}/process', screen: 'MGR-022', summary: 'Approve or reject a refund' },
   { method: 'POST', path: '/api/v1/ops/trips/{tripId}/replace-vehicle', screen: 'MGR-023', summary: 'Emergency vehicle replacement' },
   { method: 'POST', path: '/api/v1/ops/trips/{tripId}/delay', screen: 'MGR-024', summary: 'Declare a trip delay' },

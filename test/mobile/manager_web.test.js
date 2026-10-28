@@ -169,4 +169,11 @@ describe('Phase Manager Web: Flutter Web Platform & Dashboard Integrity Test Sui
     // bank-transactions assign
     assert.ok(content.includes('/api/v1/ops/bank-transactions') && content.includes('/assign'), 'Must call bank-transactions assign');
   });
+
+  it('TC-MGR-WEB-11: Manager Web Distribution must list and process refund requests in the payments panel (MGR-022)', () => {
+    const content = fs.readFileSync(path.join(managerDir, 'web_dist/index.html'), 'utf8');
+    assert.ok(content.includes('id="refundsBox"'), 'payments panel must hold the refund list');
+    assert.ok(content.includes('/api/v1/ops/refunds?status='), 'Must call GET /api/v1/ops/refunds');
+    assert.ok(content.includes('/process`'), 'Must call refunds process');
+  });
 });

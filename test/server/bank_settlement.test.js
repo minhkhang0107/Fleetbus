@@ -762,4 +762,44 @@ describe('Unified bank transfer settlement engine (MGR-037)', () => {
 
     cashOrder.payment_status = origStatus;
   });
+
+  it('17. GET /api/v1/ops/refunds lists open refunds per company; reject needs a reason; processed ones leave the default list (MGR-022)', async () => {
+    const { payment } = await createOrder();
+    const res = services.paymentService.applyBankTransfer({
+      operatorId: 'op_saomai',
+      provider: 'VIETQR_HMAC',
+      providerTxId: 'FT_REFUND_LIST_1',
+      bankRef: 'FT_REFUND_LIST_1',
+      amountVnd: payment.amount_vnd + 30000,
+      memo: payment.payment_details.transfer_memo
+    });
+    assert.strictEqual(res.outcome, 'OVERPAID_SETTLED');
+
+    const list = await api('/api/v1/ops/refunds', { token: directorToken });
+    assert.strictEqual(list.status, 200);
+    const row = list.body.data.refunds.find(r => r.refund_id === res.refund_id);
+    assert.ok(row, 'open refund must be listed');
+    assert.strictEqual(row.amount_vnd, 30000);
+    assert.strictEqual(row.source, 'OVERPAID_EXCESS');
+    assert.strictEqual(row.payer_phone, '0912340001', 'the director sees the full phone to pay back');
+
+    assert.strictEqual((await api('/api/v1/ops/refunds', { token: cashierToken })).status, 403);
+    assert.strictEqual((await api('/api/v1/ops/refunds', { token: dispatcherToken })).status, 403);
+    const xv = await api('/api/v1/ops/refunds?status=ALL', { token: xvDirectorToken });
+    assert.ok(!xv.body.data.refunds.some(r => r.refund_id === res.refund_id), 'another company must not see it');
+
+    const noReason = await api(`/api/v1/ops/refunds/${res.refund_id}/process`, { method: 'POST', token: directorToken, body: { approved: false, notes: ' ' } });
+    assert.strictEqual(noReason.status, 400);
+    assert.strictEqual(noReason.body.code ?? noReason.body.error?.code, 'REASON_REQUIRED');
+
+    const done = await api(`/api/v1/ops/refunds/${res.refund_id}/process`, { method: 'POST', token: directorToken, body: { approved: true, notes: 'CK VCB FT123' } });
+    assert.strictEqual(done.status, 200);
+    assert.strictEqual(done.body.data.status, 'REFUNDED');
+    assert.ok(done.body.data.processed_by);
+
+    const open = await api('/api/v1/ops/refunds', { token: directorToken });
+    assert.ok(!open.body.data.refunds.some(r => r.refund_id === res.refund_id), 'processed refund leaves the open list');
+    const all = await api('/api/v1/ops/refunds?status=ALL', { token: directorToken });
+    assert.strictEqual(all.body.data.refunds.find(r => r.refund_id === res.refund_id)?.status, 'REFUNDED');
+  });
 });

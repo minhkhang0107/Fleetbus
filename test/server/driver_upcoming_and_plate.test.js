@@ -32,7 +32,7 @@ describe('Task T2: Driver upcoming trips within 12 hours & schedule template def
 
   describe('Driver upcoming trip window (next 12 hours)', () => {
     it('TC-DRV-UPCOMING-01: at day D 23:30 (VN), a run departing D+1 07:00 appears in getTodayTrips; a run departing D+2 07:00 does not', () => {
-      const dayD = '2026-10-25';
+      const dayD = vnDate(Date.now());
       const dayD1 = addDays(dayD, 1);
       const dayD2 = addDays(dayD, 2);
       const runD1 = `trp_hn_th_01_${dayD1.replaceAll('-', '')}`;
@@ -84,7 +84,7 @@ describe('Task T2: Driver upcoming trips within 12 hours & schedule template def
     });
 
     it('TC-DRV-UPCOMING-03: today\'s past/current trips remain visible alongside upcoming morning trips', () => {
-      const dayD = '2026-10-25';
+      const dayD = vnDate(Date.now());
       const dayD1 = addDays(dayD, 1);
       const runD1 = `trp_hn_th_01_${dayD1.replaceAll('-', '')}`;
 
