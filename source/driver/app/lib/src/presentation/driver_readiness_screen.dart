@@ -74,7 +74,7 @@ class DriverReadinessScreen extends StatelessWidget {
             child: Panel(
               border: const Color(0xFFA16207),
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Text('Đón tận nhà · $homeWaiting/$homes khách chờ', style: dsans(size: 17, weight: FontWeight.w700, color: DTokens.warnInk)),
+                Text(homeWaiting == 0 ? 'Đón tận nhà · xong ($homes khách)' : 'Đón tận nhà · còn $homeWaiting/$homes khách chờ', style: dsans(size: 17, weight: FontWeight.w700, color: DTokens.warnInk)),
                 const SizedBox(height: 4),
                 Text(
                   store.homeRunStarted

@@ -26,8 +26,10 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
     if (store.userPhone == null) {
       return EmptyState(
         icon: Icons.lock_person_outlined,
-        title: 'Đăng nhập để xem vé',
-        message: 'Vé đã đặt, mã QR lên xe và vé đã hủy được lưu theo số điện thoại của bạn.',
+        title: store.sessionExpired ? 'Phiên đăng nhập đã hết hạn' : 'Đăng nhập để xem vé',
+        message: store.sessionExpired
+            ? 'Đăng nhập lại để xem vé. Vé của bạn vẫn còn, lưu theo số điện thoại.'
+            : 'Vé đã đặt, mã QR lên xe và vé đã hủy được lưu theo số điện thoại của bạn.',
         actionLabel: 'Đăng nhập',
         actionIcon: Icons.login,
         onAction: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerLoginScreen())),

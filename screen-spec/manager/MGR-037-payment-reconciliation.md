@@ -3,7 +3,7 @@
 **App:** Manager Operations Portal (`/manager` → "Thanh toán")  
 **Platform:** Web (Desktop) + server  
 **Priority:** P0 (money)  
-**Version:** 1.0 (D162, 2026-10-27)  
+**Version:** 1.0 (D163, 2026-10-27)  
 **Roles:** FLEET_DIRECTOR edits settings; FINANCIAL_CONTROLLER reads settings; CASHIER, FINANCIAL_CONTROLLER, FLEET_DIRECTOR confirm payments; FLEET_DIRECTOR, FINANCIAL_CONTROLLER assign unmatched transfers
 
 ---

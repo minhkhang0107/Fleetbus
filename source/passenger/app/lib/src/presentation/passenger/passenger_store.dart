@@ -686,6 +686,9 @@ class PassengerStore extends ChangeNotifier {
   String? userPhone;
   bool isVip = false;
   bool get loggedIn => api.authToken != null;
+
+  /// The server refused the saved session as expired; the wallet asks to sign in again and says why.
+  bool sessionExpired = false;
   String? devOtp; // development server only: fills the OTP field like an SMS autofill
 
   // Search
@@ -779,6 +782,11 @@ class PassengerStore extends ChangeNotifier {
   List<TravelDate> get bookableDates => [for (final d in calendar.days) TravelDate.of(d, today: calendar.today)];
 
   ApiResult<Map<String, dynamic>> _result(Map<String, dynamic> json) {
+    // A session that ran out while the app stayed open (12 h): sign out at once instead of showing an empty wallet.
+    if ((json['code'] == 'TOKEN_EXPIRED' || json['code'] == 'INVALID_TOKEN') && api.authToken != null) {
+      sessionExpired = true;
+      logout();
+    }
     if (json['status'] == 'success') return ApiResult(json['data'] is Map<String, dynamic> ? json['data'] as Map<String, dynamic> : {'value': json['data']});
     return ApiResult(null, '${json['message'] ?? 'Có lỗi, thử lại sau.'}', '${json['code'] ?? ''}');
   }
@@ -984,6 +992,7 @@ class PassengerStore extends ChangeNotifier {
     }
     
     userPhone = phone;
+    sessionExpired = false;
     final name = r.value!['user']?['full_name'];
     userName = name is String && name != 'Hành khách BusGo' ? name : null;
     isVip = r.value!['user']?['is_vip'] == true;

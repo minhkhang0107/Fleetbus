@@ -699,7 +699,11 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     const bookingId = pathname.split('/')[5];
     const booking = managerService.bookings.find(b => b.pnr === bookingId && (!req.operatorId || managerService.findTrip(b.trip_id)?.operator_id === req.operatorId));
     if (booking) {
-      sendSuccess(res, visibleBooking(req, booking));
+      // What was paid stays total_fare_vnd; what goes back (a refused home fee, a cancellation) is listed beside it.
+      const refunds = managerService.refundRequests.filter(r => r.pnr === booking.pnr)
+        .map(({ refund_id, amount_vnd, status, reason, source, requested_at, processed_at }) => ({ refund_id, amount_vnd, status, reason, source, requested_at, processed_at: processed_at || null }));
+      const sum = (status) => refunds.filter(r => r.status === status).reduce((n, r) => n + (r.amount_vnd || 0), 0);
+      sendSuccess(res, { ...visibleBooking(req, booking), refunds, refund_pending_vnd: sum('REFUND_REQUESTED'), refunded_vnd: sum('REFUNDED') });
     } else {
       sendError(res, 'Không tìm thấy thông tin đơn đặt vé', 'BOOKING_NOT_FOUND', 404);
     }

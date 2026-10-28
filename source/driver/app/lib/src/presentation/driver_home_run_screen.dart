@@ -62,6 +62,8 @@ class _DriverHomeRunScreenState extends State<DriverHomeRunScreen> {
     final homes = store.homePickupsInOrder;
     final waiting = store.homePickupsWaiting;
     final window = store.homeWindow;
+    // Every ticket of the next door is next: a family at one gate is one stop of the run.
+    final nextDoor = waiting.isEmpty ? null : store.homeStopOf(waiting.first)?.position;
     final live = Panel(
       border: const Color(0xFF166534),
       child: Row(children: [
@@ -85,6 +87,21 @@ class _DriverHomeRunScreenState extends State<DriverHomeRunScreen> {
       ),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 16), children: [
         live,
+        if (waiting.isNotEmpty && (store.homeLateMinutes > 0 || store.homePastWindow > 0)) ...[
+          const SizedBox(height: 12),
+          Panel(
+            border: const Color(0xFFA16207),
+            child: Text(
+              [
+                if (store.homeLateMinutes > 0 && store.homeBackAt != null)
+                  'Lộ trình này về bến khoảng ${_HomeCard._clock(store.homeBackAt!)}, trễ giờ xuất bến ${store.homeLateMinutes} phút.',
+                if (store.homePastWindow > 0) '${store.homePastWindow} khách được hẹn sau khung đón.',
+                'Đổi thứ tự đón hoặc báo điều hành.',
+              ].join(' '),
+              style: dsans(size: 15, color: DTokens.warnInk, height: 1.4),
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         DriverRouteMap(store: store, height: 200),
         const SizedBox(height: 12),
@@ -92,7 +109,7 @@ class _DriverHomeRunScreenState extends State<DriverHomeRunScreen> {
           _HomeCard(
             p: homes[i],
             stop: store.homeStopOf(homes[i]),
-            next: waiting.isNotEmpty && waiting.first.ticketId == homes[i].ticketId,
+            next: waiting.isNotEmpty && (waiting.first.ticketId == homes[i].ticketId || (nextDoor != null && store.homeStopOf(homes[i])?.position == nextDoor && waiting.contains(homes[i]))),
             canMoveUp: i > 0 && homes[i].status == PaxStatus.waiting,
             canMoveDown: i < homes.length - 1 && homes[i].status == PaxStatus.waiting,
             onUp: () => _run(() => store.moveHome(homes[i], -1), 'Đã đổi thứ tự đón'),
@@ -217,7 +234,7 @@ class _HomeCard extends StatelessWidget {
               call,
             ])
           else ...[
-            Text('Xe đang chờ, tới ${_clock(missable!)} được đi tiếp', style: dsans(size: 14, color: DTokens.warnInk)),
+            Text(canMiss ? 'Đã chờ đủ thời gian, có thể đi tiếp' : 'Xe đang chờ, tới ${_clock(missable!)} được đi tiếp', style: dsans(size: 14, color: DTokens.warnInk)),
             const SizedBox(height: 8),
             Row(children: [
               Expanded(

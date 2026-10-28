@@ -3,7 +3,7 @@
 **App:** Manager Operations Portal (`/manager` → "Thông tin nhà xe"; platform admin → "Nhà xe (nền tảng)" → "Sửa")  
 **Platform:** Web (Desktop)  
 **Priority:** P1  
-**Version:** 1.0 (D160, 2026-10-27)  
+**Version:** 1.0 (D161, 2026-10-27)  
 **Roles:** every office role reads; FLEET_DIRECTOR edits contact info; PLATFORM_ADMIN edits everything except the code
 
 ---

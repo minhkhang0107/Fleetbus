@@ -95,6 +95,7 @@ void main() {
   bool voucherRefused = false;
   // SH-006: the legal texts of the fake server; legalDown answers with a network failure.
   bool legalDown = false;
+  bool sessionGone = false;
   final legalAnswer = {
     'app': 'passenger',
     'version': '1.0',
@@ -127,6 +128,7 @@ void main() {
     reissueAllowed = false;
     voucherRefused = false;
     legalDown = false;
+    sessionGone = false;
     final client = MockClient((req) async {
       sent.add(req);
       Map<String, dynamic>? data;
@@ -232,6 +234,9 @@ void main() {
           'is_settled': paid,
           if (paid) 'tickets': [{...ticket, 'status': ticketStatus}],
         };
+      }
+      if (path.endsWith('/passenger/tickets') && sessionGone) {
+        return http.Response(jsonEncode({'status': 'error', 'code': 'TOKEN_EXPIRED', 'message': 'Phiên đăng nhập đã hết hạn'}), 401, headers: {'content-type': 'application/json; charset=utf-8'});
       }
       if (path.endsWith('/passenger/tickets')) {
         final tab = req.url.queryParameters['tab'];
@@ -1092,6 +1097,29 @@ void main() {
     expect(find.textContaining('SMS'), findsNothing);
     expect(find.textContaining('Vé đã lưu trong mục "Vé của tôi" của số 0987 *** 321'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a session that expires while the app is open signs out and says so, not an empty wallet', (tester) async {
+    final store = await storeWithServer();
+    paid = true;
+    await store.verifyOtp('0987654321', '123456');
+    await store.loadTickets();
+    expect(store.tickets, isNotEmpty);
+
+    sessionGone = true;
+    await store.loadTickets();
+    expect(store.loggedIn, isFalse);
+    expect(store.sessionExpired, isTrue);
+    expect(store.tickets, isEmpty);
+
+    await tester.pumpWidget(MaterialApp(home: PassengerScope(store: store, child: const Scaffold(body: PassengerWalletScreen()))));
+    await tester.pumpAndSettle();
+    expect(find.text('Phiên đăng nhập đã hết hạn'), findsOneWidget);
+    expect(find.text('Đăng nhập'), findsOneWidget);
+
+    sessionGone = false;
+    await store.verifyOtp('0987654321', '123456');
+    expect(store.sessionExpired, isFalse);
   });
 
   testWidgets('wallet puts HISTORY tickets under "Lịch sử" with "Đã đi" and UPCOMING ones under "Sắp đi"', (tester) async {
