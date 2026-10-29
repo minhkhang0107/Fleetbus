@@ -39,9 +39,9 @@ export class RateLimiter {
     return { ok: true };
   }
 
-  /** Answers 429 and returns false when the caller is over the limit. */
-  enforce(req, res, env = process.env) {
-    const result = this.check(clientIp(req, env));
+  /** Answers 429 and returns false when the caller (its IP, or the given key) is over the limit. */
+  enforce(req, res, env = process.env, key = clientIp(req, env)) {
+    const result = this.check(key);
     if (result.ok) return true;
     res.setHeader('Retry-After', String(result.retryAfterSeconds));
     sendError(res, 'Quá nhiều yêu cầu, vui lòng thử lại sau ít phút', 'RATE_LIMITED', 429);
@@ -49,12 +49,17 @@ export class RateLimiter {
   }
 }
 
-/** The limits of the auth endpoints; each may be replaced by a RateLimiter or its options (tests use small ones). */
+/**
+ * The limits of the auth endpoints; each may be replaced by a RateLimiter or its options (tests use small ones).
+ * Phones on 4G sit behind the carrier's NAT and share an address, so the per-IP OTP limits are wide and the
+ * SMS cost is held by a limit per phone number instead.
+ */
 export function createAuthRateLimiters(overrides = {}) {
   const build = (entry, max) => (entry instanceof RateLimiter ? entry : new RateLimiter({ max, ...entry }));
   return {
-    requestOtp: build(overrides.requestOtp, 10),
-    verifyOtp: build(overrides.verifyOtp, 30),
+    requestOtp: build(overrides.requestOtp, 60),
+    requestOtpPhone: build(overrides.requestOtpPhone, 5),
+    verifyOtp: build(overrides.verifyOtp, 120),
     staffLogin: build(overrides.staffLogin, 30),
     driverLogin: build(overrides.driverLogin, 30)
   };

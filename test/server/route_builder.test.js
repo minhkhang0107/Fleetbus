@@ -460,6 +460,8 @@ describe('Route & Station Builder: Newly onboarded operator creates stations, ro
     assert.strictEqual(createdRouteA.active, true);
     assert.ok(createdRouteA.schedule_id.startsWith('sch_'));
     assert.strictEqual(createdRouteA.schedule.departure, '07:30');
+    // Nothing is on sale on a new route, so its first schedule starts today, not after the booking window.
+    assert.strictEqual(createdRouteA.schedule.valid_from, vnDate());
     assert.strictEqual(createdRouteA.schedule.total_seats, 22);
 
     // GET /api/v1/ops/routes lists the newly created route

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'passenger_about_screen.dart';
 import 'passenger_main_shell.dart';
 import 'passenger_store.dart';
 import 'passenger_widgets.dart';
@@ -208,8 +209,67 @@ class _OtpFormState extends State<OtpForm> {
       ],
       gap(14),
       PrimaryButton(label: _busy ? 'Đang gửi…' : (_codeSent ? widget.confirmLabel : 'Gửi mã'), onPressed: _busy ? null : _submit),
+      gap(10),
+      const PassengerConsentLine(),
       if (widget.secondaryLabel != null) ...[gap(8), GhostButton(label: widget.secondaryLabel!, onPressed: () => Navigator.of(context).pop(false))],
     ]);
     return inSheet ? form : SingleChildScrollView(child: form);
+  }
+}
+
+/// Small consent text under the login button linking to terms and privacy policy.
+class PassengerConsentLine extends StatelessWidget {
+  const PassengerConsentLine({super.key});
+
+  Future<void> _openDoc(BuildContext context, LegalDoc Function(LegalInfo) pick) async {
+    final store = PassengerScope.read(context);
+    var info = store.legalInfo;
+    if (info == null) {
+      final res = await store.loadLegal();
+      info = res.value;
+    }
+    if (!context.mounted) return;
+    if (info == null) {
+      showToast(context, 'Chưa tải được, thử lại sau');
+      return;
+    }
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => LegalDocScreen(doc: pick(info!), info: info)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text.rich(
+      TextSpan(
+        style: sans(size: 12, color: PTokens.muted, height: 1.4),
+        children: [
+          const TextSpan(text: 'Bằng việc tiếp tục, bạn đồng ý với '),
+          WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: GestureDetector(
+              onTap: () => _openDoc(context, (i) => i.terms),
+              child: Text(
+                'Điều khoản sử dụng',
+                style: sans(size: 12, color: PTokens.primary, weight: FontWeight.w600).copyWith(decoration: TextDecoration.underline),
+              ),
+            ),
+          ),
+          const TextSpan(text: ' và '),
+          WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: GestureDetector(
+              onTap: () => _openDoc(context, (i) => i.privacy),
+              child: Text(
+                'Chính sách quyền riêng tư',
+                style: sans(size: 12, color: PTokens.primary, weight: FontWeight.w600).copyWith(decoration: TextDecoration.underline),
+              ),
+            ),
+          ),
+          const TextSpan(text: '.'),
+        ],
+      ),
+      textAlign: TextAlign.center,
+    );
   }
 }

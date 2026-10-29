@@ -100,6 +100,18 @@ void main() {
               {'heading': 'Dữ liệu bản đồ', 'body': 'Dữ liệu bản đồ © những người đóng góp OpenStreetMap.', 'links': [{'label': 'OpenStreetMap — bản quyền', 'url': 'https://www.openstreetmap.org/copyright'}]},
             ],
           },
+          'privacy': {
+            'title': 'Chính sách quyền riêng tư',
+            'sections': [
+              {'heading': 'Ai chịu trách nhiệm về dữ liệu của bạn', 'body': 'Nhà xe nơi bạn làm việc là bên kiểm soát dữ liệu.'},
+              {'heading': 'Dữ liệu chúng tôi thu thập', 'body': 'Họ tên, mã nhân viên, vị trí trong ca.'},
+            ],
+          },
+          'urls': {
+            'terms': 'https://busgo.vn/driver-terms',
+            'privacy': 'https://busgo.vn/driver-privacy',
+            'account_deletion': null,
+          },
         });
       }
       if (serverForcesPinChange && !path.endsWith('/change-pin')) {
@@ -937,19 +949,45 @@ void main() {
   });
 
   testWidgets('location is asked with a reason first, then "all the time"; a refusal keeps the bus from leaving (D145)', (tester) async {
-    final fake = FakePermissions(LocationAccess.denied, afterRequest: LocationAccess.whileInUse);
-    driverPermissions = fake;
     bool? allowed;
     await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => Scaffold(body: TextButton(onPressed: () async => allowed = await ensureDriverLocation(context), child: const Text('go'))))));
+
+    // 1. Declining disclosure does not call requestLocation and shows toast
+    final declineFake = FakePermissions(LocationAccess.denied);
+    driverPermissions = declineFake;
+    allowed = null;
     await tester.tap(find.text('go'));
     await tester.pumpAndSettle();
-    expect(find.text('Cho phép app biết vị trí xe'), findsOneWidget, reason: 'the reason comes before the system dialog');
+
+    expect(find.text('BusGo Driver dùng vị trí của bạn'), findsOneWidget);
+    expect(find.text('BusGo Driver thu thập vị trí của điện thoại trong ca chạy, kể cả khi ứng dụng đóng hoặc không được sử dụng, để gửi vị trí xe cho điều hành nhà xe và cho hành khách của chuyến biết xe đang ở đâu và khi nào tới. Ngoài ca chạy, ứng dụng không lấy vị trí.'), findsOneWidget);
+    expect(find.text('Đồng ý'), findsOneWidget);
+    expect(find.text('Không đồng ý'), findsOneWidget);
+
+    await tester.tap(find.text('Không đồng ý'));
+    await tester.pumpAndSettle();
+    expect(declineFake.asked, isEmpty, reason: 'declining disclosure must not request system location');
+    expect(allowed, isFalse);
+    expect(find.text('Chưa có quyền vị trí: khách sẽ không thấy xe'), findsOneWidget);
+
+    // 2. Accepting disclosure calls requestLocation, then shows background disclosure sheet
+    final fake = FakePermissions(LocationAccess.denied, afterRequest: LocationAccess.whileInUse);
+    driverPermissions = fake;
+    allowed = null;
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    expect(find.text('BusGo Driver dùng vị trí của bạn'), findsOneWidget, reason: 'the reason comes before the system dialog');
     expect(fake.asked, isEmpty);
-    await tester.tap(find.text('Tiếp tục'));
+    await tester.tap(find.text('Đồng ý'));
     await tester.pumpAndSettle();
     expect(fake.asked, ['location']);
-    expect(find.text('Chọn "Luôn cho phép"'), findsOneWidget);
-    await tester.tap(find.text('Tiếp tục'));
+
+    expect(find.text('Cho phép vị trí cả khi app chạy nền'), findsOneWidget);
+    expect(find.text('Để vị trí xe vẫn được gửi khi màn hình tắt, khi ứng dụng đóng hoặc không được sử dụng, ở màn tiếp theo hãy chọn "Luôn cho phép".'), findsOneWidget);
+    expect(find.text('Đồng ý'), findsOneWidget);
+    expect(find.text('Để sau'), findsOneWidget);
+
+    await tester.tap(find.text('Đồng ý'));
     await tester.pumpAndSettle();
     expect(fake.asked, ['location', 'background']);
     expect(allowed, isTrue, reason: 'while in use is enough to send the position');
@@ -1986,12 +2024,18 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Phiên bản 3.0.0'), findsOneWidget);
-    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsOneWidget);
+    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsNWidgets(2));
     expect(sent.where((r) => r.url.path == '/api/v1/legal').single.url.queryParameters['app'], 'driver');
 
     await tester.tap(find.text('Điều khoản sử dụng'));
     await tester.pumpAndSettle();
     expect(find.text('2. Vị trí trong ca'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Chính sách quyền riêng tư'));
+    await tester.pumpAndSettle();
+    expect(find.text('1. Ai chịu trách nhiệm về dữ liệu của bạn'), findsOneWidget);
     await tester.tap(find.byTooltip('Quay lại'));
     await tester.pumpAndSettle();
 
@@ -2014,8 +2058,11 @@ void main() {
     legalDown = true;
     await tester.pumpWidget(DriverScope(store: store, child: const MaterialApp(home: DriverAboutScreen())));
     await tester.pumpAndSettle();
-    expect(find.text('Chưa tải được'), findsNWidgets(2));
+    expect(find.text('Chưa tải được'), findsNWidgets(3));
     await tester.tap(find.text('Điều khoản sử dụng'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DriverLegalDocScreen), findsNothing);
+    await tester.tap(find.text('Chính sách quyền riêng tư'));
     await tester.pumpAndSettle();
     expect(find.byType(DriverLegalDocScreen), findsNothing);
     // The open-source licences are in the app and open without the server.
@@ -2024,18 +2071,107 @@ void main() {
     legalDown = false;
     await tester.tap(find.text('Thử lại'));
     await tester.pumpAndSettle();
-    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsOneWidget);
+    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsNWidgets(2));
     expect(find.text('Thử lại'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('driver login screen consent links open terms and privacy policy before sign-in', (tester) async {
+    final store = storeWithServer();
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverLoginScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Bằng việc tiếp tục, bạn đồng ý với'), findsOneWidget);
+
+    // Tap terms
+    await tester.tap(find.text('Điều khoản sử dụng'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DriverLegalDocScreen), findsOneWidget);
+    expect(find.text('2. Vị trí trong ca'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    // Tap privacy
+    await tester.tap(find.text('Chính sách quyền riêng tư'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DriverLegalDocScreen), findsOneWidget);
+    expect(find.text('1. Ai chịu trách nhiệm về dữ liệu của bạn'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('driver login screen consent link shows toast when legal fails to load', (tester) async {
+    final store = storeWithServer();
+    store.legalInfo = null;
+    legalDown = true;
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverLoginScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Điều khoản sử dụng'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DriverLegalDocScreen), findsNothing);
+    expect(find.text('Chưa tải được, thử lại sau'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('notifications requested before the run starts and refusal does not block', (tester) async {
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    });
+    final fake = FakePermissions(LocationAccess.always, notificationsOk: false);
+    driverPermissions = fake;
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverReadinessScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    // Tick all 6 checkboxes to enable 'Xuất bến'
+    for (int i = 0; i < 6; i++) {
+      store.toggleCheck(i, true);
+    }
+    await tester.pumpAndSettle();
+
+    expect(find.text('Xuất bến'), findsOneWidget);
+    await tester.tap(find.text('Xuất bến'));
+    await tester.pumpAndSettle();
+
+    // Verify notifications were requested
+    expect(fake.asked, contains('notifications'));
+
+    // Confirmation sheet opens despite notification refusal
+    expect(find.textContaining('Xuất bến chuyến 07:00?'), findsOneWidget);
+
+    // Confirm start trip
+    await tester.tap(find.text('Xuất bến').last);
+    await tester.pumpAndSettle();
+
+    expect(store.trip, TripState.inTransit);
     await tester.pumpWidget(const SizedBox());
     store.dispose();
   });
 }
 
 class FakePermissions implements DevicePermissions {
-  FakePermissions(this.access, {this.afterRequest, this.cameraOk = false});
+  FakePermissions(this.access, {this.afterRequest, this.cameraOk = false, this.notificationsOk = true});
   LocationAccess access;
   final LocationAccess? afterRequest;
   final bool cameraOk;
+  final bool notificationsOk;
   final List<String> asked = [];
 
   @override
@@ -2050,6 +2186,12 @@ class FakePermissions implements DevicePermissions {
   Future<LocationAccess> requestBackgroundLocation() async {
     asked.add('background');
     return access;
+  }
+
+  @override
+  Future<bool> requestNotifications() async {
+    asked.add('notifications');
+    return notificationsOk;
   }
 
   @override

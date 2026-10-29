@@ -4,7 +4,7 @@
  * token) or else by SMS, with the link to follow the bus.
  *
  * Providers are plugged by URL: FLEETBUS_SMS_WEBHOOK_URL and FLEETBUS_PUSH_WEBHOOK_URL receive
- * POST {to, text, title, type, link} (an SMS gateway, a Zalo ZNS bridge, a function calling Firebase). Push also
+ * POST {to, text, title, type, link}, with `Authorization: Bearer` FLEETBUS_SMS_WEBHOOK_TOKEN / _PUSH_WEBHOOK_TOKEN when set (an SMS gateway, a Zalo ZNS bridge, a function calling Firebase). Push also
  * goes straight to Firebase Cloud Messaging with FLEETBUS_FCM_SERVICE_ACCOUNT (path to the project's service
  * account key, D145). Without a provider, a message is kept in the outbox as LOGGED, so the office sees what
  * would have gone out.
@@ -102,8 +102,15 @@ export class Messenger {
     this.devices = new Map(); // phone -> { phone, operator_id, token, platform, registered_at }
     this.smsUrl = env.FLEETBUS_SMS_WEBHOOK_URL || null;
     this.pushUrl = env.FLEETBUS_PUSH_WEBHOOK_URL || null;
+    // SMS gateways and Zalo ZNS bridges want a key: sent as a Bearer token when set.
+    this.smsToken = env.FLEETBUS_SMS_WEBHOOK_TOKEN || null;
+    this.pushToken = env.FLEETBUS_PUSH_WEBHOOK_TOKEN || null;
     this.fetch = fetchImpl;
     this.fcm = fcm === undefined ? FcmSender.fromEnv(env, fetchImpl) : fcm;
+  }
+
+  _headers(token) {
+    return { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
   }
 
   /** Whether a push can leave: straight to Firebase, or through a push webhook. */
@@ -147,7 +154,7 @@ export class Messenger {
     const sending = url && typeof this.fetch === 'function'
       ? this.fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: this._headers(this.smsToken),
         body: JSON.stringify({ to: phone, text, type: 'OTP' })
       })
       : null;
@@ -198,7 +205,7 @@ export class Messenger {
     const sending = viaFcm
       ? this.fcm.send({ to: device.token, title, body, type, link })
       : url && typeof this.fetch === 'function'
-        ? this.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: channel === 'PUSH' ? device.token : phone, text, title, body, type, link }) })
+        ? this.fetch(url, { method: 'POST', headers: this._headers(channel === 'PUSH' ? this.pushToken : this.smsToken), body: JSON.stringify({ to: channel === 'PUSH' ? device.token : phone, text, title, body, type, link }) })
         : null;
     if (sending) {
       sending

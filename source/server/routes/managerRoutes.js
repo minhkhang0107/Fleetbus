@@ -15,6 +15,7 @@ import { resolveHomeBooking, routeServiceConfig } from '../core/serviceAreas.js'
 import { BUILTIN_LAYOUTS, validateLayout, findLayout } from '../core/seatLayouts.js';
 import { STATIONS_DATABASE, MOCK_TRIPS_DATABASE, scheduleView } from '../services/passenger/modules/search.js';
 import { setStopCoords } from '../core/geo.js';
+import { MOCK_MANAGERS_DB } from '../services/manager/modules/managerService.js';
 
 // Seat conflicts and reservation mismatches are conflicts (409); a missing trip or reservation is 404.
 function inventoryErrorStatus(code) {
@@ -84,7 +85,9 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         managerService.recordAudit({ actor: result.data.user.user_id, role: result.data.user.role, action: 'LOGIN', resource: username, ip: clientIp(req, services.env), operator_id: result.data.operator?.operator_id ?? null });
         sendSuccess(res, result.data || result);
       } else {
-        managerService.recordAudit({ action: result.code === 'ACCOUNT_LOCKED' ? 'LOGIN_LOCKED' : 'LOGIN_FAILED', resource: username, ip: clientIp(req, services.env) });
+        // A failed sign-in goes to the company of the account tried, so its director sees guessing; none if unknown.
+        const tried = MOCK_MANAGERS_DB.find(u => u.username === username);
+        managerService.recordAudit({ action: result.code === 'ACCOUNT_LOCKED' ? 'LOGIN_LOCKED' : 'LOGIN_FAILED', resource: username, ip: clientIp(req, services.env), operator_id: tried ? tried.operator_id ?? null : null });
         const status = result.code === 'ACCOUNT_LOCKED' ? 429 : (result.code === 'OPERATOR_INACTIVE' || result.code === 'ACCOUNT_DISABLED') ? 403 : (result.status || 401);
         sendError(res, result.error, result.code, status, result);
       }

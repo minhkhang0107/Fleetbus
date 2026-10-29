@@ -134,6 +134,10 @@ describe('Home pickup run as bus companies run it (D144)', () => {
     const started = ofType(B.phone, 'HOME_RUN_STARTED');
     assert.strictEqual(started.length, 1);
     assert.match(started[0].body, /điểm đón thứ 2, giờ hẹn khoảng \d\d:\d\d/);
+    // An app ticket's message carries its tracking link, which opens before the passenger ever shared it.
+    const toA = services.messenger.list('op_saomai', { tripId: TRIP }).find(m => m.to === A.phone && m.link);
+    assert.ok(toA, 'the app passenger is sent the tracking link');
+    assert.strictEqual((await fetch(`${baseUrl}${new URL(toA.link).pathname}`)).status, 200);
 
     // The bus is a few hundred metres from A: A is next, B and C wait their turn.
     ping(21.0215, 105.8510);

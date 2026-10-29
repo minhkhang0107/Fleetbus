@@ -1203,8 +1203,15 @@ export class PassengerPaymentService {
   }
 
   /** Whether the share link of a ticket was issued and has not expired. */
+  /**
+   * The ticket's tracking link works from issue until 6 hours after departure: the server itself sends it in the
+   * SMS and push of the home pickup (D144), before the passenger ever shares it from the app.
+   */
   shareLinkValid(ticket, mockNow = Date.now()) {
-    return Boolean(ticket?.share_expires_at) && new Date(ticket.share_expires_at).getTime() > mockNow;
+    if (!ticket?.share_token) return false;
+    if (ticket.share_expires_at) return new Date(ticket.share_expires_at).getTime() > mockNow;
+    const departure = Date.parse(ticket.departure_time || '');
+    return Number.isFinite(departure) && departure + 6 * 60 * 60 * 1000 > mockNow;
   }
 
   /** A companion's link lasts like a shared ticket's: until 6 hours after departure. */

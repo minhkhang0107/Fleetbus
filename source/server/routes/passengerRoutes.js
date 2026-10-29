@@ -257,6 +257,9 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       return true;
     }
     parseJsonBody(req).then(body => {
+      // Five codes per number in ten minutes, whatever address asks (an SMS costs money).
+      const digits = String(body.phone || '').replace(/\D/g, '').slice(-9);
+      if (digits && services.rateLimits?.requestOtpPhone && !services.rateLimits.requestOtpPhone.enforce(req, res, services.env, `${req.operatorId}:${digits}`)) return;
       const result = authService.requestOTP(body.phone, clientNow(body), req.operatorId);
       if (result.success) {
         sendSuccess(res, result.data);

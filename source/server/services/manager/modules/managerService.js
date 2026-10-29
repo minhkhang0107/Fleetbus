@@ -8,6 +8,7 @@ import { createShareToken } from '../../passenger/core/cryptoEngine.js';
 import { DEMO_DATE, vnDate, parseServiceDate } from '../../../core/serviceDate.js';
 import { validateVietnamPhone, validatePersonName } from '../../passenger/core/formatters.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
+import { PLATFORM_SCOPE } from '../../../core/tenantDb.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
 import { verifyTotp, generateSecret } from '../../../core/totp.js';
 import { getStaffTotpSecret } from '../../../config.js';
@@ -199,7 +200,9 @@ export class ManagerOperationsService {
    * Entries are frozen and never edited; secrets are never written to it.
    */
   recordAudit({ actor = 'anonymous', role = null, action, resource = null, ip = null, before = null, after = null, now = Date.now(), operator_id = DEFAULT_OPERATOR_ID }) {
-    // Each company's entries form a hash chain (D127): removing or inserting an entry breaks it.
+    // Each company's entries form a hash chain (D127): removing or inserting an entry breaks it. What belongs to
+    // no company (the platform admin's own login, a login with an unknown name) has its own chain on the platform.
+    if (operator_id === null) operator_id = PLATFORM_SCOPE;
     const prev = this.auditLog.findLast(a => (a.operator_id || DEFAULT_OPERATOR_ID) === operator_id);
     const body = {
       audit_id: `aud_${now}_${this.auditLog.length + 1}`,

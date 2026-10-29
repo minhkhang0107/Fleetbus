@@ -18,6 +18,7 @@ abstract class DevicePermissions {
   Future<LocationAccess> location();
   Future<LocationAccess> requestLocation();
   Future<LocationAccess> requestBackgroundLocation();
+  Future<bool> requestNotifications();
   Future<bool> camera({bool request = false});
   Future<void> openSettings();
   Future<void> openLocationSettings();
@@ -60,6 +61,12 @@ class SystemPermissions implements DevicePermissions {
     final status = await Permission.locationAlways.request();
     if (status.isGranted) return LocationAccess.always;
     return location();
+  }
+
+  @override
+  Future<bool> requestNotifications() async {
+    final status = await Permission.notification.request();
+    return status.isGranted || status.isProvisional;
   }
 
   @override
@@ -107,10 +114,14 @@ Future<bool> ensureDriverLocation(BuildContext context) async {
 
   if (access == LocationAccess.denied) {
     final go = await _sheet(context,
-        title: 'Cho phép app biết vị trí xe',
-        body: 'App gửi vị trí xe cho khách đang chờ và cho điều hành trong suốt chuyến: khách biết xe đang ở đâu, khi nào tới đón, không cần gọi điện cho bạn.',
-        primary: 'Tiếp tục');
-    if (go != true) return false;
+        title: 'BusGo Driver dùng vị trí của bạn',
+        body: 'BusGo Driver thu thập vị trí của điện thoại trong ca chạy, kể cả khi ứng dụng đóng hoặc không được sử dụng, để gửi vị trí xe cho điều hành nhà xe và cho hành khách của chuyến biết xe đang ở đâu và khi nào tới. Ngoài ca chạy, ứng dụng không lấy vị trí.',
+        primary: 'Đồng ý',
+        secondary: 'Không đồng ý');
+    if (go != true) {
+      if (context.mounted) dToast(context, 'Chưa có quyền vị trí: khách sẽ không thấy xe');
+      return false;
+    }
     access = await driverPermissions.requestLocation();
     if (access == LocationAccess.denied || access == LocationAccess.deniedForever) {
       if (context.mounted) dToast(context, 'Chưa có quyền vị trí: khách sẽ không thấy xe');
@@ -120,9 +131,9 @@ Future<bool> ensureDriverLocation(BuildContext context) async {
 
   if (access == LocationAccess.whileInUse && context.mounted) {
     final go = await _sheet(context,
-        title: 'Chọn "Luôn cho phép"',
-        body: 'Để vị trí vẫn được gửi khi màn hình tắt hoặc bạn mở app khác (bản đồ, điện thoại), chọn "Luôn cho phép" ở màn tiếp theo.',
-        primary: 'Tiếp tục',
+        title: 'Cho phép vị trí cả khi app chạy nền',
+        body: 'Để vị trí xe vẫn được gửi khi màn hình tắt, khi ứng dụng đóng hoặc không được sử dụng, ở màn tiếp theo hãy chọn "Luôn cho phép".',
+        primary: 'Đồng ý',
         secondary: 'Để sau');
     if (go == true) access = await driverPermissions.requestBackgroundLocation();
     if (access != LocationAccess.always && context.mounted) {

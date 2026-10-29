@@ -1,5 +1,5 @@
 # Uncomment this line to define a global platform for your project
-# platform :ios, '12.0'
+platform :ios, '15.0'  # firebase_messaging needs iOS 15
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -40,5 +40,16 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+    # permission_handler compiles no permission on iOS unless enabled here: a disabled one always answers
+    # "denied" without asking. Location goes through geolocator (its
+    # "always" request is compiled out: the app only uses location while open), photos through gal.
+    target.build_configurations.each do |config|
+      defs = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || '$(inherited)'
+      defs = defs.split(' ') if defs.is_a?(String)
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = defs + [
+        'PERMISSION_NOTIFICATIONS=1',
+        'BYPASS_PERMISSION_LOCATION_ALWAYS=1',    # trip notices
+      ]
+    end
   end
 end

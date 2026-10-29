@@ -612,10 +612,11 @@ export class PassengerSearchService {
       if (!parseServiceDate(sch.extra_date)) return invalid('Ngày chạy tăng cường dạng YYYY-MM-DD');
       if (sch.extra_date < today) return invalid('Ngày chạy tăng cường đã qua');
     }
-    const validFrom = extra ? sch.extra_date : sch.valid_from || changeFrom;
-    if (!extra && validFrom < changeFrom) {
-      return invalid(`Lịch mới áp dụng sớm nhất từ ${dmy(changeFrom)}, sau các ngày đang mở bán`);
-    }
+    // A new route has no day on sale yet, so its first schedule may start today: the rule that a change starts
+    // after the days on sale (D129) protects tickets, and there are none. Later schedules follow it as usual.
+    const validFrom = extra ? sch.extra_date : sch.valid_from || today;
+    if (!parseServiceDate(validFrom)) return invalid('Ngày bắt đầu dạng YYYY-MM-DD');
+    if (validFrom < today) return invalid('Ngày bắt đầu đã qua');
 
     const fields = {
       departure: sch.departure,

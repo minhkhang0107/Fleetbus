@@ -1,8 +1,9 @@
 /**
  * Keeps the server's working data in the company databases (D127).
  *
- * The services keep their objects in memory; this store loads them from the databases at start and, after
- * every request, writes what changed before the response leaves (`flush`). A record goes to the database of
+ * The services keep their objects in memory; this store loads them from the databases at start.
+ * Writes that change business data are stored before their answer leaves (`flush`); reads and GPS pings
+ * are marked dirty and stored within a second by a background timer. A record goes to the database of
  * the company it belongs to (`scope`), or to the platform database for data that is no single company's.
  * Each record is sealed (core/dbCrypto.js) and stored under an HMAC of its id.
  *
@@ -36,6 +37,23 @@ export class StateStore {
     this.stored = new Map(); // collection -> Map(scope|idHash -> digest)
     this.idCache = new Map();
     this.failed = null;
+    this.dirty = false;
+  }
+
+  markDirty() {
+    this.dirty = true;
+  }
+
+  /** Flushes only when marked dirty; errors are logged and never throw. A failed store stays quiet. */
+  flushIfDirty() {
+    if (!this.dirty || this.failed) return false;
+    try {
+      this.flush();
+      return true;
+    } catch (err) {
+      console.error(`[storage] ${err.message}`);
+      return false;
+    }
   }
 
   db(scope) {
@@ -160,6 +178,7 @@ export class StateStore {
       throw this.failed;
     }
     for (const [name, now] of pending) this.stored.set(name, now);
+    this.dirty = false;
   }
 }
 

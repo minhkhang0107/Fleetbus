@@ -439,18 +439,42 @@ class LegalSection {
       ]);
 }
 
+class LegalUrls {
+  const LegalUrls({this.terms, this.privacy, this.accountDeletion});
+  final String? terms;
+  final String? privacy;
+  final String? accountDeletion;
+
+  factory LegalUrls.fromJson(Map<String, dynamic> j) => LegalUrls(
+        terms: j['terms'] as String?,
+        privacy: j['privacy'] as String?,
+        accountDeletion: j['account_deletion'] as String?,
+      );
+}
+
 class LegalInfo {
-  const LegalInfo({required this.version, required this.effectiveDate, required this.terms, required this.modelNotice});
+  const LegalInfo({
+    required this.version,
+    required this.effectiveDate,
+    required this.terms,
+    required this.privacy,
+    required this.modelNotice,
+    this.urls = const LegalUrls(),
+  });
   final String version;
   final String effectiveDate;
   final LegalDoc terms;
+  final LegalDoc privacy;
   final LegalDoc modelNotice;
+  final LegalUrls urls;
 
   factory LegalInfo.fromJson(Map<String, dynamic> j) => LegalInfo(
         version: '${j['version'] ?? ''}',
         effectiveDate: '${j['effective_date'] ?? ''}',
         terms: LegalDoc.fromJson(j['terms'] as Map<String, dynamic>? ?? const {}),
+        privacy: LegalDoc.fromJson(j['privacy'] as Map<String, dynamic>? ?? const {}),
         modelNotice: LegalDoc.fromJson(j['model_notice'] as Map<String, dynamic>? ?? const {}),
+        urls: LegalUrls.fromJson(j['urls'] as Map<String, dynamic>? ?? const {}),
       );
 }
 
@@ -948,12 +972,16 @@ class DriverStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  LegalInfo? legalInfo;
+
   /// DRI-021: loads the driver's monthly trip schedule from the server.
   /// SH-006: the terms and notices come from the server so they change without an app release (D157).
   Future<({LegalInfo? info, String? error})> loadLegal() async {
     final r = await _call(api.getLegal);
     if (r.error != null || r.data == null) return (info: null, error: r.error ?? 'Không tải được, thử lại sau');
-    return (info: LegalInfo.fromJson(r.data!), error: null);
+    final info = LegalInfo.fromJson(r.data!);
+    legalInfo = info;
+    return (info: info, error: null);
   }
 
   Future<void> loadMonthlySchedule([String month = '']) async {

@@ -10,6 +10,8 @@ import crypto from 'node:crypto';
 import { createFleetBusServer } from '../../source/server/apiServer.js';
 import { RateLimiter, clientIp } from '../../source/server/core/rateLimit.js';
 import { clientNow } from '../../source/server/middleware/httpUtils.js';
+import { generateTotp } from '../../source/server/core/totp.js';
+import { DEV_TOTP_SECRET } from '../../source/server/config.js';
 
 const TRIP = 'trp_hn_th_01';
 
@@ -122,6 +124,13 @@ describe('Launch security (B-01, B-03, H-05)', () => {
       assert.strictEqual(cancelRes.body.data.refund_amount_vnd, 0, 'forged early body.now must be ignored in production');
       const cancelledAtMs = Date.parse(cancelRes.body.data.cancelled_at);
       assert.ok(Math.abs(cancelledAtMs - Date.now()) < 10000, 'cancelled_at must use real server time');
+
+      // Office staff sign in by email alone: production does not ask the web form for a company code.
+      const staffLogin = await api('/api/v1/ops/auth/login', { method: 'POST', operatorCode: null, body: { username: 'cashier@busgo.vn', password: 'cash123' } });
+      assert.strictEqual(staffLogin.status, 200, JSON.stringify(staffLogin.body));
+      // Signed in, a company request without a code takes the company from the token.
+      const bookings = await api('/api/v1/ops/bookings', { operatorCode: null, token: staffLogin.body.data.token });
+      assert.strictEqual(bookings.status, 200, JSON.stringify(bookings.body));
     } finally {
       if (savedEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = savedEnv;
@@ -133,6 +142,7 @@ describe('Launch security (B-01, B-03, H-05)', () => {
   it('2. B-01: OTP is sent to FLEETBUS_SMS_WEBHOOK_URL without diacritics, mock_otp is omitted, and outbox masks the code', async () => {
     webhookCalls.length = 0;
     services.messenger.smsUrl = 'https://sms.busgo.example/webhook';
+    services.messenger.smsToken = 'sms-gateway-key';
     try {
       const phone = '0903112233';
       const res = await api('/api/v1/passenger/auth/request-otp', {
@@ -148,6 +158,7 @@ describe('Launch security (B-01, B-03, H-05)', () => {
       assert.strictEqual(call.method, 'POST');
       assert.strictEqual(call.body.to, phone);
       assert.strictEqual(call.body.type, 'OTP');
+      assert.strictEqual(call.headers.Authorization, 'Bearer sms-gateway-key', 'the gateway key goes with the request');
       assert.match(call.body.text, /^BusGo: Ma xac thuc cua ban la (\d{6}), hieu luc 5 phut\. Khong chia se ma nay\.$/);
       // Verify no Vietnamese diacritics in SMS text
       assert.strictEqual(/^[\x20-\x7E]+$/.test(call.body.text), true, 'SMS text must be pure ASCII without diacritics');
@@ -169,6 +180,7 @@ describe('Launch security (B-01, B-03, H-05)', () => {
       assert.ok(verifyRes.body.data.token);
     } finally {
       services.messenger.smsUrl = null;
+      services.messenger.smsToken = null;
     }
   });
 
@@ -362,6 +374,42 @@ describe('Launch security (B-01, B-03, H-05)', () => {
     } finally {
       if (savedTrustProxy === undefined) delete process.env.FLEETBUS_TRUST_PROXY;
       else process.env.FLEETBUS_TRUST_PROXY = savedTrustProxy;
+    }
+  });
+
+  it('5. OTP limits: many phones behind one carrier address get codes; one number is capped at 5 per 10 minutes', async () => {
+    services.rateLimits.requestOtp = new RateLimiter({ max: 60 });
+    services.rateLimits.requestOtpPhone = new RateLimiter({ max: 5 });
+    // Twelve passengers behind one 4G address (CGNAT): all get a code.
+    for (let i = 0; i < 12; i++) {
+      const r = await api('/api/v1/auth/passenger/otp/request', { method: 'POST', body: { phone: `09061110${String(i).padStart(2, '0')}` } });
+      assert.strictEqual(r.status, 200, `phone ${i}: ${JSON.stringify(r.body)}`);
+    }
+    // One number asked again and again (past each cooldown): the sixth time is refused.
+    const base = Date.now();
+    for (let i = 0; i < 5; i++) {
+      const r = await api('/api/v1/auth/passenger/otp/request', { method: 'POST', body: { phone: '0906222333', now: base + i * 61000 } });
+      assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+    }
+    const sixth = await api('/api/v1/auth/passenger/otp/request', { method: 'POST', body: { phone: '0906222333', now: base + 5 * 61000 } });
+    assert.strictEqual(sixth.status, 429);
+    assert.strictEqual(sixth.body.code, 'RATE_LIMITED');
+  });
+
+  it('6. Audit: the platform admin signing in breaks no company chain; a failed sign-in is logged at the company of the account tried', async () => {
+    services.rateLimits.staffLogin = new RateLimiter({ max: 1000 });
+    const root = await api('/api/v1/ops/auth/login', { method: 'POST', operatorCode: null, body: { username: 'root@busgo.vn', password: 'root123', totp: generateTotp(DEV_TOTP_SECRET, Date.now()) } });
+    assert.strictEqual(root.status, 200, JSON.stringify(root.body));
+    const bad = await api('/api/v1/ops/auth/login', { method: 'POST', operatorCode: null, body: { username: 'cashier@xuyenviet.vn', password: 'sai-mat-khau' } });
+    assert.strictEqual(bad.status, 401);
+    await api('/api/v1/ops/auth/login', { method: 'POST', operatorCode: null, body: { username: 'khong-co@busgo.vn', password: 'x' } });
+
+    const log = services.managerService.auditLog;
+    assert.strictEqual(log.findLast(a => a.resource === 'root@busgo.vn').operator_id, '_platform');
+    assert.strictEqual(log.findLast(a => a.resource === 'cashier@xuyenviet.vn').operator_id, 'op_xuyenviet');
+    assert.strictEqual(log.findLast(a => a.resource === 'khong-co@busgo.vn').operator_id, '_platform');
+    for (const op of ['op_saomai', 'op_xuyenviet', '_platform']) {
+      assert.strictEqual(services.managerService.verifyAuditChain(op).intact, true, `${op} chain`);
     }
   });
 });

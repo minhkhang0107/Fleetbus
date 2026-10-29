@@ -56,9 +56,10 @@ export function pruneBackups(backupDir, keep) {
  * Runs a backup every `intervalMs` (and once at start). Failures are logged and retried at the next run;
  * returns a function that stops the timer.
  */
-export function startBackups(tenantDbs, { backupDir, intervalMs, keep, log = console }) {
+export function startBackups(tenantDbs, { backupDir, intervalMs, keep, log = console, beforeRun = null } = {}) {
   const run = () => {
     try {
+      beforeRun?.();
       const { folder } = backupNow(tenantDbs, backupDir);
       pruneBackups(backupDir, keep);
       log.info?.(`[backup] Đã sao lưu dữ liệu vào ${folder}`);

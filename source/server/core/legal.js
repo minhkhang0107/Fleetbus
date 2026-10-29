@@ -3,8 +3,10 @@
  * The server is the single source so a change of terms needs no app release; open-source licences are listed by each client.
  */
 
-export const LEGAL_VERSION = '1.0';
-export const LEGAL_EFFECTIVE_DATE = '2026-10-20';
+export const LEGAL_VERSION = '1.1';
+export const LEGAL_EFFECTIVE_DATE = '2026-10-29';
+/** Where people write about their personal data (privacy policy, deletion requests). */
+export const PRIVACY_CONTACT_EMAIL = process.env.FLEETBUS_PRIVACY_EMAIL || 'mjnhkhang1@gmail.com';
 export const LEGAL_APPS = ['passenger', 'driver', 'manager'];
 
 const COMMON_CLOSING = [
@@ -46,7 +48,7 @@ const TERMS = {
     },
     {
       heading: 'Dữ liệu cá nhân',
-      body: 'Dữ liệu được thu thập gồm họ tên, số điện thoại, vé đã đặt, địa chỉ đón hoặc trả tận nhà (nếu có) và lịch sử thanh toán. Dữ liệu dùng để xuất vé, liên hệ về chuyến và vận hành chuyến; chỉ nhà xe và tài xế của chuyến được xem. Dữ liệu được xử lý theo Nghị định 13/2023/NĐ-CP về bảo vệ dữ liệu cá nhân và chỉ lưu trong thời gian cần cho các mục đích trên hoặc theo yêu cầu của pháp luật. Bạn có quyền yêu cầu xem, sửa hoặc xóa dữ liệu của mình qua tổng đài nhà xe.'
+      body: 'Dữ liệu được thu thập gồm họ tên, số điện thoại, vé đã đặt, địa chỉ đón hoặc trả tận nhà (nếu có) và lịch sử thanh toán. Dữ liệu dùng để xuất vé, liên hệ về chuyến và vận hành chuyến; chỉ nhà xe và tài xế của chuyến được xem. Dữ liệu được xử lý theo Nghị định 13/2023/NĐ-CP về bảo vệ dữ liệu cá nhân và chỉ lưu trong thời gian cần cho các mục đích trên hoặc theo yêu cầu của pháp luật. Chi tiết, quyền của bạn và cách xóa tài khoản ở mục "Chính sách quyền riêng tư".'
     },
     {
       heading: 'Hành vi không được phép',
@@ -111,6 +113,82 @@ const TERMS = {
   ]
 };
 
+// Privacy policy of each app (Google Play and App Store ask for one, inside the app and at a public URL; Nghị định
+// 13/2023/NĐ-CP). It says what the code collects, nothing more: keep it in step with the apps and the server.
+const PRIVACY = {
+  passenger: [
+    {
+      heading: 'Ai chịu trách nhiệm về dữ liệu của bạn',
+      body: 'Nhà xe bạn đặt vé là bên kiểm soát dữ liệu cá nhân của bạn. BusGo cung cấp phần mềm và máy chủ, là bên xử lý dữ liệu theo yêu cầu của nhà xe. Chính sách này áp dụng cho ứng dụng BusGo dành cho hành khách và trang theo dõi chuyến xe.'
+    },
+    {
+      heading: 'Dữ liệu chúng tôi thu thập',
+      body: '(1) Số điện thoại để đăng nhập bằng mã OTP. (2) Họ tên và số điện thoại của hành khách trên vé. (3) Địa chỉ và vị trí ghim trên bản đồ khi bạn đặt đón hoặc trả tận nhà. (4) Vé, đơn, số tiền, nội dung chuyển khoản và mã giao dịch ngân hàng của vé; chúng tôi không thu thập số thẻ hay mật khẩu ngân hàng. (5) Số tài khoản, ngân hàng và tên chủ tài khoản bạn nhập để nhận tiền hoàn khi hủy vé đã chuyển khoản. (6) Vị trí của điện thoại, chỉ khi bạn cho phép và chỉ lúc app đang mở, để gợi ý điểm đón; app không theo dõi vị trí của bạn khi chạy nền. (7) Mã thiết bị nhận thông báo đẩy. (8) Địa chỉ IP và thời điểm truy cập, để chống lạm dụng và bảo vệ tài khoản.'
+    },
+    {
+      heading: 'Mục đích sử dụng',
+      body: 'Xuất vé và cho bạn lên xe; báo cho bạn về chuyến (xe sắp tới, xe đang chờ, thay đổi giờ); đón hoặc trả tận nhà; đối soát thanh toán và hoàn tiền; chăm sóc khách hàng; bảo vệ tài khoản và chống gian lận; thực hiện nghĩa vụ pháp luật của nhà xe (kế toán, vận tải hành khách). Chúng tôi không bán dữ liệu, không dùng dữ liệu để quảng cáo và không gửi dữ liệu tới mô hình trí tuệ nhân tạo.'
+    },
+    {
+      heading: 'Chia sẻ dữ liệu',
+      body: 'Nhà xe và tài xế của chuyến thấy tên, ghế, điểm đón và trả của bạn. Tài xế thấy số điện thoại đã che; khi cần gọi bạn lúc đón, tài xế mở được số đầy đủ và mỗi lần mở được ghi vào nhật ký chuyến. Nhà cung cấp tin nhắn SMS nhận số điện thoại và nội dung tin (mã OTP, thông báo chuyến). Google Firebase Cloud Messaging nhận mã thiết bị và nội dung thông báo ngắn. Máy chủ bản đồ OpenStreetMap France nhận địa chỉ IP và vùng bản đồ bạn xem. Ngân hàng và cổng đối soát chuyển khoản của nhà xe nhận thông tin giao dịch bạn chuyển. Người nhận link theo dõi hoặc vé bạn chia sẻ thấy chuyến và điểm đón của vé đó. Cơ quan nhà nước có thẩm quyền khi pháp luật yêu cầu.'
+    },
+    {
+      heading: 'Lưu trữ và bảo mật',
+      body: 'Dữ liệu lưu trên máy chủ do BusGo quản lý, trong cơ sở dữ liệu riêng của từng nhà xe, được mã hóa; đường truyền giữa app và máy chủ được mã hóa. Chỉ nhân viên nhà xe có quyền mới xem được dữ liệu, mọi thao tác được ghi nhật ký. Tài khoản được giữ đến khi bạn xóa. Vé, đơn và chứng từ thanh toán được giữ theo thời hạn pháp luật kế toán yêu cầu. Vị trí xe chỉ hiện trong chuyến. Bản sao lưu được xoay vòng và tự xóa sau khoảng 7 ngày.'
+    },
+    {
+      heading: 'Quyền của bạn và cách xóa tài khoản',
+      body: 'Theo Nghị định 13/2023/NĐ-CP, bạn có quyền được biết, xem, sửa, xóa dữ liệu, rút lại sự đồng ý và phản đối việc xử lý. Xóa tài khoản ngay trong app: Cá nhân > Xóa tài khoản. Không còn app thì vào trang xóa tài khoản trên web (đường dẫn ở cuối chính sách này) và xác nhận bằng mã OTP gửi tới số điện thoại. Khi xóa, phiên đăng nhập, thiết bị nhận thông báo và thông báo bị xóa; vé và đơn cũ chỉ còn ở dạng ẩn danh cho sổ sách của nhà xe. Bạn có thể tắt quyền vị trí và thông báo bất cứ lúc nào trong cài đặt của điện thoại.'
+    },
+    {
+      heading: 'Trẻ em',
+      body: 'App dành cho người từ 16 tuổi. Vé cho trẻ em do cha mẹ hoặc người giám hộ đặt.'
+    }
+  ],
+  driver: [
+    {
+      heading: 'Ai chịu trách nhiệm về dữ liệu của bạn',
+      body: 'Nhà xe nơi bạn làm việc là bên kiểm soát dữ liệu cá nhân của bạn và tạo tài khoản cho bạn. BusGo cung cấp phần mềm và máy chủ, là bên xử lý dữ liệu theo yêu cầu của nhà xe. Chính sách này áp dụng cho ứng dụng BusGo Driver.'
+    },
+    {
+      heading: 'Dữ liệu chúng tôi thu thập',
+      body: '(1) Họ tên, mã nhân viên, số điện thoại, hạng và hạn bằng lái do nhà xe nhập. (2) Vị trí chính xác của điện thoại trong ca chạy, kể cả khi app đóng hoặc không được sử dụng, từ lúc bạn bấm đi đón khách hoặc xuất bến tới khi kết thúc chuyến; ngoài ca app không lấy vị trí. (3) Thao tác trong ca: kiểm tra xe, quét vé, cho khách lên xe, thu tiền, báo sự cố kèm ghi chú. (4) Địa chỉ IP và thời điểm truy cập. Camera chỉ dùng để quét mã QR trên vé; hình ảnh được xử lý trên máy, không gửi đi.'
+    },
+    {
+      heading: 'Mục đích sử dụng',
+      body: 'Cho hành khách và điều hành biết xe đang ở đâu và khi nào tới; xếp lịch chạy; đối soát vé và tiền mặt; xử lý sự cố; bảo vệ tài khoản. Chúng tôi không bán dữ liệu và không dùng dữ liệu để quảng cáo.'
+    },
+    {
+      heading: 'Chia sẻ dữ liệu',
+      body: 'Vị trí xe được gửi tới điều hành của nhà xe và tới hành khách của chuyến (và người họ chia sẻ link theo dõi) trong lúc chuyến chạy. Thao tác trong ca được nhà xe xem để đối soát. Máy chủ bản đồ OpenStreetMap France nhận địa chỉ IP và vùng bản đồ app hiển thị. Cơ quan nhà nước có thẩm quyền khi pháp luật yêu cầu.'
+    },
+    {
+      heading: 'Lưu trữ và bảo mật',
+      body: 'Dữ liệu lưu trên máy chủ do BusGo quản lý, trong cơ sở dữ liệu riêng của nhà xe, được mã hóa; đường truyền được mã hóa. Thời gian lưu do nhà xe quyết định theo quy định lao động, vận tải và kế toán. Bản sao lưu tự xóa sau khoảng 7 ngày.'
+    },
+    {
+      heading: 'Quyền của bạn',
+      body: 'Theo Nghị định 13/2023/NĐ-CP, bạn có quyền được biết, xem, sửa, xóa dữ liệu và rút lại sự đồng ý. Tài khoản do nhà xe tạo và đóng: liên hệ điều độ hoặc giám đốc nhà xe để xem, sửa hoặc xóa tài khoản. Bạn có thể tắt quyền vị trí bất cứ lúc nào trong cài đặt của điện thoại; khi đó hành khách không thấy vị trí xe.'
+    }
+  ],
+  manager: [
+    {
+      heading: 'Ai chịu trách nhiệm về dữ liệu',
+      body: 'Nhà xe là bên kiểm soát dữ liệu của hành khách, tài xế và nhân viên văn phòng; BusGo là bên xử lý dữ liệu. Trang điều hành chỉ dành cho nhân viên do nhà xe cấp tài khoản.'
+    },
+    {
+      heading: 'Dữ liệu và nhật ký',
+      body: 'Trang lưu tài khoản nhân viên (email, họ tên, vai trò, khóa xác thực 2 bước), mọi thao tác kèm địa chỉ IP trong nhật ký không sửa được, và dữ liệu vận hành của nhà xe. Dữ liệu được mã hóa, chỉ người có quyền mới xem.'
+    }
+  ]
+};
+
+const PRIVACY_CLOSING = {
+  heading: 'Liên hệ',
+  body: `Về dữ liệu cá nhân, liên hệ tổng đài của nhà xe (trong app) hoặc BusGo qua email ${PRIVACY_CONTACT_EMAIL}. Chính sách có thể được cập nhật; mỗi bản có số phiên bản và ngày hiệu lực ở đầu trang.`
+};
+
 const MODEL_NOTICE = [
   {
     heading: 'Mô hình trí tuệ nhân tạo',
@@ -147,6 +225,7 @@ export function legalContent(app) {
     version: LEGAL_VERSION,
     effective_date: LEGAL_EFFECTIVE_DATE,
     terms: { title: 'Điều khoản sử dụng', sections: [...TERMS[app], ...COMMON_CLOSING] },
+    privacy: { title: 'Chính sách quyền riêng tư', sections: [...PRIVACY[app], PRIVACY_CLOSING] },
     model_notice: { title: 'Giấy phép mô hình và dữ liệu', sections: pick(MODEL_NOTICE, app) }
   };
 }

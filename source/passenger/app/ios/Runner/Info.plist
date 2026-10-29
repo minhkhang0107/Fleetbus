@@ -27,17 +27,9 @@
 
 	<!-- Location Usage Descriptions (PAX-005, PAX-018, PAX-019) -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>BusGo sử dụng vị trí của bạn để tìm kiếm bến xe gần nhất và theo dõi lộ trình xe đến điểm đón.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>BusGo cập nhật vị trí xe theo thời gian thực và thông báo khi xe sắp đến điểm đón.</string>
-
-	<!-- Camera Usage for Dynamic QR Ticket Scanning (PAX-017) -->
-	<key>NSCameraUsageDescription</key>
-	<string>BusGo cần quyền truy cập máy ảnh để quét mã QR vé xe và xác thực hành khách.</string>
+	<string>BusGo dùng vị trí của bạn khi app đang mở để gợi ý điểm đón gần nhất và ghim địa chỉ đón tận nhà.</string>
 
 	<!-- Photo Library for Saving E-Tickets -->
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>BusGo cho phép lưu ảnh vé điện tử và mã QR vé xe vào thư viện ảnh của bạn.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>BusGo lưu ảnh mã QR thanh toán vào thư viện ảnh của bạn.</string>
 
@@ -49,6 +41,9 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<!-- Portrait only, also on iPad: full screen, no Split View (App Store asks for all four orientations otherwise) -->
+	<key>UIRequiresFullScreen</key>
+	<true/>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

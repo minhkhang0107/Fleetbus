@@ -81,3 +81,33 @@ Rà soát theo 4 vai: hành khách, tài xế, nhà xe (giám đốc, điều ph
 Để sau theo yêu cầu: B-02 và B-04 (số và dữ liệu, tài khoản demo), B-05, B-06 và phần còn lại của B-12 (cấu hình bản release: địa chỉ server, GPS thật, ký app, quyền vị trí nền, HTTP không mã hóa).
 
 Còn mở: H-04 (hóa đơn điện tử, danh sách hành khách, cần xác nhận pháp lý), H-07 (đo tải lưu trữ), H-09 (push cho app tài xế), H-10 (tile bản đồ thương mại, tìm địa chỉ), tên khách chưa sửa được.
+
+## 8. Rà soát lần 2 (sau D165-D172)
+
+Gemini rà soát lại theo 4 vai (17 phát hiện). Claude kiểm chứng trong code và chạy thử server **ở chế độ production** với thư mục dữ liệu, khóa và webhook SMS giả. Bài thử đi trọn luồng: khách nhận OTP qua SMS, quản trị tạo nhà xe, giám đốc đổi mật khẩu và cài 2FA, tạo bến, tuyến và nhân viên, khách tìm thấy chuyến ngày mai, giới hạn IP, sao lưu.
+
+**Lỗi chặn mới, đã sửa (D173):**
+
+| ID | Vấn đề | Ai tìm ra |
+|---|---|---|
+| R2-01 | **Ở production không nhân viên văn phòng nào đăng nhập được**: form đăng nhập web không gửi mã nhà xe, gateway trả 400 `OPERATOR_REQUIRED`. Có từ trước, lần 1 bỏ sót. | Claude (chạy thử production), Gemini cũng nêu (O-02) |
+| R2-02 | **Tuyến mới không bán được vé trong 15 ngày đầu**: lịch đầu tiên bị áp quy tắc "bắt đầu sau các ngày đang mở bán" (D129), dù tuyến chưa bán ngày nào. Test cũ qua được nhờ thêm chuyến tăng cường. | Claude (đọc test, chạy thử production), Gemini (O-01) |
+| R2-03 | **Link theo dõi xe trong SMS/push của vé đặt qua app báo 404** cho tới khi khách tự bấm "Chia sẻ vé" (link chỉ hợp lệ khi có `share_expires_at`). Có từ D144. | Gemini (P-01), Claude xác nhận bằng test |
+| R2-04 | Webhook SMS/push không gửi được khóa xác thực mà các cổng SMS Brandname, Zalo ZNS yêu cầu. Mức CAO. | Gemini (P-02) |
+
+**Bác bỏ hoặc không cần sửa:**
+- D-01 "`seq` GPS lùi khi đồng hồ máy lùi": sai, app đã giữ `seq` luôn tăng (`driver_store.dart:1312`).
+- D-03 "tài xế mẫu dự phòng ở `/driver/profile`": production luôn bật xác thực (`getAuthMode`), nhánh này không chạy.
+- O-04 "kế toán không xem được tài xế": danh sách nộp tiền đã có tên tài xế, biển số.
+- P-04 "ảnh QR từ `api.vietqr.io`": app tự vẽ QR từ `qr_payload`.
+- A-04 "`/health` lộ RAM": đã biết, mức thấp.
+
+**Để sau (mới thêm):**
+- A-01: tài khoản quản trị nền tảng ở production cần đặt `FLEETBUS_TOTP_SECRET_PLAT_01` trước khi đăng nhập. Sẽ làm cùng B-04 (tạo tài khoản quản trị thật thay tài khoản mẫu).
+- P-03: khách chưa sửa được tên.
+- D-02: ghi chú sự cố tối đa 200 ký tự, chưa gửi được ảnh.
+- O-05: bảng điều độ chưa lọc theo xe/tài xế.
+- A-02: chạy dưới systemd/pm2 để tự khởi động lại.
+- O-03: danh sách hành khách và lệnh vận chuyển theo Nghị định 10/2020, trùng H-04.
+
+**Kết luận lần 2: sẵn sàng cho pilot có kiểm soát với một nhà xe nhỏ**, với điều kiện xong các mục để sau theo yêu cầu (dữ liệu/tài khoản demo, cấu hình bản release), có hợp đồng SMS hoặc Zalo ZNS, và chốt nghĩa vụ hóa đơn điện tử và danh sách hành khách với nhà xe pilot.

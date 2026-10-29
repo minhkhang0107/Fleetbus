@@ -561,18 +561,42 @@ class LegalSection {
       ]);
 }
 
+class LegalUrls {
+  const LegalUrls({this.terms, this.privacy, this.accountDeletion});
+  final String? terms;
+  final String? privacy;
+  final String? accountDeletion;
+
+  factory LegalUrls.fromJson(Map<String, dynamic> j) => LegalUrls(
+        terms: j['terms'] as String?,
+        privacy: j['privacy'] as String?,
+        accountDeletion: j['account_deletion'] as String?,
+      );
+}
+
 class LegalInfo {
-  const LegalInfo({required this.version, required this.effectiveDate, required this.terms, required this.modelNotice});
+  const LegalInfo({
+    required this.version,
+    required this.effectiveDate,
+    required this.terms,
+    required this.privacy,
+    required this.modelNotice,
+    this.urls = const LegalUrls(),
+  });
   final String version;
   final String effectiveDate;
   final LegalDoc terms;
+  final LegalDoc privacy;
   final LegalDoc modelNotice;
+  final LegalUrls urls;
 
   factory LegalInfo.fromJson(Map<String, dynamic> j) => LegalInfo(
         version: '${j['version'] ?? ''}',
         effectiveDate: '${j['effective_date'] ?? ''}',
         terms: LegalDoc.fromJson(j['terms'] as Map<String, dynamic>? ?? const {}),
+        privacy: LegalDoc.fromJson(j['privacy'] as Map<String, dynamic>? ?? const {}),
         modelNotice: LegalDoc.fromJson(j['model_notice'] as Map<String, dynamic>? ?? const {}),
+        urls: LegalUrls.fromJson(j['urls'] as Map<String, dynamic>? ?? const {}),
       );
 }
 
@@ -934,11 +958,15 @@ class PassengerStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  LegalInfo? legalInfo;
+
   /// SH-006: the terms and notices come from the server so they change without an app release (D157).
   Future<ApiResult<LegalInfo>> loadLegal() async {
     final r = await _call(api.getLegal);
     if (!r.ok) return ApiResult(null, r.error, r.code);
-    return ApiResult(LegalInfo.fromJson(r.value!));
+    final info = LegalInfo.fromJson(r.value!);
+    legalInfo = info;
+    return ApiResult(info);
   }
 
   /// The HTML page of one slide; the error is shown in place of the page.

@@ -67,6 +67,8 @@ class _DriverAboutScreenState extends State<DriverAboutScreen> {
           child: Column(children: [
             _row('Điều khoản sử dụng', legalHint, legal == null ? null : () => openDoc(legal.terms)),
             const Divider(height: 1, color: DTokens.line),
+            _row('Chính sách quyền riêng tư', legalHint, legal == null ? null : () => openDoc(legal.privacy)),
+            const Divider(height: 1, color: DTokens.line),
             _row('Giấy phép mã nguồn mở', 'Thư viện và phông chữ dùng trong app', () => showLicensePage(
                   context: context,
                   applicationName: 'BusGo Driver',
