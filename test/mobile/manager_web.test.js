@@ -223,4 +223,24 @@ describe('Phase Manager Web: Flutter Web Platform & Dashboard Integrity Test Sui
     assert.ok(content.includes('/api/v1/ops/cash-handovers/') && content.includes('/confirm'), 'Must call cash-handovers confirm');
     assert.ok(content.includes('Nộp tiền cuối chuyến'), 'Must display "Nộp tiền cuối chuyến"');
   });
+
+  it('TC-MGR-WEB-15: Manager Web api() must use AbortController timeout and return unresponsive server message', () => {
+    const webDistPath = path.join(managerDir, 'web_dist/index.html');
+    assert.ok(fs.existsSync(webDistPath), 'source/manager/web_dist/index.html must exist');
+    const content = fs.readFileSync(webDistPath, 'utf8');
+
+    const apiFn = content.slice(content.indexOf('async function api('), content.indexOf('async function publicApi('));
+    assert.ok(apiFn.includes('AbortController'), 'api() must use AbortController');
+    assert.ok(
+      apiFn.includes('Máy chủ không phản hồi. Kiểm tra mạng rồi thử lại.'),
+      'api() must return unresponsive server message on abort'
+    );
+  });
+
+  it('TC-MGR-WEB-16: a tab that failed for lack of network loads again when the browser is back online (D178)', () => {
+    const content = fs.readFileSync(path.join(managerDir, 'web_dist/index.html'), 'utf8');
+    const listener = content.slice(content.indexOf("window.addEventListener('online'"), content.indexOf('function stopTimers()'));
+    assert.ok(listener.includes('state.missedLoad'), 'only a tab that missed a load is reloaded');
+    assert.ok(listener.includes('show(state.view)'), 'the current tab loads again');
+  });
 });

@@ -230,6 +230,14 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
                   child: QrImageView(data: t.qrValue!, size: 232, backgroundColor: Colors.white),
                 ),
               ),
+              if (t.qrFromCache) ...[
+                gap(10),
+                Text(
+                  'Đang không có mạng — đây là mã QR đã lưu trên máy. Mã vẫn dùng được nếu bạn chưa đổi mã.',
+                  textAlign: TextAlign.center,
+                  style: sans(size: 13, color: PTokens.warnInk),
+                ),
+              ],
               gap(12),
               Text('Dùng được khi mất mạng, khi lưu ảnh hoặc in. Mỗi vé chỉ lên xe một lần · màn hình đã tăng độ sáng', textAlign: TextAlign.center, style: sans(size: 12, color: PTokens.muted, height: 1.5)),
               if (_showPin && t.pin != null) ...[

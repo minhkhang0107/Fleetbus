@@ -21,6 +21,13 @@ class PassengerWalletScreen extends StatefulWidget {
 class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
   bool _history = false;
 
+  String _formatVnHhmm(DateTime dt) {
+    final vn = dt.toUtc().add(const Duration(hours: 7));
+    final hh = vn.hour.toString().padLeft(2, '0');
+    final mm = vn.minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
+  }
+
   /// What the passenger sees with no ticket: sign in first, else how to get one (or what history keeps).
   Widget _empty(BuildContext context, PassengerStore store) {
     if (store.userPhone == null) {
@@ -137,6 +144,22 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
         ),
       ),
       const Divider(height: 1, color: PTokens.line),
+      if (store.walletOfflineSince != null)
+        Container(
+          width: double.infinity,
+          color: PTokens.warnSoft,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(children: [
+            const Icon(Icons.wifi_off_rounded, size: 18, color: PTokens.warnInk),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Không có mạng — vé đã lưu lúc ${_formatVnHhmm(store.walletOfflineSince!)}',
+                style: sans(size: 13, color: PTokens.warnInk),
+              ),
+            ),
+          ]),
+        ),
       Expanded(
         child: store.loadingTickets && list.isEmpty
             ? const Center(child: CircularProgressIndicator())

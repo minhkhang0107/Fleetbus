@@ -929,11 +929,19 @@ async function api(path, { method = 'GET', body, idempotent = false } = {}) {
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
   if (state.platformCode && path.startsWith('/api/v1/ops/')) headers['X-Operator-Code'] = state.platformCode;
   if (idempotent) headers['Idempotency-Key'] = uuid();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
   let res;
   try {
-    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-  } catch (_) {
+    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal });
+  } catch (err) {
+    if (controller.signal.aborted || (err && err.name === 'AbortError')) {
+      return { ok: false, status: 0, message: 'Máy chủ không phản hồi. Kiểm tra mạng rồi thử lại.' };
+    }
+    state.missedLoad = true;
     return { ok: false, status: 0, message: 'Không kết nối được máy chủ' };
+  } finally {
+    clearTimeout(timer);
   }
   let json = {};
   try { json = await res.json(); } catch (_) {}
@@ -962,7 +970,17 @@ async function publicApi(path) {
   // The staff token lets the office see the bus; anonymous callers only get the road and stops.
   const headers = { Authorization: `Bearer ${state.token}` };
   if (code) headers['X-Operator-Code'] = code;
-  try { const res = await fetch(path, { headers }); const json = await res.json(); return res.ok ? json.data : null; } catch (_) { return null; }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(path, { headers, signal: controller.signal });
+    const json = await res.json();
+    return res.ok ? json.data : null;
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const STATUS = {
@@ -1321,6 +1339,13 @@ async function enter() {
 }
 
 document.querySelectorAll('nav button[data-view]').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+// A tab opened while offline shows its error; once the network is back it loads again by itself (D178).
+window.addEventListener('online', () => {
+  if (!state.missedLoad || !state.token || $('#app').classList.contains('hidden')) return;
+  state.missedLoad = false;
+  toast('Đã có mạng trở lại');
+  show(state.view);
+});
 function stopTimers() { state.timers.forEach(clearInterval); state.timers = []; }
 function every(fn) { fn(); state.timers.push(setInterval(fn, POLL_MS)); }
 
@@ -1705,7 +1730,9 @@ async function loadOverview() {
     ['Cảnh báo', m.active_alerts_count ?? 0]
   ];
   $('#kpis').innerHTML = tiles.map(([l, v]) => `<div class="card kpi"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`).join('');
-  const alerts = a.ok ? a.data.alerts : [];
+  // Alerts that could not be read are not "no alerts": the office must not take silence for calm.
+  if (!a.ok) { $('#alerts').innerHTML = `<p class="error">Chưa tải được cảnh báo: ${esc(a.message)}</p>`; return; }
+  const alerts = a.data.alerts || [];
   $('#alerts').innerHTML = alerts.length ? alerts.map(x => `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><span class="pill ${x.severity === 'RED' ? 'danger' : x.severity === 'AMBER' ? 'warn' : 'ok'}">${esc(x.type)}</span><span class="grow">${esc(x.message)}</span><span class="muted mono">${esc(x.vehicle_plate || '')}</span></div>`).join('') : '<p class="muted">Không có cảnh báo.</p>';
 }
 

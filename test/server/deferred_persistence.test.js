@@ -132,6 +132,14 @@ describe('Deferred Persistence: reads and GPS pings', () => {
         return origFlush(...args);
       };
 
+      // Seen when the ping marks the store dirty, i.e. before its answer: the 100 ms timer may flush any time after.
+      let flushesWhenAnswered = null;
+      const origMarkDirty = services.store.markDirty.bind(services.store);
+      services.store.markDirty = (...args) => {
+        flushesWhenAnswered ??= flushes;
+        return origMarkDirty(...args);
+      };
+
       // 3. Send GPS ping
       const pingRes = await fetch(`${baseUrl}/api/v1/driver/trips/trp_991823/telemetry`, {
         method: 'POST',
@@ -141,8 +149,7 @@ describe('Deferred Persistence: reads and GPS pings', () => {
       assert.strictEqual(pingRes.status, 200);
 
       // Ping was NOT flushed synchronously
-      assert.strictEqual(flushes, 0, 'GPS ping must not call store.flush synchronously');
-      assert.strictEqual(services.store.dirty, true, 'store must be dirty after ping');
+      assert.strictEqual(flushesWhenAnswered, 0, 'GPS ping must not call store.flush synchronously');
 
       // Wait > persistIntervalMs for the deferred flush to execute
       await new Promise(resolve => setTimeout(resolve, 400));

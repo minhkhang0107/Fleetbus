@@ -57,7 +57,13 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
     if (!mounted) return;
     setState(() {
       _checking = false;
-      if (manual && !paid) _notYet = 'Chưa nhận được tiền. Hệ thống vẫn kiểm tra mỗi 3 giây; kiểm tra lại nội dung chuyển khoản.';
+      if (manual && !paid) {
+        if (store.lastPaymentCheckCode == 'NETWORK') {
+          _notYet = 'Không kết nối được máy chủ. Tiền bạn đã chuyển không mất — kiểm tra mạng rồi bấm lại.';
+        } else {
+          _notYet = 'Chưa nhận được tiền. Hệ thống vẫn kiểm tra mỗi 3 giây; kiểm tra lại nội dung chuyển khoản.';
+        }
+      }
     });
     if (!paid || store.lastTicket == null) return;
     _poll?.cancel();

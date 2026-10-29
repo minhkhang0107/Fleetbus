@@ -22,11 +22,16 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
   static const pollEvery = Duration(seconds: 10);
   /// After the stream drops, it is opened again this much later; meanwhile the screen asks.
   static const reconnectAfter = Duration(seconds: 30);
+  /// The server pushes at least every 20 s: a longer silence is a dead connection the socket has not noticed.
+  static const streamIdle = Duration(seconds: 45);
 
   Tracking? _tracking;
   StreamSubscription<Tracking>? _stream;
   Timer? _poll;
   Timer? _reconnect;
+  Timer? _idle;
+  /// The last answer could not reach the server: the bus shown is the last one known.
+  bool _phoneOffline = false;
 
   @override
   void initState() {
@@ -64,14 +69,28 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
     _poll = null;
     _reconnect?.cancel();
     _reconnect = null;
+    _idle?.cancel();
+    _idle = null;
+  }
+
+  void _armIdle() {
+    _idle?.cancel();
+    _idle = Timer(streamIdle, () {
+      _stream?.cancel();
+      _fallBack();
+    });
   }
 
   /// The server pushes the bus after each of its positions; asking every 10 s is only the fallback.
   void _watch() {
     _stop();
     final ticket = widget.ticket;
+    _armIdle();
     _stream = PassengerScope.read(context).watchTracking(ticket.tripId, ticketId: ticket.id).listen(
-      _show,
+      (t) {
+        _armIdle();
+        _show(t);
+      },
       onError: (_) => _fallBack(),
       onDone: _fallBack,
       cancelOnError: true,
@@ -80,6 +99,8 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
 
   void _fallBack() {
     _stream = null;
+    _idle?.cancel();
+    _idle = null;
     if (!mounted) return;
     _poll ??= Timer.periodic(pollEvery, (_) => _load());
     _reconnect ??= Timer(reconnectAfter, () {
@@ -99,7 +120,15 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
 
   void _show(Tracking t) {
     if (!mounted) return;
-    setState(() => _tracking = t);
+    // Offline the bus stays where it was last seen, marked as old, rather than vanishing as if it had no signal.
+    if (t.unreachable && _tracking != null) {
+      setState(() => _phoneOffline = true);
+      return;
+    }
+    setState(() {
+      _phoneOffline = false;
+      _tracking = t;
+    });
     // Boarded: the server now aims at the drop-off; the ticket learns it from its pass.
     if (widget.ticket.status == TicketStatus.active && t.target?.isDropoff == true) {
       PassengerScope.read(context).loadPass(widget.ticket);
@@ -116,7 +145,9 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
     final live = signal == GpsSignal.live;
     final pill = isCompleted
         ? const Pill('Đã đi', PillKind.mute)
-        : switch (signal) {
+        : _phoneOffline
+            ? const Pill('Mất mạng', PillKind.warn)
+            : switch (signal) {
             GpsSignal.live => const Pill('Trực tiếp', PillKind.ok),
             GpsSignal.stale => const Pill('Mất tín hiệu', PillKind.warn),
             GpsSignal.offline => const Pill('Ngoại tuyến', PillKind.mute),
@@ -124,7 +155,9 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
           };
     final banner = isCompleted
         ? null
-        : switch (signal) {
+        : _phoneOffline
+            ? ('Điện thoại của bạn đang mất mạng. ', 'Vị trí xe dưới đây là lần cập nhật cuối; màn hình tự cập nhật khi có mạng lại.')
+            : switch (signal) {
             GpsSignal.live => null,
             GpsSignal.stale => ('Mất tín hiệu. ', 'Vị trí dưới đây đã cũ; giờ đến chỉ là ước tính.'),
             GpsSignal.offline => ('Xe ngoại tuyến. ', 'Vị trí dưới đây đã cũ; giờ đến chỉ là ước tính.'),
@@ -187,10 +220,10 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
             liveRegion: true,
             child: Container(
               width: double.infinity,
-              color: signal == GpsSignal.stale ? PTokens.warnSoft : const Color(0xFFF1F5F9),
+              color: signal == GpsSignal.stale || _phoneOffline ? PTokens.warnSoft : const Color(0xFFF1F5F9),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Icon(Icons.signal_wifi_off, size: 18, color: signal == GpsSignal.stale ? PTokens.warnInk : const Color(0xFF334155)),
+                Icon(Icons.signal_wifi_off, size: 18, color: signal == GpsSignal.stale || _phoneOffline ? PTokens.warnInk : const Color(0xFF334155)),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text.rich(TextSpan(children: [

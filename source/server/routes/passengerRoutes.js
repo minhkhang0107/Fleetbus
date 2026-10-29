@@ -264,7 +264,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       if (result.success) {
         sendSuccess(res, result.data);
       } else {
-        sendError(res, result.error, result.code, result.status || 429, result);
+        sendError(res, result.error, result.code, result.status || (result.code === 'COOLDOWN_ACTIVE' ? 429 : 400), result);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;

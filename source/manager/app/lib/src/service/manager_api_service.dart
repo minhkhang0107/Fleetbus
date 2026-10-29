@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:http/http.dart' as http;
@@ -18,6 +19,7 @@ String newManagerIdempotencyKey() {
 class ManagerApiService {
   final String baseUrl;
   final http.Client _client;
+  final Duration timeout;
 
   /// Session token of the signed-in staff member (set by [login]).
   String? authToken;
@@ -26,6 +28,7 @@ class ManagerApiService {
     String? baseUrl,
     http.Client? client,
     this.authToken,
+    this.timeout = const Duration(seconds: 20),
   })  : baseUrl = baseUrl ?? const String.fromEnvironment('API_BASE_URL', defaultValue: 'http://localhost:3000/api/v1'),
         _client = client ?? http.Client();
 
@@ -42,13 +45,13 @@ class ManagerApiService {
 
   Future<Map<String, dynamic>> _get(String path, {Map<String, String>? query}) async {
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
-    return _decode(await _client.get(uri, headers: _headers()));
+    return _decode(await _client.get(uri, headers: _headers()).timeout(timeout));
   }
 
   /// A GET answered with a file (CSV), returned as text.
   Future<String> _getText(String path, {Map<String, String>? query}) async {
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
-    return utf8.decode((await _client.get(uri, headers: _headers())).bodyBytes);
+    return utf8.decode((await _client.get(uri, headers: _headers()).timeout(timeout)).bodyBytes);
   }
 
   Future<Map<String, dynamic>> _post(
@@ -61,22 +64,22 @@ class ManagerApiService {
       Uri.parse('$baseUrl$path'),
       headers: _headers(idempotencyKey: idempotent ? (idempotencyKey ?? newManagerIdempotencyKey()) : null),
       body: body == null ? null : jsonEncode(body),
-    );
+    ).timeout(timeout);
     return _decode(response);
   }
 
   Future<Map<String, dynamic>> _put(String path, {Object? body}) async {
-    final response = await _client.put(Uri.parse('$baseUrl$path'), headers: _headers(), body: body == null ? null : jsonEncode(body));
+    final response = await _client.put(Uri.parse('$baseUrl$path'), headers: _headers(), body: body == null ? null : jsonEncode(body)).timeout(timeout);
     return _decode(response);
   }
 
   Future<Map<String, dynamic>> _patch(String path, {Object? body}) async {
-    final response = await _client.patch(Uri.parse('$baseUrl$path'), headers: _headers(), body: body == null ? null : jsonEncode(body));
+    final response = await _client.patch(Uri.parse('$baseUrl$path'), headers: _headers(), body: body == null ? null : jsonEncode(body)).timeout(timeout);
     return _decode(response);
   }
 
   Future<Map<String, dynamic>> _delete(String path) async {
-    return _decode(await _client.delete(Uri.parse('$baseUrl$path'), headers: _headers()));
+    return _decode(await _client.delete(Uri.parse('$baseUrl$path'), headers: _headers()).timeout(timeout));
   }
 
   // MGR-001 / MGR-029: RBAC Login. Five wrong passwords lock the account (429 ACCOUNT_LOCKED).

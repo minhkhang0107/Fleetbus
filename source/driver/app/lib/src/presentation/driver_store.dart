@@ -106,6 +106,7 @@ class Passenger {
     this.meetingPoint,
     this.homeMissed = false,
     this.isHotline = false,
+    this.pnr,
   });
   final String ticketId;
   final String seat;
@@ -120,6 +121,7 @@ class Passenger {
   final int? boardedAt;
   final bool hail;
   final bool isHotline;
+  final String? pnr;
 
   /// Home pickup / drop-off address (spec 3.1); the passenger still rides from [from] to [to].
   final String? homePickup;
@@ -140,6 +142,40 @@ class Passenger {
   final bool homeMissed;
   final String? meetingPoint;
   bool get codDue => cod > 0 && !paid;
+
+  Passenger copyWith({
+    PaxStatus? status,
+    int? boardedAt,
+    bool? inaccessible,
+    String? meetingPoint,
+    bool? homeMissed,
+    bool? paid,
+  }) =>
+      Passenger(
+        ticketId: ticketId,
+        seat: seat,
+        name: name,
+        phone: phone,
+        pay: pay,
+        from: from,
+        to: to,
+        cod: cod,
+        paid: paid ?? this.paid,
+        status: status ?? this.status,
+        boardedAt: boardedAt ?? this.boardedAt,
+        hail: hail,
+        homePickup: homePickup,
+        homeDropoff: homeDropoff,
+        homeNote: homeNote,
+        pickupWindow: pickupWindow,
+        homeLat: homeLat,
+        homeLng: homeLng,
+        inaccessible: inaccessible ?? this.inaccessible,
+        meetingPoint: meetingPoint ?? this.meetingPoint,
+        homeMissed: homeMissed ?? this.homeMissed,
+        isHotline: isHotline,
+        pnr: pnr,
+      );
 
   factory Passenger.fromJson(Map<String, dynamic> j) {
     final boardedAt = DateTime.tryParse('${j['boarded_at']}')?.toUtc().add(const Duration(hours: 7));
@@ -174,6 +210,7 @@ class Passenger {
       meetingPoint: j['home_pickup']?['meeting_point'],
       homeMissed: j['home_pickup']?['missed_at'] != null,
       isHotline: j['source'] == 'HOTLINE',
+      pnr: j['pnr']?.toString(),
     );
   }
 }
@@ -415,6 +452,9 @@ int? minutesToStop({
 
 const _networkError = 'Không kết nối được máy chủ. Thao tác chưa được gửi, thử lại khi có mạng.';
 
+/// D178: what a manifest action says when it is kept on the device until the network is back.
+const savedOffline = 'Đã lưu trên máy · sẽ gửi khi có sóng';
+
 /// SH-006: one titled text of the about screen (terms of use, or the model and data notice).
 class LegalDoc {
   const LegalDoc(this.title, this.sections);
@@ -534,6 +574,12 @@ class DriverStore extends ChangeNotifier {
   static String queueKeyFor(String staffId) => 'driver_queue_${staffId.isEmpty ? 'default' : staffId}';
   String get _queueKey => queueKeyFor(staffId);
 
+  static String telemetryKeyFor(String staffId) => 'driver_telemetry_${staffId.isEmpty ? 'default' : staffId}';
+  String get _telemetryKey => telemetryKeyFor(staffId);
+
+  final List<Map<String, dynamic>> telemetryBuffer = [];
+  bool _flushingTelemetry = false;
+
   static List<QueuedAction> _decodeQueue(String raw) {
     try {
       final list = jsonDecode(raw) as List;
@@ -551,6 +597,19 @@ class DriverStore extends ChangeNotifier {
     await prefs.setString(_queueKey, jsonEncode([for (final q in queue) q.toJson()]));
   }
 
+  Future<void> _saveTelemetryBuffer() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_telemetryKey, jsonEncode(telemetryBuffer));
+  }
+
+  /// Removes the action identified by [idempotencyKey] from the offline queue and saves.
+  Future<void> _dropQueued(String idempotencyKey) async {
+    queue.removeWhere((a) => a.idempotencyKey == idempotencyKey);
+    await _saveQueue();
+    _syncRetryTimer();
+    notifyListeners();
+  }
+
   Future<void> _loadInitialQueue() async {
     final prefs = await SharedPreferences.getInstance();
     var targetStaff = staffId;
@@ -565,12 +624,21 @@ class DriverStore extends ChangeNotifier {
     }
     if (targetStaff.isEmpty) return;
     final raw = prefs.getString(queueKeyFor(targetStaff));
-    if (raw == null) return;
-    final loaded = _decodeQueue(raw);
-    if (loaded.isEmpty) return;
-    final existingKeys = {for (final q in queue) q.idempotencyKey};
-    queue.insertAll(0, [for (final q in loaded) if (!existingKeys.contains(q.idempotencyKey)) q]);
-    notifyListeners();
+    if (raw != null) {
+      final loaded = _decodeQueue(raw);
+      if (loaded.isNotEmpty) {
+        final existingKeys = {for (final q in queue) q.idempotencyKey};
+        queue.insertAll(0, [for (final q in loaded) if (!existingKeys.contains(q.idempotencyKey)) q]);
+        notifyListeners();
+      }
+    }
+    final rawTelemetry = prefs.getString(telemetryKeyFor(targetStaff));
+    if (rawTelemetry != null) {
+      try {
+        final list = jsonDecode(rawTelemetry) as List;
+        telemetryBuffer.addAll([for (final i in list) if (i is Map) Map<String, dynamic>.from(i)]);
+      } catch (_) {}
+    }
   }
 
   Future<void> _loadQueueForDriver() async {
@@ -581,6 +649,43 @@ class DriverStore extends ChangeNotifier {
       ..addAll(raw == null ? const [] : _decodeQueue(raw));
     _syncRetryTimer();
     notifyListeners();
+  }
+
+  Future<void> _loadTelemetryBufferForDriver() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_telemetryKey);
+    telemetryBuffer.clear();
+    if (raw != null) {
+      try {
+        final list = jsonDecode(raw) as List;
+        telemetryBuffer.addAll([for (final i in list) if (i is Map) Map<String, dynamic>.from(i)]);
+      } catch (_) {}
+    }
+  }
+
+  /// Flushes buffered telemetry pings in chunks of 200 via replayOfflineTelemetry.
+  Future<void> flushTelemetry() async {
+    if (_flushingTelemetry || telemetryBuffer.isEmpty) return;
+    _flushingTelemetry = true;
+    try {
+      while (telemetryBuffer.isNotEmpty) {
+        final chunk = telemetryBuffer.take(200).toList();
+        try {
+          final key = newDriverIdempotencyKey();
+          final json = await api.replayOfflineTelemetry(chunk, idempotencyKey: key);
+          final error = _error(json);
+          if (error != null) {
+            break;
+          }
+          telemetryBuffer.removeRange(0, chunk.length);
+          await _saveTelemetryBuffer();
+        } catch (_) {
+          break;
+        }
+      }
+    } finally {
+      _flushingTelemetry = false;
+    }
   }
 
   /// Keeps the signed-in session on the device so reopening the app skips the login screen.
@@ -831,6 +936,9 @@ class DriverStore extends ChangeNotifier {
         offline = false;
         _syncRetryTimer();
       }
+      if (error == null && telemetryBuffer.isNotEmpty && !_flushingTelemetry) {
+        await flushTelemetry();
+      }
       if (autoFlush && queue.isNotEmpty && !_flushing) {
         unawaited(flushQueue());
       }
@@ -894,6 +1002,7 @@ class DriverStore extends ChangeNotifier {
       await loadShift(autoFlush: false);
     }
     await _loadQueueForDriver();
+    await _loadTelemetryBufferForDriver();
     return null;
   }
 
@@ -914,6 +1023,13 @@ class DriverStore extends ChangeNotifier {
   void logout() {
     api.authToken = null;
     unawaited(SharedPreferences.getInstance().then((prefs) => prefs.remove(_sessionKey)));
+    telemetryBuffer.clear();
+    final shiftKey = _shiftKey;
+    unawaited(SharedPreferences.getInstance().then((prefs) async {
+      await prefs.remove(_telemetryKey);
+      await prefs.remove(shiftKey);
+    }));
+    shiftSavedAt = null;
     _stopTimers();
     _retryTimer?.cancel();
     _retryTimer = null;
@@ -939,12 +1055,21 @@ class DriverStore extends ChangeNotifier {
     notifyListeners();
     final r = await _call(api.getTodayTrips, autoFlush: autoFlush);
     loading = false;
-    if (r.error != null) {
+    final prefs = await SharedPreferences.getInstance();
+    var data = r.data;
+    if (r.error == null) {
+      shiftSavedAt = null;
+      await prefs.setString(_shiftKey, jsonEncode({'saved_at': DateTime.now().toIso8601String(), 'day': _vnDay(_vnNow()), 'data': data}));
+    } else if (r.code == 'NETWORK') {
+      // D178: reopened without a network, the trips and passengers saved today, so boarding still works offline.
+      data = _cachedShift(prefs.getString(_shiftKey));
+    }
+    if (data == null) {
       loadError = r.error;
       notifyListeners();
       return;
     }
-    final trips = (r.data!['trips'] as List).cast<Map<String, dynamic>>()
+    final trips = (data['trips'] as List).cast<Map<String, dynamic>>()
       ..sort((a, b) => '${a['planned_departure_time']}'.compareTo('${b['planned_departure_time']}'));
     shift = [
       for (final t in trips)
@@ -969,7 +1094,49 @@ class DriverStore extends ChangeNotifier {
     }).firstOrNull;
     final current = selected ?? notStale ?? live.where((t) => t['status'] != 'COMPLETED').firstOrNull ?? live.lastOrNull;
     if (current != null) _apply(current, fresh: tripId != current['trip_id']);
+    if (shiftSavedAt != null) _replayQueuedBoarding();
     notifyListeners();
+  }
+
+  /// When the trips shown were saved, while the server cannot be reached; null when they are fresh.
+  DateTime? shiftSavedAt;
+
+  String get _shiftKey => 'driver_shift_${staffId.isEmpty ? 'default' : staffId}';
+
+  static String _vnDay(DateTime vn) => '${vn.year}-${vn.month}-${vn.day}';
+
+  /// The saved trips of today; a shift saved on another day is of no use and is not shown.
+  Map<String, dynamic>? _cachedShift(String? raw) {
+    if (raw == null) return null;
+    try {
+      final saved = jsonDecode(raw) as Map<String, dynamic>;
+      if (saved['day'] != _vnDay(_vnNow()) || saved['data'] is! Map<String, dynamic>) return null;
+      shiftSavedAt = DateTime.tryParse('${saved['saved_at']}');
+      return saved['data'] as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The saved manifest predates the boardings still waiting in the queue: show them boarded, so a second scan
+  /// is refused as "đã lên xe" instead of being queued again.
+  void _replayQueuedBoarding() {
+    final boarded = <String>{};
+    for (final a in queue) {
+      final ticket = a.body?['ticket_id'];
+      if (ticket is String) boarded.add(ticket);
+      final payload = '${a.body?['qrPayload'] ?? ''}';
+      final parts = payload.split('|');
+      if (parts.length > 2 && parts[0] == 'BUSGO') boarded.add(parts[2]);
+      if (parts.length > 1 && parts[0] == 'BUSGO_GRP') boarded.addAll(manifest.where((m) => m.pnr == parts[1]).map((m) => m.ticketId));
+      final pin = payload.split(':');
+      if (pin.length == 3 && pin[0] == 'PIN') boarded.add(pin[1]);
+    }
+    if (boarded.isEmpty) return;
+    manifest = [
+      for (final m in manifest)
+        if (boarded.contains(m.ticketId) && m.status != PaxStatus.boarded) m.copyWith(status: PaxStatus.boarded, boardedAt: clock) else m,
+    ];
   }
 
   LegalInfo? legalInfo;
@@ -1251,11 +1418,24 @@ class DriverStore extends ChangeNotifier {
       );
 
   /// D144: the passenger did not come out in time; the bus goes on, the passenger is sent to the first stop.
-  Future<String?> homeMissed(Passenger p) => _act(
-        'Khách ghế ${p.seat} không ra',
-        '/api/v1/driver/trips/$tripId/tickets/${p.ticketId}/home-missed',
-        request: (key) => api.homeMissed(tripId!, p.ticketId, idempotencyKey: key),
-      );
+  Future<String?> homeMissed(Passenger p) async {
+    final error = await _act(
+      'Khách ghế ${p.seat} không ra',
+      '/api/v1/driver/trips/$tripId/tickets/${p.ticketId}/home-missed',
+      request: (key) => api.homeMissed(tripId!, p.ticketId, idempotencyKey: key),
+    );
+    if (error != _networkError) return error;
+    // Queued for the network: the row changes now, as the server will make it.
+    manifest = [
+      for (final m in manifest)
+        if (m.ticketId == p.ticketId)
+          m.copyWith(homeMissed: true)
+        else
+          m
+    ];
+    notifyListeners();
+    return savedOffline;
+  }
 
   /// D144: the passenger's number, for a call while the bus is stopped. The server logs every request.
   Future<({String? phone, String? error})> contactOf(Passenger p) async {
@@ -1339,8 +1519,24 @@ class DriverStore extends ChangeNotifier {
     final at = DateTime.now();
     _seq = at.millisecondsSinceEpoch > _seq ? at.millisecondsSinceEpoch : _seq + 1;
     final seq = _seq;
-    await _call(() =>
+    final ping = <String, dynamic>{
+      'trip_id': tripId,
+      'lat': _lat,
+      'lng': _lng,
+      'speed_kmh': speed.toDouble(),
+      'bearing_deg': _bearing,
+      'recorded_at': at.toUtc().toIso8601String(),
+      if (_gpsAccuracy != null) 'accuracy_m': _gpsAccuracy,
+    };
+    final r = await _call(() =>
         api.sendTelemetry(tripId!, lat: _lat, lng: _lng, speedKmh: speed.toDouble(), bearingDeg: _bearing, seq: seq, recordedAt: at, accuracyM: _gpsAccuracy));
+    if (r.code == 'NETWORK') {
+      telemetryBuffer.add(ping);
+      if (telemetryBuffer.length > 720) {
+        telemetryBuffer.removeRange(0, telemetryBuffer.length - 720);
+      }
+      await _saveTelemetryBuffer();
+    }
   }
 
   // ---------- Stops (DRI-008) ----------
@@ -1424,12 +1620,27 @@ class DriverStore extends ChangeNotifier {
 
   // ---------- Boarding (DRI-009 to DRI-012) ----------
   /// The server refuses an unpaid COD ticket (409 COD_PAYMENT_REQUIRED, BR-COD-006).
-  Future<String?> board(Passenger p) => _act(
-        'Cho lên xe ghế ${p.seat}',
-        '/api/v1/driver/trips/$tripId/boarding/manual',
-        body: {'ticket_id': p.ticketId},
-        request: (key) => api.boardManually(tripId!, ticketId: p.ticketId, idempotencyKey: key),
-      );
+  Future<String?> board(Passenger p) async {
+    final error = await _act(
+      'Cho lên xe ghế ${p.seat}',
+      '/api/v1/driver/trips/$tripId/boarding/manual',
+      body: {'ticket_id': p.ticketId},
+      request: (key) => api.boardManually(tripId!, ticketId: p.ticketId, idempotencyKey: key),
+    );
+    // An unpaid COD ticket boards only once the cash is taken (BR-COD-006), with or without a network.
+    if (error != _networkError || p.codDue) return error;
+    // Queued for the network: the row changes now, as the server will make it.
+    manifest = [
+      for (final m in manifest)
+        if (m.ticketId == p.ticketId)
+          m.copyWith(status: PaxStatus.boarded, boardedAt: clock)
+        else
+          m
+    ];
+    _boardedOnClock.putIfAbsent(p.ticketId, () => clock);
+    notifyListeners();
+    return savedOffline;
+  }
 
   /// DRI-010: the backup PIN is checked by the server against the ticket's current QR version.
   Future<({String? error, String? code, Map<String, dynamic>? data})> boardWithPin(Passenger p, String pin) async {
@@ -1442,7 +1653,13 @@ class DriverStore extends ChangeNotifier {
       body: {'qrPayload': payload},
       idempotencyKey: key,
     );
-    if (r.error == null) await refreshTrip();
+    if (r.error == null) {
+      await refreshTrip();
+      return (error: null, code: r.code, data: r.data);
+    }
+    if (r.code == 'NETWORK') {
+      return _handleOfflineBoarding(payload, knownPassenger: p, key: key);
+    }
     return (error: r.error, code: r.code, data: r.data);
   }
 
@@ -1456,24 +1673,148 @@ class DriverStore extends ChangeNotifier {
       body: {'qrPayload': payload},
       idempotencyKey: key,
     );
-    if (r.error == null) await refreshTrip();
+    if (r.error == null) {
+      await refreshTrip();
+      return (error: null, code: r.code, data: r.data);
+    }
+    if (r.code == 'NETWORK') {
+      return _handleOfflineBoarding(payload, key: key);
+    }
     return (error: r.error, code: r.code, data: r.data);
   }
 
-  /// Spec A9: the bus cannot reach this home pickup; the manifest reloads to show it.
-  Future<String?> reportInaccessible(Passenger p, String reason, String meetingPoint) => _act(
-        'Không vào được địa chỉ ghế ${p.seat}',
-        '/api/v1/driver/trips/$tripId/tickets/${p.ticketId}/inaccessible',
-        body: {'reason': reason, if (meetingPoint.isNotEmpty) 'meeting_point': meetingPoint},
-        request: (key) => api.reportInaccessible(tripId!, p.ticketId, reason: reason, meetingPoint: meetingPoint, idempotencyKey: key),
-      );
+  Future<({String? error, String? code, Map<String, dynamic>? data})> _handleOfflineBoarding(
+    String payload, {
+    Passenger? knownPassenger,
+    required String key,
+  }) async {
+    List<Passenger> matching;
+    if (knownPassenger != null) {
+      final pnr = knownPassenger.pnr;
+      matching = (pnr != null && pnr.isNotEmpty)
+          ? manifest.where((m) => m.pnr == pnr).toList()
+          : [knownPassenger];
+      if (matching.isEmpty) matching = [knownPassenger];
+    } else {
+      final parts = payload.split('|');
+      if (payload.startsWith('BUSGO_GRP|')) {
+        final pnr = parts.length > 1 ? parts[1] : '';
+        matching = manifest.where((m) => m.pnr != null && m.pnr == pnr).toList();
+      } else if (payload.startsWith('BUSGO|')) {
+        final pnr = parts.length > 1 ? parts[1] : '';
+        final ticketId = parts.length > 2 ? parts[2] : '';
+        if (ticketId.isNotEmpty) {
+          matching = manifest.where((m) => m.ticketId == ticketId).toList();
+        } else {
+          matching = const [];
+        }
+        if (matching.isEmpty && pnr.isNotEmpty) {
+          matching = manifest.where((m) => m.pnr != null && m.pnr == pnr).toList();
+        }
+      } else {
+        // Not a FleetBus pass: nothing to check it against without the server.
+        matching = const [];
+      }
+    }
 
-  Future<String?> markNoShow(Passenger p) => _act(
-        'Vắng mặt ghế ${p.seat}',
-        '/api/v1/driver/trips/$tripId/tickets/${p.ticketId}/no-show',
-        body: {'passenger_requested_cancel': false},
-        request: (key) => api.markNoShow(tripId!, p.ticketId, idempotencyKey: key),
+    if (matching.isEmpty) {
+      await _dropQueued(key);
+      return (
+        error: 'Mất mạng và vé không có trong danh sách chuyến này. Gọi nhà xe để kiểm tra.',
+        code: 'TICKET_NOT_FOUND',
+        data: null,
       );
+    }
+
+    final unpaid = matching.where((m) => m.codDue).firstOrNull;
+    if (unpaid != null) {
+      await _dropQueued(key);
+      return (
+        error: 'Cần thu tiền COD trước khi cho lên xe',
+        code: 'COD_PAYMENT_REQUIRED',
+        data: {'ticket_id': unpaid.ticketId, 'seat_code': unpaid.seat, 'passenger_name': unpaid.name},
+      );
+    }
+
+    if (matching.every((m) => m.status == PaxStatus.boarded)) {
+      await _dropQueued(key);
+      return (
+        error: 'Vé này đã lên xe',
+        code: 'ALREADY_BOARDED',
+        data: null,
+      );
+    }
+
+    final newlyBoardedIds = matching.where((m) => m.status != PaxStatus.boarded).map((m) => m.ticketId).toSet();
+    manifest = [
+      for (final m in manifest)
+        if (newlyBoardedIds.contains(m.ticketId))
+          m.copyWith(status: PaxStatus.boarded, boardedAt: clock)
+        else
+          m,
+    ];
+    for (final id in newlyBoardedIds) {
+      _boardedOnClock.putIfAbsent(id, () => clock);
+    }
+    notifyListeners();
+
+    final seatCodes = matching.map((m) => m.seat).toList();
+    final seatsStr = seatCodes.join(', ');
+    final targetName = matching.first.name;
+
+    return (
+      error: null,
+      code: 'QUEUED_OFFLINE',
+      data: {
+        'seat_code': seatCodes.length == 1 ? seatCodes.first : seatsStr,
+        'passenger_name': targetName,
+        'boarded_passengers': [
+          for (final m in matching) {'seat_code': m.seat, 'passenger_name': m.name, 'ticket_id': m.ticketId}
+        ],
+      },
+    );
+  }
+
+  /// Spec A9: the bus cannot reach this home pickup; the manifest reloads to show it.
+  Future<String?> reportInaccessible(Passenger p, String reason, String meetingPoint) async {
+    final error = await _act(
+      'Không vào được địa chỉ ghế ${p.seat}',
+      '/api/v1/driver/trips/$tripId/tickets/${p.ticketId}/inaccessible',
+      body: {'reason': reason, if (meetingPoint.isNotEmpty) 'meeting_point': meetingPoint},
+      request: (key) => api.reportInaccessible(tripId!, p.ticketId, reason: reason, meetingPoint: meetingPoint, idempotencyKey: key),
+    );
+    if (error != _networkError) return error;
+    // Queued for the network: the row changes now, as the server will make it.
+    manifest = [
+      for (final m in manifest)
+        if (m.ticketId == p.ticketId)
+          m.copyWith(inaccessible: true, meetingPoint: meetingPoint.isNotEmpty ? meetingPoint : null)
+        else
+          m
+    ];
+    notifyListeners();
+    return savedOffline;
+  }
+
+  Future<String?> markNoShow(Passenger p) async {
+    final error = await _act(
+      'Vắng mặt ghế ${p.seat}',
+      '/api/v1/driver/trips/$tripId/tickets/${p.ticketId}/no-show',
+      body: {'passenger_requested_cancel': false},
+      request: (key) => api.markNoShow(tripId!, p.ticketId, idempotencyKey: key),
+    );
+    if (error != _networkError) return error;
+    // Queued for the network: the row changes now, as the server will make it.
+    manifest = [
+      for (final m in manifest)
+        if (m.ticketId == p.ticketId)
+          m.copyWith(status: PaxStatus.noShow)
+        else
+          m
+    ];
+    notifyListeners();
+    return savedOffline;
+  }
 
   static const changeSettlementMethods = {
     'CASH': 'CASH_RETURNED',
@@ -1655,15 +1996,39 @@ class DriverStore extends ChangeNotifier {
   }
 
   Future<String?> endTrip() async {
+    final endPath = '/api/v1/driver/trips/$tripId/end';
+    // Offline a second tap must not queue a second end of the same trip.
+    final alreadyQueued = queue.any((a) => a.path == endPath);
+    if (alreadyQueued) {
+      endedCash = codCash + hailCash;
+      earlyEndReason = null;
+      _stopTimers();
+      moving = false;
+      trip = TripState.completed;
+      shift = [for (final t in shift) t.id == tripId ? ShiftTrip(t.id, t.dep, t.route, t.plate, t.booked, 'COMPLETED', t.departureTime) : t];
+      notifyListeners();
+      return null;
+    }
+
     final reason = lastStop && atStop ? null : earlyEndReason;
     final key = newDriverIdempotencyKey();
     final r = await _call(
       () => api.endTrip(tripId!, earlyEndReason: reason, idempotencyKey: key),
       label: 'Kết thúc chuyến',
-      path: '/api/v1/driver/trips/$tripId/end',
+      path: endPath,
       body: {if (reason != null) 'early_end_reason': reason},
       idempotencyKey: key,
     );
+    if (r.code == 'NETWORK') {
+      endedCash = codCash + hailCash;
+      earlyEndReason = null;
+      _stopTimers();
+      moving = false;
+      trip = TripState.completed;
+      shift = [for (final t in shift) t.id == tripId ? ShiftTrip(t.id, t.dep, t.route, t.plate, t.booked, 'COMPLETED', t.departureTime) : t];
+      notifyListeners();
+      return null;
+    }
     if (r.error != null) return r.error;
     endedCash = (r.data!['total_cash_to_handover_vnd'] as num?)?.toInt() ?? codCash + hailCash;
     earlyEndReason = null;

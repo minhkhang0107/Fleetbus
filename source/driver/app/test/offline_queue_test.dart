@@ -124,7 +124,7 @@ void main() {
       }
       if (path.endsWith('/boarding')) {
         final payload = '${body['qrPayload'] ?? ''}';
-        if (payload == 'ALREADY_SCANNED') {
+        if (payload.endsWith('|dup')) {
           return fail(409, 'TICKET_ALREADY_BOARDED', 'Vé đã được quét');
         }
         final p = pax('t_a01');
@@ -176,7 +176,7 @@ void main() {
     // Go offline and attempt to board passenger A01.
     networkDown = true;
     final err = await store.board(p);
-    expect(err, contains('Không kết nối được máy chủ'));
+    expect(err, savedOffline);
     expect(store.offline, isTrue);
     expect(store.queue, hasLength(1));
 
@@ -216,7 +216,7 @@ void main() {
     final p2 = store.manifest.firstWhere((m) => m.seat == 'A02');
 
     networkDown = true;
-    await store.boardWithQr('QR_A01');
+    await store.boardWithQr('BUSGO|BG-000001|t_a01|v1|sig');
     await store.collectCod(p2, given: 220000, method: 'CASH');
     await store.reportIncident('Kẹt xe', 15, 'Tắc đường cao tốc');
     expect(store.queue, hasLength(3));
@@ -312,7 +312,7 @@ void main() {
     expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
 
     networkDown = true;
-    await store.boardWithQr('ALREADY_SCANNED');
+    await store.boardWithQr('BUSGO|BG-000001|t_a01|v1|dup');
     expect(store.queue, hasLength(1));
 
     networkDown = false;

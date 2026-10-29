@@ -398,6 +398,11 @@ export function createFleetBusServer(customServices = {}) {
     persistTimer.unref();
   }
 
+  // A client on a weak network that stops sending mid-request frees its connection after 30 s, not 5 min.
+  // Only the request has to arrive in time: a live tracking stream stays open as long as it is read.
+  server.headersTimeout = 20000;
+  server.requestTimeout = 30000;
+
   server.on('close', () => {
     if (reconcileTimer) clearInterval(reconcileTimer);
     if (persistTimer) clearInterval(persistTimer);

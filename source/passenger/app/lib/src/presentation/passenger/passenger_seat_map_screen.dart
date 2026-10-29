@@ -31,10 +31,12 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final error = await PassengerScope.read(context).loadSeatMap();
-      if (mounted) setState(() => _error = error);
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  Future<void> _load() async {
+    final error = await PassengerScope.read(context).loadSeatMap();
+    if (mounted) setState(() => _error = error);
   }
 
   Future<void> _hold() async {
@@ -126,7 +128,18 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
           child: store.loadingSeats
               ? const Center(child: CircularProgressIndicator())
               : _error != null
-              ? Padding(padding: const EdgeInsets.all(16), child: Text(_error!, style: sans(size: 15, color: PTokens.danger)))
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_error!, style: sans(size: 15, color: PTokens.danger)),
+                      gap(12),
+                      PrimaryButton(label: 'Thử lại', onPressed: _load),
+                    ],
+                  ),
+                )
               : wide
               ? SingleChildScrollView(
                   padding: const EdgeInsets.all(24),

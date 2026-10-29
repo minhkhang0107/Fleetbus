@@ -28,8 +28,13 @@ class DriverEndTripScreen extends StatelessWidget {
           dToast(context, error);
           return;
         }
+        final hasQueuedEnd = store.queue.any((a) => a.label == 'Kết thúc chuyến');
         Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const MainShellScreen()), (_) => false);
-        dToast(context, 'Chuyến đã kết thúc · nộp ${vnd(store.endedCash ?? cash)} tại quầy bến');
+        final baseMsg = 'Chuyến đã kết thúc · nộp ${vnd(store.endedCash ?? cash)} tại quầy bến';
+        final message = hasQueuedEnd
+            ? '$baseMsg\nChưa gửi được lên máy chủ — máy sẽ gửi khi có sóng. Nộp tiền tại bến như bình thường.'
+            : baseMsg;
+        dToast(context, message);
       },
     );
     final report = <Widget>[

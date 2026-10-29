@@ -7,6 +7,7 @@
  * driver from it, so the app sends no driver id.
  */
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
@@ -41,6 +42,7 @@ String newDriverIdempotencyKey() {
 class DriverApiClientService {
   final String baseUrl;
   final http.Client _client;
+  final Duration timeout;
 
   /// Session token of the signed-in driver (set by [login]).
   String? authToken;
@@ -51,6 +53,7 @@ class DriverApiClientService {
     http.Client? client,
     this.authToken,
     this.operatorCode,
+    this.timeout = const Duration(seconds: 20),
   })  : baseUrl = resolveDriverBaseUrl(baseUrl),
         _client = client ?? http.Client();
 
@@ -70,7 +73,7 @@ class DriverApiClientService {
     if (query != null && query.isNotEmpty) {
       uri = uri.replace(queryParameters: query);
     }
-    return _decode(await _client.get(uri, headers: _headers()));
+    return _decode(await _client.get(uri, headers: _headers()).timeout(timeout));
   }
 
   Future<Map<String, dynamic>> _post(
@@ -83,7 +86,7 @@ class DriverApiClientService {
       Uri.parse('$baseUrl$path'),
       headers: _headers(idempotencyKey: idempotent ? (idempotencyKey ?? newDriverIdempotencyKey()) : null),
       body: body == null ? null : jsonEncode(body),
-    );
+    ).timeout(timeout);
     return _decode(response);
   }
 

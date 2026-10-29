@@ -439,6 +439,8 @@ class Ticket {
   int? refund;
   TicketRefund? refundInfo;
   bool past;
+  /// D178: the pass shown is the one saved on the device; the server could not be reached.
+  bool qrFromCache = false;
 
   bool get unpaidCash => paymentStatus == 'UNPAID_COD' && codDue > 0;
   bool get isTransferPayment => !unpaidCash && paymentMethod != 'CASH';
@@ -708,6 +710,7 @@ class Tracking {
     this.queuePosition,
     this.queueTotal,
     this.readyStatus,
+    this.unreachable = false,
     this.readyMinutes,
     this.homeWaitMinutes,
     this.doorArrivedAt,
@@ -717,6 +720,8 @@ class Tracking {
     this.tripStatus,
   });
 
+  /// The passenger's phone could not reach the server; nothing is known about the bus from this answer.
+  final bool unreachable;
   final GpsSignal signal;
   final int? etaMinutes;
   final double? distanceKm;
@@ -813,6 +818,13 @@ class PassengerStore extends ChangeNotifier {
   String? userPhone;
   bool isVip = false;
   bool get loggedIn => api.authToken != null;
+
+  /// D178: when the wallet shown was saved, while the server cannot be reached; null when it is fresh.
+  DateTime? walletOfflineSince;
+  /// Why the last payment check had no answer ('NETWORK'), so a manual check does not blame the transfer.
+  String? lastPaymentCheckCode;
+  /// No station could be shown, not even saved ones; the home screen offers to try again.
+  String? placesError;
 
   /// The server refused the saved session as expired; the wallet asks to sign in again and says why.
   bool sessionExpired = false;
@@ -927,6 +939,15 @@ class PassengerStore extends ChangeNotifier {
   }
 
   // ---------- Operator & Places ----------
+  void _applyConfig(String code, Map<String, dynamic> config, SharedPreferences prefs) {
+    api.operatorCode = code;
+    operator = OperatorInfo.fromJson(config['operator'] as Map<String, dynamic>);
+    paymentMethod = defaultPaymentMethod;
+    calendar = ServiceCalendar.fromJson(config['service_calendar'] as Map<String, dynamic>?);
+    fixedEndpoints = FixedEndpoints.fromJson(config['fixed_endpoints']);
+    _rememberedRides = _readRides(prefs.getString('rides_$code'));
+  }
+
   Future<String?> selectOperator(String rawCode) async {
     final code = rawCode.trim().toUpperCase();
     if (code.isEmpty) return 'Nhập mã nhà xe';
@@ -934,15 +955,11 @@ class PassengerStore extends ChangeNotifier {
     final r = await _call(() => api.getAppConfig(operatorCode: code));
     if (!r.ok) return r.error;
     
-    api.operatorCode = code;
-    operator = OperatorInfo.fromJson(r.value!['operator'] as Map<String, dynamic>);
-    paymentMethod = defaultPaymentMethod;
-    calendar = ServiceCalendar.fromJson(r.value!['service_calendar'] as Map<String, dynamic>?);
-    fixedEndpoints = FixedEndpoints.fromJson(r.value!['fixed_endpoints']);
-    
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('operator_code', code);
-    _rememberedRides = _readRides(prefs.getString('rides_$code'));
+    // D178: kept so the app opens on this company without a network.
+    await prefs.setString('config_$code', jsonEncode(r.value!));
+    _applyConfig(code, r.value!, prefs);
     
     await loadPlaces();
     notifyListeners();
@@ -980,7 +997,15 @@ class PassengerStore extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final code = prefs.getString('operator_code');
     if (code != null && code.isNotEmpty) {
-      await selectOperator(code); // silently ignore errors
+      final error = await selectOperator(code); // other errors: the passenger picks the company again
+      // D178: offline, the company saved on the last start; the wallet and its passes come from the device too.
+      final cached = prefs.getString('config_$code');
+      if (operator == null && error == _networkError && cached != null) {
+        try {
+          _applyConfig(code, jsonDecode(cached) as Map<String, dynamic>, prefs);
+          await loadPlaces();
+        } catch (_) {}
+      }
       if (operator != null) await _restoreSession(prefs);
     }
   }
@@ -1033,7 +1058,7 @@ class PassengerStore extends ChangeNotifier {
   }
 
   Future<void> changeOperator() async {
-    logout();
+    await logout();
     operator = null;
     fixedEndpoints = null;
     places.clear();
@@ -1060,47 +1085,70 @@ class PassengerStore extends ChangeNotifier {
     return lower;
   }
 
+  void _populatePlaces(List<dynamic> json) {
+    final cityGroups = <String, List<Map<String, dynamic>>>{};
+    for (final s in json) {
+      if (s is! Map<String, dynamic>) continue;
+      final city = s['city'] as String? ?? '';
+      if (city.isEmpty) continue;
+      final code = _foldToCode(city);
+      (cityGroups[code] ??= []).add(s);
+    }
+    
+    places.clear();
+    for (final e in cityGroups.entries) {
+      final code = e.key;
+      final group = e.value;
+      final city = group.first['city'] as String;
+      final sorted = group.toList()..sort((a, b) => (b['popular'] == true ? 1 : 0).compareTo(a['popular'] == true ? 1 : 0));
+      final mainStation = sorted.first['name'] as String;
+      final alt = sorted.skip(1).map((s) => s['name'] as String).toList();
+      places[code] = Place(code, city, mainStation, alt);
+    }
+
+    final fixed = fixedEndpoints;
+    if (fixed != null) {
+      // The two stations the company set: shown as they are, nothing else to pick.
+      final o = _foldToCode(fixed.originCity);
+      final d = _foldToCode(fixed.destCity);
+      places[o] = Place(o, fixed.originCity, fixed.originStation, const []);
+      places[d] = Place(d, fixed.destCity, fixed.destStation, const []);
+      origin = o;
+      dest = d;
+    } else if (places.isNotEmpty) {
+      final hn = places.values.where((p) => p.city == 'Hà Nội').firstOrNull;
+      origin = hn?.code ?? places.keys.first;
+      
+      final th = places.values.where((p) => p.city == 'Thanh Hóa').firstOrNull;
+      dest = th?.code ?? places.keys.lastWhere((k) => k != origin, orElse: () => places.keys.first);
+    }
+  }
+
   Future<void> loadPlaces() async {
+    final prefs = await SharedPreferences.getInstance();
+    final op = operator?.code ?? api.operatorCode ?? prefs.getString('operator_code') ?? '';
     try {
       final json = await api.searchStations('');
-      final cityGroups = <String, List<Map<String, dynamic>>>{};
-      for (final s in json) {
-        final city = s['city'] as String? ?? '';
-        if (city.isEmpty) continue;
-        final code = _foldToCode(city);
-        (cityGroups[code] ??= []).add(s as Map<String, dynamic>);
-      }
-      
-      places.clear();
-      for (final e in cityGroups.entries) {
-        final code = e.key;
-        final group = e.value;
-        final city = group.first['city'] as String;
-        final sorted = group.toList()..sort((a, b) => (b['popular'] == true ? 1 : 0).compareTo(a['popular'] == true ? 1 : 0));
-        final mainStation = sorted.first['name'] as String;
-        final alt = sorted.skip(1).map((s) => s['name'] as String).toList();
-        places[code] = Place(code, city, mainStation, alt);
-      }
-
-      final fixed = fixedEndpoints;
-      if (fixed != null) {
-        // The two stations the company set: shown as they are, nothing else to pick.
-        final o = _foldToCode(fixed.originCity);
-        final d = _foldToCode(fixed.destCity);
-        places[o] = Place(o, fixed.originCity, fixed.originStation, const []);
-        places[d] = Place(d, fixed.destCity, fixed.destStation, const []);
-        origin = o;
-        dest = d;
-      } else if (places.isNotEmpty) {
-        final hn = places.values.where((p) => p.city == 'Hà Nội').firstOrNull;
-        origin = hn?.code ?? places.keys.first;
-        
-        final th = places.values.where((p) => p.city == 'Thanh Hóa').firstOrNull;
-        dest = th?.code ?? places.keys.lastWhere((k) => k != origin, orElse: () => places.keys.first);
+      _populatePlaces(json);
+      placesError = null;
+      if (op.isNotEmpty) {
+        await prefs.setString('stations_$op', jsonEncode(json));
       }
     } catch (_) {
-      // Ignore network errors on loadPlaces as instructed or leave empty
+      // D178: offline, the stations saved on the last start, so the search form is never blank.
+      final cached = op.isNotEmpty ? prefs.getString('stations_$op') : null;
+      if (cached != null) {
+        try {
+          final list = (jsonDecode(cached) as List).cast<dynamic>();
+          _populatePlaces(list);
+          placesError = null;
+          notifyListeners();
+          return;
+        } catch (_) {}
+      }
+      placesError = _networkError;
     }
+    notifyListeners();
   }
 
 
@@ -1172,15 +1220,21 @@ class PassengerStore extends ChangeNotifier {
     }
   }
 
-  void logout() {
+  Future<void> logout() async {
+    final cacheKey = _walletCacheKey();
     api.authToken = null;
-    unawaited(SharedPreferences.getInstance().then((prefs) => prefs.remove(_sessionKey)));
     userPhone = null;
     userName = null;
     isVip = false;
     tickets = [];
     notices = [];
+    walletOfflineSince = null;
+    _walletRows = {};
     notifyListeners();
+    // D178: the saved wallet leaves the device with the session.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_sessionKey);
+    if (cacheKey != null) await prefs.remove(cacheKey);
   }
 
   // ---------- Search (PAX-004 to PAX-006) ----------
@@ -1578,6 +1632,7 @@ class PassengerStore extends ChangeNotifier {
   Future<bool> checkPayment({bool manual = false}) async {
     if (orderId == null) return false;
     final r = await _call(() => api.verifyPaymentStatus(orderId!, manualTrigger: manual));
+    lastPaymentCheckCode = r.code;
     if (!r.ok || r.value!['payment_status'] != 'PAID') return false;
     stopHold();
     await loadTickets();
@@ -1662,30 +1717,93 @@ class PassengerStore extends ChangeNotifier {
   }
 
   // ---------- Wallet, pass, cancellation (PAX-016, PAX-017, PAX-021) ----------
+  /// D178: the wallet of this phone at this company, kept on the device so the pass shows without a network.
+  String? _walletCacheKey() {
+    final op = operator?.code ?? api.operatorCode;
+    final digits = (userPhone ?? '').replaceAll(RegExp(r'\D'), '');
+    if (op == null || op.isEmpty || digits.isEmpty) return null;
+    return 'wallet_${op}_$digits';
+  }
+
+  /// The server's rows of the last successful load, by tab; the cache writes them back with each pass.
+  Map<String, List<Map<String, dynamic>>> _walletRows = {};
+
+  Future<void> _saveWalletCache() async {
+    final key = _walletCacheKey();
+    if (key == null || _walletRows.isEmpty) return;
+    Map<String, dynamic> withPass(Map<String, dynamic> j) {
+      final t = tickets.where((t) => t.id == j['ticket_id']).firstOrNull;
+      return t == null ? j : {...j, '_qr': t.qrValue, '_qr_version': t.qrVersion, '_pin': t.pin};
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, jsonEncode({
+      'saved_at': DateTime.now().toIso8601String(),
+      for (final e in _walletRows.entries) e.key: [for (final j in e.value) withPass(j)],
+    }));
+  }
+
+  /// The tickets of one tab as last saved, with their pass; empty when nothing was saved.
+  List<Ticket> _cachedTickets(Map<String, dynamic>? cache, String tab) {
+    final rows = cache?[tab];
+    if (rows is! List) return [];
+    return [
+      for (final j in rows.cast<Map<String, dynamic>>())
+        Ticket.fromJson(j, past: tab == 'HISTORY')
+          ..qrValue = j['_qr'] as String?
+          ..qrVersion = (j['_qr_version'] as num?)?.toInt() ?? 1
+          ..pin = j['_pin'] as String?,
+    ];
+  }
+
   Future<void> loadTickets() async {
     if (!loggedIn) return;
     loadingTickets = true;
     notifyListeners();
     final up = await _call(() => api.getTicketWallet(tab: 'UPCOMING'));
     final past = await _call(() => api.getTicketWallet(tab: 'HISTORY'));
-    final list = <Ticket>[];
-    if (up.ok) {
-      list.addAll(((up.value!['value'] ?? up.value) as List).cast<Map<String, dynamic>>().map(Ticket.fromJson));
+    List<Map<String, dynamic>> rows(ApiResult<Map<String, dynamic>> r) => ((r.value!['value'] ?? r.value) as List).cast<Map<String, dynamic>>();
+
+    // D178: without a network a tab keeps what is on screen, or what was saved on the device; never an empty wallet.
+    Map<String, dynamic>? cache;
+    if (up.code == 'NETWORK' || past.code == 'NETWORK') {
+      final raw = (await SharedPreferences.getInstance()).getString(_walletCacheKey() ?? '');
+      try {
+        cache = raw == null ? null : jsonDecode(raw) as Map<String, dynamic>;
+      } catch (_) {}
     }
-    if (past.ok) {
-      list.addAll(((past.value!['value'] ?? past.value) as List).cast<Map<String, dynamic>>().map((j) => Ticket.fromJson(j, past: true)));
+    List<Ticket> offlineTab(String tab) {
+      final shown = tickets.where((t) => t.past == (tab == 'HISTORY')).toList();
+      return shown.isNotEmpty ? shown : _cachedTickets(cache, tab);
     }
+
+    final list = <Ticket>[
+      if (up.ok) ...rows(up).map(Ticket.fromJson) else if (up.code == 'NETWORK') ...offlineTab('UPCOMING'),
+      if (past.ok) ...rows(past).map((j) => Ticket.fromJson(j, past: true)) else if (past.code == 'NETWORK') ...offlineTab('HISTORY'),
+    ];
     for (final t in list) {
       final old = tickets.where((o) => o.id == t.id).firstOrNull;
-      if (old != null && t.plate.isEmpty) t.plate = old.plate;
+      if (old == null || identical(old, t)) continue;
+      if (t.plate.isEmpty) t.plate = old.plate;
+      // The wallet rows carry no pass: keep the one already loaded until the pass screen asks again.
+      t.qrValue ??= old.qrValue;
+      t.pin ??= old.pin;
+      if (old.qrVersion > t.qrVersion) t.qrVersion = old.qrVersion;
     }
     tickets = list;
-    for (final tripId in tickets.where((t) => !t.past && t.active).map((t) => t.tripId).toSet()) {
-      final d = await _call(() => api.getDisruptions(tripId));
-      final minutes = d.ok ? (d.value!['delay_minutes'] ?? d.value!['current_delay_minutes'] ?? 0) : 0;
-      for (final t in tickets.where((t) => t.tripId == tripId)) {
-        t.delay = (minutes as num).toInt();
+
+    if (up.ok && past.ok) {
+      walletOfflineSince = null;
+      _walletRows = {'UPCOMING': rows(up), 'HISTORY': rows(past)};
+      await _saveWalletCache();
+      for (final tripId in tickets.where((t) => !t.past && t.active).map((t) => t.tripId).toSet()) {
+        final d = await _call(() => api.getDisruptions(tripId));
+        final minutes = d.ok ? (d.value!['delay_minutes'] ?? d.value!['current_delay_minutes'] ?? 0) : 0;
+        for (final t in tickets.where((t) => t.tripId == tripId)) {
+          t.delay = (minutes as num).toInt();
+        }
       }
+    } else if (up.code == 'NETWORK' || past.code == 'NETWORK') {
+      walletOfflineSince = tickets.isEmpty ? null : DateTime.tryParse('${cache?['saved_at']}') ?? walletOfflineSince ?? DateTime.now();
     }
     loadingTickets = false;
     notifyListeners();
@@ -1693,7 +1811,16 @@ class PassengerStore extends ChangeNotifier {
 
   Future<String?> loadPass(Ticket t) async {
     final r = await _call(() => api.getTicketQR(t.id));
-    if (!r.ok) return r.error;
+    if (!r.ok) {
+      // D178: offline, the pass already on the device still boards the passenger.
+      if (r.code == 'NETWORK' && t.qrValue != null) {
+        t.qrFromCache = true;
+        notifyListeners();
+        return null;
+      }
+      return r.error;
+    }
+    t.qrFromCache = false;
     final qr = r.value!['boarding_qr'] as Map<String, dynamic>?;
     t.qrVersion = (qr?['version'] as num?)?.toInt() ?? t.qrVersion;
     t.pin = r.value!['offline_pin']?.toString();
@@ -1715,7 +1842,14 @@ class PassengerStore extends ChangeNotifier {
         final orderId = t.orderId ?? '';
         if (orderId.isNotEmpty) {
           final grp = await _call(() => api.getGroupQr(orderId));
-          if (!grp.ok) return grp.error;
+          if (!grp.ok) {
+            if (grp.code == 'NETWORK' && t.qrValue != null) {
+              t.qrFromCache = true;
+              notifyListeners();
+              return null;
+            }
+            return grp.error;
+          }
           final groupQr = grp.value!['group_qr'] as Map<String, dynamic>?;
           t.qrValue = groupQr?['qr_code_value']?.toString();
         }
@@ -1726,6 +1860,7 @@ class PassengerStore extends ChangeNotifier {
       t.qrValue = qr?['qr_code_value'];
     }
 
+    await _saveWalletCache();
     notifyListeners();
     return null;
   }
@@ -1745,9 +1880,11 @@ class PassengerStore extends ChangeNotifier {
     final r = await _call(() => api.reissueBoardingQr(t.id));
     if (!r.ok) return ApiResult(null, r.error, r.code);
     final qr = r.value!['boarding_qr'] as Map<String, dynamic>;
+    t.qrFromCache = false;
     t.qrValue = qr['qr_code_value'];
     t.qrVersion = (qr['version'] as num).toInt();
     t.pin = r.value!['offline_pin']?.toString();
+    await _saveWalletCache();
     notifyListeners();
     return const ApiResult(null);
   }
@@ -1839,12 +1976,14 @@ class PassengerStore extends ChangeNotifier {
   }
 
   Future<ApiResult<void>> deleteAccount() async {
+    final cacheKey = _walletCacheKey();
     final r = await _call(() => api.deleteAccount());
     if (!r.ok) return ApiResult(null, r.error, r.code);
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_sessionKey);
     await prefs.remove('last_refund_account');
+    if (cacheKey != null) await prefs.remove(cacheKey);
 
     api.authToken = null;
     userPhone = null;
@@ -1854,6 +1993,8 @@ class PassengerStore extends ChangeNotifier {
     notices = [];
     walletBalanceVnd = 0;
     sessionExpired = false;
+    walletOfflineSince = null;
+    _walletRows = {};
     notifyListeners();
     return const ApiResult(null);
   }
@@ -1864,7 +2005,7 @@ class PassengerStore extends ChangeNotifier {
 
   Future<Tracking> loadTracking(String tripId, {String? ticketId}) async {
     final r = await _call(() => api.getLiveRadarHUD(tripId, ticketId: ticketId));
-    if (!r.ok) return Tracking(GpsSignal.none, text: r.error!);
+    if (!r.ok) return Tracking(GpsSignal.none, text: r.error!, unreachable: r.code == 'NETWORK');
     final tr = _trackingFrom(r.value!);
     if (tr.ended || tr.tripStatus == 'COMPLETED') _tripEnded[tripId] = true;
     return tr;
