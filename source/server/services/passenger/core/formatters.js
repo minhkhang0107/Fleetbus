@@ -26,6 +26,7 @@ export function formatCountdown(secondsRemaining) {
 
 export function validateVietnamPhone(phone) {
   if (!phone) return { isValid: false, message: 'Số điện thoại không được để trống' };
+  if (typeof phone !== 'string') return { isValid: false, message: 'Số điện thoại không hợp lệ' };
   const cleaned = phone.replace(/[\s\-\.]/g, '');
   // Matches +84 or 0 followed by 3, 5, 7, 8, 9 and 8 digits
   const vnPhoneRegex = /^(?:\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;

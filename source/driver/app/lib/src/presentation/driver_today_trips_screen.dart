@@ -191,6 +191,16 @@ class DriverTodayTripsScreen extends StatelessWidget {
       child: RefreshIndicator(
         onRefresh: store.loadShift,
         child: ListView(padding: EdgeInsets.all(wide ? 24 : 16), children: [
+          if (store.shiftSavedAt != null)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: DTokens.warnBg, borderRadius: BorderRadius.circular(12)),
+              child: Text(
+                'Mất mạng · danh sách chuyến và khách lưu lúc ${_hhmm(store.shiftSavedAt!)}. Quét vé vẫn được; máy gửi lên khi có sóng.',
+                style: dsans(size: 13, color: DTokens.warnInk),
+              ),
+            ),
           Row(children: [
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -219,4 +229,9 @@ class DriverTodayTripsScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+String _hhmm(DateTime at) {
+  final vn = at.toUtc().add(const Duration(hours: 7));
+  return '${vn.hour.toString().padLeft(2, '0')}:${vn.minute.toString().padLeft(2, '0')}';
 }

@@ -59,6 +59,23 @@ class PassengerProfileScreen extends StatelessWidget {
               ),
             ]),
           ),
+          if (store.loggedIn && store.walletEnabled) ...[
+            gap(16),
+            AppCard(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(children: [
+                const Icon(Icons.account_balance_wallet_outlined, color: PTokens.primary, size: 24),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Số dư ví BusGo', style: sans(size: 13, color: PTokens.muted)),
+                    gap(2),
+                    Text(vnd(store.walletBalanceVnd), style: mono(size: 16, weight: FontWeight.w700)),
+                  ]),
+                ),
+              ]),
+            ),
+          ],
           gap(16),
           if (store.operator != null) ...[
             AppCard(
@@ -109,8 +126,117 @@ class PassengerProfileScreen extends StatelessWidget {
               }
             },
           ),
+          if (store.loggedIn) ...[
+            gap(16),
+            GhostButton(
+              label: 'Xóa tài khoản',
+              color: PTokens.danger,
+              borderColor: const Color(0xFFFCA5A5),
+              onPressed: () => _confirmDeleteAccount(context, store),
+            ),
+          ],
         ])),
       ),
     ]);
+  }
+
+  /// "XÓA" typed on a Vietnamese keyboard may come precomposed or as O + combining acute; "XOA" is accepted too.
+  static bool _confirmsDeletion(String input) => {'XÓA', 'XO\u0301A', 'XOA'}.contains(input.toUpperCase());
+
+  Future<void> _confirmDeleteAccount(BuildContext context, PassengerStore store) async {
+    String input = '';
+    String? errorMessage;
+    bool isDeleting = false;
+
+    await showAppSheet<void>(
+      context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Xóa tài khoản?', style: sans(size: 18, weight: FontWeight.w700, color: PTokens.danger)),
+            gap(12),
+            AppCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Tất cả thông tin cá nhân, phiên đăng nhập và liên kết số điện thoại sẽ bị xóa hoàn toàn khỏi hệ thống.',
+                    style: sans(size: 13, color: PTokens.muted, height: 1.4),
+                  ),
+                  gap(8),
+                  Text(
+                    'Lịch sử vé đã đi được giữ lại ở dạng ẩn danh theo quy định kế toán.',
+                    style: sans(size: 13, weight: FontWeight.w600, color: PTokens.ink, height: 1.4),
+                  ),
+                ],
+              ),
+            ),
+            gap(14),
+            Text(
+              'Nhập chữ XÓA để xác nhận xóa vĩnh viễn tài khoản:',
+              style: sans(size: 13, color: PTokens.muted),
+            ),
+            gap(8),
+            TextField(
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: 'Nhập XÓA',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              ),
+              onChanged: (val) {
+                setSheetState(() {
+                  input = val.trim();
+                  errorMessage = null;
+                });
+              },
+            ),
+            if (errorMessage != null) ...[
+              gap(8),
+              Text(errorMessage!, style: sans(size: 13, weight: FontWeight.w500, color: PTokens.danger)),
+            ],
+            gap(16),
+            PrimaryButton(
+              label: isDeleting ? 'Đang xóa tài khoản…' : 'Xóa tài khoản',
+              color: PTokens.danger,
+              onPressed: _confirmsDeletion(input) && !isDeleting
+                  ? () async {
+                      setSheetState(() => isDeleting = true);
+                      final r = await store.deleteAccount();
+                      if (!ctx.mounted) return;
+                      if (!r.ok) {
+                        setSheetState(() {
+                          isDeleting = false;
+                          errorMessage = r.error;
+                        });
+                        showToast(ctx, r.error ?? 'Không thể xóa tài khoản');
+                        return;
+                      }
+                      final nav = Navigator.of(context);
+                      final messenger = ScaffoldMessenger.of(context);
+                      Navigator.of(ctx).pop();
+                      messenger
+                        ..hideCurrentSnackBar()
+                        ..showSnackBar(SnackBar(
+                          content: Text('Đã xóa tài khoản', style: sans(size: 14, color: Colors.white)),
+                          duration: const Duration(seconds: 3),
+                        ));
+                      nav.pushAndRemoveUntil(
+                        MaterialPageRoute(builder: (_) => const PassengerLoginScreen()),
+                        (_) => false,
+                      );
+                    }
+                  : null,
+            ),
+            gap(8),
+            GhostButton(
+              label: 'Giữ tài khoản',
+              onPressed: isDeleting ? null : () => Navigator.of(ctx).pop(),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

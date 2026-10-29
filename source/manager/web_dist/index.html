@@ -214,6 +214,7 @@
     <button data-view="banners">Quảng cáo</button>
     <button data-view="vouchers">Mã giảm giá</button>
     <button data-view="payments">Thanh toán</button>
+    <button data-view="staff" id="navStaff">Nhân viên</button>
     <button data-view="audit">Nhật ký thao tác</button>
     <button data-view="company" id="navCompany">Thông tin nhà xe</button>
     <button data-view="about">Giới thiệu</button>
@@ -274,6 +275,65 @@
           <label class="row" style="margin:0 0 12px"><input type="checkbox" name="active" checked> Đang chạy</label>
           <div class="error" id="scheduleError"></div>
           <div class="row"><button class="btn primary" type="submit" id="scheduleSave">Thêm giờ chạy</button><button class="btn hidden" type="button" id="scheduleCancel">Hủy sửa</button></div>
+        </form>
+      </div>
+
+      <div class="split" style="margin-top:24px">
+        <form class="card" id="stationForm" novalidate>
+          <div class="section-title" style="margin-top:0">Thêm bến/điểm đón</div>
+          <div class="field"><label for="stName">Tên bến/điểm</label><input id="stName" name="name" placeholder="Ví dụ: Bến xe Đà Lạt" required minlength="3"></div>
+          <div class="row">
+            <div class="field grow"><label for="stCity">Tỉnh/thành phố</label><input id="stCity" name="city" placeholder="Ví dụ: Lâm Đồng" required></div>
+            <div class="field grow"><label for="stKind">Loại điểm</label>
+              <select id="stKind" name="kind">
+                <option value="STATION">Bến xe</option>
+                <option value="ROADSIDE">Điểm dọc đường</option>
+              </select>
+            </div>
+          </div>
+          <div class="field"><label for="stAddress">Địa chỉ</label><input id="stAddress" name="address" placeholder="Ví dụ: 01 Tô Hiến Thành, Phường 3, Đà Lạt"></div>
+          <div class="row">
+            <div class="field grow"><label for="stLat">Vĩ độ (8–23.5)</label><input id="stLat" name="lat" type="number" step="any" placeholder="11.9404" required></div>
+            <div class="field grow"><label for="stLng">Kinh độ (102–110)</label><input id="stLng" name="lng" type="number" step="any" placeholder="108.4583" required></div>
+          </div>
+          <div class="error" id="stationError"></div>
+          <div class="row"><button class="btn primary" type="submit" id="stationSave">Thêm bến/điểm đón</button></div>
+        </form>
+
+        <form class="card" id="routeForm" novalidate>
+          <div class="section-title" style="margin-top:0">Tạo tuyến mới</div>
+          <div class="field"><label for="rtName">Tên tuyến</label><input id="rtName" name="name" placeholder="Ví dụ: Hà Nội — Đà Lạt (Cao tốc)" required minlength="3"></div>
+          
+          <div class="field" style="margin-bottom:6px"><label>Danh sách điểm dừng theo thứ tự</label></div>
+          <div class="row" style="margin-bottom:8px">
+            <div class="field grow" style="margin-bottom:0">
+              <select id="rtStopPick"></select>
+            </div>
+            <button class="btn" type="button" id="rtAddStop">Thêm điểm</button>
+          </div>
+          
+          <div class="scroll" style="max-height:160px;border:1px solid var(--line);border-radius:8px;padding:6px;margin-bottom:12px">
+            <table style="width:100%;font-size:13px" id="rtStopsTable">
+              <thead><tr><th>STT</th><th>Điểm dừng</th><th>Đón</th><th>Trả</th><th></th></tr></thead>
+              <tbody id="rtStopsList"><tr><td colspan="5" class="muted">Chưa có điểm dừng nào được chọn</td></tr></tbody>
+            </table>
+          </div>
+
+          <div class="section-title" style="font-size:14px;margin:8px 0 6px">Giờ chạy đầu tiên của tuyến</div>
+          <div class="row">
+            <div class="field grow"><label for="rtDeparture">Giờ xuất bến</label><input id="rtDeparture" name="departure" type="time" required value="08:00"></div>
+            <div class="field grow"><label for="rtDuration">Thời gian chạy (phút)</label><input id="rtDuration" name="duration_minutes" type="number" min="15" max="1440" value="180"></div>
+            <div class="field grow"><label for="rtFare">Giá vé (đ)</label><input id="rtFare" name="base_fare_vnd" type="number" min="10000" step="1000" value="250000"></div>
+          </div>
+          <div class="row">
+            <div class="field grow"><label for="rtVehicleType">Loại xe</label><select id="rtVehicleType" name="vehicle_type"></select></div>
+            <div class="field grow"><label for="rtTotalSeats">Số ghế</label><input id="rtTotalSeats" name="total_seats" type="number" min="1" max="100" value="22"></div>
+            <div class="field grow"><label for="rtDistance">Cự ly (km)</label><input id="rtDistance" name="distance_km" type="number" min="1" value="150"></div>
+          </div>
+          <div class="field" style="margin-bottom:4px"><label>Ngày chạy trong tuần</label></div>
+          <div class="dayPick" id="rtDays"></div>
+          <div class="error" id="routeError"></div>
+          <div class="row"><button class="btn primary" type="submit" id="routeSave">Tạo tuyến mới</button></div>
         </form>
       </div>
     </div>
@@ -628,6 +688,15 @@
       </div>
 
       <!-- Card d: Yêu cầu hoàn tiền (MGR-022) -->
+      <div class="card hidden" id="cardPaymentsCsv" style="margin-top:16px">
+        <div class="section-title" style="margin-top:0">Xuất sổ thu chi (CSV)</div>
+        <p class="muted" style="margin:2px 0 10px;font-size:13px">Tiền vé đã thu và tiền đã hoàn trong khoảng ngày, mở được bằng Excel.</p>
+        <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="field" style="margin:0"><label for="csvFrom">Từ ngày</label><input id="csvFrom" type="date"></div>
+          <div class="field" style="margin:0"><label for="csvTo">Đến ngày</label><input id="csvTo" type="date"></div>
+          <button class="btn primary" type="button" id="csvExportBtn">Tải file CSV</button>
+        </div>
+      </div>
       <div class="card" id="cardRefunds" style="margin-top:16px">
         <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
           <div>
@@ -639,6 +708,23 @@
           </label>
         </div>
         <div class="card scroll" style="padding:0" id="refundsBox"></div>
+      </div>
+
+      <!-- Card e: Nộp tiền cuối chuyến (H-02) -->
+      <div class="card" id="cardCashHandovers" style="margin-top:16px">
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div>
+            <div class="section-title" style="margin:0">Nộp tiền cuối chuyến</div>
+            <p class="muted" style="margin:2px 0 0;font-size:13px">Xác nhận tiền mặt tài xế nộp sau khi hoàn thành chuyến (COD và khách vẫy dọc đường).</p>
+          </div>
+          <div class="row" style="gap:12px;align-items:center">
+            <input type="date" id="cashHandoverDate" style="padding:4px 8px;font-size:13px">
+            <label class="row" style="margin:0;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="cashHandoverShowAll"> Xem cả chuyến đã nộp
+            </label>
+          </div>
+        </div>
+        <div class="card scroll" style="padding:0" id="cashHandoversBox"></div>
       </div>
     </div>
 
@@ -665,6 +751,60 @@
           <button class="btn primary" type="submit" id="companySaveBtn">Lưu</button>
         </form>
       </div>
+    </div>
+
+    <!-- Staff Management (MGR-038) -->
+    <div data-panel="staff" class="hidden">
+      <h2>Nhân viên</h2>
+      <p class="muted" style="margin:-6px 0 14px">Quản lý tài khoản nhân viên nhà xe (Điều phối, Thu ngân, Kế toán). Chỉ Giám đốc nhà xe có quyền quản lý.</p>
+
+      <div id="staffPasswordNoticeBox" class="card hidden" style="background:var(--warn-soft);border:1px solid var(--warn);margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div>
+            <div>Mật khẩu tạm của <b id="staffNoticeName"></b>: <span class="mono" style="font-size:16px;font-weight:bold;background:#fff;padding:2px 8px;border-radius:4px;border:1px solid var(--border)" id="staffTempPasswordDisplay"></span></div>
+            <div class="muted" style="margin-top:4px;font-size:13px">Mật khẩu chỉ hiện một lần. Nhân viên phải đổi mật khẩu khi đăng nhập lần đầu.</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn primary" id="staffCopyPasswordBtn" type="button">Sao chép</button>
+            <button class="btn" id="staffNoticeAckBtn" type="button">Đóng</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="section-title" style="margin-top:0" id="staffFormTitle">Thêm nhân viên</div>
+        <form id="staffForm" novalidate>
+          <div class="row" style="flex-wrap:wrap;align-items:flex-end;gap:12px">
+            <div class="field" style="flex:2;min-width:180px;margin-bottom:0">
+              <label for="staffEmail">Email (Tên đăng nhập)</label>
+              <input id="staffEmail" name="username" type="email" required placeholder="nhanvien@nhaxe.vn">
+            </div>
+            <div class="field" style="flex:2;min-width:180px;margin-bottom:0">
+              <label for="staffFullName">Họ và tên</label>
+              <input id="staffFullName" name="full_name" required maxlength="60" placeholder="Ví dụ: Nguyễn Văn A">
+            </div>
+            <div class="field" style="flex:1.5;min-width:140px;margin-bottom:0">
+              <label for="staffPhone">Số điện thoại</label>
+              <input id="staffPhone" name="phone" type="tel" inputmode="tel" placeholder="09xxxxxxxx">
+            </div>
+            <div class="field" style="flex:1.5;min-width:140px;margin-bottom:0">
+              <label for="staffRole">Vai trò</label>
+              <select id="staffRole" name="role" required>
+                <option value="DISPATCHER">Điều phối</option>
+                <option value="CASHIER">Thu ngân</option>
+                <option value="FINANCIAL_CONTROLLER">Kế toán</option>
+              </select>
+            </div>
+            <div class="row" style="margin-bottom:0;gap:8px">
+              <button class="btn primary" type="submit" id="staffSubmitBtn">Thêm nhân viên</button>
+              <button class="btn hidden" type="button" id="staffCancelBtn">Hủy</button>
+            </div>
+          </div>
+          <div class="error" id="staffError" style="margin-top:8px"></div>
+        </form>
+      </div>
+
+      <div class="card scroll" style="padding:0" id="staffBox"></div>
     </div>
 
     <!-- SH-006: about, terms of use, licences (D157) -->
@@ -789,15 +929,25 @@ async function api(path, { method = 'GET', body, idempotent = false } = {}) {
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
   if (state.platformCode && path.startsWith('/api/v1/ops/')) headers['X-Operator-Code'] = state.platformCode;
   if (idempotent) headers['Idempotency-Key'] = uuid();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
   let res;
   try {
-    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-  } catch (_) {
+    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal });
+  } catch (err) {
+    if (controller.signal.aborted || (err && err.name === 'AbortError')) {
+      return { ok: false, status: 0, message: 'Máy chủ không phản hồi. Kiểm tra mạng rồi thử lại.' };
+    }
+    state.missedLoad = true;
     return { ok: false, status: 0, message: 'Không kết nối được máy chủ' };
+  } finally {
+    clearTimeout(timer);
   }
   let json = {};
   try { json = await res.json(); } catch (_) {}
-  if (res.status === 401 && state.token) { logout('Phiên đăng nhập đã hết hạn'); }
+  if (res.status === 401 && state.token) {
+    logout(json.code === 'TOKEN_REVOKED' ? (json.message || 'Phiên đăng nhập đã hết hiệu lực, vui lòng đăng nhập lại') : 'Phiên đăng nhập đã hết hạn');
+  }
   if (res.status === 403 && json.code === 'PASSWORD_CHANGE_REQUIRED') {
     if (state.user) {
       state.user.must_change_password = true;
@@ -820,7 +970,17 @@ async function publicApi(path) {
   // The staff token lets the office see the bus; anonymous callers only get the road and stops.
   const headers = { Authorization: `Bearer ${state.token}` };
   if (code) headers['X-Operator-Code'] = code;
-  try { const res = await fetch(path, { headers }); const json = await res.json(); return res.ok ? json.data : null; } catch (_) { return null; }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(path, { headers, signal: controller.signal });
+    const json = await res.json();
+    return res.ok ? json.data : null;
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const STATUS = {
@@ -1093,6 +1253,8 @@ $('#changePasswordForm')?.addEventListener('submit', async (e) => {
     return;
   }
   if (state.user) state.user.must_change_password = false;
+  // Changing the password ends every session; this page goes on with the new token.
+  if (r.data?.token) state.token = r.data.token;
   store('busgo_ops_session', JSON.stringify({ token: state.token, user: state.user, operator: state.operator }));
   $('#changePassword').classList.add('hidden');
   enter();
@@ -1154,6 +1316,7 @@ async function enter() {
     banners: ['FLEET_DIRECTOR'],
     vouchers: ['FLEET_DIRECTOR'],
     payments: ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'CASHIER'],
+    staff: ['FLEET_DIRECTOR'],
     audit: ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'DISPATCHER']
   };
   document.querySelectorAll('nav button[data-view]').forEach(b => {
@@ -1176,6 +1339,13 @@ async function enter() {
 }
 
 document.querySelectorAll('nav button[data-view]').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+// A tab opened while offline shows its error; once the network is back it loads again by itself (D178).
+window.addEventListener('online', () => {
+  if (!state.missedLoad || !state.token || $('#app').classList.contains('hidden')) return;
+  state.missedLoad = false;
+  toast('Đã có mạng trở lại');
+  show(state.view);
+});
 function stopTimers() { state.timers.forEach(clearInterval); state.timers = []; }
 function every(fn) { fn(); state.timers.push(setInterval(fn, POLL_MS)); }
 
@@ -1191,7 +1361,7 @@ function show(view) {
   if (state.user?.role === 'PLATFORM_ADMIN' && view !== 'platform' && view !== 'about' && !state.platformCode) {
     toast('Chọn nhà xe ở thanh trên để xem dữ liệu điều hành');
   }
-  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, fleet: loadFleet, drivers: loadDrivers, layouts: loadLayouts, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, vouchers: loadVouchers, payments: loadPayments, audit: loadAudit, company: loadCompany, about: loadAbout, platform: loadOperators })[view]?.();
+  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, fleet: loadFleet, drivers: loadDrivers, layouts: loadLayouts, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, vouchers: loadVouchers, payments: loadPayments, staff: loadStaff, audit: loadAudit, company: loadCompany, about: loadAbout, platform: loadOperators })[view]?.();
 }
 
 // ---------- company info (MGR-036) ----------
@@ -1251,6 +1421,282 @@ $('#companyForm')?.addEventListener('submit', async (e) => {
   }
 });
 
+// ---------- staff accounts (MGR-038) ----------
+const staffState = { staff: [], editingId: null };
+
+const STAFF_ROLE_LABELS = {
+  FLEET_DIRECTOR: 'Giám đốc',
+  DISPATCHER: 'Điều phối',
+  CASHIER: 'Thu ngân',
+  FINANCIAL_CONTROLLER: 'Kế toán',
+  PLATFORM_ADMIN: 'Quản trị nền tảng'
+};
+
+function showStaffPasswordNotice(name, password) {
+  const box = $('#staffPasswordNoticeBox');
+  const nameEl = $('#staffNoticeName');
+  const pwEl = $('#staffTempPasswordDisplay');
+  if (!box || !nameEl || !pwEl) return;
+  nameEl.textContent = name;
+  pwEl.textContent = password;
+  box.classList.remove('hidden');
+}
+
+function resetStaffForm() {
+  staffState.editingId = null;
+  const f = $('#staffForm');
+  if (f) f.reset();
+  $('#staffFormTitle').textContent = 'Thêm nhân viên';
+  $('#staffSubmitBtn').textContent = 'Thêm nhân viên';
+  $('#staffCancelBtn').classList.add('hidden');
+  const emailEl = $('#staffEmail');
+  if (emailEl) {
+    emailEl.readOnly = false;
+    emailEl.style.background = '';
+  }
+  $('#staffError').textContent = '';
+}
+
+$('#staffCancelBtn')?.addEventListener('click', () => {
+  resetStaffForm();
+});
+
+$('#staffNoticeAckBtn')?.addEventListener('click', () => {
+  const box = $('#staffPasswordNoticeBox');
+  const pwEl = $('#staffTempPasswordDisplay');
+  if (pwEl) pwEl.textContent = '';
+  if (box) box.classList.add('hidden');
+});
+
+$('#staffCopyPasswordBtn')?.addEventListener('click', () => {
+  const pw = $('#staffTempPasswordDisplay')?.textContent || '';
+  if (!pw) return;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(pw).then(() => toast('Đã sao chép mật khẩu')).catch(() => fallbackCopy(pw));
+  } else {
+    fallbackCopy(pw);
+  }
+});
+
+function fallbackCopy(text) {
+  const input = document.createElement('input');
+  input.value = text;
+  document.body.appendChild(input);
+  input.select();
+  try {
+    document.execCommand('copy');
+    toast('Đã sao chép mật khẩu');
+  } catch (_) {}
+  document.body.removeChild(input);
+}
+
+async function loadStaff() {
+  const box = $('#staffBox');
+  if (!box) return;
+  const r = await api('/api/v1/ops/staff');
+  if (!r.ok) {
+    box.innerHTML = `<p class="error" style="padding:16px">${esc(r.message)}</p>`;
+    return;
+  }
+  const list = Array.isArray(r.data) ? r.data : (r.data?.staff || []);
+  staffState.staff = list;
+  if (!list.length) {
+    box.innerHTML = '<p class="muted" style="padding:16px;margin:0">Chưa có nhân viên nào.</p>';
+    return;
+  }
+  box.innerHTML = `<table>
+    <thead>
+      <tr>
+        <th>Họ và tên</th>
+        <th>Email (Tên đăng nhập)</th>
+        <th>Số điện thoại</th>
+        <th>Vai trò</th>
+        <th>Trạng thái</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      ${list.map(s => {
+        let statusHtml = '';
+        if (s.active === false) {
+          statusHtml = '<span class="pill danger">Đã khóa</span>';
+        } else if (s.must_change_password) {
+          statusHtml = '<span class="pill warn">Chờ đổi MK</span>';
+        } else {
+          statusHtml = '<span class="pill ok">Đang hoạt động</span>';
+        }
+        const isSelf = s.user_id === state.user?.user_id;
+        const isDirector = s.role === 'FLEET_DIRECTOR';
+        const roleLabel = STAFF_ROLE_LABELS[s.role] || s.role;
+        const phoneStr = s.phone ? `<span class="mono">${esc(s.phone)}</span>` : '<span class="muted">—</span>';
+        return `<tr>
+          <td><b>${esc(s.full_name)}</b></td>
+          <td><span class="mono">${esc(s.username)}</span></td>
+          <td>${phoneStr}</td>
+          <td>${esc(roleLabel)}</td>
+          <td>${statusHtml}</td>
+          <td style="white-space:nowrap">
+            ${(isSelf || isDirector) ? `<span class="muted" style="font-size:12px">${isSelf ? 'Tài khoản của bạn' : 'Giám đốc'}</span>` : `
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn" data-edit-staff="${esc(s.user_id)}">Đổi vai trò</button>
+              ${s.active === false
+                ? `<button class="btn" data-unlock-staff="${esc(s.user_id)}">Mở khóa</button>`
+                : `<button class="btn danger" data-lock-staff="${esc(s.user_id)}">Khóa</button>`
+              }
+              <button class="btn" data-reset-pw="${esc(s.user_id)}" data-staff-name="${esc(s.full_name)}">Cấp lại mật khẩu</button>
+            </div>`}
+          </td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+
+  box.querySelectorAll('button[data-edit-staff]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const uId = btn.dataset.editStaff;
+      const s = staffState.staff.find(x => x.user_id === uId);
+      if (!s) return;
+      staffState.editingId = s.user_id;
+      $('#staffFormTitle').textContent = 'Sửa thông tin / Đổi vai trò';
+      $('#staffEmail').value = s.username;
+      $('#staffEmail').readOnly = true;
+      $('#staffEmail').style.background = '#f1f5f9';
+      $('#staffFullName').value = s.full_name;
+      $('#staffPhone').value = s.phone || '';
+      $('#staffRole').value = s.role;
+      $('#staffSubmitBtn').textContent = 'Lưu thay đổi';
+      $('#staffCancelBtn').classList.remove('hidden');
+      $('#staffError').textContent = '';
+      $('#staffRole').focus();
+    });
+  });
+
+  box.querySelectorAll('button[data-lock-staff]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const uId = btn.dataset.lockStaff;
+      btn.disabled = true;
+      const r = await api(`/api/v1/ops/staff/${encodeURIComponent(uId)}`, {
+        method: 'PATCH',
+        body: { active: false }
+      });
+      btn.disabled = false;
+      if (!r.ok) {
+        toast(r.message);
+        return;
+      }
+      toast('Đã khóa tài khoản nhân viên');
+      loadStaff();
+    });
+  });
+
+  box.querySelectorAll('button[data-unlock-staff]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const uId = btn.dataset.unlockStaff;
+      btn.disabled = true;
+      const r = await api(`/api/v1/ops/staff/${encodeURIComponent(uId)}`, {
+        method: 'PATCH',
+        body: { active: true }
+      });
+      btn.disabled = false;
+      if (!r.ok) {
+        toast(r.message);
+        return;
+      }
+      toast('Đã mở khóa tài khoản nhân viên');
+      loadStaff();
+    });
+  });
+
+  box.querySelectorAll('button[data-reset-pw]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const uId = btn.dataset.resetPw;
+      const name = btn.dataset.staffName;
+      if (!btn.dataset.armed) {
+        btn.dataset.armed = '1';
+        btn.textContent = 'Cấp lại hẳn?';
+        setTimeout(() => {
+          if (btn.isConnected) {
+            delete btn.dataset.armed;
+            btn.textContent = 'Cấp lại mật khẩu';
+          }
+        }, 4000);
+        return;
+      }
+      delete btn.dataset.armed;
+      btn.textContent = 'Cấp lại mật khẩu';
+      btn.disabled = true;
+      const r = await api(`/api/v1/ops/staff/${encodeURIComponent(uId)}/reset-password`, {
+        method: 'POST',
+        idempotent: true
+      });
+      btn.disabled = false;
+      if (!r.ok) {
+        toast(r.message);
+        return;
+      }
+      showStaffPasswordNotice(name, r.data?.temporary_password);
+      toast('Đã cấp lại mật khẩu tạm');
+      loadStaff();
+    });
+  });
+}
+
+$('#staffForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const errEl = $('#staffError');
+  errEl.textContent = '';
+
+  const nameRaw = f.full_name.value.trim();
+  const phoneRaw = f.phone.value.trim();
+  const roleRaw = f.role.value;
+
+  if (staffState.editingId) {
+    const body = {
+      full_name: nameRaw,
+      phone: phoneRaw || undefined,
+      role: roleRaw
+    };
+    $('#staffSubmitBtn').disabled = true;
+    const r = await api(`/api/v1/ops/staff/${encodeURIComponent(staffState.editingId)}`, {
+      method: 'PATCH',
+      body
+    });
+    $('#staffSubmitBtn').disabled = false;
+    if (!r.ok) {
+      errEl.textContent = r.message;
+      return;
+    }
+    toast('Đã cập nhật nhân viên');
+    resetStaffForm();
+    loadStaff();
+    return;
+  }
+
+  const emailRaw = f.username.value.trim();
+  const body = {
+    username: emailRaw,
+    full_name: nameRaw,
+    phone: phoneRaw || undefined,
+    role: roleRaw
+  };
+  $('#staffSubmitBtn').disabled = true;
+  const r = await api('/api/v1/ops/staff', {
+    method: 'POST',
+    idempotent: true,
+    body
+  });
+  $('#staffSubmitBtn').disabled = false;
+  if (!r.ok) {
+    errEl.textContent = r.message;
+    return;
+  }
+  toast('Đã tạo tài khoản nhân viên');
+  showStaffPasswordNotice(nameRaw, r.data?.temporary_password);
+  resetStaffForm();
+  loadStaff();
+});
+
 // ---------- about (SH-006, D157) ----------
 // The terms and the model and data notice come from the server, so they change without a new page.
 function legalDocHtml(doc, d) {
@@ -1284,7 +1730,9 @@ async function loadOverview() {
     ['Cảnh báo', m.active_alerts_count ?? 0]
   ];
   $('#kpis').innerHTML = tiles.map(([l, v]) => `<div class="card kpi"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`).join('');
-  const alerts = a.ok ? a.data.alerts : [];
+  // Alerts that could not be read are not "no alerts": the office must not take silence for calm.
+  if (!a.ok) { $('#alerts').innerHTML = `<p class="error">Chưa tải được cảnh báo: ${esc(a.message)}</p>`; return; }
+  const alerts = a.data.alerts || [];
   $('#alerts').innerHTML = alerts.length ? alerts.map(x => `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><span class="pill ${x.severity === 'RED' ? 'danger' : x.severity === 'AMBER' ? 'warn' : 'ok'}">${esc(x.type)}</span><span class="grow">${esc(x.message)}</span><span class="muted mono">${esc(x.vehicle_plate || '')}</span></div>`).join('') : '<p class="muted">Không có cảnh báo.</p>';
 }
 
@@ -1941,6 +2389,8 @@ async function loadSchedules() {
     $('#sRoute').innerHTML = schedules.routes.map(rt => `<option value="${esc(rt.route_id)}">${esc(rt.name)}</option>`).join('');
     if (!$('#sFrom').value) $('#sFrom').value = r.data.change_from;
   }
+  loadStationPicker();
+  loadVehicleTypes();
   let lastRoute = null;
   $('#schedulesBox').innerHTML = schedules.list.length ? `<table><thead><tr><th>Giờ</th><th>Ngày chạy · áp dụng</th><th>Giá</th><th>Trạng thái</th><th></th></tr></thead><tbody>${schedules.list.map(sc => {
     const routeName = schedules.routes.find(rt => rt.route_id === sc.route_id)?.name || sc.route_name;
@@ -2053,6 +2503,184 @@ $('#scheduleForm').addEventListener('submit', async (e) => {
   if (!r.ok) return;
   toast(`${editing ? 'Đã lưu' : 'Đã thêm giờ chạy'}, có hiệu lực từ ${ddmm(r.data.effective_from || r.data.valid_from)}`);
   resetScheduleForm();
+  loadSchedules();
+});
+
+// ---------- station & route builder (MGR-011) ----------
+$('#rtDays').innerHTML = WEEKDAY_SHORT.map((d, i) => `<label><input type="checkbox" name="rt_day" value="${i + 1}" checked> ${d}</label>`).join('');
+let usableStationsList = [];
+let routeBuilderStops = [];
+
+async function loadStationPicker() {
+  const r = await api('/api/v1/ops/stations');
+  if (r.ok && Array.isArray(r.data)) {
+    usableStationsList = r.data;
+    $('#rtStopPick').innerHTML = usableStationsList.map(st => `<option value="${esc(st.station_id)}">${esc(st.name)} (${esc(st.city)})${st.kind === 'ROADSIDE' ? ' · Dọc đường' : ''}</option>`).join('');
+  }
+}
+
+async function loadVehicleTypes() {
+  const r = await api('/api/v1/ops/seat-layouts');
+  const layouts = (r.ok && Array.isArray(r.data) && r.data.length) ? r.data : [
+    { vehicle_type: 'DOUBLE_DECK_VIP_CABIN', name: 'Limousine 22 phòng (2 tầng)', total_seats: 22 },
+    { vehicle_type: 'DOUBLE_DECK_SLEEPER', name: 'Giường nằm 34 chỗ (2 tầng)', total_seats: 34 },
+    { vehicle_type: 'SINGLE_DECK_SEATER', name: 'Ghế ngồi 45 chỗ (1 tầng)', total_seats: 45 }
+  ];
+  $('#rtVehicleType').innerHTML = layouts.map(l => `<option value="${esc(l.vehicle_type)}" data-seats="${l.total_seats || 22}">${esc(l.name)} (${esc(l.total_seats || 22)} chỗ)</option>`).join('');
+  if (layouts[0]?.total_seats) $('#rtTotalSeats').value = layouts[0].total_seats;
+}
+
+$('#rtVehicleType').addEventListener('change', (e) => {
+  const opt = e.target.selectedOptions?.[0];
+  if (opt?.dataset.seats) $('#rtTotalSeats').value = opt.dataset.seats;
+});
+
+function renderRouteStops() {
+  if (!routeBuilderStops.length) {
+    $('#rtStopsList').innerHTML = '<tr><td colspan="5" class="muted">Chưa có điểm dừng nào được chọn</td></tr>';
+    return;
+  }
+  $('#rtStopsList').innerHTML = routeBuilderStops.map((s, i) => `
+    <tr>
+      <td class="mono" style="font-weight:700">${i + 1}</td>
+      <td>${esc(s.name)}<div class="muted" style="font-size:12px">${esc(s.city)}</div></td>
+      <td><label style="cursor:pointer"><input type="checkbox" data-stop-pickup="${i}" ${s.pickup_allowed ? 'checked' : ''}> Đón</label></td>
+      <td><label style="cursor:pointer"><input type="checkbox" data-stop-dropoff="${i}" ${s.dropoff_allowed ? 'checked' : ''}> Trả</label></td>
+      <td>
+        <div style="display:flex;gap:4px">
+          <button class="btn" type="button" data-stop-up="${i}" style="padding:2px 6px" ${i === 0 ? 'disabled' : ''}>▲</button>
+          <button class="btn" type="button" data-stop-down="${i}" style="padding:2px 6px" ${i === routeBuilderStops.length - 1 ? 'disabled' : ''}>▼</button>
+          <button class="btn danger" type="button" data-stop-del="${i}" style="padding:2px 6px">✕</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+  const tbody = $('#rtStopsList');
+  tbody.querySelectorAll('input[data-stop-pickup]').forEach(cb => cb.addEventListener('change', (e) => {
+    routeBuilderStops[Number(e.target.dataset.stopPickup)].pickup_allowed = e.target.checked;
+  }));
+  tbody.querySelectorAll('input[data-stop-dropoff]').forEach(cb => cb.addEventListener('change', (e) => {
+    routeBuilderStops[Number(e.target.dataset.stopDropoff)].dropoff_allowed = e.target.checked;
+  }));
+  tbody.querySelectorAll('button[data-stop-up]').forEach(b => b.addEventListener('click', () => {
+    const idx = Number(b.dataset.stopUp);
+    if (idx > 0) {
+      [routeBuilderStops[idx - 1], routeBuilderStops[idx]] = [routeBuilderStops[idx], routeBuilderStops[idx - 1]];
+      renderRouteStops();
+    }
+  }));
+  tbody.querySelectorAll('button[data-stop-down]').forEach(b => b.addEventListener('click', () => {
+    const idx = Number(b.dataset.stopDown);
+    if (idx < routeBuilderStops.length - 1) {
+      [routeBuilderStops[idx], routeBuilderStops[idx + 1]] = [routeBuilderStops[idx + 1], routeBuilderStops[idx]];
+      renderRouteStops();
+    }
+  }));
+  tbody.querySelectorAll('button[data-stop-del]').forEach(b => b.addEventListener('click', () => {
+    routeBuilderStops.splice(Number(b.dataset.stopDel), 1);
+    renderRouteStops();
+  }));
+}
+
+$('#rtAddStop').addEventListener('click', () => {
+  const stopId = $('#rtStopPick').value;
+  if (!stopId) return;
+  if (routeBuilderStops.some(s => s.stop_id === stopId)) {
+    toast('Điểm dừng này đã có trong tuyến');
+    return;
+  }
+  const st = usableStationsList.find(s => s.station_id === stopId);
+  if (!st) return;
+  routeBuilderStops.push({
+    stop_id: st.station_id,
+    name: st.name,
+    city: st.city,
+    pickup_allowed: true,
+    dropoff_allowed: true
+  });
+  renderRouteStops();
+});
+
+$('#stationForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const name = f.name.value.trim();
+  const city = f.city.value.trim();
+  const address = f.address.value.trim();
+  const lat = Number(f.lat.value);
+  const lng = Number(f.lng.value);
+  const kind = f.kind.value;
+
+  if (name.length < 3) { $('#stationError').textContent = 'Tên bến/điểm đón phải từ 3 ký tự trở lên'; return; }
+  if (!city) { $('#stationError').textContent = 'Tỉnh/thành phố là bắt buộc'; return; }
+  if (isNaN(lat) || lat < 8 || lat > 23.5 || isNaN(lng) || lng < 102 || lng > 110) {
+    $('#stationError').textContent = 'Tọa độ không hợp lệ (Việt Nam: vĩ độ 8-23.5, kinh độ 102-110)';
+    return;
+  }
+  $('#stationSave').disabled = true;
+  const r = await api('/api/v1/ops/stations', {
+    method: 'POST',
+    idempotent: true,
+    body: { name, city, address, lat, lng, kind }
+  });
+  $('#stationSave').disabled = false;
+  $('#stationError').textContent = r.ok ? '' : r.message;
+  if (!r.ok) return;
+  toast(`Đã thêm ${kind === 'STATION' ? 'bến xe' : 'điểm đón'} ${name} (${city})`);
+  f.reset();
+  loadStationPicker();
+});
+
+$('#routeForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const name = f.name.value.trim();
+  if (name.length < 3) { $('#routeError').textContent = 'Tên tuyến từ 3 ký tự trở lên'; return; }
+  if (routeBuilderStops.length < 2) { $('#routeError').textContent = 'Tuyến phải có ít nhất 2 điểm dừng'; return; }
+  if (routeBuilderStops[0].pickup_allowed === false) { $('#routeError').textContent = 'Điểm đầu tuyến phải cho phép đón khách'; return; }
+  if (routeBuilderStops[routeBuilderStops.length - 1].dropoff_allowed === false) { $('#routeError').textContent = 'Điểm cuối tuyến phải cho phép trả khách'; return; }
+
+  const days = [...f.querySelectorAll('input[name="rt_day"]:checked')].map(c => Number(c.value));
+  if (!days.length) { $('#routeError').textContent = 'Chọn ít nhất một ngày chạy'; return; }
+  if (!f.departure.value) { $('#routeError').textContent = 'Cần giờ xuất bến'; return; }
+  if (!f.duration_minutes.value) { $('#routeError').textContent = 'Cần thời gian chạy'; return; }
+  if (!f.base_fare_vnd.value) { $('#routeError').textContent = 'Cần giá vé'; return; }
+  if (!f.vehicle_type.value) { $('#routeError').textContent = 'Chọn loại xe'; return; }
+  if (!f.total_seats.value || Number(f.total_seats.value) <= 0) { $('#routeError').textContent = 'Số lượng ghế phải lớn hơn 0'; return; }
+
+  const body = {
+    name,
+    distance_km: f.distance_km.value ? Number(f.distance_km.value) : undefined,
+    stops: routeBuilderStops.map(s => ({
+      stop_id: s.stop_id,
+      pickup_allowed: s.pickup_allowed,
+      dropoff_allowed: s.dropoff_allowed
+    })),
+    schedule: {
+      departure: f.departure.value,
+      duration_minutes: Number(f.duration_minutes.value),
+      base_fare_vnd: Number(f.base_fare_vnd.value),
+      vehicle_type: f.vehicle_type.value,
+      total_seats: Number(f.total_seats.value),
+      days_of_week: days
+    }
+  };
+
+  $('#routeSave').disabled = true;
+  const r = await api('/api/v1/ops/routes', {
+    method: 'POST',
+    idempotent: true,
+    body
+  });
+  $('#routeSave').disabled = false;
+  $('#routeError').textContent = r.ok ? '' : r.message;
+  if (!r.ok) return;
+
+  toast(`Đã tạo tuyến ${name} với giờ chạy đầu tiên ${body.schedule.departure}`);
+  f.reset();
+  routeBuilderStops = [];
+  renderRouteStops();
+  $('#rtDays').querySelectorAll('input[name="rt_day"]').forEach(c => { c.checked = true; });
   loadSchedules();
 });
 
@@ -2300,8 +2928,10 @@ async function loadPayments() {
     loadPaymentSettings(),
     loadPendingPayments(),
     loadBankTransactions(),
-    loadRefunds()
+    loadRefunds(),
+    loadCashHandovers()
   ]);
+  showPaymentsCsv();
 }
 
 async function loadPaymentSettings() {
@@ -2727,6 +3357,53 @@ const REFUND_SOURCES = {
   UNMATCHED_OVERDUE: 'Chuyển trễ, ghế đã bán'
 };
 
+function buildVietQrUrl(binOrCode, accountNumber, amountVnd, memo, accountName) {
+  if (!binOrCode || !accountNumber) return '';
+  const params = new URLSearchParams();
+  if (amountVnd) params.set('amount', amountVnd);
+  if (memo) params.set('addInfo', memo);
+  if (accountName) params.set('accountName', accountName);
+  return `https://api.vietqr.io/image/${encodeURIComponent(binOrCode)}-${encodeURIComponent(accountNumber)}-compact.png?${params.toString()}`;
+}
+
+// Accountant export (MGR-025): director and finance download the period's money in and out.
+function showPaymentsCsv() {
+  const card = $('#cardPaymentsCsv');
+  if (!card) return;
+  const allowed = ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER'].includes(state.user?.role);
+  card.classList.toggle('hidden', !allowed);
+  const today = new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10);
+  if (!$('#csvFrom').value) $('#csvFrom').value = today.slice(0, 8) + '01';
+  if (!$('#csvTo').value) $('#csvTo').value = today;
+}
+
+$('#csvExportBtn')?.addEventListener('click', async () => {
+  const from = $('#csvFrom').value;
+  const to = $('#csvTo').value;
+  const headers = { Authorization: `Bearer ${state.token}` };
+  if (state.platformCode) headers['X-Operator-Code'] = state.platformCode;
+  let res;
+  try {
+    res = await fetch(`/api/v1/ops/reports/payments.csv?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { headers });
+  } catch (_) {
+    toast('Không kết nối được máy chủ');
+    return;
+  }
+  if (!res.ok) {
+    let json = {};
+    try { json = await res.json(); } catch (_) {}
+    toast(json.message || 'Không xuất được file');
+    return;
+  }
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(await res.blob());
+  link.download = `thu-chi-${from}_${to}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(link.href);
+});
+
 async function loadRefunds() {
   const card = $('#cardRefunds');
   const box = $('#refundsBox');
@@ -2762,17 +3439,38 @@ async function loadRefunds() {
         <th>Khách hàng</th>
         <th>Số tiền</th>
         <th>Lý do</th>
+        <th>Tài khoản nhận hoàn</th>
         <th style="text-align:right">${refundShowAll ? 'Trạng thái' : 'Thao tác'}</th>
       </tr>
     </thead>
     <tbody>
-      ${refunds.map(f => `
+      ${refunds.map(f => {
+        const acc = f.refund_account;
+        const qrUrl = acc ? buildVietQrUrl(acc.bank_bin || acc.bank_code, acc.account_number, f.amount_vnd, `Hoan tien ${f.pnr || ''}`.trim(), acc.account_name) : '';
+        return `
         <tr>
           <td style="font-size:12px">${esc(hhmm(f.requested_at))} ${esc(dmy(f.requested_at))}</td>
           <td><b class="mono">${esc(f.pnr || '—')}</b></td>
           <td>${esc(f.payer_name || '—')}${f.payer_phone ? `<br><span class="mono muted" style="font-size:12px">${esc(f.payer_phone)}</span>` : ''}</td>
           <td style="font-weight:600;color:var(--danger)">${vnd(f.amount_vnd)}</td>
           <td style="font-size:13px">${esc(REFUND_SOURCES[f.source] || f.source || '')}${f.reason ? `<br><span class="muted" style="font-size:12px">${esc(f.reason)}</span>` : ''}</td>
+          <td style="font-size:13px">
+            ${acc ? `
+              <div><b>${esc(acc.bank_name || acc.bank_code || 'Ngân hàng')}</b></div>
+              <div class="row" style="gap:4px;align-items:center;margin:2px 0">
+                <span class="mono" style="font-weight:600">${esc(acc.account_number)}</span>
+                <button class="btn" type="button" data-copy-acc="${esc(acc.account_number)}" style="padding:1px 6px;font-size:11px">Sao chép STK</button>
+              </div>
+              <div class="mono muted" style="font-size:12px">${esc(acc.account_name || '')}</div>
+              ${qrUrl ? `
+                <div style="margin-top:4px">
+                  <a href="${esc(qrUrl)}" target="_blank" rel="noopener">
+                    <img src="${esc(qrUrl)}" alt="VietQR" style="width:72px;height:72px;object-fit:contain;border:1px solid var(--border);border-radius:4px;background:#fff" loading="lazy" title="Bấm xem VietQR">
+                  </a>
+                </div>
+              ` : ''}
+            ` : '<span class="muted">—</span>'}
+          </td>
           <td style="text-align:right">
             ${f.status === 'REFUND_REQUESTED' ? `
               <div class="row" style="gap:6px;justify-content:flex-end">
@@ -2783,9 +3481,17 @@ async function loadRefunds() {
             ` : `${statusBadge(f.status)}${f.notes ? `<br><span class="muted" style="font-size:12px">${esc(f.notes)}</span>` : ''}`}
           </td>
         </tr>
-      `).join('')}
+      `;}).join('')}
     </tbody>
   </table>`;
+
+  box.querySelectorAll('button[data-copy-acc]').forEach(b => b.addEventListener('click', () => {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(b.dataset.copyAcc).then(() => toast('Đã sao chép số tài khoản')).catch(() => toast('Không thể sao chép'));
+    } else {
+      toast('Trình duyệt không hỗ trợ sao chép');
+    }
+  }));
 
   const process = async (btn, refundId, approved) => {
     const notes = (box.querySelector(`input[data-refund-note="${CSS.escape(refundId)}"]`)?.value || '').trim();
@@ -2814,6 +3520,190 @@ async function loadRefunds() {
 $('#refundShowAll')?.addEventListener('change', (e) => {
   refundShowAll = e.target.checked;
   loadRefunds();
+});
+
+// ---------- cash handovers (H-02) ----------
+let cashHandoverShowAll = false;
+
+async function loadCashHandovers() {
+  const card = $('#cardCashHandovers');
+  const box = $('#cashHandoversBox');
+  if (!box || !card) return;
+  if (!['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'CASHIER'].includes(state.user?.role)) {
+    card.classList.add('hidden');
+    return;
+  }
+  card.classList.remove('hidden');
+
+  const dateInput = $('#cashHandoverDate');
+  const dateVal = dateInput?.value || '';
+  const query = new URLSearchParams({
+    status: cashHandoverShowAll ? 'ALL' : 'PENDING'
+  });
+  if (dateVal) query.set('date', dateVal);
+
+  const r = await api(`/api/v1/ops/cash-handovers?${query.toString()}`);
+  if (!r.ok) {
+    box.innerHTML = `<p class="muted" style="padding:16px;margin:0">${esc(r.message)}</p>`;
+    return;
+  }
+  const handovers = r.data?.handovers || [];
+  if (handovers.length === 0) {
+    box.innerHTML = `<p class="muted" style="padding:16px;margin:0">${cashHandoverShowAll ? 'Không có chuyến nào.' : 'Không có chuyến nào đang chờ nộp tiền.'}</p>`;
+    return;
+  }
+
+  const reconBadge = (st, diff, note) => {
+    if (st === 'PENDING_DEPOT_SETTLEMENT') return '<span class="pill warn">Chờ nộp tiền</span>';
+    if (st === 'SETTLED') return '<span class="pill ok">Đã khớp đủ</span>';
+    if (st === 'SETTLED_WITH_DIFFERENCE') {
+      const diffStr = diff > 0 ? `+${vnd(diff)}` : vnd(diff);
+      return `<span class="pill danger">Lệch ${esc(diffStr)}</span>${note ? `<br><span class="muted" style="font-size:12px">${esc(note)}</span>` : ''}`;
+    }
+    return `<span class="pill">${esc(st || '—')}</span>`;
+  };
+
+  box.innerHTML = `<table>
+    <thead>
+      <tr>
+        <th>Hoàn thành lúc</th>
+        <th>Tài xế & Biển số</th>
+        <th>Tuyến đường</th>
+        <th>Tiền phải nộp</th>
+        <th>Biên lai nợ</th>
+        <th>Thực nhận & Chênh lệch</th>
+        <th style="text-align:right">${cashHandoverShowAll ? 'Trạng thái' : 'Thao tác'}</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${handovers.map(h => {
+        const isSettled = ['SETTLED', 'SETTLED_WITH_DIFFERENCE'].includes(h.financial_reconciliation_status);
+        const expected = Number(h.expected_cash_vnd) || 0;
+        return `
+        <tr data-handover-row="${esc(h.trip_id)}">
+          <td style="font-size:12px">
+            <b>${esc(hhmm(h.completed_at))}</b> ${esc(dmy(h.completed_at))}
+            <div class="mono muted" style="font-size:11px">${esc(h.trip_id)}</div>
+          </td>
+          <td>
+            <b>${esc(h.driver_name || 'Tài xế')}</b>
+            ${h.vehicle_plate ? `<br><span class="mono muted" style="font-size:12px">${esc(h.vehicle_plate)}</span>` : ''}
+          </td>
+          <td style="font-size:13px">${esc(h.route_name || '—')}</td>
+          <td>
+            <div style="font-weight:600;color:var(--text)">${vnd(expected)}</div>
+            <div class="muted" style="font-size:11px">
+              COD: ${vnd(h.cod_collected_vnd || 0)} · Vẫy: ${vnd(h.hail_collected_vnd || 0)}
+            </div>
+          </td>
+          <td style="font-size:12px">
+            ${h.debt_receipts?.count > 0 ? `
+              <span class="pill warn">${h.debt_receipts.count} biên lai</span>
+              <div class="muted" style="font-size:11px;margin-top:2px">${vnd(h.debt_receipts.amount_vnd || 0)}</div>
+            ` : '<span class="muted">0</span>'}
+          </td>
+          <td>
+            ${!isSettled ? `
+              <div style="display:flex;flex-direction:column;gap:4px">
+                <div class="row" style="gap:6px;align-items:center">
+                  <input type="number" class="mono handover-input-received" data-handover-trip="${esc(h.trip_id)}" data-expected="${expected}" value="${expected}" min="0" step="1000" style="width:120px;padding:4px 8px;font-size:13px">
+                  <span class="handover-diff-badge" data-handover-trip="${esc(h.trip_id)}" style="font-size:12px;font-weight:600;color:var(--ok)">Khớp</span>
+                </div>
+                <input type="text" class="handover-input-note" data-handover-trip="${esc(h.trip_id)}" placeholder="Ghi chú (bắt buộc nếu lệch)" style="width:180px;padding:4px 8px;font-size:12px">
+              </div>
+            ` : `
+              <div>Đã nhận: <b class="mono">${vnd(h.received_vnd ?? expected)}</b></div>
+              ${h.difference_vnd !== null && h.difference_vnd !== 0 ? `<div style="color:var(--danger);font-size:12px">Chênh lệch: ${h.difference_vnd > 0 ? '+' : ''}${vnd(h.difference_vnd)}</div>` : ''}
+              ${h.confirmed_at ? `<div class="muted" style="font-size:11px">${esc(hhmm(h.confirmed_at))} ${esc(dmy(h.confirmed_at))}</div>` : ''}
+            `}
+          </td>
+          <td style="text-align:right">
+            ${!isSettled ? `
+              <button class="btn primary" data-handover-confirm="${esc(h.trip_id)}" style="padding:4px 10px;font-size:13px;white-space:nowrap">Xác nhận đã nhận</button>
+            ` : `${reconBadge(h.financial_reconciliation_status, h.difference_vnd, h.note)}`}
+          </td>
+        </tr>
+      `;}).join('')}
+    </tbody>
+  </table>`;
+
+  box.querySelectorAll('input.handover-input-received').forEach(input => {
+    const tripId = input.dataset.handoverTrip;
+    const expected = Number(input.dataset.expected) || 0;
+    const diffBadge = box.querySelector(`.handover-diff-badge[data-handover-trip="${CSS.escape(tripId)}"]`);
+    const noteInput = box.querySelector(`.handover-input-note[data-handover-trip="${CSS.escape(tripId)}"]`);
+
+    const updateDiff = () => {
+      const val = Number(input.value) || 0;
+      const diff = val - expected;
+      if (diff === 0) {
+        if (diffBadge) {
+          diffBadge.textContent = 'Khớp';
+          diffBadge.style.color = 'var(--ok)';
+        }
+        if (noteInput) {
+          noteInput.style.borderColor = '';
+        }
+      } else {
+        const sign = diff > 0 ? '+' : '';
+        if (diffBadge) {
+          diffBadge.textContent = `Lệch ${sign}${vnd(diff)}`;
+          diffBadge.style.color = 'var(--danger)';
+        }
+        if (noteInput) {
+          noteInput.style.borderColor = 'var(--danger)';
+        }
+      }
+    };
+    input.addEventListener('input', updateDiff);
+  });
+
+  box.querySelectorAll('button[data-handover-confirm]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const tripId = btn.dataset.handoverConfirm;
+      const recInput = box.querySelector(`input.handover-input-received[data-handover-trip="${CSS.escape(tripId)}"]`);
+      const noteInput = box.querySelector(`input.handover-input-note[data-handover-trip="${CSS.escape(tripId)}"]`);
+      const expected = Number(recInput?.dataset.expected) || 0;
+      const received = Number(recInput?.value);
+
+      if (!Number.isFinite(received) || received < 0) {
+        toast('Số tiền thực nhận không hợp lệ');
+        recInput?.focus();
+        return;
+      }
+
+      const diff = received - expected;
+      const note = (noteInput?.value || '').trim();
+      if (diff !== 0 && note.length < 3) {
+        toast('Số tiền nộp bị lệch. Cần nhập ghi chú ít nhất 3 ký tự.');
+        noteInput?.focus();
+        return;
+      }
+
+      btn.disabled = true;
+      const r = await api(`/api/v1/ops/cash-handovers/${encodeURIComponent(tripId)}/confirm`, {
+        method: 'POST',
+        idempotent: true,
+        body: { received_vnd: received, note }
+      });
+      btn.disabled = false;
+      if (!r.ok) {
+        toast(r.message || 'Xác nhận nộp tiền thất bại');
+        return;
+      }
+      toast(r.message || 'Đã xác nhận nộp tiền');
+      await loadCashHandovers();
+    });
+  });
+}
+
+$('#cashHandoverShowAll')?.addEventListener('change', (e) => {
+  cashHandoverShowAll = e.target.checked;
+  loadCashHandovers();
+});
+
+$('#cashHandoverDate')?.addEventListener('change', () => {
+  loadCashHandovers();
 });
 
 // ---------- fleet (MGR-005, MGR-006) ----------

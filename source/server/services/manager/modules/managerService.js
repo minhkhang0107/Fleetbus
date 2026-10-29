@@ -8,6 +8,7 @@ import { createShareToken } from '../../passenger/core/cryptoEngine.js';
 import { DEMO_DATE, vnDate, parseServiceDate } from '../../../core/serviceDate.js';
 import { validateVietnamPhone, validatePersonName } from '../../passenger/core/formatters.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
+import { PLATFORM_SCOPE } from '../../../core/tenantDb.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
 import { verifyTotp, generateSecret } from '../../../core/totp.js';
 import { getStaffTotpSecret } from '../../../config.js';
@@ -55,6 +56,14 @@ function bookingRevenue(b) {
   return b.payment_method === 'CASH' ? (b.cod_collected_vnd || 0) : b.total_fare_vnd;
 }
 
+/** A staff session token; `tv` ties it to the account's token version so it can be revoked (H-06). */
+function staffToken(user, now = Date.now()) {
+  return signToken(
+    { sub: user.user_id, role: user.role, permissions: user.permissions, kind: 'staff', operator_id: user.operator_id, tv: user.token_version || 0 },
+    { prefix: TOKEN_PREFIXES.staff, ttlSeconds: 8 * 3600, now }
+  );
+}
+
 export const MOCK_MANAGERS_DB = [
   {
     user_id: 'mgr_01',
@@ -64,6 +73,9 @@ export const MOCK_MANAGERS_DB = [
     role: 'FLEET_DIRECTOR', // FLEET_DIRECTOR | DISPATCHER | CASHIER | FINANCIAL_CONTROLLER
     permissions: ['ALL'],
     operator_id: 'op_saomai',
+    active: true,
+    token_version: 0,
+    created_at: '2026-10-01T00:00:00.000Z',
     must_change_password: false
   },
   {
@@ -74,6 +86,9 @@ export const MOCK_MANAGERS_DB = [
     role: 'DISPATCHER',
     permissions: ['DISPATCH_MANAGE', 'TRIP_EDIT', 'INCIDENT_BROADCAST', 'RADAR_VIEW'],
     operator_id: 'op_saomai',
+    active: true,
+    token_version: 0,
+    created_at: '2026-10-01T00:00:00.000Z',
     must_change_password: false
   },
   {
@@ -84,6 +99,9 @@ export const MOCK_MANAGERS_DB = [
     role: 'CASHIER',
     permissions: ['POS_ISSUE', 'BOOKING_SEARCH'],
     operator_id: 'op_saomai',
+    active: true,
+    token_version: 0,
+    created_at: '2026-10-01T00:00:00.000Z',
     must_change_password: false
   },
   {
@@ -94,6 +112,9 @@ export const MOCK_MANAGERS_DB = [
     role: 'DISPATCHER',
     permissions: ['DISPATCH_MANAGE', 'TRIP_EDIT', 'INCIDENT_BROADCAST', 'RADAR_VIEW'],
     operator_id: 'op_xuyenviet',
+    active: true,
+    token_version: 0,
+    created_at: '2026-10-01T00:00:00.000Z',
     must_change_password: false
   },
   {
@@ -104,6 +125,9 @@ export const MOCK_MANAGERS_DB = [
     role: 'CASHIER',
     permissions: ['POS_ISSUE', 'BOOKING_SEARCH'],
     operator_id: 'op_xuyenviet',
+    active: true,
+    token_version: 0,
+    created_at: '2026-10-01T00:00:00.000Z',
     must_change_password: false
   },
   {
@@ -115,6 +139,9 @@ export const MOCK_MANAGERS_DB = [
     role: 'PLATFORM_ADMIN',
     permissions: ['PLATFORM_ALL'],
     operator_id: null,
+    active: true,
+    token_version: 0,
+    created_at: '2026-10-01T00:00:00.000Z',
     must_change_password: false
   }
 ];
@@ -173,7 +200,9 @@ export class ManagerOperationsService {
    * Entries are frozen and never edited; secrets are never written to it.
    */
   recordAudit({ actor = 'anonymous', role = null, action, resource = null, ip = null, before = null, after = null, now = Date.now(), operator_id = DEFAULT_OPERATOR_ID }) {
-    // Each company's entries form a hash chain (D127): removing or inserting an entry breaks it.
+    // Each company's entries form a hash chain (D127): removing or inserting an entry breaks it. What belongs to
+    // no company (the platform admin's own login, a login with an unknown name) has its own chain on the platform.
+    if (operator_id === null) operator_id = PLATFORM_SCOPE;
     const prev = this.auditLog.findLast(a => (a.operator_id || DEFAULT_OPERATOR_ID) === operator_id);
     const body = {
       audit_id: `aud_${now}_${this.auditLog.length + 1}`,
@@ -229,6 +258,10 @@ export class ManagerOperationsService {
       return { success: false, error: 'Tên đăng nhập hoặc mật khẩu không chính xác', code: 'INVALID_CREDENTIALS' };
     }
 
+    if (user.active === false) {
+      return { success: false, error: 'Tài khoản đã bị khóa. Liên hệ giám đốc nhà xe.', code: 'ACCOUNT_DISABLED', status: 403 };
+    }
+
     // Second factor: asked only after the password is right, so it never tells whether a password is valid.
     // An account not enrolled yet is let in with password alone because it can only reach the enrollment endpoints.
     if (TOTP_ROLES.includes(user.role) && user.totp_enrolled !== false) {
@@ -257,10 +290,9 @@ export class ManagerOperationsService {
       return { success: false, error: OPERATOR_INACTIVE.message, code: OPERATOR_INACTIVE.code };
     }
 
-    const token = signToken(
-      { sub: user.user_id, role: user.role, permissions: user.permissions, kind: 'staff', operator_id: user.operator_id },
-      { prefix: TOKEN_PREFIXES.staff, ttlSeconds: 8 * 3600, now: mockNow }
-    );
+    user.last_login_at = new Date(mockNow).toISOString();
+
+    const token = staffToken(user, mockNow);
 
     return {
       success: true,
@@ -336,9 +368,12 @@ export class ManagerOperationsService {
     user.password_hash = hashSecret(new_password);
     user.must_change_password = false;
     user.totp_last_step = -1;
+    // Every other session ends (H-06); the page that changed it carries on with a new token.
+    user.token_version = (user.token_version || 0) + 1;
     return {
       success: true,
-      username: user.username
+      username: user.username,
+      token: staffToken(user)
     };
   }
 
@@ -357,6 +392,7 @@ export class ManagerOperationsService {
     delete director.totp_secret;
     delete director.pending_totp_secret;
     director.totp_last_step = -1;
+    director.token_version = (director.token_version || 0) + 1;
     this.loginGuard.succeed((director.username || '').trim().toLowerCase());
     return {
       success: true,
@@ -873,7 +909,11 @@ export class ManagerOperationsService {
       const oldStatus = driver.status;
       driver.status = newStatus;
       if (acc) acc.status = newStatus;
-      if (oldStatus !== 'LOCKED' && newStatus === 'LOCKED') lockChanged = 'LOCK';
+      if (oldStatus !== 'LOCKED' && newStatus === 'LOCKED') {
+        lockChanged = 'LOCK';
+        if (acc) acc.token_version = (acc.token_version || 0) + 1;
+        driver.token_version = (driver.token_version || 0) + 1;
+      }
       else if (oldStatus === 'LOCKED' && newStatus === 'ACTIVE') lockChanged = 'UNLOCK';
     }
 
@@ -911,6 +951,10 @@ export class ManagerOperationsService {
     if (acc) {
       acc.pin = hashSecret(temporary_pin);
       acc.must_change_pin = true;
+      acc.token_version = (acc.token_version || 0) + 1;
+    }
+    if (driver) {
+      driver.token_version = (driver.token_version || 0) + 1;
     }
 
     const staffId = acc?.staff_id || driver?.staff_id;
@@ -938,14 +982,15 @@ export class ManagerOperationsService {
     };
   }
 
-  addRoute({ name, distance_km, base_fare_vnd, stops_count = 4 }, operatorId = DEFAULT_OPERATOR_ID) {
+  addRoute({ route_id, name, distance_km, base_fare_vnd, stops_count = 4, active = true }, operatorId = DEFAULT_OPERATOR_ID) {
     const newRoute = {
-      route_id: `rt_${Date.now()}`,
+      route_id: route_id || `rt_${Date.now()}`,
       name,
       distance_km,
       base_fare_vnd,
       stops_count,
-      operator_id: operatorId
+      operator_id: operatorId,
+      active
     };
     this.routes.push(newRoute);
     return { success: true, data: newRoute };
@@ -1753,7 +1798,7 @@ export class ManagerOperationsService {
   /**
    * MGR-022: A refund request opened by a cancellation (PAX-021) or an overdue payment (OQ-008).
    */
-  createRefundRequest({ pnr, ticket_id = null, trip_id = null, amount_vnd, reason, source = 'PASSENGER_CANCEL', policy = null, operator_id = DEFAULT_OPERATOR_ID }) {
+  createRefundRequest({ pnr, ticket_id = null, trip_id = null, amount_vnd, reason, source = 'PASSENGER_CANCEL', policy = null, operator_id = DEFAULT_OPERATOR_ID, refund_account = null }) {
     const request = {
       refund_id: `ref_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`,
       pnr,
@@ -1763,6 +1808,7 @@ export class ManagerOperationsService {
       reason,
       source,
       policy,
+      refund_account,
       status: 'REFUND_REQUESTED',
       requested_at: new Date().toISOString(),
       operator_id

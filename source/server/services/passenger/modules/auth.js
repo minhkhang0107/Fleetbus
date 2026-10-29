@@ -8,17 +8,35 @@ import { isProduction, VIP_PASSENGER_OTP, isVipPassengerPhone } from '../../../c
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { findOperatorById, DEFAULT_OPERATOR_ID, publicOperatorProfile } from '../../../core/operators.js';
 
+// Passengers who deleted their account (B-12): "<operator>:<phone>" -> time; tokens signed before it stop working.
+export const PASSENGER_REVOCATIONS = new Map();
+
+export function isPassengerRevoked(identity) {
+  const revokedAt = PASSENGER_REVOCATIONS.get(`${identity.operator_id || DEFAULT_OPERATOR_ID}:${identity.phone}`);
+  return revokedAt !== undefined && (identity.iat || 0) <= revokedAt;
+}
+
 export class PassengerAuthService {
   constructor(options = {}) {
     this.minSupportedVersion = options.minSupportedVersion || '3.0.0';
     this.latestVersion = options.latestVersion || '3.1.0';
     this.forceUpgrade = options.forceUpgrade ?? false;
     this.maintenanceActive = options.maintenanceActive ?? false;
+    this.messenger = options.messenger || null;
 
     this.sessions = new Map(); // token -> session
     this.otpStore = new Map(); // operatorId:phone -> { otp, expiresAt, attempts, lastSentAt }
     this.otpCooldownSeconds = 60;
     this.otpTtlSeconds = 180; // 3 minutes
+  }
+
+  /** Ends every session of a phone with one company and refuses the tokens already handed out. */
+  revokePhone(operatorId, phone, now = Date.now()) {
+    PASSENGER_REVOCATIONS.set(`${operatorId}:${phone}`, now);
+    for (const [token, session] of this.sessions) {
+      if (session.phone === phone && (session.operator_id || DEFAULT_OPERATOR_ID) === operatorId) this.sessions.delete(token);
+    }
+    this.otpStore.delete(`${operatorId}:${phone}`);
   }
 
   /**
@@ -76,6 +94,16 @@ export class PassengerAuthService {
       };
     }
 
+    const hasSmsProvider = Boolean(this.messenger?.smsUrl);
+    if (isProduction() && !hasSmsProvider) {
+      return {
+        success: false,
+        error: 'Chưa gửi được mã OTP. Vui lòng thử lại sau hoặc gọi tổng đài nhà xe.',
+        code: 'OTP_PROVIDER_UNAVAILABLE',
+        status: 503
+      };
+    }
+
     // Generate 6-digit OTP (Deterministic mock for 0912345678 is 882199, VIP is 888777 outside production)
     const otp = isVipPassengerPhone(normalized)
       ? VIP_PASSENGER_OTP
@@ -91,14 +119,18 @@ export class PassengerAuthService {
       lastSentAt: mockNow
     });
 
+    if (hasSmsProvider) {
+      this.messenger.sendOtp({ operatorId, phone: normalized, otp, brand: 'BusGo' });
+    }
+
     return {
       success: true,
       data: {
         phone: normalized,
         cooldown_seconds: this.otpCooldownSeconds,
         expires_in_seconds: this.otpTtlSeconds,
-        // The OTP is only echoed outside production, where no SMS gateway exists
-        ...(isProduction() ? {} : { mock_otp: otp })
+        // The OTP is only echoed outside production when no SMS gateway is configured
+        ...(isProduction() || hasSmsProvider ? {} : { mock_otp: otp })
       }
     };
   }

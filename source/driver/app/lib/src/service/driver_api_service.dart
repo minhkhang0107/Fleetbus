@@ -7,6 +7,7 @@
  * driver from it, so the app sends no driver id.
  */
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
@@ -41,6 +42,7 @@ String newDriverIdempotencyKey() {
 class DriverApiClientService {
   final String baseUrl;
   final http.Client _client;
+  final Duration timeout;
 
   /// Session token of the signed-in driver (set by [login]).
   String? authToken;
@@ -51,6 +53,7 @@ class DriverApiClientService {
     http.Client? client,
     this.authToken,
     this.operatorCode,
+    this.timeout = const Duration(seconds: 20),
   })  : baseUrl = resolveDriverBaseUrl(baseUrl),
         _client = client ?? http.Client();
 
@@ -70,7 +73,7 @@ class DriverApiClientService {
     if (query != null && query.isNotEmpty) {
       uri = uri.replace(queryParameters: query);
     }
-    return _decode(await _client.get(uri, headers: _headers()));
+    return _decode(await _client.get(uri, headers: _headers()).timeout(timeout));
   }
 
   Future<Map<String, dynamic>> _post(
@@ -83,8 +86,26 @@ class DriverApiClientService {
       Uri.parse('$baseUrl$path'),
       headers: _headers(idempotencyKey: idempotent ? (idempotencyKey ?? newDriverIdempotencyKey()) : null),
       body: body == null ? null : jsonEncode(body),
-    );
+    ).timeout(timeout);
     return _decode(response);
+  }
+
+  /// Resends a stored request with a given [idempotencyKey].
+  Future<Map<String, dynamic>> replay(
+    String method,
+    String path,
+    Map<String, dynamic>? body,
+    String idempotencyKey,
+  ) {
+    if (method.toUpperCase() == 'GET') {
+      return _get(path);
+    }
+    return _post(
+      path,
+      body: body,
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
   }
 
   /**
@@ -175,16 +196,22 @@ class DriverApiClientService {
     int? seq,
     DateTime? recordedAt,
     double? accuracyM,
+    String? idempotencyKey,
   }) {
-    return _post('/api/v1/driver/trips/$tripId/telemetry', body: {
-      'lat': lat,
-      'lng': lng,
-      'speed_kmh': speedKmh,
-      'bearing_deg': bearingDeg,
-      if (seq != null) 'seq': seq,
-      if (recordedAt != null) 'recorded_at': recordedAt.toUtc().toIso8601String(),
-      if (accuracyM != null) 'accuracy_m': accuracyM,
-    });
+    return _post(
+      '/api/v1/driver/trips/$tripId/telemetry',
+      body: {
+        'lat': lat,
+        'lng': lng,
+        'speed_kmh': speedKmh,
+        'bearing_deg': bearingDeg,
+        if (seq != null) 'seq': seq,
+        if (recordedAt != null) 'recorded_at': recordedAt.toUtc().toIso8601String(),
+        if (accuracyM != null) 'accuracy_m': accuracyM,
+      },
+      idempotent: idempotencyKey != null,
+      idempotencyKey: idempotencyKey,
+    );
   }
 
   /**
@@ -281,23 +308,23 @@ class DriverApiClientService {
    */
   /// Spec A9: the bus cannot reach this home pickup address; the passenger and the office are told.
   /// DRI-020 (D143): set off to collect the home pickups; from then on the bus position goes to the server.
-  Future<Map<String, dynamic>> startHomeRun(String tripId) {
-    return _post('/api/v1/driver/trips/$tripId/home-run', idempotent: true);
+  Future<Map<String, dynamic>> startHomeRun(String tripId, {String? idempotencyKey}) {
+    return _post('/api/v1/driver/trips/$tripId/home-run', idempotent: true, idempotencyKey: idempotencyKey);
   }
 
   /// D144: the driver's order for the home pickups, first to last.
-  Future<Map<String, dynamic>> setHomeOrder(String tripId, List<String> ticketIds) {
-    return _post('/api/v1/driver/trips/$tripId/home-order', body: {'ticket_ids': ticketIds}, idempotent: true);
+  Future<Map<String, dynamic>> setHomeOrder(String tripId, List<String> ticketIds, {String? idempotencyKey}) {
+    return _post('/api/v1/driver/trips/$tripId/home-order', body: {'ticket_ids': ticketIds}, idempotent: true, idempotencyKey: idempotencyKey);
   }
 
   /// D144: the bus is at a home passenger's door; the wait starts.
-  Future<Map<String, dynamic>> homeArrived(String tripId, String ticketId) {
-    return _post('/api/v1/driver/trips/$tripId/tickets/$ticketId/home-arrived', idempotent: true);
+  Future<Map<String, dynamic>> homeArrived(String tripId, String ticketId, {String? idempotencyKey}) {
+    return _post('/api/v1/driver/trips/$tripId/tickets/$ticketId/home-arrived', idempotent: true, idempotencyKey: idempotencyKey);
   }
 
   /// D144: the passenger did not come out within the wait; the bus goes on.
-  Future<Map<String, dynamic>> homeMissed(String tripId, String ticketId) {
-    return _post('/api/v1/driver/trips/$tripId/tickets/$ticketId/home-missed', idempotent: true);
+  Future<Map<String, dynamic>> homeMissed(String tripId, String ticketId, {String? idempotencyKey}) {
+    return _post('/api/v1/driver/trips/$tripId/tickets/$ticketId/home-missed', idempotent: true, idempotencyKey: idempotencyKey);
   }
 
   /// D144: the passenger's number for a call (logged on the trip).
@@ -305,11 +332,12 @@ class DriverApiClientService {
     return _post('/api/v1/driver/trips/$tripId/tickets/$ticketId/contact');
   }
 
-  Future<Map<String, dynamic>> reportInaccessible(String tripId, String ticketId, {required String reason, String? meetingPoint}) {
+  Future<Map<String, dynamic>> reportInaccessible(String tripId, String ticketId, {required String reason, String? meetingPoint, String? idempotencyKey}) {
     return _post(
       '/api/v1/driver/trips/$tripId/tickets/$ticketId/inaccessible',
       body: {'reason': reason, if (meetingPoint != null && meetingPoint.isNotEmpty) 'meeting_point': meetingPoint},
       idempotent: true,
+      idempotencyKey: idempotencyKey,
     );
   }
 

@@ -14,6 +14,8 @@ import {
 import { validateVietnamPhone, calculateRefundAmount } from '../core/formatters.js';
 import { getTicketSecret, isProduction } from '../../../config.js';
 import { findOperatorById, DEFAULT_OPERATOR_ID } from '../../../core/operators.js';
+import { publicBaseUrl } from '../../../core/messaging.js';
+import { validateRefundAccount, maskRefundAccount } from '../../../core/bankAccounts.js';
 
 // PAX-025: a delay longer than this waives the cancellation fee
 const DELAY_WAIVER_AFTER_MINUTES = 30;
@@ -773,6 +775,17 @@ export class PassengerPaymentService {
       const plate = this._resolveVehiclePlate(ticket.trip_id);
       if (plate) ticket.vehicle_plate = plate;
     }
+    // A cancelled ticket shows where its refund stands and the (masked) account it goes to (H-01).
+    const refund = this.eventBridge?.services?.managerService?.refundRequests?.find(r => r.ticket_id === ticket.ticket_id);
+    if (refund) {
+      ticket.refund = {
+        refund_id: refund.refund_id,
+        status: refund.status,
+        amount_vnd: refund.amount_vnd,
+        reject_note: refund.status === 'REFUND_REJECTED' ? refund.notes || null : null,
+        refund_account: maskRefundAccount(refund.refund_account)
+      };
+    }
     return ticket;
   }
 
@@ -997,7 +1010,8 @@ export class PassengerPaymentService {
     // The link is an opaque token; the PIN goes in the SMS text, never in a URL (BR-TICKET-005)
     const pin = generateTicketPin(ticketId, this.secretKey, ticket.qr_version || 1);
     const shareToken = createShareToken();
-    const shareLink = `https://busgo.vn/pass/${shareToken}`;
+    // The companion follows the bus on the public tracking page, like a shared ticket (`/t/<token>`).
+    const shareLink = `${publicBaseUrl()}/t/${shareToken}`;
 
     ticket.delegated_to = {
       phone: delegateToPhone,
@@ -1026,7 +1040,7 @@ export class PassengerPaymentService {
    * PAX-021: Cancel a ticket and open a refund request.
    * Price and departure come from the stored ticket, never from the client. Cancelling is a one-way step.
    */
-  cancelTicket(ticketId, { now = Date.now(), reason = 'Khách hủy vé trực tuyến' } = {}) {
+  cancelTicket(ticketId, { now = Date.now(), reason = 'Khách hủy vé trực tuyến', refund_account = null } = {}) {
     const ticket = this.tickets.get(ticketId);
     if (!ticket) {
       return { success: false, error: 'Không tìm thấy vé', code: 'TICKET_NOT_FOUND' };
@@ -1092,6 +1106,28 @@ export class PassengerPaymentService {
         message: `Chuyến chậm ${delayMinutes} phút (trên ${DELAY_WAIVER_AFTER_MINUTES} phút): Hoàn tiền 100%, không thu phí hủy`
       }
       : calculateRefundAmount(ticket.fare_vnd, ticket.departure_time, now);
+
+    let cleanRefundAccount = null;
+    const order = ticket.order_id ? this.orders.get(ticket.order_id) : null;
+    const isCash = ticket.payment_method === 'CASH' || order?.payment_method === 'CASH';
+
+    if (!isCash && refundCalc.refundAmount > 0) {
+      if (!refund_account) {
+        return { success: false, error: 'Nhập tài khoản ngân hàng để nhận tiền hoàn', code: 'REFUND_ACCOUNT_REQUIRED' };
+      }
+      const accCheck = validateRefundAccount(refund_account);
+      if (!accCheck.ok) {
+        return { success: false, error: accCheck.message, code: accCheck.code };
+      }
+      cleanRefundAccount = accCheck.account;
+    } else if (refund_account) {
+      const accCheck = validateRefundAccount(refund_account);
+      if (!accCheck.ok) {
+        return { success: false, error: accCheck.message, code: accCheck.code };
+      }
+      cleanRefundAccount = accCheck.account;
+    }
+
     const cancelledAt = new Date(now).toISOString();
 
     ticket.status = 'CANCELLED';
@@ -1103,7 +1139,8 @@ export class PassengerPaymentService {
       trip_id: ticket.trip_id,
       amount_vnd: refundCalc.refundAmount,
       reason,
-      policy: { tier: refundCalc.tier, percentage: refundCalc.percentage, fee_vnd: refundCalc.feeAmount }
+      policy: { tier: refundCalc.tier, percentage: refundCalc.percentage, fee_vnd: refundCalc.feeAmount },
+      refund_account: cleanRefundAccount || null
     };
     const refund = this.eventBridge && typeof this.eventBridge.requestRefund === 'function'
       ? this.eventBridge.requestRefund(refundRequest)
@@ -1133,7 +1170,8 @@ export class PassengerPaymentService {
         tier: refundCalc.tier,
         policy_message: refundCalc.message,
         status: 'REFUND_REQUESTED',
-        cancelled_at: cancelledAt
+        cancelled_at: cancelledAt,
+        ...(cleanRefundAccount ? { refund_account: maskRefundAccount(cleanRefundAccount) } : {})
       }
     };
   }
@@ -1165,7 +1203,20 @@ export class PassengerPaymentService {
   }
 
   /** Whether the share link of a ticket was issued and has not expired. */
+  /**
+   * The ticket's tracking link works from issue until 6 hours after departure: the server itself sends it in the
+   * SMS and push of the home pickup (D144), before the passenger ever shares it from the app.
+   */
   shareLinkValid(ticket, mockNow = Date.now()) {
-    return Boolean(ticket?.share_expires_at) && new Date(ticket.share_expires_at).getTime() > mockNow;
+    if (!ticket?.share_token) return false;
+    if (ticket.share_expires_at) return new Date(ticket.share_expires_at).getTime() > mockNow;
+    const departure = Date.parse(ticket.departure_time || '');
+    return Number.isFinite(departure) && departure + 6 * 60 * 60 * 1000 > mockNow;
+  }
+
+  /** A companion's link lasts like a shared ticket's: until 6 hours after departure. */
+  delegateLinkValid(ticket, mockNow = Date.now()) {
+    const departure = Date.parse(ticket?.departure_time || '');
+    return Boolean(ticket?.delegated_to?.share_token) && Math.max(Number.isFinite(departure) ? departure : 0, Date.parse(ticket.delegated_to.delegated_at) || 0) + 6 * 60 * 60 * 1000 > mockNow;
   }
 }

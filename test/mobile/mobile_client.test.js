@@ -29,7 +29,9 @@ describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
     assert.ok(content.includes('android.permission.INTERNET'), 'INTERNET permission required');
     assert.ok(content.includes('android.permission.ACCESS_FINE_LOCATION'), 'FINE_LOCATION required for GPS telemetry');
     assert.ok(content.includes('android.permission.ACCESS_COARSE_LOCATION'), 'COARSE_LOCATION required');
-    assert.ok(content.includes('android.permission.CAMERA'), 'CAMERA required for QR ticket scanning');
+    assert.ok(!content.includes('android.permission.CAMERA'), 'CAMERA must not be declared in passenger app');
+    assert.ok(!content.includes('android.permission.ACCESS_BACKGROUND_LOCATION'), 'ACCESS_BACKGROUND_LOCATION must not be declared');
+    assert.ok(!content.includes('android.permission.ACCESS_WIFI_STATE'), 'ACCESS_WIFI_STATE must not be declared');
     assert.ok(content.includes('android:label="BusGo"'), 'Label must be BusGo');
     assert.ok(content.includes('android:scheme="busgo"'), 'Deep link scheme busgo must be configured');
     assert.ok(content.includes('android:usesCleartextTraffic="true"'), 'Cleartext traffic must be enabled for dev APIs');
@@ -42,8 +44,12 @@ describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
     assert.ok(content.includes('<string>BusGo</string>'), 'CFBundleDisplayName must be BusGo');
     assert.ok(content.includes('<string>vn.busgo.passenger</string>'), 'CFBundleIdentifier must be vn.busgo.passenger');
     assert.ok(content.includes('NSLocationWhenInUseUsageDescription'), 'NSLocationWhenInUseUsageDescription must be set');
-    assert.ok(content.includes('NSCameraUsageDescription'), 'NSCameraUsageDescription must be set');
-    assert.ok(content.includes('NSPhotoLibraryUsageDescription'), 'NSPhotoLibraryUsageDescription must be set');
+    assert.ok(content.includes('BusGo dùng vị trí của bạn khi app đang mở để gợi ý điểm đón gần nhất và ghim địa chỉ đón tận nhà.'), 'NSLocationWhenInUseUsageDescription must match policy text');
+    assert.ok(!content.includes('NSCameraUsageDescription'), 'NSCameraUsageDescription must not be set');
+    assert.ok(!content.includes('NSLocationAlwaysAndWhenInUseUsageDescription'), 'NSLocationAlwaysAndWhenInUseUsageDescription must not be set');
+    // The QR image is only added to the photos (gal asks for add-only access); the app never reads them.
+    assert.ok(content.includes('NSPhotoLibraryAddUsageDescription'), 'NSPhotoLibraryAddUsageDescription must be set');
+    assert.ok(!content.includes('NSPhotoLibraryUsageDescription'), 'NSPhotoLibraryUsageDescription must not be set');
   });
 
   it('TC-MOB-03: Flutter Dart App entry point must instantiate BusGoPassengerApp with Splash', () => {

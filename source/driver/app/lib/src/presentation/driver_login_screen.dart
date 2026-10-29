@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'driver_about_screen.dart';
 import 'driver_change_pin_screen.dart';
 import 'driver_store.dart';
 import 'driver_widgets.dart';
@@ -173,6 +174,8 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                       const SizedBox(height: 24),
                       _submitButton(),
                       const SizedBox(height: 12),
+                      const DriverConsentLine(),
+                      const SizedBox(height: 12),
                       _hotline(),
                     ]),
                   ),
@@ -199,6 +202,8 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                     const Spacer(),
                     _submitButton(),
                     const SizedBox(height: 10),
+                    const DriverConsentLine(),
+                    const SizedBox(height: 10),
                     _hotline(),
                   ]),
                 ),
@@ -207,6 +212,63 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Small consent text under the driver login button linking to terms and privacy policy.
+class DriverConsentLine extends StatelessWidget {
+  const DriverConsentLine({super.key});
+
+  Future<void> _openDoc(BuildContext context, LegalDoc Function(LegalInfo) pick) async {
+    final store = DriverScope.read(context);
+    var info = store.legalInfo;
+    if (info == null) {
+      final res = await store.loadLegal();
+      info = res.info;
+    }
+    if (!context.mounted) return;
+    if (info == null) {
+      dToast(context, 'Chưa tải được, thử lại sau');
+      return;
+    }
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => DriverLegalDocScreen(doc: pick(info!), info: info)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text.rich(
+      TextSpan(
+        style: dsans(size: 12, color: DTokens.muted, height: 1.4),
+        children: [
+          const TextSpan(text: 'Bằng việc tiếp tục, bạn đồng ý với '),
+          WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: GestureDetector(
+              onTap: () => _openDoc(context, (i) => i.terms),
+              child: Text(
+                'Điều khoản sử dụng',
+                style: dsans(size: 12, color: DTokens.primaryInk, weight: FontWeight.w600).copyWith(decoration: TextDecoration.underline),
+              ),
+            ),
+          ),
+          const TextSpan(text: ' và '),
+          WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: GestureDetector(
+              onTap: () => _openDoc(context, (i) => i.privacy),
+              child: Text(
+                'Chính sách quyền riêng tư',
+                style: dsans(size: 12, color: DTokens.primaryInk, weight: FontWeight.w600).copyWith(decoration: TextDecoration.underline),
+              ),
+            ),
+          ),
+          const TextSpan(text: '.'),
+        ],
+      ),
+      textAlign: TextAlign.center,
     );
   }
 }

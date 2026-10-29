@@ -38,6 +38,19 @@ class PassengerHomeScreen extends StatelessWidget {
           ),
         ]),
         gap(20),
+        if (store.placesError != null) ...[
+          AppCard(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text(store.placesError!, style: sans(size: 14, color: PTokens.danger)),
+              gap(10),
+              PrimaryButton(
+                label: 'Thử lại',
+                onPressed: store.loadPlaces,
+              ),
+            ]),
+          ),
+          gap(16),
+        ],
         AppCard(
           padding: const EdgeInsets.all(16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

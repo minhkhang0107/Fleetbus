@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<string>vi</string>
 	<key>CFBundleDisplayName</key>
 	<string>BusGo Driver</string>
 	<key>CFBundleExecutable</key>
@@ -48,22 +48,18 @@
 
 	<!-- Privacy Usage Descriptions for iOS Driver Cockpit -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>BusGo Driver cần quyền truy cập vị trí để điều hướng hành trình và hiển thị tốc độ trên màn hình buồng lái.</string>
+	<string>BusGo Driver dùng vị trí của bạn trong ca chạy để gửi vị trí xe cho điều hành nhà xe và hành khách của chuyến.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>BusGo Driver cần quyền vị trí liên tục để truyền telemetry GPS và tính toán thời gian đến dự kiến ETA cho hành khách.</string>
+	<string>BusGo Driver thu thập vị trí trong ca chạy, kể cả khi ứng dụng đóng hoặc không được sử dụng, để gửi vị trí xe cho điều hành nhà xe và cho hành khách của chuyến biết xe đang ở đâu và khi nào tới.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>BusGo Driver cần truyền dữ liệu định vị xe liên tục về Trung tâm Điều hành trong suốt ca chạy.</string>
+	<string>BusGo Driver thu thập vị trí trong ca chạy, kể cả khi ứng dụng đóng hoặc không được sử dụng, để gửi vị trí xe liên tục về điều hành nhà xe trong suốt ca chạy.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>BusGo Driver cần quyền camera để quét mã QR vé động 30s của hành khách khi lên xe.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>BusGo Driver cần quyền truy cập thư viện ảnh để gửi hình ảnh báo cáo sự cố kỹ thuật hoặc biên bản kiểm tra.</string>
+	<string>BusGo Driver dùng camera để quét mã QR trên vé khi khách lên xe. Hình ảnh chỉ xử lý trên máy, không gửi đi.</string>
 
-	<!-- Background Modes for Telemetry & Push -->
+	<!-- Background mode: the bus position keeps going during a run with the screen off -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
-		<string>fetch</string>
-		<string>remote-notification</string>
 	</array>
 
 	<!-- App Transport Security for Local Network & Dev APIs -->

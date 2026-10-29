@@ -69,13 +69,30 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
         return;
       }
     }
+    if (r.code == 'QUEUED_OFFLINE') {
+      final boardedList = (r.data?['boarded_passengers'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+      final seats = boardedList.map((p) => p['seat_code']?.toString()).whereType<String>().toList();
+      final seatsStr = seats.isNotEmpty ? seats.join(', ') : (r.data?['seat_code']?.toString() ?? '');
+      await _result(
+        context,
+        false,
+        'Đã ghi nhận · chưa xác minh',
+        'Mất mạng: vé có trong danh sách chuyến (ghế $seatsStr). Máy sẽ gửi lên khi có sóng.',
+        warn: true,
+      );
+      if (!mounted) return;
+      setState(() => _busy = false);
+      await _scanner?.start();
+      return;
+    }
     final boardedList = (r.data?['boarded_passengers'] as List?)?.cast<Map<String, dynamic>>() ?? [];
     final seats = boardedList.map((p) => p['seat_code']?.toString()).whereType<String>().toList();
     final seat = r.data?['seat_code'] ?? r.data?['passenger']?['seat_code'];
     final name = r.data?['passenger_name'] ?? r.data?['passenger']?['passenger_name'];
+    final isAlreadyBoarded = r.code == 'ALREADY_BOARDED' || r.code == 'TICKET_ALREADY_BOARDED';
     final title = r.error == null
         ? (seats.length > 1 ? 'Đã lên xe ${seats.length} ghế: ${seats.join(', ')}' : 'Hợp lệ${seat != null ? ' · Ghế $seat' : ''}')
-        : 'Không cho lên xe';
+        : (isAlreadyBoarded ? 'Vé này đã lên xe' : 'Không cho lên xe');
     await _result(
       context,
       r.error == null,
@@ -97,7 +114,7 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
     var selected = waiting.first;
     final pin = TextEditingController();
     String? error;
-    final result = await showDriverSheet<({Passenger passenger, List<String> boardedSeats})>(context, builder: (ctx) => StatefulBuilder(
+    final result = await showDriverSheet<({Passenger passenger, List<String> boardedSeats, bool offline})>(context, builder: (ctx) => StatefulBuilder(
           builder: (ctx, setSheet) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('Lên xe bằng mã PIN', style: dsans(size: 18, weight: FontWeight.w700)),
             const SizedBox(height: 8),
@@ -124,18 +141,21 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
                   return;
                 }
                 if (selected.codDue) {
-                  Navigator.of(ctx).pop((passenger: selected, boardedSeats: <String>[]));
+                  Navigator.of(ctx).pop((passenger: selected, boardedSeats: <String>[], offline: false));
                   return;
                 }
                 final r = await store.boardWithPin(selected, pin.text.trim());
                 if (r.error != null) {
-                  setSheet(() => error = r.code == 'INVALID_PIN' ? 'Mã PIN không đúng với vé ghế ${selected.seat}.' : r.error);
+                  setSheet(() => error = r.code == 'INVALID_PIN'
+                      ? 'Mã PIN không đúng với vé ghế ${selected.seat}.'
+                      : (r.code == 'ALREADY_BOARDED' ? 'Vé này đã lên xe' : r.error));
                   return;
                 }
                 final boardedList = (r.data?['boarded_passengers'] as List?)?.cast<Map<String, dynamic>>() ?? [];
                 final seats = boardedList.map((p) => p['seat_code']?.toString()).whereType<String>().toList();
                 final boardedSeats = seats.isNotEmpty ? seats : [selected.seat];
-                if (ctx.mounted) Navigator.of(ctx).pop((passenger: selected, boardedSeats: boardedSeats));
+                final isQueuedOffline = r.code == 'QUEUED_OFFLINE';
+                if (ctx.mounted) Navigator.of(ctx).pop((passenger: selected, boardedSeats: boardedSeats, offline: isQueuedOffline));
               },
             ),
           ]),
@@ -146,6 +166,16 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
       return;
     }
     final boardedSeats = result.boardedSeats;
+    if (result.offline) {
+      await _result(
+        context,
+        false,
+        'Đã ghi nhận · chưa xác minh',
+        'Mất mạng: vé có trong danh sách chuyến (ghế ${boardedSeats.join(', ')}). Máy sẽ gửi lên khi có sóng.',
+        warn: true,
+      );
+      return;
+    }
     final title = boardedSeats.length > 1
         ? 'Đã lên xe ${boardedSeats.length} ghế: ${boardedSeats.join(', ')}'
         : 'Hợp lệ · Ghế ${boardedSeats.firstOrNull ?? result.passenger.seat}';
@@ -157,12 +187,12 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
     );
   }
 
-  Future<void> _result(BuildContext context, bool ok, String title, String body) => showDriverSheet<void>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+  Future<void> _result(BuildContext context, bool ok, String title, String body, {bool warn = false}) => showDriverSheet<void>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Container(
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: ok ? DTokens.okBg : DTokens.dangerBg, borderRadius: BorderRadius.circular(12)),
+          decoration: BoxDecoration(color: warn ? DTokens.warnBg : (ok ? DTokens.okBg : DTokens.dangerBg), borderRadius: BorderRadius.circular(12)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: dsans(size: 20, weight: FontWeight.w700, color: ok ? DTokens.okInk : DTokens.dangerInk)),
+            Text(title, style: dsans(size: 20, weight: FontWeight.w700, color: warn ? DTokens.warnInk : (ok ? DTokens.okInk : DTokens.dangerInk))),
             const SizedBox(height: 6),
             Text(body, style: dsans(size: 15, height: 1.5)),
           ]),

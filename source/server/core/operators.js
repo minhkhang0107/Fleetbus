@@ -8,7 +8,7 @@ const SEED_CREATED_AT = '2026-10-01T00:00:00.000Z';
 
 /** Pickup / drop-off offer of a company that only serves its fixed stops (spec 3). */
 export function defaultServiceConfig() {
-  return { pickup_modes: ['FIXED_STOP'], dropoff_modes: ['FIXED_LOCATION'], stop_style: 'STATIONS', route_configs: {}, allow_home_to_home: false, allow_cash_payment: true, approaching_threshold_minutes: 10, home_wait_minutes: 5, service_areas: [] };
+  return { pickup_modes: ['FIXED_STOP'], dropoff_modes: ['FIXED_LOCATION'], stop_style: 'STATIONS', route_configs: {}, allow_home_to_home: false, allow_cash_payment: true, approaching_threshold_minutes: 10, home_wait_minutes: 5, service_areas: [], insurance_enabled: false, wallet_enabled: false };
 }
 
 export const OPERATORS = [
@@ -32,6 +32,8 @@ export const OPERATORS = [
       dropoff_modes: ['FIXED_LOCATION', 'HOME_DROPOFF'],
       allow_home_to_home: true,
       allow_cash_payment: true,
+      insurance_enabled: false,
+      wallet_enabled: false,
       // Its Hà Nội — Thanh Hóa line picks passengers up at stations and points along the road.
       stop_style: 'ROUTE_LINE',
       route_configs: {},
@@ -111,6 +113,9 @@ export function publicOperatorProfile(op) {
     pickup_modes: [...(op.service_config?.pickup_modes || ['FIXED_STOP'])],
     dropoff_modes: [...(op.service_config?.dropoff_modes || ['FIXED_LOCATION'])],
     allow_cash_payment: payment.methods.includes('CASH'),
+    // Insurance and the BusGo wallet stay off until the company has a partner for them (H-03).
+    insurance_enabled: Boolean(op.service_config?.insurance_enabled),
+    wallet_enabled: Boolean(op.service_config?.wallet_enabled),
     payment_methods: payment.methods
   };
 }
@@ -223,8 +228,11 @@ export function createOperator(input = {}, now = Date.now()) {
     role: 'FLEET_DIRECTOR',
     permissions: ['ALL'],
     operator_id: op.operator_id,
+    active: true,
+    token_version: 0,
     must_change_password: true,
-    totp_enrolled: false
+    totp_enrolled: false,
+    created_at: new Date(now).toISOString()
   };
   MOCK_MANAGERS_DB.push(director);
 

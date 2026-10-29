@@ -3,7 +3,7 @@
  * passenger app, editing for the company's office under /api/v1/ops. Always the request's company only.
  */
 import crypto from 'crypto';
-import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { sendSuccess, sendError, parseJsonBody, clientIp } from '../middleware/httpUtils.js';
 import { defaultServiceConfig, updateOperatorContact } from '../core/operators.js';
 import { STOP_STYLES, checkHomeService, publicServiceConfig, routeServiceConfig, validateArea, validateModes, validateRouteSettings } from '../core/serviceAreas.js';
 import { tripVisibleTo } from '../core/tenancy.js';
@@ -46,7 +46,7 @@ function audit(req, managerService, entry) {
   managerService.recordAudit({
     actor: req.identity?.sub || 'anonymous',
     role: req.identity?.role || null,
-    ip: req.socket?.remoteAddress || null,
+    ip: clientIp(req),
     operator_id: req.operatorId,
     ...entry
   });
@@ -194,7 +194,9 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
         allow_home_to_home: body.allow_home_to_home ?? config.allow_home_to_home,
         approaching_threshold_minutes: body.approaching_threshold_minutes ?? config.approaching_threshold_minutes,
         home_wait_minutes: body.home_wait_minutes ?? config.home_wait_minutes ?? 5,
-        stop_style: body.stop_style ?? config.stop_style ?? 'STATIONS'
+        stop_style: body.stop_style ?? config.stop_style ?? 'STATIONS',
+        insurance_enabled: body.insurance_enabled !== undefined ? Boolean(body.insurance_enabled) : (config.insurance_enabled ?? false),
+        wallet_enabled: body.wallet_enabled !== undefined ? Boolean(body.wallet_enabled) : (config.wallet_enabled ?? false)
       };
       if (!STOP_STYLES.includes(next.stop_style)) {
         sendError(res, 'Kiểu điểm đón phải là ROUTE_LINE hoặc STATIONS', 'VALIDATION_ERROR', 400);

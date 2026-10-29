@@ -126,7 +126,17 @@ describe('Fixed routes, schedules and home service rules', () => {
       assert.strictEqual(looked.refunded_vnd, 0);
       assert.deepStrictEqual(looked.refunds.map(r => [r.amount_vnd, r.status, r.source]), [[80000, 'REFUND_REQUESTED', 'HOME_SERVICE_REFUSED']]);
 
-      const cancel = await request(`/api/v1/passenger/tickets/${ticket.ticket_id}/cancel`, { method: 'POST', token: pax, body: {} });
+      const cancel = await request(`/api/v1/passenger/tickets/${ticket.ticket_id}/cancel`, {
+        method: 'POST',
+        token: pax,
+        body: {
+          refund_account: {
+            bank_bin: '970415',
+            account_number: '1088219999',
+            account_name: 'NGUYEN VAN A'
+          }
+        }
+      });
       assert.strictEqual(cancel.status, 200, JSON.stringify(cancel.body));
       assert.deepStrictEqual([cancel.body.data.tier, cancel.body.data.refund_amount_vnd], ['HOME_SERVICE_REFUSED', fare - 80000], 'the rest of the price, no fee twice');
     });

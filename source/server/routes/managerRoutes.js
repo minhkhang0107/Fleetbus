@@ -5,14 +5,17 @@
 
 import crypto from 'crypto';
 import { DEFAULT_OPERATOR_ID } from '../core/operators.js';
-import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { sendSuccess, sendError, parseJsonBody, clientNow, clientIp } from '../middleware/httpUtils.js';
 import { maskPhone, normalizePlate } from '../services/passenger/core/formatters.js';
 import { ADMIN_ROLE } from '../core/gateway.js';
 import { tripVisibleTo } from '../core/tenancy.js';
-import { parseServiceDate } from '../core/serviceDate.js';
+import { parseServiceDate, scheduleChangeFrom, vnDate } from '../core/serviceDate.js';
 import { isProduction } from '../config.js';
 import { resolveHomeBooking, routeServiceConfig } from '../core/serviceAreas.js';
 import { BUILTIN_LAYOUTS, validateLayout, findLayout } from '../core/seatLayouts.js';
+import { STATIONS_DATABASE, MOCK_TRIPS_DATABASE, scheduleView } from '../services/passenger/modules/search.js';
+import { setStopCoords } from '../core/geo.js';
+import { MOCK_MANAGERS_DB } from '../services/manager/modules/managerService.js';
 
 // Seat conflicts and reservation mismatches are conflicts (409); a missing trip or reservation is 404.
 function inventoryErrorStatus(code) {
@@ -32,7 +35,7 @@ function audit(req, managerService, entry) {
   managerService.recordAudit({
     actor: req.identity?.sub || 'anonymous',
     role: req.identity?.role || null,
-    ip: req.socket?.remoteAddress || null,
+    ip: clientIp(req),
     operator_id: req.operatorId || null,
     ...entry
   });
@@ -72,15 +75,20 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
 
   // POST /api/v1/ops/auth/login or /api/v1/auth/staff/login (MGR-001, MGR-029)
   if ((pathname === '/api/v1/ops/auth/login' || pathname === '/api/v1/auth/staff/login') && req.method === 'POST') {
+    if (services.rateLimits?.staffLogin && !services.rateLimits.staffLogin.enforce(req, res, services.env)) {
+      return true;
+    }
     parseJsonBody(req).then(body => {
       const username = String(body.username || body.email || '').trim().toLowerCase();
       const result = managerService.authenticateStaff(username, body.password, body.totp ?? body.totpCode ?? null);
       if (result.success) {
-        managerService.recordAudit({ actor: result.data.user.user_id, role: result.data.user.role, action: 'LOGIN', resource: username, ip: req.socket?.remoteAddress || null, operator_id: result.data.operator?.operator_id ?? null });
+        managerService.recordAudit({ actor: result.data.user.user_id, role: result.data.user.role, action: 'LOGIN', resource: username, ip: clientIp(req, services.env), operator_id: result.data.operator?.operator_id ?? null });
         sendSuccess(res, result.data || result);
       } else {
-        managerService.recordAudit({ action: result.code === 'ACCOUNT_LOCKED' ? 'LOGIN_LOCKED' : 'LOGIN_FAILED', resource: username, ip: req.socket?.remoteAddress || null });
-        const status = result.code === 'ACCOUNT_LOCKED' ? 429 : result.code === 'OPERATOR_INACTIVE' ? 403 : 401;
+        // A failed sign-in goes to the company of the account tried, so its director sees guessing; none if unknown.
+        const tried = MOCK_MANAGERS_DB.find(u => u.username === username);
+        managerService.recordAudit({ action: result.code === 'ACCOUNT_LOCKED' ? 'LOGIN_LOCKED' : 'LOGIN_FAILED', resource: username, ip: clientIp(req, services.env), operator_id: tried ? tried.operator_id ?? null : null });
+        const status = result.code === 'ACCOUNT_LOCKED' ? 429 : (result.code === 'OPERATOR_INACTIVE' || result.code === 'ACCOUNT_DISABLED') ? 403 : (result.status || 401);
         sendError(res, result.error, result.code, status, result);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
@@ -93,7 +101,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       const result = managerService.changePassword(req.identity?.sub, body);
       if (result.success) {
         audit(req, managerService, { action: 'PASSWORD_CHANGE', resource: result.username });
-        sendSuccess(res, { message: 'Đổi mật khẩu thành công' });
+        sendSuccess(res, { message: 'Đổi mật khẩu thành công', token: result.token });
       } else {
         sendError(res, result.error, result.code, result.status || 400);
       }
@@ -447,10 +455,159 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
-  // GET /api/v1/ops/routes (MGR-011, MGR-012, MGR-013)
+  // GET /api/v1/ops/stations (MGR-011)
+  if (pathname === '/api/v1/ops/stations' && req.method === 'GET') {
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const stations = STATIONS_DATABASE.filter(s => s.operator_ids && s.operator_ids.includes(operatorId));
+    sendSuccess(res, stations);
+    return true;
+  }
+
+  // POST /api/v1/ops/stations (MGR-011)
+  if (pathname === '/api/v1/ops/stations' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+      const name = typeof body?.name === 'string' ? body.name.trim() : '';
+      const city = typeof body?.city === 'string' ? body.city.trim() : '';
+      const address = typeof body?.address === 'string' ? body.address.trim() : '';
+      const lat = Number(body?.lat);
+      const lng = Number(body?.lng);
+      const kind = body?.kind || 'STATION';
+
+      if (name.length < 3) {
+        sendError(res, 'Tên bến/điểm đón phải từ 3 ký tự trở lên', 'VALIDATION_ERROR', 400);
+        return;
+      }
+      if (!city) {
+        sendError(res, 'Tỉnh/thành phố là bắt buộc', 'VALIDATION_ERROR', 400);
+        return;
+      }
+      if (!Number.isFinite(lat) || lat < 8 || lat > 23.5 || !Number.isFinite(lng) || lng < 102 || lng > 110) {
+        sendError(res, 'Tọa độ không hợp lệ (Việt Nam: vĩ độ 8-23.5, kinh độ 102-110)', 'VALIDATION_ERROR', 400);
+        return;
+      }
+      if (!['STATION', 'ROADSIDE'].includes(kind)) {
+        sendError(res, 'Loại điểm đón phải là STATION hoặc ROADSIDE', 'VALIDATION_ERROR', 400);
+        return;
+      }
+
+      const norm = (s) => (s || '').trim().toLowerCase();
+      const duplicate = STATIONS_DATABASE.some(s =>
+        s.operator_ids && s.operator_ids.includes(operatorId) &&
+        norm(s.name) === norm(name) &&
+        norm(s.city) === norm(city)
+      );
+      if (duplicate) {
+        sendError(res, 'Bến hoặc điểm đón đã tồn tại trong cùng tỉnh/thành', 'STATION_EXISTS', 409);
+        return;
+      }
+
+      const opCode = (req.operator?.code || operatorId).toLowerCase().replace(/^op_/, '');
+      const stationId = `stp_${opCode}_${crypto.randomBytes(3).toString('hex')}`;
+      const newStation = {
+        station_id: stationId,
+        name,
+        city,
+        address,
+        lat,
+        lng,
+        kind,
+        popular: false,
+        operator_ids: [operatorId]
+      };
+
+      STATIONS_DATABASE.push(newStation);
+      setStopCoords(stationId, { lat, lng });
+      audit(req, managerService, { action: 'STATION_CREATE', resource: stationId, before: null, after: newStation });
+      sendSuccess(res, newStation, 201);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/ops/routes (MGR-008, MGR-011)
   if (pathname === '/api/v1/ops/routes' && req.method === 'GET') {
     const routes = managerService.getRoutes(req.operatorId);
     sendSuccess(res, routes.data || routes);
+    return true;
+  }
+
+  // POST /api/v1/ops/routes (MGR-011)
+  if (pathname === '/api/v1/ops/routes' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+      const when = { today: vnDate(), changeFrom: scheduleChangeFrom() };
+      const customLayouts = (managerService.seatLayouts || []).filter(l => (l.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
+      const result = services.searchService.createRoute(operatorId, body, {
+        changeFrom: when.changeFrom,
+        today: when.today,
+        operatorCode: req.operator?.code,
+        customLayouts
+      });
+      if (!result.ok) {
+        sendError(res, result.message, result.code, result.status || 400);
+        return;
+      }
+      const routeEntry = {
+        route_id: result.route_id,
+        name: body.name.trim(),
+        distance_km: body.distance_km ?? null,
+        base_fare_vnd: result.fields.base_fare_vnd,
+        stops_count: result.stops.length,
+        operator_id: operatorId,
+        active: true
+      };
+      managerService.routes.push(routeEntry);
+      const after = {
+        ...routeEntry,
+        schedule_id: result.schedule_id,
+        schedule: scheduleView(result.template, when)
+      };
+      audit(req, managerService, { action: 'ROUTE_CREATE', resource: result.route_id, before: null, after });
+      sendSuccess(res, after, 201);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // PATCH /api/v1/ops/routes/:routeId (MGR-011)
+  const routeOneMatch = pathname.match(/^\/api\/v1\/ops\/routes\/([^/]+)$/);
+  if (routeOneMatch && req.method === 'PATCH') {
+    const routeId = decodeURIComponent(routeOneMatch[1]);
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const route = managerService.routes.find(r => r.route_id === routeId && r.operator_id === operatorId);
+    if (!route) {
+      sendError(res, 'Không tìm thấy tuyến đường', 'ROUTE_NOT_FOUND', 404);
+      return true;
+    }
+    parseJsonBody(req).then(body => {
+      const before = structuredClone(route);
+      if (body.name !== undefined) {
+        if (typeof body.name !== 'string' || body.name.trim().length < 3) {
+          sendError(res, 'Tên tuyến từ 3 ký tự trở lên', 'VALIDATION_ERROR', 400);
+          return;
+        }
+        route.name = body.name.trim();
+        for (const t of MOCK_TRIPS_DATABASE) {
+          if (t.route_id === routeId && t.operator_id === operatorId) {
+            t.route_name = route.name;
+          }
+        }
+      }
+      if (body.active !== undefined) {
+        if (typeof body.active !== 'boolean') {
+          sendError(res, 'Trạng thái active phải là boolean', 'VALIDATION_ERROR', 400);
+          return;
+        }
+        route.active = body.active;
+        if (req.operator) {
+          if (!req.operator.service_config) req.operator.service_config = {};
+          if (!req.operator.service_config.route_configs) req.operator.service_config.route_configs = {};
+          if (!req.operator.service_config.route_configs[routeId]) req.operator.service_config.route_configs[routeId] = {};
+          req.operator.service_config.route_configs[routeId].sales_suspended = !body.active;
+        }
+      }
+      audit(req, managerService, { action: 'ROUTE_UPDATE', resource: routeId, before, after: route });
+      sendSuccess(res, route);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 
@@ -487,7 +644,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         dropoffStopId: body.dropoffStopId || body.dropoff_stop_id || null,
         homePickup: home.home,
         homeFeeVnd: home.fee,
-        mockNow: body.now || Date.now(),
+        mockNow: clientNow(body),
         operatorId: req.operatorId
       });
 
@@ -530,7 +687,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         dropoffStopId: body.dropoffStopId || body.dropoff_stop_id || null,
         homePickup: home.home,
         homeFeeVnd: home.fee,
-        mockNow: body.now || Date.now(),
+        mockNow: clientNow(body),
         operatorId: req.operatorId
       });
 
@@ -685,6 +842,41 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/ops/reports/payments.csv?from=&to= (MGR-025): money in (paid orders) and out (refunds paid) of
+  // the company for its accountant, one line each, days in Vietnam time. Opens in Excel (UTF-8 with BOM).
+  if (pathname === '/api/v1/ops/reports/payments.csv' && req.method === 'GET') {
+    const from = parsedUrl.searchParams.get('from') || vnDate();
+    const to = parsedUrl.searchParams.get('to') || from;
+    if (!parseServiceDate(from) || !parseServiceDate(to) || from > to) {
+      sendError(res, 'Khoảng ngày dạng YYYY-MM-DD, từ ngày không sau đến ngày', 'VALIDATION_ERROR', 400);
+      return true;
+    }
+    const inRange = (iso) => Boolean(iso) && vnDate(Date.parse(iso)) >= from && vnDate(Date.parse(iso)) <= to;
+    const rows = [];
+    for (const o of services.paymentService.orders.values()) {
+      if (o.operator_id !== req.operatorId || !inRange(o.paid_at)) continue;
+      rows.push([o.paid_at, 'THU', o.pnr, o.channel || 'APP', o.payment_method, o.payer?.full_name || o.payer?.name || '', o.amount_vnd, o.payment_ref || '', o.route_name || '']);
+    }
+    for (const r of managerService.refundRequests) {
+      if ((r.operator_id || DEFAULT_OPERATOR_ID) !== req.operatorId || r.status !== 'REFUNDED' || !inRange(r.processed_at)) continue;
+      const account = r.refund_account ? `${r.refund_account.bank_name || r.refund_account.bank_bin} ${r.refund_account.account_number}` : '';
+      rows.push([r.processed_at, 'HOAN', r.pnr, r.source || '', 'CHUYEN_KHOAN', '', -r.amount_vnd, account, r.reason || '']);
+    }
+    rows.sort((a, b) => a[0].localeCompare(b[0]));
+    const cell = (v) => {
+      const text = String(v ?? '');
+      return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+    };
+    const header = ['Thời điểm', 'Loại', 'Mã đặt chỗ', 'Kênh', 'Hình thức', 'Khách', 'Số tiền (đ)', 'Giao dịch / Tài khoản', 'Ghi chú'];
+    const csv = '\ufeff' + [header, ...rows].map(r => r.map(cell).join(',')).join('\r\n') + '\r\n';
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="thu-chi-${from}_${to}.csv"`
+    });
+    res.end(csv);
+    return true;
+  }
+
   // GET /api/v1/ops/bookings (MGR-017)
   if (pathname === '/api/v1/ops/bookings' && req.method === 'GET') {
     sendSuccess(res, {
@@ -759,6 +951,52 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         sendSuccess(res, result.data);
       } else {
         sendError(res, result.error, result.code, result.code === 'DEBT_RECEIPT_NOT_FOUND' ? 404 : 409);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/ops/cash-handovers (H-02)
+  if (pathname === '/api/v1/ops/cash-handovers' && req.method === 'GET') {
+    const status = parsedUrl.searchParams.get('status') || 'PENDING';
+    const date = parsedUrl.searchParams.get('date') || null;
+    const handovers = services.driverService.listCashHandovers({
+      operatorId: req.operatorId || DEFAULT_OPERATOR_ID,
+      status,
+      date
+    });
+    sendSuccess(res, { total: handovers.length, handovers });
+    return true;
+  }
+
+  // POST /api/v1/ops/cash-handovers/:tripId/confirm (H-02)
+  const cashConfirmMatch = pathname.match(/^\/api\/v1\/ops\/cash-handovers\/([^/]+)\/confirm$/);
+  if (cashConfirmMatch && req.method === 'POST') {
+    const tripId = decodeURIComponent(cashConfirmMatch[1]);
+    parseJsonBody(req).then(body => {
+      const result = services.driverService.confirmCashHandover(tripId, {
+        receivedVnd: body.received_vnd !== undefined ? body.received_vnd : body.receivedAmount,
+        note: body.note,
+        staffId: req.identity?.sub || null,
+        operatorId: req.operatorId || DEFAULT_OPERATOR_ID
+      });
+      if (result.success) {
+        audit(req, managerService, {
+          action: 'CASH_HANDOVER_CONFIRMED',
+          resource: tripId,
+          before: { financial_reconciliation_status: 'PENDING_DEPOT_SETTLEMENT' },
+          after: {
+            financial_reconciliation_status: result.data.financial_reconciliation_status,
+            expected_cash_vnd: result.data.expected_cash_vnd,
+            received_vnd: result.data.received_vnd,
+            difference_vnd: result.data.difference_vnd,
+            note: result.data.note
+          }
+        });
+        sendSuccess(res, result.data);
+      } else {
+        const status = result.code === 'TRIP_NOT_FOUND' ? 404 : (result.code === 'ALREADY_SETTLED' ? 409 : 400);
+        sendError(res, result.error, result.code, status);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -882,8 +1120,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   // GET /api/v1/ops/pending-payments (MGR-037)
   if (pathname === '/api/v1/ops/pending-payments' && req.method === 'GET') {
     const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
-    const rawNow = !isProduction() && parsedUrl.searchParams.get('now');
-    const now = rawNow ? (Number(rawNow) || Date.parse(rawNow) || Date.now()) : Date.now();
+    const now = clientNow(parsedUrl.searchParams);
     const cutoff = now - 3 * 86400000;
     const ALLOWED_STATUSES = ['PENDING_PAYMENT', 'EXPIRED', 'UNMATCHED_OVERDUE'];
 
@@ -930,7 +1167,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     const orderId = decodeURIComponent(confirmPaymentMatch[1]);
     parseJsonBody(req).then(body => {
       const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
-      const now = !isProduction() && body?.now ? body.now : Date.now();
+      const now = clientNow(body);
       const result = services.paymentService.confirmPaymentManually(orderId, {
         operatorId,
         amountVnd: body?.amount_vnd ?? body?.amountVnd,
@@ -972,7 +1209,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     const txId = decodeURIComponent(assignBankTxMatch[1]);
     parseJsonBody(req).then(body => {
       const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
-      const now = !isProduction() && body?.now ? body.now : Date.now();
+      const now = clientNow(body);
       const result = services.paymentService.assignBankTransaction(txId, body?.pnr, {
         operatorId,
         staff: req.identity?.sub || null

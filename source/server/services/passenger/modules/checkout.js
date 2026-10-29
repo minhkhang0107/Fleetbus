@@ -87,7 +87,8 @@ export class PassengerCheckoutService {
    * passenger never pays a price other than the one the app showed.
    * [free = false]: when true, sets fares and totals to 0 đ without evaluating vouchers.
    */
-  calculateOrderReview({ trip = {}, seatCodes = [], pickupStop = 'Bến xe Giáp Bát', dropoffStop = 'Bến xe Phía Bắc Thanh Hóa', voucherCode, resolveVoucher = null, insuranceSelected = false, seats, seatPriceVnd, free = false }) {
+  calculateOrderReview({ trip = {}, seatCodes = [], pickupStop = 'Bến xe Giáp Bát', dropoffStop = 'Bến xe Phía Bắc Thanh Hóa', voucherCode, resolveVoucher = null, insuranceSelected = false, insuranceEnabled = true, insurance_enabled, seats, seatPriceVnd, free = false }) {
+    const isInsuranceEnabled = insurance_enabled !== undefined ? Boolean(insurance_enabled) : Boolean(insuranceEnabled);
     const effectiveSeatCodes = seatCodes.length > 0 ? seatCodes : (seats ? seats.map(s => typeof s === 'string' ? s : s.seat_code) : []);
     const seatPrice = seatPriceVnd || trip.base_fare_vnd || 220000;
     const perSeatPrices = Array.isArray(seats) && seats.length > 0 && seats.every(s => s && Number.isFinite(s.price_vnd))
@@ -100,7 +101,7 @@ export class PassengerCheckoutService {
         : effectiveSeatCodes.length * seatPrice);
     
     // Optional travel insurance (10,000 VND / passenger)
-    const insuranceFare = !free && insuranceSelected ? effectiveSeatCodes.length * 10000 : 0;
+    const insuranceFare = !free && insuranceSelected && isInsuranceEnabled ? effectiveSeatCodes.length * 10000 : 0;
 
     // Voucher computation
     let voucherDiscount = 0;

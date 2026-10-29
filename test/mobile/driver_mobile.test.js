@@ -28,7 +28,9 @@ describe('Phase Driver Mobile: Android & iOS Platform Integrity Test Suite', () 
     assert.ok(content.includes('package="vn.busgo.driver"'), 'Package name must be vn.busgo.driver');
     assert.ok(content.includes('android.permission.FOREGROUND_SERVICE'), 'FOREGROUND_SERVICE permission required');
     assert.ok(content.includes('android.permission.ACCESS_FINE_LOCATION'), 'FINE_LOCATION required');
+    assert.ok(content.includes('android.permission.POST_NOTIFICATIONS'), 'POST_NOTIFICATIONS permission required');
     assert.ok(content.includes('android.permission.CAMERA'), 'CAMERA permission required');
+    assert.ok(content.includes('<uses-feature android:name="android.hardware.camera" android:required="false" />'), 'Camera feature must not be required');
     assert.ok(content.includes('android:label="BusGo Driver"'), 'Label must be BusGo Driver');
     assert.ok(content.includes('android:usesCleartextTraffic="true"'), 'Cleartext traffic must be enabled for dev APIs');
   });

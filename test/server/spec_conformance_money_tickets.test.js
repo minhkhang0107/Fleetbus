@@ -250,7 +250,7 @@ describe('Spec conformance: money, tickets and boarding', () => {
     const farFuture = new Date(dep + 400 * HOUR).toISOString();
 
     const eightHours = await api(`/api/v1/passenger/tickets/${ticket.ticket_id}/cancel`, {
-      method: 'POST', body: { now: dep - 8 * HOUR, departureTime: farFuture }
+      method: 'POST', body: { now: dep - 8 * HOUR, departureTime: farFuture, refund_account: { bank_bin: '970415', account_number: '1088219999', account_name: 'NGUYEN VAN A' } }
     });
     assert.strictEqual(eightHours.status, 200, JSON.stringify(eightHours.body));
     assert.strictEqual(eightHours.body.data.refund_percentage, 80);
@@ -267,7 +267,7 @@ describe('Spec conformance: money, tickets and boarding', () => {
   it('TC-SPEC-A18b: 14h before departure refunds 100% and under 6h refunds nothing (PAX-021 AC-001)', async () => {
     const a = await buyTicket('A11', 'u_cancel_a', '0987000778');
     const dep = Date.parse(a.ticket.departure_time);
-    const full = await api(`/api/v1/passenger/tickets/${a.ticket.ticket_id}/cancel`, { method: 'POST', body: { now: dep - 14 * HOUR } });
+    const full = await api(`/api/v1/passenger/tickets/${a.ticket.ticket_id}/cancel`, { method: 'POST', body: { now: dep - 14 * HOUR, refund_account: { bank_bin: '970415', account_number: '1088219999', account_name: 'NGUYEN VAN A' } } });
     assert.strictEqual(full.body.data.refund_percentage, 100);
     assert.strictEqual(full.body.data.refund_amount_vnd, 220000);
 
@@ -280,7 +280,7 @@ describe('Spec conformance: money, tickets and boarding', () => {
   it('TC-SPEC-A48: refund approval acts on a real request exactly once (MGR-022)', async () => {
     const { ticket } = await buyTicket('B03', 'u_refund', '0987000888');
     const dep = Date.parse(ticket.departure_time);
-    const cancel = await api(`/api/v1/passenger/tickets/${ticket.ticket_id}/cancel`, { method: 'POST', body: { now: dep - 14 * HOUR } });
+    const cancel = await api(`/api/v1/passenger/tickets/${ticket.ticket_id}/cancel`, { method: 'POST', body: { now: dep - 14 * HOUR, refund_account: { bank_bin: '970415', account_number: '1088219999', account_name: 'NGUYEN VAN A' } } });
     const refundId = cancel.body.data.refund_id;
     assert.ok(refundId, 'cancellation must create a refund request');
 

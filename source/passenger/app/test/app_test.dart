@@ -114,6 +114,18 @@ void main() {
         {'heading': 'Dữ liệu bản đồ', 'body': 'Dữ liệu bản đồ © những người đóng góp OpenStreetMap.', 'links': [{'label': 'OpenStreetMap — bản quyền', 'url': 'https://www.openstreetmap.org/copyright'}]},
       ],
     },
+    'privacy': {
+      'title': 'Chính sách quyền riêng tư',
+      'sections': [
+        {'heading': 'Ai chịu trách nhiệm về dữ liệu của bạn', 'body': 'Nhà xe bạn đặt vé là bên kiểm soát dữ liệu cá nhân của bạn.'},
+        {'heading': 'Dữ liệu chúng tôi thu thập', 'body': 'Số điện thoại, họ tên, vé.'},
+      ],
+    },
+    'urls': {
+      'terms': 'https://busgo.vn/terms',
+      'privacy': 'https://busgo.vn/privacy',
+      'account_deletion': 'https://busgo.vn/delete-account',
+    },
   };
 
   Future<PassengerStore> storeWithServer({bool selectOp = true}) async {
@@ -1791,12 +1803,19 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Phiên bản 3.0.0'), findsOneWidget);
-    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsOneWidget);
+    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsNWidgets(2));
     expect(sent.where((r) => r.url.path == '/api/v1/legal').single.url.queryParameters['app'], 'passenger');
 
     await tester.tap(find.text('Điều khoản sử dụng'));
     await tester.pumpAndSettle();
     expect(find.text('2. Hủy vé và hoàn tiền'), findsOneWidget);
+    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Chính sách quyền riêng tư'));
+    await tester.pumpAndSettle();
+    expect(find.text('1. Ai chịu trách nhiệm về dữ liệu của bạn'), findsOneWidget);
     expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsOneWidget);
     await tester.tap(find.byTooltip('Quay lại'));
     await tester.pumpAndSettle();
@@ -1819,8 +1838,11 @@ void main() {
     legalDown = true;
     await tester.pumpWidget(MaterialApp(home: PassengerScope(store: store, child: const PassengerAboutScreen())));
     await tester.pumpAndSettle();
-    expect(find.text('Chưa tải được'), findsNWidgets(2));
+    expect(find.text('Chưa tải được'), findsNWidgets(3));
     await tester.tap(find.text('Điều khoản sử dụng'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LegalDocScreen), findsNothing);
+    await tester.tap(find.text('Chính sách quyền riêng tư'));
     await tester.pumpAndSettle();
     expect(find.byType(LegalDocScreen), findsNothing);
     // The open-source licences are in the app and open without the server.
@@ -1829,8 +1851,53 @@ void main() {
     legalDown = false;
     await tester.tap(find.text('Thử lại'));
     await tester.pumpAndSettle();
-    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsOneWidget);
+    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsNWidgets(2));
     expect(find.text('Thử lại'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('passenger login screen consent links open terms and privacy policy before sign-in', (tester) async {
+    final store = await storeWithServer();
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(store: store, child: const PassengerLoginScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Bằng việc tiếp tục, bạn đồng ý với'), findsOneWidget);
+
+    // Tap terms
+    await tester.tap(find.text('Điều khoản sử dụng'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LegalDocScreen), findsOneWidget);
+    expect(find.text('2. Hủy vé và hoàn tiền'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    // Tap privacy
+    await tester.tap(find.text('Chính sách quyền riêng tư'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LegalDocScreen), findsOneWidget);
+    expect(find.text('1. Ai chịu trách nhiệm về dữ liệu của bạn'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('passenger login screen consent link shows toast when legal fails to load', (tester) async {
+    final store = await storeWithServer();
+    store.legalInfo = null;
+    legalDown = true;
+    await tester.pumpWidget(MaterialApp(
+      home: PassengerScope(store: store, child: const PassengerLoginScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Điều khoản sử dụng'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LegalDocScreen), findsNothing);
+    expect(find.text('Chưa tải được, thử lại sau'), findsOneWidget);
+
     await tester.pumpWidget(const SizedBox());
   });
 }

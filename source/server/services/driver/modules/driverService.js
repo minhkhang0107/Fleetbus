@@ -29,6 +29,14 @@ const DEBT_LIMIT_PER_TRIP_VND = 1000000;
 // The evening before, the driver prepares early trips and home pickups start 75 min before departure.
 export const DRIVER_UPCOMING_WINDOW_MS = 12 * 3600000;
 
+/** A driver session token; `tv` ties it to the account's token version so it can be revoked (H-06). */
+function driverToken(driver, operatorId, now = Date.now()) {
+  return signToken(
+    { sub: driver.driver_id, staff_id: driver.staff_id, role: 'ROLE_DRIVER', kind: 'driver', operator_id: operatorId, tv: driver.token_version || 0 },
+    { prefix: TOKEN_PREFIXES.driver, ttlSeconds: 12 * 3600, now }
+  );
+}
+
 export const MOCK_DRIVERS_DB = [
   {
     driver_id: 'drv_8821a',
@@ -41,6 +49,7 @@ export const MOCK_DRIVERS_DB = [
     is_license_expired: false,
     assigned_vehicle_plate: '29B-123.45',
     status: 'ACTIVE',
+    token_version: 0,
     must_change_pin: false,
     operator_id: 'op_saomai'
   },
@@ -55,6 +64,7 @@ export const MOCK_DRIVERS_DB = [
     is_license_expired: true,
     assigned_vehicle_plate: '29B-678.90',
     status: 'LICENSE_EXPIRED',
+    token_version: 0,
     must_change_pin: false,
     operator_id: 'op_saomai'
   },
@@ -69,6 +79,7 @@ export const MOCK_DRIVERS_DB = [
     is_license_expired: false,
     assigned_vehicle_plate: '29B-444.11',
     status: 'ACTIVE',
+    token_version: 0,
     must_change_pin: false,
     operator_id: 'op_saomai'
   },
@@ -83,6 +94,7 @@ export const MOCK_DRIVERS_DB = [
     is_license_expired: false,
     assigned_vehicle_plate: '30H-246.80',
     status: 'ACTIVE',
+    token_version: 0,
     must_change_pin: false,
     operator_id: 'op_xuyenviet'
   }
@@ -287,10 +299,9 @@ export class DriverCockpitService {
       };
     }
 
-    const token = signToken(
-      { sub: driver.driver_id, staff_id: driver.staff_id, role: 'ROLE_DRIVER', kind: 'driver', operator_id: operatorId },
-      { prefix: TOKEN_PREFIXES.driver, ttlSeconds: 12 * 3600, now: mockNow }
-    );
+    driver.last_login_at = new Date(mockNow).toISOString();
+
+    const token = driverToken(driver, operatorId, mockNow);
 
     const op = findOperatorById(operatorId);
 
@@ -359,10 +370,12 @@ export class DriverCockpitService {
 
     driver.pin = hashSecret(next);
     driver.must_change_pin = false;
+    // Every other session ends (H-06); the app that changed it carries on with a new token.
+    driver.token_version = (driver.token_version || 0) + 1;
     this.loginGuard.succeed(loginKey);
     this.loginGuard.succeed(phoneKey);
 
-    return { success: true };
+    return { success: true, token: driverToken(driver, driver.operator_id || operatorId) };
   }
 
   /**
@@ -1590,8 +1603,19 @@ export class DriverCockpitService {
       if (!CHANGE_METHODS.includes(method)) {
         return { success: false, error: 'Hình thức xử lý tiền thừa không hợp lệ', code: 'INVALID_SETTLEMENT_METHOD' };
       }
-      if (method === 'WALLET_CREDIT' && !phone) {
-        return { success: false, error: 'Cần số điện thoại của khách để cộng tiền thừa vào ví', code: 'WALLET_PHONE_REQUIRED' };
+      if (method === 'WALLET_CREDIT') {
+        const op = findOperatorById(trip?.operator_id || DEFAULT_OPERATOR_ID);
+        const walletEnabled = Boolean(op?.service_config?.wallet_enabled);
+        if (!walletEnabled) {
+          return {
+            success: false,
+            error: 'Nhà xe chưa bật ví BusGo. Trả tiền thừa bằng tiền mặt hoặc biên lai nợ.',
+            code: 'WALLET_DISABLED'
+          };
+        }
+        if (!phone) {
+          return { success: false, error: 'Cần số điện thoại của khách để cộng tiền thừa vào ví', code: 'WALLET_PHONE_REQUIRED' };
+        }
       }
     }
 
@@ -2142,6 +2166,7 @@ export class DriverCockpitService {
     trip.status = 'COMPLETED';
     trip.completed_at = summary.completed_at;
     trip.total_cash_to_handover_vnd = summary.total_cash_to_handover_vnd;
+    trip.financial_reconciliation_status = summary.financial_reconciliation_status;
     this._event(trip, 'TRIP_COMPLETED', { early_end_reason: summary.early_end_reason });
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
@@ -2159,5 +2184,102 @@ export class DriverCockpitService {
     }
 
     return { success: true, data: summary };
+  }
+
+  /**
+   * H-02: Completed trips of one company for cashier cash handover settlement.
+   */
+  listCashHandovers({ operatorId = DEFAULT_OPERATOR_ID, status = 'PENDING', date = null } = {}) {
+    const list = [];
+    for (const trip of this.activeTrips.values()) {
+      if ((trip.operator_id || DEFAULT_OPERATOR_ID) !== operatorId) continue;
+      if (trip.status !== 'COMPLETED') continue;
+      const reconStatus = trip.financial_reconciliation_status || 'PENDING_DEPOT_SETTLEMENT';
+      if (status === 'PENDING' && reconStatus !== 'PENDING_DEPOT_SETTLEMENT') continue;
+      if (date) {
+        // Days are Vietnam days, like everywhere the office picks a date.
+        const completedDay = trip.completed_at ? vnDate(Date.parse(trip.completed_at)) : '';
+        const departureDay = trip.departure_time ? vnDate(Date.parse(trip.departure_time)) : '';
+        if (completedDay !== date && departureDay !== date) continue;
+      }
+      const driver = MOCK_DRIVERS_DB.find(d => d.driver_id === trip.driver_id);
+      const expectedCash = trip.total_cash_to_handover_vnd ?? ((trip.total_cod_collected_vnd || 0) + (trip.total_hail_collected_vnd || 0));
+      const debtCount = (trip.debts || []).length;
+      const debtAmount = (trip.debts || []).reduce((sum, d) => sum + (d.amount_vnd || 0), 0);
+      list.push({
+        trip_id: trip.trip_id,
+        driver_id: trip.driver_id,
+        driver_name: driver?.full_name || trip.driver_name || 'Tài xế',
+        vehicle_plate: trip.vehicle_plate || null,
+        route_name: trip.route_name || '',
+        completed_at: trip.completed_at,
+        expected_cash_vnd: expectedCash,
+        cod_collected_vnd: trip.total_cod_collected_vnd || 0,
+        hail_collected_vnd: trip.total_hail_collected_vnd || 0,
+        debt_receipts: {
+          count: debtCount,
+          amount_vnd: debtAmount
+        },
+        financial_reconciliation_status: reconStatus,
+        received_vnd: trip.received_vnd ?? null,
+        difference_vnd: trip.difference_vnd ?? null,
+        note: trip.settlement_note || null,
+        confirmed_by: trip.confirmed_by || null,
+        confirmed_at: trip.confirmed_at || null
+      });
+    }
+    return list.sort((a, b) => (Date.parse(b.completed_at || '') || 0) - (Date.parse(a.completed_at || '') || 0));
+  }
+
+  /**
+   * H-02: Cashier confirms driver's cash handover for a completed trip.
+   */
+  confirmCashHandover(tripId, { receivedVnd, note = '', staffId = null, operatorId = DEFAULT_OPERATOR_ID, mockNow = Date.now() } = {}) {
+    const trip = this.activeTrips.get(tripId);
+    if (!trip || (trip.operator_id || DEFAULT_OPERATOR_ID) !== operatorId) {
+      return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
+    }
+    if (trip.status !== 'COMPLETED') {
+      return { success: false, error: 'Chuyến xe chưa kết thúc', code: 'TRIP_NOT_COMPLETED' };
+    }
+    const currentStatus = trip.financial_reconciliation_status || 'PENDING_DEPOT_SETTLEMENT';
+    if (['SETTLED', 'SETTLED_WITH_DIFFERENCE'].includes(currentStatus)) {
+      return { success: false, error: 'Chuyến xe đã được quyết toán nộp tiền', code: 'ALREADY_SETTLED' };
+    }
+    const received = Number(receivedVnd);
+    if (!Number.isFinite(received) || received < 0) {
+      return { success: false, error: 'Số tiền thực nhận không hợp lệ', code: 'INVALID_AMOUNT' };
+    }
+    const expected = trip.total_cash_to_handover_vnd ?? ((trip.total_cod_collected_vnd || 0) + (trip.total_hail_collected_vnd || 0));
+    const diff = received - expected;
+    const trimmedNote = typeof note === 'string' ? note.trim() : '';
+    if (diff !== 0 && trimmedNote.length < 3) {
+      return { success: false, error: 'Ghi chú lý do chênh lệch tiền (tối thiểu 3 ký tự)', code: 'NOTE_REQUIRED' };
+    }
+
+    const nextStatus = diff === 0 ? 'SETTLED' : 'SETTLED_WITH_DIFFERENCE';
+    trip.financial_reconciliation_status = nextStatus;
+    trip.received_vnd = received;
+    trip.difference_vnd = diff;
+    trip.settlement_note = trimmedNote || null;
+    trip.confirmed_by = staffId;
+    trip.confirmed_at = new Date(mockNow).toISOString();
+
+    return {
+      success: true,
+      message: diff === 0
+        ? `Đã xác nhận nhận đủ ${received.toLocaleString('vi-VN')} đ từ tài xế`
+        : `Đã xác nhận nộp tiền có chênh lệch (${diff > 0 ? '+' : ''}${diff.toLocaleString('vi-VN')} đ)`,
+      data: {
+        trip_id: trip.trip_id,
+        financial_reconciliation_status: nextStatus,
+        expected_cash_vnd: expected,
+        received_vnd: received,
+        difference_vnd: diff,
+        note: trip.settlement_note,
+        confirmed_by: trip.confirmed_by,
+        confirmed_at: trip.confirmed_at
+      }
+    };
   }
 }

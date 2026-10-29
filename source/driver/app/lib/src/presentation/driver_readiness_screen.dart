@@ -14,6 +14,8 @@ class DriverReadinessScreen extends StatelessWidget {
   const DriverReadinessScreen({super.key});
 
   Future<void> _confirmStart(BuildContext context, DriverStore store) async {
+    await driverPermissions.requestNotifications();
+    if (!context.mounted) return;
     if (!await ensureDriverLocation(context)) return;
     if (!context.mounted) return;
     // Passengers may have booked since the shift was loaded: count them from the server, not the login snapshot.
@@ -49,7 +51,11 @@ class DriverReadinessScreen extends StatelessWidget {
   /// D143: home pickups are collected before the checks at the stop; setting off starts sending the bus position.
   static Future<void> runDriverHome(BuildContext context, DriverStore store) async {
     // D145: the passengers follow the bus by its position, so the app needs location first.
-    if (!store.homeRunStarted && !await ensureDriverLocation(context)) return;
+    if (!store.homeRunStarted) {
+      await driverPermissions.requestNotifications();
+      if (!context.mounted) return;
+      if (!await ensureDriverLocation(context)) return;
+    }
     if (!context.mounted) return;
     if (!store.homeRunStarted) {
       final error = await store.startHomeRun();

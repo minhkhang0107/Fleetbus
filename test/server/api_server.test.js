@@ -327,8 +327,11 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     });
     assert.strictEqual(delegateRes.statusCode, 200);
     assert.match(delegateRes.body.data.offline_pin, /^\d{6}$/);
-    assert.ok(delegateRes.body.data.share_link.startsWith('https://busgo.vn/pass/'));
+    assert.match(delegateRes.body.data.share_link, /\/t\/[A-Za-z0-9_-]{24}$/);
     assert.ok(!delegateRes.body.data.share_link.includes(delegateRes.body.data.offline_pin), 'the PIN never goes in a URL');
+    // The companion's link opens the public tracking page of the trip.
+    const page = await fetch(`${baseUrl}${new URL(delegateRes.body.data.share_link).pathname}`);
+    assert.strictEqual(page.status, 200);
   });
 
   it('TC-SRV-07: Diagnostic, Manual Boarding, No-show & Manager Ops Queries', async () => {
@@ -354,7 +357,9 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     // 3. Driver Diagnostics & Profile (DRI-014, DRI-016, DRI-018)
     const gpsHealthRes = await makeRequest('/api/v1/driver/system/gps-health');
     assert.strictEqual(gpsHealthRes.statusCode, 200);
-    assert.strictEqual(gpsHealthRes.body.data.gps_signal, 'GOOD');
+    // Answers from the positions the server received, not fixed device readings.
+    assert.ok(['GOOD', 'WEAK', 'LOST', 'NO_TRIP'].includes(gpsHealthRes.body.data.gps_signal));
+    assert.strictEqual('satellites_locked' in gpsHealthRes.body.data, false);
 
     const diagPingRes = await makeRequest('/api/v1/driver/system/diagnostics-ping');
     assert.strictEqual(diagPingRes.statusCode, 200);

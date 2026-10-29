@@ -182,19 +182,21 @@ class _DriverCashPaymentSectionState extends State<DriverCashPaymentSection> {
             _notify();
           },
         ),
-        const SizedBox(height: 8),
-        ChoiceTile(
-          label: 'Cộng vào ví của khách',
-          hint: hasPhone
-              ? (widget.phoneHint ?? 'Theo số điện thoại: ${widget.phone!.trim()}')
-              : 'Cần số điện thoại để cộng vào ví',
-          selected: method == 'WALLET',
-          enabled: hasPhone,
-          onTap: () {
-            setState(() => method = 'WALLET');
-            _notify();
-          },
-        ),
+        if (widget.store.walletEnabled) ...[
+          const SizedBox(height: 8),
+          ChoiceTile(
+            label: 'Cộng vào ví của khách',
+            hint: hasPhone
+                ? (widget.phoneHint ?? 'Theo số điện thoại: ${widget.phone!.trim()}')
+                : 'Cần số điện thoại để cộng vào ví',
+            selected: method == 'WALLET',
+            enabled: hasPhone,
+            onTap: () {
+              setState(() => method = 'WALLET');
+              _notify();
+            },
+          ),
+        ],
         const SizedBox(height: 8),
         ChoiceTile(
           label: 'Biên lai nhận tại trạm dừng',

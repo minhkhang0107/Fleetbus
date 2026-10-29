@@ -4,7 +4,7 @@
  * `paymentService.gatewayCredentials` (sealed per-company in its tenant database) and are
  * always masked in API responses and audit logs.
  */
-import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { sendSuccess, sendError, parseJsonBody, clientIp } from '../middleware/httpUtils.js';
 import { defaultServiceConfig, operatorPaymentConfig } from '../core/operators.js';
 import { ALLOWED_PAYMENT_METHODS, getProvider, listProviders, maskCredentials, maskSecret } from '../core/payments/providers.js';
 
@@ -184,7 +184,7 @@ export function handlePaymentSettingsRoutes(req, res, pathname, parsedUrl, servi
       managerService.recordAudit({
         actor: req.identity?.sub || 'anonymous',
         role: req.identity?.role || null,
-        ip: req.socket?.remoteAddress || null,
+        ip: clientIp(req),
         operator_id: op.operator_id,
         action: 'PAYMENT_SETTINGS_UPDATE',
         resource: op.code,

@@ -31,8 +31,25 @@ export const ROUTE_SHAPES = {
 /**
  * Returns {lat, lng} coordinates for a stopId or null if not found.
  */
+let stationsProvider = null;
+export function setStationsProvider(fn) {
+  stationsProvider = fn;
+}
+
+export function setStopCoords(stopId, coords) {
+  if (stopId && coords) STOP_COORDS[stopId] = coords;
+}
+
 export function stopCoords(stopId) {
-  return STOP_COORDS[stopId] || null;
+  if (STOP_COORDS[stopId]) return STOP_COORDS[stopId];
+  if (stationsProvider) {
+    const s = stationsProvider(stopId);
+    if (s && Number.isFinite(s.lat) && Number.isFinite(s.lng)) {
+      STOP_COORDS[stopId] = { lat: s.lat, lng: s.lng };
+      return STOP_COORDS[stopId];
+    }
+  }
+  return null;
 }
 
 /**
@@ -42,6 +59,12 @@ export function stopCoords(stopId) {
 const SHAPE_ALIASES = new Map();
 export function aliasShape(scheduleId, sourceId) {
   if (sourceId && sourceId !== scheduleId) SHAPE_ALIASES.set(scheduleId, sourceId);
+}
+
+export function setRouteShape(id, points) {
+  if (id && Array.isArray(points)) {
+    ROUTE_SHAPES[id] = points;
+  }
 }
 
 export function routeShape(tripId) {

@@ -8,10 +8,89 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'passenger_dates.dart';
 
+export 'passenger_banks.dart';
 export 'passenger_dates.dart';
+import 'passenger_banks.dart';
 
 /// State of the passenger app, backed by the FleetBus API (`PassengerApiClientService`, OQ-029).
 /// Screens follow the Claude Design canvas "FleetBus — Thiết kế lại 3 app".
+
+class RefundAccount {
+  const RefundAccount({
+    required this.bankBin,
+    this.bankName,
+    this.bankShortName,
+    required this.accountNumber,
+    required this.accountName,
+  });
+
+  final String bankBin;
+  final String? bankName;
+  final String? bankShortName;
+  final String accountNumber;
+  final String accountName;
+
+  String get displayBankName {
+    if (bankName != null && bankName!.isNotEmpty) return bankName!;
+    if (bankShortName != null && bankShortName!.isNotEmpty) return bankShortName!;
+    final found = vietQrBanks.where((b) => b.bin == bankBin).firstOrNull;
+    if (found != null) return found.shortName;
+    return bankBin;
+  }
+
+  factory RefundAccount.fromJson(Map<String, dynamic> j) => RefundAccount(
+        bankBin: '${j['bank_bin'] ?? j['bin'] ?? ''}',
+        bankName: j['bank_name'] as String?,
+        bankShortName: j['bank_short_name'] as String?,
+        accountNumber: '${j['account_number'] ?? ''}',
+        accountName: '${j['account_name'] ?? ''}',
+      );
+
+  Map<String, dynamic> toJson() => {
+        'bank_bin': bankBin,
+        if (bankName != null) 'bank_name': bankName,
+        if (bankShortName != null) 'bank_short_name': bankShortName,
+        'account_number': accountNumber,
+        'account_name': accountName,
+      };
+}
+
+class TicketRefund {
+  TicketRefund({
+    required this.refundId,
+    required this.status,
+    required this.amountVnd,
+    this.rejectNote,
+    this.account,
+  });
+
+  final String refundId;
+  final String status;
+  final int amountVnd;
+  final String? rejectNote;
+  final RefundAccount? account;
+
+  bool get isPending => status == 'REFUND_REQUESTED';
+  bool get isRefunded => status == 'REFUNDED';
+  bool get isRejected => status == 'REFUND_REJECTED' || status == 'REJECTED';
+
+  String get statusLabel => switch (status) {
+        'REFUND_REQUESTED' => 'Đang chờ hoàn tiền',
+        'REFUNDED' => 'Đã hoàn tiền',
+        'REFUND_REJECTED' || 'REJECTED' => 'Từ chối',
+        _ => status,
+      };
+
+  factory TicketRefund.fromJson(Map<String, dynamic> j) => TicketRefund(
+        refundId: '${j['refund_id'] ?? ''}',
+        status: '${j['status'] ?? ''}',
+        amountVnd: (j['amount_vnd'] as num?)?.toInt() ?? 0,
+        rejectNote: (j['reject_note'] ?? j['notes'] ?? j['reason']) as String?,
+        account: j['refund_account'] is Map<String, dynamic>
+            ? RefundAccount.fromJson(j['refund_account'] as Map<String, dynamic>)
+            : null,
+      );
+}
 
 class OperatorInfo {
   const OperatorInfo({
@@ -26,6 +105,8 @@ class OperatorInfo {
     this.dropoffModes = const ['FIXED_LOCATION'],
     this.allowCash = true,
     this.allowTransfer = true,
+    this.insuranceEnabled = false,
+    this.walletEnabled = false,
   });
   final String code;
   final String name;
@@ -38,6 +119,8 @@ class OperatorInfo {
   final List<String> dropoffModes;
   final bool allowCash;
   final bool allowTransfer;
+  final bool insuranceEnabled;
+  final bool walletEnabled;
 
   bool get homePickup => pickupModes.contains('HOME_PICKUP');
   bool get homeDropoff => dropoffModes.contains('HOME_DROPOFF');
@@ -55,6 +138,8 @@ class OperatorInfo {
         allowCash: j['allow_cash_payment'] != false,
         // Older servers send no payment_methods: they always took transfers.
         allowTransfer: (j['payment_methods'] as List?)?.contains('BANK_TRANSFER') ?? true,
+        insuranceEnabled: j['insurance_enabled'] == true,
+        walletEnabled: j['wallet_enabled'] == true,
       );
 }
 
@@ -285,6 +370,7 @@ class Ticket {
     required this.route,
     required this.date,
     required this.dep,
+    this.departureTime,
     required this.seat,
     required this.pickup,
     this.dropoff = '',
@@ -304,7 +390,9 @@ class Ticket {
     this.pickupTime,
     this.pickupTimeEstimated = false,
     this.paymentStatus = '',
+    this.paymentMethod = 'VIETQR_NAPAS247',
     this.codDue = 0,
+    this.refundInfo,
   }) : ticketIds = ticketIds ?? (id.isNotEmpty ? [id] : const []);
   final String id;
   final String pnr;
@@ -314,12 +402,14 @@ class Ticket {
   final String route;
   final String date;
   final String dep;
+  final String? departureTime;
   final String seat;
   final String pickup;
   final String dropoff;
   final int paid;
   final String name;
   final String paymentStatus;
+  final String paymentMethod;
   final int codDue;
   /// Planned pickup stop time if different from first departure.
   final String? pickupTime;
@@ -347,9 +437,13 @@ class Ticket {
   String? qrValue;
   String? pin;
   int? refund;
+  TicketRefund? refundInfo;
   bool past;
+  /// D178: the pass shown is the one saved on the device; the server could not be reached.
+  bool qrFromCache = false;
 
   bool get unpaidCash => paymentStatus == 'UNPAID_COD' && codDue > 0;
+  bool get isTransferPayment => !unpaidCash && paymentMethod != 'CASH';
   bool get active => status == TicketStatus.active || status == TicketStatus.boarded;
   bool get isGroup => ticketIds.length > 1 || seat.contains(',');
   String get departure => delay == 0 ? dep : addMinutes(dep, delay);
@@ -388,6 +482,7 @@ class Ticket {
       route: routeLabel(j['route_name'] ?? ''),
       date: '${const ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][dep.weekday % 7]} ${_two(dep.day)}/${_two(dep.month)}',
       dep: _hhmm(dep),
+      departureTime: j['departure_time']?.toString(),
       seat: j['seat_code'] ?? '',
       pickup: '${j['pickup_stop'] ?? ''}'.replaceFirst('Bến xe ', ''),
       dropoff: '${j['dropoff_stop'] ?? ''}'.replaceFirst('Bến xe ', ''),
@@ -409,8 +504,12 @@ class Ticket {
       pickupTime: pTime,
       pickupTimeEstimated: j['pickup_time_estimated'] == true,
       paymentStatus: '${j['payment_status'] ?? ''}',
+      paymentMethod: '${j['payment_method'] ?? (j['payment_status'] == 'UNPAID_COD' ? 'CASH' : 'VIETQR_NAPAS247')}',
       codDue: (j['cod_amount_vnd'] as num?)?.toInt() ?? 0,
-    )..refund = (j['refund_amount_vnd'] as num?)?.toInt();
+      refundInfo: j['refund'] is Map<String, dynamic>
+          ? TicketRefund.fromJson(j['refund'] as Map<String, dynamic>)
+          : (j['refund_id'] != null || j['refund_status'] != null ? TicketRefund.fromJson(j) : null),
+    )..refund = (j['refund'] is Map<String, dynamic> ? (j['refund']['amount_vnd'] as num?)?.toInt() : null) ?? (j['refund_amount_vnd'] as num?)?.toInt();
   }
 }
 
@@ -464,18 +563,42 @@ class LegalSection {
       ]);
 }
 
+class LegalUrls {
+  const LegalUrls({this.terms, this.privacy, this.accountDeletion});
+  final String? terms;
+  final String? privacy;
+  final String? accountDeletion;
+
+  factory LegalUrls.fromJson(Map<String, dynamic> j) => LegalUrls(
+        terms: j['terms'] as String?,
+        privacy: j['privacy'] as String?,
+        accountDeletion: j['account_deletion'] as String?,
+      );
+}
+
 class LegalInfo {
-  const LegalInfo({required this.version, required this.effectiveDate, required this.terms, required this.modelNotice});
+  const LegalInfo({
+    required this.version,
+    required this.effectiveDate,
+    required this.terms,
+    required this.privacy,
+    required this.modelNotice,
+    this.urls = const LegalUrls(),
+  });
   final String version;
   final String effectiveDate;
   final LegalDoc terms;
+  final LegalDoc privacy;
   final LegalDoc modelNotice;
+  final LegalUrls urls;
 
   factory LegalInfo.fromJson(Map<String, dynamic> j) => LegalInfo(
         version: '${j['version'] ?? ''}',
         effectiveDate: '${j['effective_date'] ?? ''}',
         terms: LegalDoc.fromJson(j['terms'] as Map<String, dynamic>? ?? const {}),
+        privacy: LegalDoc.fromJson(j['privacy'] as Map<String, dynamic>? ?? const {}),
         modelNotice: LegalDoc.fromJson(j['model_notice'] as Map<String, dynamic>? ?? const {}),
+        urls: LegalUrls.fromJson(j['urls'] as Map<String, dynamic>? ?? const {}),
       );
 }
 
@@ -587,6 +710,7 @@ class Tracking {
     this.queuePosition,
     this.queueTotal,
     this.readyStatus,
+    this.unreachable = false,
     this.readyMinutes,
     this.homeWaitMinutes,
     this.doorArrivedAt,
@@ -596,6 +720,8 @@ class Tracking {
     this.tripStatus,
   });
 
+  /// The passenger's phone could not reach the server; nothing is known about the bus from this answer.
+  final bool unreachable;
   final GpsSignal signal;
   final int? etaMinutes;
   final double? distanceKm;
@@ -636,10 +762,11 @@ class Tracking {
 
 /// Result of a call: null message means success.
 class ApiResult<T> {
-  const ApiResult(this.value, [this.error, this.code]);
+  const ApiResult(this.value, [this.error, this.code, this.raw]);
   final T? value;
   final String? error;
   final String? code;
+  final Map<String, dynamic>? raw;
   bool get ok => error == null;
 }
 
@@ -679,6 +806,11 @@ class PassengerStore extends ChangeNotifier {
   OperatorInfo? operator;
   Map<String, Place> places = {};
 
+  bool get insuranceEnabled => operator?.insuranceEnabled ?? false;
+  bool get walletEnabled => operator?.walletEnabled ?? false;
+
+  int walletBalanceVnd = 0;
+
   static const maxSeats = 5;
 
   // Session
@@ -686,6 +818,13 @@ class PassengerStore extends ChangeNotifier {
   String? userPhone;
   bool isVip = false;
   bool get loggedIn => api.authToken != null;
+
+  /// D178: when the wallet shown was saved, while the server cannot be reached; null when it is fresh.
+  DateTime? walletOfflineSince;
+  /// Why the last payment check had no answer ('NETWORK'), so a manual check does not blame the transfer.
+  String? lastPaymentCheckCode;
+  /// No station could be shown, not even saved ones; the home screen offers to try again.
+  String? placesError;
 
   /// The server refused the saved session as expired; the wallet asks to sign in again and says why.
   bool sessionExpired = false;
@@ -788,7 +927,7 @@ class PassengerStore extends ChangeNotifier {
       logout();
     }
     if (json['status'] == 'success') return ApiResult(json['data'] is Map<String, dynamic> ? json['data'] as Map<String, dynamic> : {'value': json['data']});
-    return ApiResult(null, '${json['message'] ?? 'Có lỗi, thử lại sau.'}', '${json['code'] ?? ''}');
+    return ApiResult(null, '${json['message'] ?? 'Có lỗi, thử lại sau.'}', '${json['code'] ?? ''}', json);
   }
 
   Future<ApiResult<Map<String, dynamic>>> _call(Future<Map<String, dynamic>> Function() request) async {
@@ -800,6 +939,15 @@ class PassengerStore extends ChangeNotifier {
   }
 
   // ---------- Operator & Places ----------
+  void _applyConfig(String code, Map<String, dynamic> config, SharedPreferences prefs) {
+    api.operatorCode = code;
+    operator = OperatorInfo.fromJson(config['operator'] as Map<String, dynamic>);
+    paymentMethod = defaultPaymentMethod;
+    calendar = ServiceCalendar.fromJson(config['service_calendar'] as Map<String, dynamic>?);
+    fixedEndpoints = FixedEndpoints.fromJson(config['fixed_endpoints']);
+    _rememberedRides = _readRides(prefs.getString('rides_$code'));
+  }
+
   Future<String?> selectOperator(String rawCode) async {
     final code = rawCode.trim().toUpperCase();
     if (code.isEmpty) return 'Nhập mã nhà xe';
@@ -807,15 +955,11 @@ class PassengerStore extends ChangeNotifier {
     final r = await _call(() => api.getAppConfig(operatorCode: code));
     if (!r.ok) return r.error;
     
-    api.operatorCode = code;
-    operator = OperatorInfo.fromJson(r.value!['operator'] as Map<String, dynamic>);
-    paymentMethod = defaultPaymentMethod;
-    calendar = ServiceCalendar.fromJson(r.value!['service_calendar'] as Map<String, dynamic>?);
-    fixedEndpoints = FixedEndpoints.fromJson(r.value!['fixed_endpoints']);
-    
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('operator_code', code);
-    _rememberedRides = _readRides(prefs.getString('rides_$code'));
+    // D178: kept so the app opens on this company without a network.
+    await prefs.setString('config_$code', jsonEncode(r.value!));
+    _applyConfig(code, r.value!, prefs);
     
     await loadPlaces();
     notifyListeners();
@@ -831,11 +975,15 @@ class PassengerStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  LegalInfo? legalInfo;
+
   /// SH-006: the terms and notices come from the server so they change without an app release (D157).
   Future<ApiResult<LegalInfo>> loadLegal() async {
     final r = await _call(api.getLegal);
     if (!r.ok) return ApiResult(null, r.error, r.code);
-    return ApiResult(LegalInfo.fromJson(r.value!));
+    final info = LegalInfo.fromJson(r.value!);
+    legalInfo = info;
+    return ApiResult(info);
   }
 
   /// The HTML page of one slide; the error is shown in place of the page.
@@ -849,7 +997,15 @@ class PassengerStore extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final code = prefs.getString('operator_code');
     if (code != null && code.isNotEmpty) {
-      await selectOperator(code); // silently ignore errors
+      final error = await selectOperator(code); // other errors: the passenger picks the company again
+      // D178: offline, the company saved on the last start; the wallet and its passes come from the device too.
+      final cached = prefs.getString('config_$code');
+      if (operator == null && error == _networkError && cached != null) {
+        try {
+          _applyConfig(code, jsonDecode(cached) as Map<String, dynamic>, prefs);
+          await loadPlaces();
+        } catch (_) {}
+      }
       if (operator != null) await _restoreSession(prefs);
     }
   }
@@ -902,7 +1058,7 @@ class PassengerStore extends ChangeNotifier {
   }
 
   Future<void> changeOperator() async {
-    logout();
+    await logout();
     operator = null;
     fixedEndpoints = null;
     places.clear();
@@ -929,55 +1085,92 @@ class PassengerStore extends ChangeNotifier {
     return lower;
   }
 
+  void _populatePlaces(List<dynamic> json) {
+    final cityGroups = <String, List<Map<String, dynamic>>>{};
+    for (final s in json) {
+      if (s is! Map<String, dynamic>) continue;
+      final city = s['city'] as String? ?? '';
+      if (city.isEmpty) continue;
+      final code = _foldToCode(city);
+      (cityGroups[code] ??= []).add(s);
+    }
+    
+    places.clear();
+    for (final e in cityGroups.entries) {
+      final code = e.key;
+      final group = e.value;
+      final city = group.first['city'] as String;
+      final sorted = group.toList()..sort((a, b) => (b['popular'] == true ? 1 : 0).compareTo(a['popular'] == true ? 1 : 0));
+      final mainStation = sorted.first['name'] as String;
+      final alt = sorted.skip(1).map((s) => s['name'] as String).toList();
+      places[code] = Place(code, city, mainStation, alt);
+    }
+
+    final fixed = fixedEndpoints;
+    if (fixed != null) {
+      // The two stations the company set: shown as they are, nothing else to pick.
+      final o = _foldToCode(fixed.originCity);
+      final d = _foldToCode(fixed.destCity);
+      places[o] = Place(o, fixed.originCity, fixed.originStation, const []);
+      places[d] = Place(d, fixed.destCity, fixed.destStation, const []);
+      origin = o;
+      dest = d;
+    } else if (places.isNotEmpty) {
+      final hn = places.values.where((p) => p.city == 'Hà Nội').firstOrNull;
+      origin = hn?.code ?? places.keys.first;
+      
+      final th = places.values.where((p) => p.city == 'Thanh Hóa').firstOrNull;
+      dest = th?.code ?? places.keys.lastWhere((k) => k != origin, orElse: () => places.keys.first);
+    }
+  }
+
   Future<void> loadPlaces() async {
+    final prefs = await SharedPreferences.getInstance();
+    final op = operator?.code ?? api.operatorCode ?? prefs.getString('operator_code') ?? '';
     try {
       final json = await api.searchStations('');
-      final cityGroups = <String, List<Map<String, dynamic>>>{};
-      for (final s in json) {
-        final city = s['city'] as String? ?? '';
-        if (city.isEmpty) continue;
-        final code = _foldToCode(city);
-        (cityGroups[code] ??= []).add(s as Map<String, dynamic>);
-      }
-      
-      places.clear();
-      for (final e in cityGroups.entries) {
-        final code = e.key;
-        final group = e.value;
-        final city = group.first['city'] as String;
-        final sorted = group.toList()..sort((a, b) => (b['popular'] == true ? 1 : 0).compareTo(a['popular'] == true ? 1 : 0));
-        final mainStation = sorted.first['name'] as String;
-        final alt = sorted.skip(1).map((s) => s['name'] as String).toList();
-        places[code] = Place(code, city, mainStation, alt);
-      }
-
-      final fixed = fixedEndpoints;
-      if (fixed != null) {
-        // The two stations the company set: shown as they are, nothing else to pick.
-        final o = _foldToCode(fixed.originCity);
-        final d = _foldToCode(fixed.destCity);
-        places[o] = Place(o, fixed.originCity, fixed.originStation, const []);
-        places[d] = Place(d, fixed.destCity, fixed.destStation, const []);
-        origin = o;
-        dest = d;
-      } else if (places.isNotEmpty) {
-        final hn = places.values.where((p) => p.city == 'Hà Nội').firstOrNull;
-        origin = hn?.code ?? places.keys.first;
-        
-        final th = places.values.where((p) => p.city == 'Thanh Hóa').firstOrNull;
-        dest = th?.code ?? places.keys.lastWhere((k) => k != origin, orElse: () => places.keys.first);
+      _populatePlaces(json);
+      placesError = null;
+      if (op.isNotEmpty) {
+        await prefs.setString('stations_$op', jsonEncode(json));
       }
     } catch (_) {
-      // Ignore network errors on loadPlaces as instructed or leave empty
+      // D178: offline, the stations saved on the last start, so the search form is never blank.
+      final cached = op.isNotEmpty ? prefs.getString('stations_$op') : null;
+      if (cached != null) {
+        try {
+          final list = (jsonDecode(cached) as List).cast<dynamic>();
+          _populatePlaces(list);
+          placesError = null;
+          notifyListeners();
+          return;
+        } catch (_) {}
+      }
+      placesError = _networkError;
     }
+    notifyListeners();
   }
 
 
   // ---------- Login (PAX-002 / PAX-003) ----------
+  int otpCooldownSeconds = 60;
+  int? lastRemainingCooldown;
+
   Future<String?> requestOtp(String phone) async {
     final r = await _call(() => api.requestOtp(phone));
-    if (!r.ok) return r.error;
+    if (!r.ok) {
+      // COOLDOWN_ACTIVE tells how long to wait; the resend button counts it down.
+      final details = r.raw?['details'];
+      final cd = details is Map ? details['remainingCooldown'] : null;
+      lastRemainingCooldown = cd is num && cd > 0 ? cd.toInt() : null;
+      return r.error;
+    }
+    lastRemainingCooldown = null;
     devOtp = r.value!['mock_otp']?.toString();
+    final cd = r.value!['cooldown_seconds'];
+    if (cd is num && cd > 0) {
+      otpCooldownSeconds = cd.toInt();
+    }
     return null;
   }
 
@@ -997,8 +1190,13 @@ class PassengerStore extends ChangeNotifier {
     userName = name is String && name != 'Hành khách BusGo' ? name : null;
     isVip = r.value!['user']?['is_vip'] == true;
     devOtp = null;
+    final op = r.value!['user']?['operator'];
+    if (op is Map<String, dynamic>) {
+      operator = OperatorInfo.fromJson(op);
+    }
     await _saveSession();
     notifyListeners();
+    unawaited(loadProfile());
     unawaited(loadTickets());
     unawaited(loadNotices());
     // D144: the server learns this phone runs the app (a push token joins once push is set up).
@@ -1006,15 +1204,37 @@ class PassengerStore extends ChangeNotifier {
     return null;
   }
 
-  void logout() {
+  Future<void> loadProfile() async {
+    if (!loggedIn) return;
+    final r = await _call(() => api.getProfile());
+    if (r.ok && r.value != null) {
+      final bal = r.value!['wallet_balance_vnd'];
+      if (bal is num) {
+        walletBalanceVnd = bal.toInt();
+      }
+      final op = r.value!['operator'];
+      if (op is Map<String, dynamic>) {
+        operator = OperatorInfo.fromJson(op);
+      }
+      notifyListeners();
+    }
+  }
+
+  Future<void> logout() async {
+    final cacheKey = _walletCacheKey();
     api.authToken = null;
-    unawaited(SharedPreferences.getInstance().then((prefs) => prefs.remove(_sessionKey)));
     userPhone = null;
     userName = null;
     isVip = false;
     tickets = [];
     notices = [];
+    walletOfflineSince = null;
+    _walletRows = {};
     notifyListeners();
+    // D178: the saved wallet leaves the device with the session.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_sessionKey);
+    if (cacheKey != null) await prefs.remove(cacheKey);
   }
 
   // ---------- Search (PAX-004 to PAX-006) ----------
@@ -1367,7 +1587,7 @@ class PassengerStore extends ChangeNotifier {
           dropoffStop: dropoff,
           homePickup: homePickup?.toJson(),
           homeDropoff: homeDropoff?.toJson(),
-          insuranceSelected: insured,
+          insuranceSelected: insuranceEnabled && insured,
           paymentMethod: paymentMethod,
         ));
     if (!r.ok) {
@@ -1412,6 +1632,7 @@ class PassengerStore extends ChangeNotifier {
   Future<bool> checkPayment({bool manual = false}) async {
     if (orderId == null) return false;
     final r = await _call(() => api.verifyPaymentStatus(orderId!, manualTrigger: manual));
+    lastPaymentCheckCode = r.code;
     if (!r.ok || r.value!['payment_status'] != 'PAID') return false;
     stopHold();
     await loadTickets();
@@ -1496,30 +1717,93 @@ class PassengerStore extends ChangeNotifier {
   }
 
   // ---------- Wallet, pass, cancellation (PAX-016, PAX-017, PAX-021) ----------
+  /// D178: the wallet of this phone at this company, kept on the device so the pass shows without a network.
+  String? _walletCacheKey() {
+    final op = operator?.code ?? api.operatorCode;
+    final digits = (userPhone ?? '').replaceAll(RegExp(r'\D'), '');
+    if (op == null || op.isEmpty || digits.isEmpty) return null;
+    return 'wallet_${op}_$digits';
+  }
+
+  /// The server's rows of the last successful load, by tab; the cache writes them back with each pass.
+  Map<String, List<Map<String, dynamic>>> _walletRows = {};
+
+  Future<void> _saveWalletCache() async {
+    final key = _walletCacheKey();
+    if (key == null || _walletRows.isEmpty) return;
+    Map<String, dynamic> withPass(Map<String, dynamic> j) {
+      final t = tickets.where((t) => t.id == j['ticket_id']).firstOrNull;
+      return t == null ? j : {...j, '_qr': t.qrValue, '_qr_version': t.qrVersion, '_pin': t.pin};
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, jsonEncode({
+      'saved_at': DateTime.now().toIso8601String(),
+      for (final e in _walletRows.entries) e.key: [for (final j in e.value) withPass(j)],
+    }));
+  }
+
+  /// The tickets of one tab as last saved, with their pass; empty when nothing was saved.
+  List<Ticket> _cachedTickets(Map<String, dynamic>? cache, String tab) {
+    final rows = cache?[tab];
+    if (rows is! List) return [];
+    return [
+      for (final j in rows.cast<Map<String, dynamic>>())
+        Ticket.fromJson(j, past: tab == 'HISTORY')
+          ..qrValue = j['_qr'] as String?
+          ..qrVersion = (j['_qr_version'] as num?)?.toInt() ?? 1
+          ..pin = j['_pin'] as String?,
+    ];
+  }
+
   Future<void> loadTickets() async {
     if (!loggedIn) return;
     loadingTickets = true;
     notifyListeners();
     final up = await _call(() => api.getTicketWallet(tab: 'UPCOMING'));
     final past = await _call(() => api.getTicketWallet(tab: 'HISTORY'));
-    final list = <Ticket>[];
-    if (up.ok) {
-      list.addAll(((up.value!['value'] ?? up.value) as List).cast<Map<String, dynamic>>().map(Ticket.fromJson));
+    List<Map<String, dynamic>> rows(ApiResult<Map<String, dynamic>> r) => ((r.value!['value'] ?? r.value) as List).cast<Map<String, dynamic>>();
+
+    // D178: without a network a tab keeps what is on screen, or what was saved on the device; never an empty wallet.
+    Map<String, dynamic>? cache;
+    if (up.code == 'NETWORK' || past.code == 'NETWORK') {
+      final raw = (await SharedPreferences.getInstance()).getString(_walletCacheKey() ?? '');
+      try {
+        cache = raw == null ? null : jsonDecode(raw) as Map<String, dynamic>;
+      } catch (_) {}
     }
-    if (past.ok) {
-      list.addAll(((past.value!['value'] ?? past.value) as List).cast<Map<String, dynamic>>().map((j) => Ticket.fromJson(j, past: true)));
+    List<Ticket> offlineTab(String tab) {
+      final shown = tickets.where((t) => t.past == (tab == 'HISTORY')).toList();
+      return shown.isNotEmpty ? shown : _cachedTickets(cache, tab);
     }
+
+    final list = <Ticket>[
+      if (up.ok) ...rows(up).map(Ticket.fromJson) else if (up.code == 'NETWORK') ...offlineTab('UPCOMING'),
+      if (past.ok) ...rows(past).map((j) => Ticket.fromJson(j, past: true)) else if (past.code == 'NETWORK') ...offlineTab('HISTORY'),
+    ];
     for (final t in list) {
       final old = tickets.where((o) => o.id == t.id).firstOrNull;
-      if (old != null && t.plate.isEmpty) t.plate = old.plate;
+      if (old == null || identical(old, t)) continue;
+      if (t.plate.isEmpty) t.plate = old.plate;
+      // The wallet rows carry no pass: keep the one already loaded until the pass screen asks again.
+      t.qrValue ??= old.qrValue;
+      t.pin ??= old.pin;
+      if (old.qrVersion > t.qrVersion) t.qrVersion = old.qrVersion;
     }
     tickets = list;
-    for (final tripId in tickets.where((t) => !t.past && t.active).map((t) => t.tripId).toSet()) {
-      final d = await _call(() => api.getDisruptions(tripId));
-      final minutes = d.ok ? (d.value!['delay_minutes'] ?? d.value!['current_delay_minutes'] ?? 0) : 0;
-      for (final t in tickets.where((t) => t.tripId == tripId)) {
-        t.delay = (minutes as num).toInt();
+
+    if (up.ok && past.ok) {
+      walletOfflineSince = null;
+      _walletRows = {'UPCOMING': rows(up), 'HISTORY': rows(past)};
+      await _saveWalletCache();
+      for (final tripId in tickets.where((t) => !t.past && t.active).map((t) => t.tripId).toSet()) {
+        final d = await _call(() => api.getDisruptions(tripId));
+        final minutes = d.ok ? (d.value!['delay_minutes'] ?? d.value!['current_delay_minutes'] ?? 0) : 0;
+        for (final t in tickets.where((t) => t.tripId == tripId)) {
+          t.delay = (minutes as num).toInt();
+        }
       }
+    } else if (up.code == 'NETWORK' || past.code == 'NETWORK') {
+      walletOfflineSince = tickets.isEmpty ? null : DateTime.tryParse('${cache?['saved_at']}') ?? walletOfflineSince ?? DateTime.now();
     }
     loadingTickets = false;
     notifyListeners();
@@ -1527,7 +1811,16 @@ class PassengerStore extends ChangeNotifier {
 
   Future<String?> loadPass(Ticket t) async {
     final r = await _call(() => api.getTicketQR(t.id));
-    if (!r.ok) return r.error;
+    if (!r.ok) {
+      // D178: offline, the pass already on the device still boards the passenger.
+      if (r.code == 'NETWORK' && t.qrValue != null) {
+        t.qrFromCache = true;
+        notifyListeners();
+        return null;
+      }
+      return r.error;
+    }
+    t.qrFromCache = false;
     final qr = r.value!['boarding_qr'] as Map<String, dynamic>?;
     t.qrVersion = (qr?['version'] as num?)?.toInt() ?? t.qrVersion;
     t.pin = r.value!['offline_pin']?.toString();
@@ -1549,7 +1842,14 @@ class PassengerStore extends ChangeNotifier {
         final orderId = t.orderId ?? '';
         if (orderId.isNotEmpty) {
           final grp = await _call(() => api.getGroupQr(orderId));
-          if (!grp.ok) return grp.error;
+          if (!grp.ok) {
+            if (grp.code == 'NETWORK' && t.qrValue != null) {
+              t.qrFromCache = true;
+              notifyListeners();
+              return null;
+            }
+            return grp.error;
+          }
           final groupQr = grp.value!['group_qr'] as Map<String, dynamic>?;
           t.qrValue = groupQr?['qr_code_value']?.toString();
         }
@@ -1560,6 +1860,7 @@ class PassengerStore extends ChangeNotifier {
       t.qrValue = qr?['qr_code_value'];
     }
 
+    await _saveWalletCache();
     notifyListeners();
     return null;
   }
@@ -1579,9 +1880,11 @@ class PassengerStore extends ChangeNotifier {
     final r = await _call(() => api.reissueBoardingQr(t.id));
     if (!r.ok) return ApiResult(null, r.error, r.code);
     final qr = r.value!['boarding_qr'] as Map<String, dynamic>;
+    t.qrFromCache = false;
     t.qrValue = qr['qr_code_value'];
     t.qrVersion = (qr['version'] as num).toInt();
     t.pin = r.value!['offline_pin']?.toString();
+    await _saveWalletCache();
     notifyListeners();
     return const ApiResult(null);
   }
@@ -1598,6 +1901,19 @@ class PassengerStore extends ChangeNotifier {
     if (t.homePickupStatus == 'REJECTED' || t.homeDropoffStatus == 'REJECTED') {
       return (percent: 100, tier: 'Nhà xe không nhận đón/trả tận nhà: hoàn 100% tiền còn lại, không phí');
     }
+    if (t.departureTime != null) {
+      final depTime = DateTime.tryParse(t.departureTime!);
+      if (depTime != null) {
+        final hoursUntilDeparture = depTime.difference(DateTime.now()).inMinutes / 60.0;
+        if (hoursUntilDeparture >= 12) {
+          return (percent: 100, tier: 'Hủy từ 12 giờ trở lên trước giờ chạy: Hoàn tiền 100%');
+        } else if (hoursUntilDeparture >= 6) {
+          return (percent: 80, tier: 'Hủy trước giờ chạy 6–12 giờ: Hoàn tiền 80% (Phí hủy 20%)');
+        } else {
+          return (percent: 0, tier: 'Hủy dưới 6 giờ trước giờ chạy: Không hoàn tiền');
+        }
+      }
+    }
     return (percent: -1, tier: 'Mức hoàn tính theo số giờ trước giờ chạy: từ 12 giờ hoàn 100%, 6 đến 12 giờ hoàn 80%, dưới 6 giờ không hoàn.');
   }
 
@@ -1610,13 +1926,77 @@ class PassengerStore extends ChangeNotifier {
     return const ApiResult(null);
   }
 
-  Future<ApiResult<int>> cancelTicket(Ticket t) async {
-    final r = await _call(() => api.cancelTicket(t.id));
+  Future<RefundAccount?> getLastRefundAccount() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('last_refund_account');
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final j = jsonDecode(raw);
+      if (j is Map<String, dynamic>) return RefundAccount.fromJson(j);
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> saveLastRefundAccount(RefundAccount account) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('last_refund_account', jsonEncode(account.toJson()));
+  }
+
+  Future<ApiResult<int>> cancelTicket(Ticket t, {Map<String, dynamic>? refundAccount}) async {
+    final r = await _call(() => api.cancelTicket(t.id, refundAccount: refundAccount));
     if (!r.ok) return ApiResult(null, r.error, r.code);
+    if (refundAccount != null) {
+      await saveLastRefundAccount(RefundAccount.fromJson(refundAccount));
+    }
     final amount = (r.value!['refund_amount_vnd'] as num?)?.toInt() ?? 0;
     await loadTickets();
     await loadNotices();
     return ApiResult(amount);
+  }
+
+  Future<ApiResult<Map<String, dynamic>>> updateRefundAccount(Ticket t, Map<String, dynamic> refundAccount) async {
+    final r = await _call(() => api.updateRefundAccount(t.id, refundAccount: refundAccount));
+    if (!r.ok) return ApiResult(null, r.error, r.code);
+    await saveLastRefundAccount(RefundAccount.fromJson(refundAccount));
+    if (r.value != null && r.value!['refund_account'] is Map<String, dynamic>) {
+      final masked = RefundAccount.fromJson(r.value!['refund_account'] as Map<String, dynamic>);
+      if (t.refundInfo != null) {
+        t.refundInfo = TicketRefund(
+          refundId: t.refundInfo!.refundId,
+          status: t.refundInfo!.status,
+          amountVnd: t.refundInfo!.amountVnd,
+          rejectNote: t.refundInfo!.rejectNote,
+          account: masked,
+        );
+      }
+    }
+    await loadTickets();
+    notifyListeners();
+    return ApiResult(r.value);
+  }
+
+  Future<ApiResult<void>> deleteAccount() async {
+    final cacheKey = _walletCacheKey();
+    final r = await _call(() => api.deleteAccount());
+    if (!r.ok) return ApiResult(null, r.error, r.code);
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_sessionKey);
+    await prefs.remove('last_refund_account');
+    if (cacheKey != null) await prefs.remove(cacheKey);
+
+    api.authToken = null;
+    userPhone = null;
+    userName = null;
+    isVip = false;
+    tickets = [];
+    notices = [];
+    walletBalanceVnd = 0;
+    sessionExpired = false;
+    walletOfflineSince = null;
+    _walletRows = {};
+    notifyListeners();
+    return const ApiResult(null);
   }
 
   // ---------- Tracking and notices (PAX-018, PAX-020) ----------
@@ -1625,7 +2005,7 @@ class PassengerStore extends ChangeNotifier {
 
   Future<Tracking> loadTracking(String tripId, {String? ticketId}) async {
     final r = await _call(() => api.getLiveRadarHUD(tripId, ticketId: ticketId));
-    if (!r.ok) return Tracking(GpsSignal.none, text: r.error!);
+    if (!r.ok) return Tracking(GpsSignal.none, text: r.error!, unreachable: r.code == 'NETWORK');
     final tr = _trackingFrom(r.value!);
     if (tr.ended || tr.tripStatus == 'COMPLETED') _tripEnded[tripId] = true;
     return tr;

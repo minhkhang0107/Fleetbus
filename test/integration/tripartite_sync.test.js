@@ -349,7 +349,12 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
       method: 'POST',
       body: {
         // Departure of trp_hn_th_01 is 2026-08-28T07:00+07:00; cancel two days earlier (PAX-021: 100% refund)
-        now: Date.parse('2026-08-26T07:00:00+07:00')
+        now: Date.parse('2026-08-26T07:00:00+07:00'),
+        refund_account: {
+          bank_bin: '970415',
+          account_number: '1088219999',
+          account_name: 'NGUYEN VAN A'
+        }
       }
     });
     assert.strictEqual(cancelRes.statusCode, 200);

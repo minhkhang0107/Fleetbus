@@ -3,7 +3,7 @@
  * Covers all specifications PAX-001 through PAX-025 and API Screen Map matrix.
  */
 
-import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { sendSuccess, sendError, parseJsonBody, clientNow, clientIp } from '../middleware/httpUtils.js';
 import { evaluateVoucher, listOfficeVouchers, reserveVoucher } from '../core/vouchers.js';
 import { findOperatorById, operatorPaymentConfig, publicOperatorProfile, DEFAULT_OPERATOR_ID } from '../core/operators.js';
 import { getProvider } from '../core/payments/providers.js';
@@ -19,6 +19,8 @@ import { saleBlock, saleStatus } from '../core/tripSales.js';
 import { withdrawHomeRequest } from '../core/homeReview.js';
 import { changeTicketStops } from '../core/ticketChanges.js';
 import { publicFixedEndpoints } from '../core/fixedEndpoints.js';
+import { validateRefundAccount, maskRefundAccount } from '../core/bankAccounts.js';
+import { deletePassengerAccount } from '../services/passenger/modules/accountDeletion.js';
 
 // The plate passengers see is the bus the office gave the run; a day's run with no bus yet shows none.
 function withAssignedBus(services, trip) {
@@ -237,18 +239,32 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     responseData.fixed_endpoints = req.operator
       ? publicFixedEndpoints(req.operator.operator_id, req.operator.service_config, (a, b) => searchService.servesCities(req.operator.operator_id, a, b))
       : null;
+    const insEnabled = Boolean(req.operator?.service_config?.insurance_enabled);
+    const walEnabled = Boolean(req.operator?.service_config?.wallet_enabled);
+    responseData.insurance_enabled = insEnabled;
+    responseData.wallet_enabled = walEnabled;
+    if (responseData.features) {
+      responseData.features.insurance_enabled = insEnabled;
+      responseData.features.wallet_enabled = walEnabled;
+    }
     sendSuccess(res, responseData);
     return true;
   }
 
   // POST /api/v1/passenger/auth/request-otp or /api/v1/auth/passenger/otp/request (PAX-002)
   if ((pathname === '/api/v1/passenger/auth/request-otp' || pathname === '/api/v1/auth/passenger/otp/request') && req.method === 'POST') {
+    if (services.rateLimits?.requestOtp && !services.rateLimits.requestOtp.enforce(req, res, services.env)) {
+      return true;
+    }
     parseJsonBody(req).then(body => {
-      const result = authService.requestOTP(body.phone, body.now, req.operatorId);
+      // Five codes per number in ten minutes, whatever address asks (an SMS costs money).
+      const digits = String(body.phone || '').replace(/\D/g, '').slice(-9);
+      if (digits && services.rateLimits?.requestOtpPhone && !services.rateLimits.requestOtpPhone.enforce(req, res, services.env, `${req.operatorId}:${digits}`)) return;
+      const result = authService.requestOTP(body.phone, clientNow(body), req.operatorId);
       if (result.success) {
         sendSuccess(res, result.data);
       } else {
-        sendError(res, result.error, result.code, 429, result);
+        sendError(res, result.error, result.code, result.status || (result.code === 'COOLDOWN_ACTIVE' ? 429 : 400), result);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -256,8 +272,11 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
 
   // POST /api/v1/passenger/auth/verify-otp or /api/v1/auth/passenger/otp/verify (PAX-003)
   if ((pathname === '/api/v1/passenger/auth/verify-otp' || pathname === '/api/v1/auth/passenger/otp/verify') && req.method === 'POST') {
+    if (services.rateLimits?.verifyOtp && !services.rateLimits.verifyOtp.enforce(req, res, services.env)) {
+      return true;
+    }
     parseJsonBody(req).then(body => {
-      const result = authService.verifyOTP(body.phone, body.otp, body.now, req.operatorId);
+      const result = authService.verifyOTP(body.phone, body.otp, clientNow(body), req.operatorId);
       if (result.success) {
         sendSuccess(res, result.data);
       } else {
@@ -419,7 +438,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         sendError(res, 'Nhà xe không còn chạy chuyến này vào ngày đã chọn. Chọn chuyến khác.', 'TRIP_NOT_SCHEDULED', 409);
         return;
       }
-      const result = seatMapService.holdSeats(tripId, body.seatCodes || [], userId, isProduction() ? undefined : body.now, {
+      const result = seatMapService.holdSeats(tripId, body.seatCodes || [], userId, clientNow(body), {
         pickupStopId: body.pickupStopId || body.pickup_stop_id || null,
         dropoffStopId: body.dropoffStopId || body.dropoff_stop_id || null
       });
@@ -521,7 +540,8 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         seatCodes,
         ...(vip ? { free: true } : { voucherCode: body.voucherCode }),
         resolveVoucher: vip ? null : ((code, subtotal) => evaluateVoucher(voucherDb, code, { subtotal, phone: voucherPhone })),
-        insuranceSelected: Boolean(body.insuranceSelected)
+        insuranceSelected: Boolean(body.insuranceSelected),
+        insuranceEnabled: Boolean(req.operator?.service_config?.insurance_enabled)
       });
       if (!orderReview.success) {
         sendError(res, orderReview.error, orderReview.code, 422);
@@ -696,7 +716,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     if (forbidOrder(req, res, paymentService, orderId)) return true;
     parseJsonBody(req).then(async body => {
       const manualTrigger = Boolean(body.manualTrigger || body.manual_trigger);
-      const now = !isProduction() && body.now ? Number(body.now) : Date.now();
+      const now = clientNow(body);
       const order = paymentService.orders.get(orderId) || paymentService.orders.get(paymentService.pnrIndex.get(orderId));
       if (manualTrigger && order && order.payment_status === 'PENDING_PAYMENT') {
         const op = findOperatorById(order.operator_id || req.operatorId);
@@ -762,12 +782,48 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     const ticketId = parts[5];
     if (forbidTicket(req, res, paymentService, ticketId, { ownerOnly: true })) return true;
     parseJsonBody(req).then(body => {
-      const result = paymentService.cancelTicket(ticketId, { now: body.now });
+      const result = paymentService.cancelTicket(ticketId, {
+        now: clientNow(body),
+        reason: body.reason,
+        refund_account: body.refund_account || body.refundAccount || null
+      });
       if (result.success) {
         sendSuccess(res, result.data);
       } else {
         sendError(res, result.error, result.code, result.code === 'TICKET_NOT_FOUND' ? 404 : 400);
       }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // PATCH /api/v1/passenger/tickets/:ticketId/refund-account (H-01)
+  if (pathname.startsWith('/api/v1/passenger/tickets/') && pathname.endsWith('/refund-account') && req.method === 'PATCH') {
+    const parts = pathname.split('/');
+    const ticketId = parts[5];
+    if (forbidTicket(req, res, paymentService, ticketId, { ownerOnly: true })) return true;
+    parseJsonBody(req).then(body => {
+      const accInput = body.refund_account || body.refundAccount || body;
+      const accCheck = validateRefundAccount(accInput);
+      if (!accCheck.ok) {
+        sendError(res, accCheck.message, accCheck.code, 400);
+        return;
+      }
+      const ticket = paymentService.tickets.get(ticketId);
+      const refund = managerService.refundRequests.find(r => r.ticket_id === ticketId || (ticket?.pnr && r.pnr === ticket.pnr));
+      if (!refund) {
+        sendError(res, 'Không tìm thấy yêu cầu hoàn tiền', 'REFUND_NOT_FOUND', 404);
+        return;
+      }
+      if (refund.status !== 'REFUND_REQUESTED') {
+        sendError(res, 'Chỉ có thể đổi tài khoản khi yêu cầu hoàn tiền đang chờ xử lý', 'REFUND_NOT_EDITABLE', 400);
+        return;
+      }
+      refund.refund_account = accCheck.account;
+      sendSuccess(res, {
+        ticket_id: ticketId,
+        refund_id: refund.refund_id,
+        refund_account: maskRefundAccount(accCheck.account)
+      });
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
@@ -952,6 +1008,25 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     } else {
       sendError(res, profile.error, profile.code, 401);
     }
+    return true;
+  }
+
+  // DELETE /api/v1/passenger/me (PAX-022, B-12): the passenger deletes their account with this company
+  if (pathname === '/api/v1/passenger/me' && req.method === 'DELETE') {
+    const result = deletePassengerAccount(services, { operatorId: req.operatorId, phone: req.identity?.phone });
+    if (!result.ok) {
+      sendError(res, result.message, result.code, result.status);
+      return true;
+    }
+    managerService.recordAudit({
+      actor: req.identity.sub,
+      role: 'ROLE_PASSENGER',
+      action: 'PASSENGER_ACCOUNT_DELETED',
+      resource: result.masked_phone,
+      ip: clientIp(req, services.env),
+      operator_id: req.operatorId
+    });
+    sendSuccess(res, { deleted: true });
     return true;
   }
 

@@ -7,6 +7,7 @@
  * set by the app); the server derives the user and the phone from it, so no identity is sent in a body.
  */
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
@@ -44,6 +45,7 @@ const passengerAppVersion = '3.0.0';
 class PassengerApiClientService {
   final String baseUrl;
   final http.Client _client;
+  final Duration timeout;
 
   /// Session token of the signed-in passenger (set by [verifyOtp]).
   String? authToken;
@@ -56,6 +58,7 @@ class PassengerApiClientService {
     http.Client? client,
     this.authToken,
     this.operatorCode,
+    this.timeout = const Duration(seconds: 20),
   })  : baseUrl = resolvePassengerBaseUrl(baseUrl),
         _client = client ?? http.Client();
 
@@ -73,7 +76,7 @@ class PassengerApiClientService {
 
   Future<Map<String, dynamic>> _get(String path, {Map<String, String>? query}) async {
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
-    return _decode(await _client.get(uri, headers: _headers()));
+    return _decode(await _client.get(uri, headers: _headers()).timeout(timeout));
   }
 
   /// A GET answered with server-sent events: the data of each `tracking` event, until the connection drops.
@@ -82,7 +85,7 @@ class PassengerApiClientService {
     final request = http.Request('GET', uri)
       ..headers.addAll(_headers())
       ..headers['Accept'] = 'text/event-stream';
-    final response = await _client.send(request);
+    final response = await _client.send(request).timeout(timeout);
     if (response.statusCode != 200 || !(response.headers['content-type'] ?? '').startsWith('text/event-stream')) {
       throw http.ClientException('Stream refused (${response.statusCode})', uri);
     }
@@ -111,13 +114,22 @@ class PassengerApiClientService {
       Uri.parse('$baseUrl$path'),
       headers: _headers(idempotencyKey: idempotent ? (idempotencyKey ?? newIdempotencyKey()) : null),
       body: body == null ? null : jsonEncode(body),
-    );
+    ).timeout(timeout);
+    return _decode(response);
+  }
+
+  Future<Map<String, dynamic>> _patch(String path, {Object? body}) async {
+    final response = await _client.patch(
+      Uri.parse('$baseUrl$path'),
+      headers: _headers(),
+      body: body == null ? null : jsonEncode(body),
+    ).timeout(timeout);
     return _decode(response);
   }
 
   Future<Map<String, dynamic>> _delete(String path, {Map<String, String>? query}) async {
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
-    return _decode(await _client.delete(uri, headers: _headers()));
+    return _decode(await _client.delete(uri, headers: _headers()).timeout(timeout));
   }
 
   /**
@@ -442,13 +454,39 @@ class PassengerApiClientService {
    * PAX-021: Cancel one ticket and request the tiered refund. The server uses the paid amount and the
    * departure stored on the ticket.
    */
-  Future<Map<String, dynamic>> cancelTicket(String ticketId, {String? idempotencyKey}) {
+  Future<Map<String, dynamic>> cancelTicket(
+    String ticketId, {
+    Map<String, dynamic>? refundAccount,
+    String? idempotencyKey,
+  }) {
     return _post(
       '/api/v1/passenger/tickets/$ticketId/cancel',
-      body: <String, dynamic>{},
+      body: <String, dynamic>{
+        if (refundAccount != null) 'refund_account': refundAccount,
+      },
       idempotent: true,
       idempotencyKey: idempotencyKey,
     );
+  }
+
+  /**
+   * PAX-021: Update the bank account for an open refund request.
+   */
+  Future<Map<String, dynamic>> updateRefundAccount(
+    String ticketId, {
+    required Map<String, dynamic> refundAccount,
+  }) {
+    return _patch(
+      '/api/v1/passenger/tickets/$ticketId/refund-account',
+      body: {'refund_account': refundAccount},
+    );
+  }
+
+  /**
+   * PAX-022: Delete passenger account and erase personal data.
+   */
+  Future<Map<String, dynamic>> deleteAccount() {
+    return _delete('/api/v1/passenger/me');
   }
 
   /**

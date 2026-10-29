@@ -164,15 +164,22 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
     final store = PassengerScope.of(context);
     final t = widget.ticket;
     final walletTicket = store.tickets.where((o) => o.id == t.id).firstOrNull;
+    final refund = t.refundInfo ?? walletTicket?.refundInfo;
     final isFinished = t.past || walletTicket?.past == true || store.isTripEnded(t.tripId);
     final usable = t.status == TicketStatus.active && !isFinished;
-    final pill = switch (t.status) {
-      TicketStatus.active => const Pill('Hợp lệ', PillKind.ok),
-      TicketStatus.boarded => isFinished ? const Pill('Đã đi', PillKind.mute) : const Pill('Đã lên xe', PillKind.ok),
-      TicketStatus.noShow => const Pill('Vắng mặt', PillKind.mute),
-      TicketStatus.refunding => const Pill('Đang hoàn tiền', PillKind.info),
-      TicketStatus.cancelled => const Pill('Đã hủy', PillKind.mute),
-    };
+    final pill = refund != null
+        ? (refund.isPending
+            ? const Pill('Đang chờ hoàn tiền', PillKind.info)
+            : (refund.isRefunded
+                ? const Pill('Đã hoàn tiền', PillKind.ok)
+                : const Pill('Từ chối', PillKind.danger)))
+        : switch (t.status) {
+            TicketStatus.active => const Pill('Hợp lệ', PillKind.ok),
+            TicketStatus.boarded => isFinished ? const Pill('Đã đi', PillKind.mute) : const Pill('Đã lên xe', PillKind.ok),
+            TicketStatus.noShow => const Pill('Vắng mặt', PillKind.mute),
+            TicketStatus.refunding => const Pill('Đang chờ hoàn tiền', PillKind.info),
+            TicketStatus.cancelled => const Pill('Đã hủy', PillKind.mute),
+          };
     return Scaffold(
       appBar: TopBar(title: 'Vé lên xe', trailing: pill),
       body: PSplit(left: [
@@ -223,6 +230,14 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
                   child: QrImageView(data: t.qrValue!, size: 232, backgroundColor: Colors.white),
                 ),
               ),
+              if (t.qrFromCache) ...[
+                gap(10),
+                Text(
+                  'Đang không có mạng — đây là mã QR đã lưu trên máy. Mã vẫn dùng được nếu bạn chưa đổi mã.',
+                  textAlign: TextAlign.center,
+                  style: sans(size: 13, color: PTokens.warnInk),
+                ),
+              ],
               gap(12),
               Text('Dùng được khi mất mạng, khi lưu ảnh hoặc in. Mỗi vé chỉ lên xe một lần · màn hình đã tăng độ sáng', textAlign: TextAlign.center, style: sans(size: 12, color: PTokens.muted, height: 1.5)),
               if (_showPin && t.pin != null) ...[
@@ -247,7 +262,11 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
             ]),
           )
         else if (t.status == TicketStatus.boarded)
-          AppCard(child: Text('Bạn đã lên xe. Vé không còn mã QR để dùng lại hay chia sẻ.', style: sans(size: 14, color: PTokens.muted))),
+          AppCard(child: Text('Bạn đã lên xe. Vé không còn mã QR để dùng lại hay chia sẻ.', style: sans(size: 14, color: PTokens.muted)))
+        else if (refund != null)
+          _RefundCard(ticket: t, refund: refund)
+        else if (t.status == TicketStatus.cancelled)
+          AppCard(child: Text('Vé đã hủy.', style: sans(size: 14, color: PTokens.muted))),
       ], right: [
         if (!pWide(context)) gap(14),
         AppCard(
@@ -364,5 +383,72 @@ class _HomeService extends StatelessWidget {
         if (onWithdraw != null) LinkButton(label: 'Hủy yêu cầu ${pickupSide ? 'đón' : 'trả'} tận nhà', color: PTokens.danger, onPressed: onWithdraw),
       ],
     ]);
+  }
+}
+
+class _RefundCard extends StatelessWidget {
+  const _RefundCard({required this.ticket, required this.refund});
+  final Ticket ticket;
+  final TicketRefund refund;
+
+  @override
+  Widget build(BuildContext context) {
+    final pill = switch (refund.status) {
+      'REFUND_REQUESTED' => const Pill('Đang chờ hoàn tiền', PillKind.info),
+      'REFUNDED' => const Pill('Đã hoàn tiền', PillKind.ok),
+      'REFUND_REJECTED' || 'REJECTED' => const Pill('Từ chối', PillKind.danger),
+      _ => Pill(refund.statusLabel, PillKind.info),
+    };
+
+    return AppCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text('Thông tin hoàn tiền', style: sans(size: 16, weight: FontWeight.w700))),
+              const SizedBox(width: 8),
+              pill,
+            ],
+          ),
+          gap(12),
+          Row(
+            children: [
+              Text('Số tiền hoàn', style: sans(size: 14, color: PTokens.muted)),
+              const Spacer(),
+              Text(vnd(refund.amountVnd), style: mono(size: 16, weight: FontWeight.w700, color: PTokens.primaryDark)),
+            ],
+          ),
+          if (refund.isRejected && refund.rejectNote != null && refund.rejectNote!.isNotEmpty) ...[
+            gap(10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: PTokens.warnSoft, borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+              child: Text(
+                'Lý do từ chối: ${refund.rejectNote!}',
+                style: sans(size: 13, weight: FontWeight.w500, color: PTokens.warnInk),
+              ),
+            ),
+          ],
+          if (refund.account != null) ...[
+            const Divider(height: 20, color: PTokens.line),
+            KeyValue('Ngân hàng nhận hoàn', refund.account!.displayBankName),
+            gap(8),
+            KeyValue('Số tài khoản', refund.account!.accountNumber, isMono: true),
+            gap(8),
+            KeyValue('Tên chủ tài khoản', refund.account!.accountName),
+          ],
+          if (refund.isPending) ...[
+            gap(14),
+            GhostButton(
+              label: 'Sửa tài khoản nhận hoàn',
+              onPressed: () => showEditRefundAccountSheet(context, ticket),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }

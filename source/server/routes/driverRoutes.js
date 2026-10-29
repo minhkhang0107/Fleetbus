@@ -3,7 +3,7 @@
  * Covers all specifications DRI-001 through DRI-019 and API Screen Map matrix.
  */
 
-import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { sendSuccess, sendError, parseJsonBody, clientNow } from '../middleware/httpUtils.js';
 import { isProduction } from '../config.js';
 
 
@@ -46,6 +46,9 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
 
   // POST /api/v1/driver/auth/login or /api/v1/auth/driver/login (DRI-001)
   if ((pathname === '/api/v1/driver/auth/login' || pathname === '/api/v1/auth/driver/login') && req.method === 'POST') {
+    if (services.rateLimits?.driverLogin && !services.rateLimits.driverLogin.enforce(req, res, services.env)) {
+      return true;
+    }
     parseJsonBody(req).then(body => {
       const result = driverService.authenticateDriver(body.staffIdOrPhone || body.staff_id || body.username, body.pin || body.password, {}, Date.now(), req.operatorId);
       if (result.success) {
@@ -69,7 +72,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
       const newPin = body?.new_pin ?? body?.newPin;
       const result = driverService.changePin(driverId, { currentPin, newPin }, req.operatorId);
       if (result.success) {
-        sendSuccess(res, { success: true });
+        sendSuccess(res, { success: true, token: result.token });
       } else {
         sendError(res, result.error, result.code, result.status || 400);
       }
@@ -219,7 +222,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
       const qrPayload = body.qrString || body.qrPayload || body.qr_code;
-      const result = driverService.boardPassengerByQR(tripId, qrPayload, body.now);
+      const result = driverService.boardPassengerByQR(tripId, qrPayload, clientNow(body));
       if (result.success) {
         sendSuccess(res, result.data || result);
       } else {
@@ -250,7 +253,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
         qrOrPin = `PIN:${body.ticket_id || body.ticketId}:${body.pin}`;
       }
       if (qrOrPin) {
-        const result = driverService.boardPassengerByQR(tripId, qrOrPin, body.now);
+        const result = driverService.boardPassengerByQR(tripId, qrOrPin, clientNow(body));
         if (result.success) {
           sendSuccess(res, result.data || result);
         } else {
@@ -260,7 +263,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
         const result = driverService.boardPassengerManually(
           tripId,
           { ticketId: body.ticket_id || body.ticketId, seatCode: body.seat_code },
-          body.now
+          clientNow(body)
         );
         if (result.success) {
           sendSuccess(res, result.data);
@@ -282,7 +285,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
       const tId = ticketId || body.ticketId || body.ticket_id;
       const result = driverService.markNoShow(tripId, tId, body.reason, {
         // The grace period runs on the server clock; a client time is honoured in tests only.
-        mockNow: (!isProduction() && body.now) || Date.now(),
+        mockNow: clientNow(body),
         passengerRequestedCancel: Boolean(body.passenger_requested_cancel)
       });
       if (result.success) {
@@ -352,7 +355,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.onboardHailPassenger(tripId, body, body.now);
+      const result = driverService.onboardHailPassenger(tripId, body, clientNow(body));
       if (result.success) {
         sendSuccess(res, result.data || result, 201);
       } else {
@@ -412,30 +415,26 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
-  // GET /api/v1/driver/system/gps-health (DRI-014)
+  // GET /api/v1/driver/system/gps-health (DRI-014): what the server received from this driver's bus, not device
+  // readings it cannot know. GOOD within a minute of the last position, WEAK within five, else LOST.
   if (pathname === '/api/v1/driver/system/gps-health' && req.method === 'GET') {
+    const trip = [...driverService.activeTrips.values()].find(t => t.driver_id === req.identity?.sub && ['IN_TRANSIT', 'BOARDING'].includes(t.status));
+    const last = trip ? services.trackingService.busPositions.get(trip.trip_id) : null;
+    const ageSeconds = last ? Math.max(0, Math.round((Date.now() - Date.parse(last.timestamp)) / 1000)) : null;
     sendSuccess(res, {
-      gps_signal: 'GOOD',
-      satellites_locked: 14,
-      accuracy_meters: 4.2,
-      foreground_service_active: true,
-      battery_optimization_whitelisted: true,
-      mqtt_connection_status: 'ONLINE',
-      mqtt_rtt_ms: 42,
-      mock_location_detected: false,
-      buffered_offline_count: driverService.offlineQueue.length
+      trip_id: trip?.trip_id || null,
+      gps_signal: ageSeconds === null ? 'NO_TRIP' : ageSeconds <= 60 ? 'GOOD' : ageSeconds <= 300 ? 'WEAK' : 'LOST',
+      last_position_at: last?.timestamp || null,
+      last_position_age_seconds: ageSeconds,
+      accuracy_meters: last?.accuracy_m ?? null,
+      buffered_offline_count: driverService.offlineQueue.filter(p => p.trip_id === trip?.trip_id).length
     });
     return true;
   }
 
-  // GET /api/v1/driver/system/diagnostics-ping (DRI-016)
+  // GET /api/v1/driver/system/diagnostics-ping (DRI-016): the app measures the round trip itself.
   if (pathname === '/api/v1/driver/system/diagnostics-ping' && req.method === 'GET') {
-    sendSuccess(res, {
-      gateway_status: 'HEALTHY',
-      api_latency_ms: 18,
-      mqtt_broker_status: 'CONNECTED',
-      timestamp: new Date().toISOString()
-    });
+    sendSuccess(res, { gateway_status: 'HEALTHY', timestamp: new Date().toISOString() });
     return true;
   }
 

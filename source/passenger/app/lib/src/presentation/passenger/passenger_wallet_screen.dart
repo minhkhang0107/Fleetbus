@@ -21,6 +21,13 @@ class PassengerWalletScreen extends StatefulWidget {
 class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
   bool _history = false;
 
+  String _formatVnHhmm(DateTime dt) {
+    final vn = dt.toUtc().add(const Duration(hours: 7));
+    final hh = vn.hour.toString().padLeft(2, '0');
+    final mm = vn.minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
+  }
+
   /// What the passenger sees with no ticket: sign in first, else how to get one (or what history keeps).
   Widget _empty(BuildContext context, PassengerStore store) {
     if (store.userPhone == null) {
@@ -76,6 +83,7 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
         route: first.route,
         date: first.date,
         dep: first.dep,
+        departureTime: first.departureTime,
         seat: seats,
         pickup: first.pickup,
         dropoff: first.dropoff,
@@ -94,6 +102,10 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
         past: first.past,
         pickupTime: first.pickupTime,
         pickupTimeEstimated: first.pickupTimeEstimated,
+        paymentStatus: first.paymentStatus,
+        paymentMethod: first.paymentMethod,
+        codDue: first.codDue,
+        refundInfo: group.map((t) => t.refundInfo).whereType<TicketRefund>().firstOrNull,
       )
         ..delay = first.delay
         ..qrVersion = first.qrVersion
@@ -132,6 +144,22 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
         ),
       ),
       const Divider(height: 1, color: PTokens.line),
+      if (store.walletOfflineSince != null)
+        Container(
+          width: double.infinity,
+          color: PTokens.warnSoft,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(children: [
+            const Icon(Icons.wifi_off_rounded, size: 18, color: PTokens.warnInk),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Không có mạng — vé đã lưu lúc ${_formatVnHhmm(store.walletOfflineSince!)}',
+                style: sans(size: 13, color: PTokens.warnInk),
+              ),
+            ),
+          ]),
+        ),
       Expanded(
         child: store.loadingTickets && list.isEmpty
             ? const Center(child: CircularProgressIndicator())
@@ -188,13 +216,19 @@ class TicketCard extends StatelessWidget {
     final t = ticket;
     final active = !t.past && t.active;
     final platePart = t.plate.isNotEmpty ? ' · Xe ${t.plate}' : (active ? ' · Xe: Nhà xe sẽ báo' : '');
-    final status = switch (t.status) {
-      TicketStatus.active => const Pill('Đã thanh toán', PillKind.ok),
-      TicketStatus.boarded => t.past ? const Pill('Đã đi', PillKind.mute) : const Pill('Đã lên xe', PillKind.ok),
-      TicketStatus.refunding => const Pill('Đang hoàn tiền', PillKind.info),
-      TicketStatus.noShow => const Pill('Vắng mặt', PillKind.mute),
-      TicketStatus.cancelled => const Pill('Đã hủy', PillKind.mute),
-    };
+    final status = t.refundInfo != null
+        ? (t.refundInfo!.isPending
+            ? const Pill('Đang chờ hoàn tiền', PillKind.info)
+            : (t.refundInfo!.isRefunded
+                ? const Pill('Đã hoàn tiền', PillKind.ok)
+                : const Pill('Từ chối', PillKind.danger)))
+        : switch (t.status) {
+            TicketStatus.active => const Pill('Đã thanh toán', PillKind.ok),
+            TicketStatus.boarded => t.past ? const Pill('Đã đi', PillKind.mute) : const Pill('Đã lên xe', PillKind.ok),
+            TicketStatus.refunding => const Pill('Đang chờ hoàn tiền', PillKind.info),
+            TicketStatus.noShow => const Pill('Vắng mặt', PillKind.mute),
+            TicketStatus.cancelled => const Pill('Đã hủy', PillKind.mute),
+          };
     return Container(
       decoration: BoxDecoration(color: PTokens.surface, borderRadius: BorderRadius.circular(PTokens.radius), border: Border.all(color: PTokens.line)),
       clipBehavior: Clip.antiAlias,
@@ -227,6 +261,19 @@ class TicketCard extends StatelessWidget {
             ]),
             gap(6),
             Text(active ? '${t.date} · Ghế ${t.seat} · ${_pickupLine(t)}$platePart' : '${t.date} · Ghế ${t.seat}$platePart${t.refund != null ? ' · hoàn ${vnd(t.refund!)}' : ''}', style: sans(size: 13, color: PTokens.muted)),
+            if (t.refundInfo != null) ...[
+              gap(6),
+              Row(children: [
+                Text(
+                  '${t.refundInfo!.statusLabel} · ${vnd(t.refundInfo!.amountVnd)}',
+                  style: sans(size: 13, weight: FontWeight.w600, color: t.refundInfo!.isPending ? PTokens.primaryDark : (t.refundInfo!.isRefunded ? PTokens.success : PTokens.danger)),
+                ),
+                if (t.refundInfo!.account != null) ...[
+                  const SizedBox(width: 8),
+                  Text('(${t.refundInfo!.account!.accountNumber})', style: mono(size: 13, color: PTokens.muted)),
+                ],
+              ]),
+            ],
             if (active && t.status == TicketStatus.active) _BusComing(ticket: t),
             if (active) ...[
               gap(10),
@@ -240,6 +287,20 @@ class TicketCard extends StatelessWidget {
                   final store = PassengerScope.read(context);
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerLiveRadarScreen(ticket: t))).then((_) => store.loadTickets());
                 })),
+              ]),
+            ] else ...[
+              gap(10),
+              Row(children: [
+                Expanded(child: GhostButton(label: 'Chi tiết vé', onPressed: () {
+                  final store = PassengerScope.read(context);
+                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerTicketQrScreen(ticket: t))).then((_) => store.loadTickets());
+                })),
+                if (t.refundInfo?.isPending == true) ...[
+                  const SizedBox(width: 8),
+                  Expanded(child: GhostButton(label: 'Sửa tài khoản nhận hoàn', onPressed: () {
+                    showEditRefundAccountSheet(context, t);
+                  })),
+                ],
               ]),
             ],
           ]),

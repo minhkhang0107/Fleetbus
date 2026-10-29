@@ -30,7 +30,7 @@ describe('Spec conformance: seat inventory by segment', () => {
   let phoneSeq = 913000000;
 
   before(async () => {
-    ({ server, services } = createFleetBusServer({ webhookSecret: null }));
+    ({ server, services } = createFleetBusServer({ webhookSecret: null, rateLimits: { requestOtp: { max: 1000 }, verifyOtp: { max: 1000 } } }));
     await new Promise((resolve) => server.listen(0, '127.0.0.1', () => { baseUrl = `http://127.0.0.1:${server.address().port}`; resolve(); }));
     driver = (await login('/api/v1/auth/driver/login', { staffIdOrPhone: 'TX8821', pin: '123456' })).token;
     dispatcher = (await login('/api/v1/auth/staff/login', { username: 'dispatcher@busgo.vn', password: 'disp123' })).token;
