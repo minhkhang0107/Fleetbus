@@ -79,7 +79,7 @@ class DriverCockpitDashboard extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(child: Stat('Trả', '$drop', size: wide ? 28 : 20)),
           const SizedBox(width: 8),
-          Expanded(child: Stat('Thu COD', '$cod', color: DTokens.warnInk, size: wide ? 28 : 20)),
+          Expanded(child: Stat('Thu tiền', '$cod', color: DTokens.warnInk, size: wide ? 28 : 20)),
         ]),
       ]),
     );
@@ -179,7 +179,8 @@ class DriverCockpitDashboard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(hhmm(store.clock), style: dmono(size: 13, weight: FontWeight.w500, color: DTokens.muted)),
+                // A demo trip of another day runs on a quick clock; say so rather than show a time that is not the phone's.
+                Text(store.realClock ? hhmm(store.clock) : 'giờ chạy thử ${hhmm(store.clock)}', style: dmono(size: 13, weight: FontWeight.w500, color: DTokens.muted)),
               ]),
             ),
             if (store.incident != null)
@@ -187,7 +188,14 @@ class DriverCockpitDashboard extends StatelessWidget {
                 width: double.infinity,
                 color: DTokens.dangerBg,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: Text('Đã báo ${store.incident!.type.toLowerCase()} lúc ${hhmm(store.incident!.at)} · ước tính chậm ${store.incident!.delay} phút. Điều hành đã nhận.', style: dsans(size: 13, color: DTokens.dangerInk)),
+                child: Row(children: [
+                  Expanded(child: Text('Đã báo ${store.incident!.type.toLowerCase()} lúc ${hhmm(store.incident!.at)} · ước tính chậm ${store.incident!.delay} phút. Điều hành đã nhận.', style: dsans(size: 13, color: DTokens.dangerInk))),
+                  TextButton(
+                    onPressed: store.clearIncident,
+                    style: TextButton.styleFrom(minimumSize: const Size(48, 44)),
+                    child: Text('Đã hết, đi tiếp', style: dsans(size: 14, weight: FontWeight.w700, color: DTokens.ink)),
+                  ),
+                ]),
               ),
             Expanded(
               child: wide

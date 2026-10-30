@@ -23,15 +23,17 @@ class _DriverIncidentScreenState extends State<DriverIncidentScreen> {
     super.dispose();
   }
 
-  Future<void> _call112() async {
+  Future<void> _call112() => _dial('112');
+
+  Future<void> _dial(String number) async {
     var ok = false;
     try {
-      ok = await launchUrl(Uri.parse('tel:112'));
+      ok = await launchUrl(Uri.parse('tel:${number.replaceAll(RegExp(r'[^0-9+]'), '')}'));
     } catch (_) {
       ok = false;
     }
     if (!ok && mounted) {
-      dToast(context, 'Không mở được trình gọi điện, hãy gọi 112 trực tiếp');
+      dToast(context, 'Không mở được trình gọi điện, hãy gọi $number trực tiếp');
     }
   }
 
@@ -54,15 +56,27 @@ class _DriverIncidentScreenState extends State<DriverIncidentScreen> {
       const SizedBox(height: 20),
       Text('Ước tính chậm bao lâu?', style: dsans(size: 15, weight: FontWeight.w600)),
       const SizedBox(height: 10),
-      Row(children: [
-        for (final d in [15, 30, 45, 60]) ...[
-          if (d != 15) const SizedBox(width: 8),
-          Expanded(child: ChoiceTile(label: d == 60 ? '60+' : '$d', danger: true, center: true, selected: _delay == d, onTap: () => setState(() => _delay = d))),
+      // Two per row, so "15 phút" stays on one line on a narrow phone.
+      GridView.count(
+        crossAxisCount: 2,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 3.2,
+        children: [
+          for (final d in [15, 30, 45, 60])
+            ChoiceTile(label: d == 60 ? 'Hơn 1 giờ' : '$d phút', danger: true, center: true, selected: _delay == d, onTap: () => setState(() => _delay = d)),
         ],
-      ]),
+      ),
     ];
+    final hotline = DriverScope.read(context).operatorHotline;
     final note = <Widget>[
-      TextField(controller: _note, maxLines: 3, maxLength: 200, style: dsans(size: 15), decoration: const InputDecoration(labelText: 'Ghi chú (không bắt buộc)')),
+      if (hotline.isNotEmpty) ...[
+        BigButton(label: 'Gọi điều hành $hotline', icon: Icons.call, outline: true, color: const Color(0xFFE2E8F0), onPressed: () => _dial(hotline)),
+        const SizedBox(height: 16),
+      ],
+      TextField(controller: _note, maxLines: 3, maxLength: 200, style: dsans(size: 15), decoration: const InputDecoration(labelText: 'Ghi chú (không bắt buộc)', counterText: '')),
       const SizedBox(height: 16),
       Text('Điều hành nhận ngay cùng vị trí xe. Khách trên chuyến chỉ thấy giờ mới khi điều hành công bố.', style: dsans(size: 13, color: DTokens.muted, height: 1.5)),
     ];

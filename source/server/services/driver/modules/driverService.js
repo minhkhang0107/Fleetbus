@@ -17,7 +17,8 @@ import { getTicketSecret, isProduction } from '../../../config.js';
 import { maskPhone, validateVietnamPhone } from '../../passenger/core/formatters.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
-import { stopCoords, routeShape } from '../../../core/geo.js';
+import { stopCoords, routeShape, distanceAlongRoute } from '../../../core/geo.js';
+import { hailFares, haversineMeters } from '../../../core/hailFare.js';
 import { DEFAULT_OPERATOR_ID, findOperatorById, publicOperatorProfile } from '../../../core/operators.js';
 import { DEMO_DATE, vnDate, runId } from '../../../core/serviceDate.js';
 import { getScheduleTemplates, getScheduleTemplate, runsOn, settingsOn } from '../../passenger/modules/search.js';
@@ -443,8 +444,21 @@ export class DriverCockpitService {
       stops,
       route_shape: routeShape(trip.trip_id) || null,
       home_run: this._homeRunView(trip),
+      hail_fares: this._hailFares(trip, trip.current_stop_index || 0),
       manifest: (trip.manifest || []).map(p => this._publicPassenger(p))
     };
+  }
+
+  /** D188: walk-up fare from the stop at `fromIndex` to each later stop, by the distance along the road. */
+  _hailFares(trip, fromIndex) {
+    const stops = trip.stops || [];
+    const points = stops.map(s => stopCoords(s.stop_id) || (typeof s.lat === 'number' && typeof s.lng === 'number' ? { lat: s.lat, lng: s.lng } : null));
+    const shape = routeShape(trip.trip_id);
+    const leg = (a, b) => {
+      const onRoad = shape ? distanceAlongRoute(shape, a.lat, a.lng, b.lat, b.lng) : null;
+      return onRoad && onRoad > 0 ? onRoad : haversineMeters(a, b);
+    };
+    return hailFares(stops, points, Math.min(fromIndex, Math.max(0, stops.length - 1)), trip.base_fare_vnd, leg);
   }
 
   /** Stops with their counts and the event log of a trip, for the office (spec 5.2, 5.3). */
@@ -605,7 +619,8 @@ export class DriverCockpitService {
         const day = departureMs ? vnDate(departureMs) : null;
         const isToday = !day || day === today || (!isProduction() && day === DEMO_DATE);
         const isUpcoming = departureMs !== null && departureMs > now && departureMs <= now + DRIVER_UPCOMING_WINDOW_MS;
-        return isToday || isUpcoming;
+        // A night trip still on the road after midnight stays in the driver's list until it ends (D188).
+        return isToday || isUpcoming || t.status === 'IN_TRANSIT';
       })
       .sort((a, b) => Date.parse(a.planned_departure_time || 0) - Date.parse(b.planned_departure_time || 0))
       .map(t => this._publicTrip(t));
@@ -1786,7 +1801,7 @@ export class DriverCockpitService {
       normalizedPhone = phoneCheck.normalized;
     }
 
-    const fare = trip.base_fare_vnd;
+    const fare = stops.length > 0 ? (this._hailFares(trip, pickupIndex)[dropId] ?? trip.base_fare_vnd) : trip.base_fare_vnd;
     const collected = amount_collected_vnd === undefined ? fare : Number(amount_collected_vnd);
     if (!Number.isFinite(collected) || collected < fare) {
       return { success: false, error: 'Số tiền thu chưa đủ giá vé', code: 'INSUFFICIENT_AMOUNT' };

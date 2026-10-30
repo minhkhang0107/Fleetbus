@@ -12,6 +12,8 @@ class DriverManifestScreen extends StatelessWidget {
   const DriverManifestScreen({super.key});
 
   Future<void> _leave(BuildContext context, DriverStore store) async {
+    await store.flushPendingBoards();
+    if (!context.mounted) return;
     final waiting = store.atStopPassengers.where((p) => p.status == PaxStatus.waiting).toList();
     if (waiting.isNotEmpty) {
       final hotline = waiting.where((p) => p.isHotline).toList();
@@ -91,23 +93,24 @@ class DriverManifestScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = DriverScope.of(context);
-    final list = store.atStopPassengers;
+    // Passengers who waved the bus down here are listed too, so the driver sees the sale went through.
+    final list = [...store.atStopPassengers, ...store.hailHere];
     final boarded = list.where((p) => p.status == PaxStatus.boarded).length;
     final opensAt = hhmm(store.noShowFrom());
     Widget row(Passenger p) => PassengerRow(
           p: p,
           noShowOpen: store.noShowOpen,
           opensAt: opensAt,
-          onBoard: () async {
-            final error = await store.board(p);
-            if (context.mounted) dToast(context, error ?? 'Ghế ${p.seat} đã lên xe');
-          },
+          onBoard: () => store.boardWithUndo(p, (error) {
+            if (context.mounted && error != null) dToast(context, error);
+          }),
+          onUndo: () => store.undoBoard(p),
           onCod: () => showCodSheet(context, p),
           onNoShow: () => _noShow(context, store, p),
           onInaccessible: () => reportInaccessible(context, store, p),
         );
     final drops = store.dropOffPassengers;
-    final allHandled = list.every((p) => p.status != PaxStatus.waiting);
+    final allHandled = list.every((p) => p.status != PaxStatus.waiting || store.isBoardPending(p));
     final dropOff = drops.isEmpty
         ? null
         : Panel(
@@ -135,7 +138,7 @@ class DriverManifestScreen extends StatelessWidget {
     final empty = Panel(child: Text('Không có khách đón ở trạm này.', style: dsans(size: 16, color: DTokens.sub)));
     final header = DHeader(
       title: store.stop.name,
-      subtitle: 'Đón ${list.length} · trả ${drops.length} khách · rời trạm ${store.stop.time} · bây giờ ${hhmm(store.clock)}',
+      subtitle: 'Đón ${list.length} · trả ${drops.length} khách · rời trạm ${store.stop.time} · ${store.realClock ? 'bây giờ' : 'giờ chạy thử'} ${hhmm(store.clock)}',
       trailing: Text('$boarded/${list.length}', style: dmono(size: 16, color: DTokens.okInk)),
     );
     if (dWide(context)) {
@@ -200,27 +203,31 @@ class DriverManifestScreen extends StatelessWidget {
 }
 
 class PassengerRow extends StatelessWidget {
-  const PassengerRow({required this.p, required this.noShowOpen, required this.opensAt, required this.onBoard, required this.onCod, required this.onNoShow, required this.onInaccessible});
+  const PassengerRow({required this.p, required this.noShowOpen, required this.opensAt, required this.onBoard, this.onUndo, required this.onCod, required this.onNoShow, required this.onInaccessible});
   final Passenger p;
   final bool noShowOpen;
   final String opensAt;
   final VoidCallback onBoard;
+  final VoidCallback? onUndo;
   final VoidCallback onCod;
   final VoidCallback onNoShow;
   final VoidCallback onInaccessible;
 
   @override
   Widget build(BuildContext context) {
-    final boardedAt = DriverScope.of(context).boardedTime(p);
+    final store = DriverScope.of(context);
+    final boardedAt = store.boardedTime(p);
+    final pending = store.isBoardPending(p);
     final (pill, border) = switch (p.status) {
+      _ when pending => (const StatusPill('Đang cho lên…', DPill.ok), const Color(0xFF166534)),
       PaxStatus.boarded => (StatusPill(boardedAt == null ? 'Đã lên' : 'Đã lên ${hhmm(boardedAt)}', DPill.ok), const Color(0xFF166534)),
       PaxStatus.noShow => (const StatusPill('Vắng mặt', DPill.mute), DTokens.line),
-      PaxStatus.waiting => p.codDue ? (const StatusPill('Chờ thu COD', DPill.warn), const Color(0xFFA16207)) : (const StatusPill('Chưa lên', DPill.mute), DTokens.line),
+      PaxStatus.waiting => p.codDue ? (const StatusPill('Chưa trả tiền', DPill.warn), const Color(0xFFA16207)) : (const StatusPill('Chưa lên', DPill.mute), DTokens.line),
     };
     final noShowButton = SizedBox(
       width: 112,
       child: BigButton(
-        label: noShowOpen ? 'Vắng mặt' : 'Vắng · $opensAt',
+        label: noShowOpen ? 'Vắng mặt' : 'Báo vắng từ $opensAt',
         outline: true,
         color: const Color(0xFFE2E8F0),
         onPressed: noShowOpen ? onNoShow : null,
@@ -238,8 +245,8 @@ class PassengerRow extends StatelessWidget {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(p.name, style: dsans(size: 15, weight: FontWeight.w600)),
                 Text.rich(TextSpan(children: [
-                  TextSpan(text: p.phone, style: dmono(size: 12, weight: FontWeight.w500, color: DTokens.muted)),
-                  TextSpan(text: ' · ${p.pay} · xuống ${p.homeDropoff != null ? 'tận nhà' : DriverScope.of(context).stopById(p.to).short}', style: dsans(size: 12, color: DTokens.muted)),
+                  if (p.phone.isNotEmpty) TextSpan(text: '${p.phone} · ', style: dmono(size: 12, weight: FontWeight.w500, color: DTokens.muted)),
+                  TextSpan(text: '${payNote(p)} · xuống ${p.homeDropoff != null ? 'tận nhà' : store.stopById(p.to).short}', style: dsans(size: 12, color: DTokens.muted)),
                 ])),
                 if (p.homePickup != null)
                   Padding(
@@ -255,7 +262,10 @@ class PassengerRow extends StatelessWidget {
             ),
             pill,
           ]),
-          if (p.status == PaxStatus.waiting) ...[
+          if (pending) ...[
+            const SizedBox(height: 8),
+            BigButton(label: 'Bấm nhầm? Hoàn tác', outline: true, color: const Color(0xFFE2E8F0), onPressed: onUndo),
+          ] else if (p.status == PaxStatus.waiting) ...[
             const SizedBox(height: 8),
             Row(children: [
               Expanded(

@@ -284,19 +284,28 @@ class ShiftTrip {
   final String status;
   final DateTime? departureTime;
 
-  String dayLabel([DateTime? vnNow]) {
-    if (departureTime == null) return '';
-    final ref = vnNow ?? DateTime.now().toUtc().add(const Duration(hours: 7));
-    if (departureTime!.year == ref.year && departureTime!.month == ref.month && departureTime!.day == ref.day) {
-      return 'Hôm nay';
-    }
-    final tomorrow = DateTime.utc(ref.year, ref.month, ref.day).add(const Duration(days: 1));
-    if (departureTime!.year == tomorrow.year && departureTime!.month == tomorrow.month && departureTime!.day == tomorrow.day) {
-      return 'Ngày mai';
-    }
-    return '${departureTime!.day.toString().padLeft(2, '0')}/${departureTime!.month.toString().padLeft(2, '0')}';
-  }
+  String dayLabel([DateTime? vnNow]) => tripDayLabel(departureTime, vnNow);
+
+  bool get done => status == 'COMPLETED' || status == 'CANCELLED';
 }
+
+/// "Hôm nay", "Ngày mai" or dd/MM for a departure in Vietnam time; empty when unknown.
+String tripDayLabel(DateTime? departure, [DateTime? vnNow]) {
+  if (departure == null) return '';
+  final ref = vnNow ?? DateTime.now().toUtc().add(const Duration(hours: 7));
+  if (departure.year == ref.year && departure.month == ref.month && departure.day == ref.day) {
+    return 'Hôm nay';
+  }
+  final tomorrow = DateTime.utc(ref.year, ref.month, ref.day).add(const Duration(days: 1));
+  if (departure.year == tomorrow.year && departure.month == tomorrow.month && departure.day == tomorrow.day) {
+    return 'Ngày mai';
+  }
+  return '${departure.day.toString().padLeft(2, '0')}/${departure.month.toString().padLeft(2, '0')}';
+}
+
+/// True when [departure] falls on a day before [vnNow].
+bool tripDayPast(DateTime? departure, DateTime vnNow) =>
+    departure != null && DateTime.utc(departure.year, departure.month, departure.day).isBefore(DateTime.utc(vnNow.year, vnNow.month, vnNow.day));
 
 /// DRI-021: A trip in the driver's monthly schedule.
 class ScheduleTrip {
@@ -420,6 +429,28 @@ String hhmm(int minutes) => '${((minutes ~/ 60) % 24).toString().padLeft(2, '0')
 int toMinutes(String t) {
   final p = t.split(':').map(int.parse).toList();
   return p[0] * 60 + p[1];
+}
+
+/// Seat codes in the order a driver looks for them: by letter, then by number (A02 before A10).
+List<String> sortedSeats(Iterable<String> seats) {
+  final re = RegExp(r'^([A-Za-z]*)(\d*)');
+  int byCode(String a, String b) {
+    final ma = re.firstMatch(a)!, mb = re.firstMatch(b)!;
+    final letters = ma.group(1)!.compareTo(mb.group(1)!);
+    if (letters != 0) return letters;
+    final na = int.tryParse(ma.group(2)!) ?? 0, nb = int.tryParse(mb.group(2)!) ?? 0;
+    return na != nb ? na.compareTo(nb) : a.compareTo(b);
+  }
+
+  return seats.toList()..sort(byCode);
+}
+
+/// How the passenger pays, in the words a driver uses: paid already, or cash to take when boarding.
+String payNote(Passenger p) {
+  if (p.hail) return 'khách vẫy, đã thu tiền';
+  if (p.codDue) return 'thu ${vnd(p.cod)} khi lên';
+  if (p.cod > 0) return 'đã thu tiền mặt';
+  return 'đã trả tiền';
 }
 
 String vnd(int amount) {
@@ -564,12 +595,21 @@ class DriverStore extends ChangeNotifier {
   bool walletEnabled = false;
   String driverName = '';
   String staffId = '';
+  /// Licence class and expiry as the company recorded them (empty when unknown).
+  String licenseClass = '';
+  String licenseValidUntil = '';
   bool mustChangePin = false;
   String? temporaryPin;
 
   static Future<String> savedOperatorCode() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('driver_operator_code') ?? '';
+  }
+
+  /// The staff id of the last sign-in on this phone, so the driver types only the PIN next time.
+  static Future<String> savedStaffId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('driver_staff_id') ?? '';
   }
 
   bool get loggedIn => api.authToken != null;
@@ -704,6 +744,8 @@ class DriverStore extends ChangeNotifier {
       'wallet_enabled': walletEnabled,
       'driver_name': driverName,
       'staff_id': staffId,
+      'license_class': licenseClass,
+      'license_valid_until': licenseValidUntil,
     }));
   }
 
@@ -727,6 +769,8 @@ class DriverStore extends ChangeNotifier {
       walletEnabled = s['wallet_enabled'] == true;
       driverName = s['driver_name'] ?? '';
       staffId = s['staff_id'] ?? '';
+      licenseClass = s['license_class'] ?? '';
+      licenseValidUntil = s['license_valid_until'] ?? '';
     } catch (_) {
       await prefs.remove(_sessionKey);
       return false;
@@ -763,6 +807,8 @@ class DriverStore extends ChangeNotifier {
   String route = '';
   String plate = '';
   String depTime = '--:--';
+  /// Planned departure in Vietnam time; null when the server sent none.
+  DateTime? depAt;
   int delayMinutes = 0;
   String? estimatedDepTime;
 
@@ -774,6 +820,9 @@ class DriverStore extends ChangeNotifier {
     return depTime;
   }
   int fare = 0;
+  /// D188: walk-up fare from the current stop to each later stop, set by the server.
+  Map<String, int> hailFares = {};
+  int hailFareTo(String stopId) => hailFares[stopId] ?? fare;
   TripState trip = TripState.readyCheck;
   List<DriverStop> stops = const [];
   List<Passenger> manifest = [];
@@ -898,6 +947,9 @@ class DriverStore extends ChangeNotifier {
   List<Passenger> get dropOffPassengers => manifest.where((p) => p.to == stop.id && p.status == PaxStatus.boarded).toList();
   int get boardedCount => manifest.where((p) => p.status == PaxStatus.boarded).length;
   int get hailCount => manifest.where((p) => p.hail).length;
+
+  /// Passengers sold at the current stop as walk-ups.
+  List<Passenger> get hailHere => manifest.where((p) => p.hail && p.from == stop.id).toList();
   int get debtIssued => debts.fold(0, (a, d) => a + d.amount);
   bool get readyToStart => checked.every((c) => c);
   String get firstStopName => stops.isEmpty ? '' : stops.first.name;
@@ -987,7 +1039,10 @@ class DriverStore extends ChangeNotifier {
 
       driverName = d['full_name'] ?? '';
       staffId = d['staff_id'] ?? staff.trim();
+      licenseClass = '${d['license_class'] ?? ''}';
+      licenseValidUntil = '${d['license_valid_until'] ?? ''}';
       mustChangePin = d['must_change_pin'] == true;
+      unawaited(SharedPreferences.getInstance().then((prefs) => prefs.setString('driver_staff_id', staff.trim())));
       temporaryPin = pin.trim();
 
       if (op != null) {
@@ -1090,14 +1145,18 @@ class DriverStore extends ChangeNotifier {
     ];
     final live = trips.where((t) => t['status'] != 'CANCELLED').toList();
     final now = _vnNow();
-    final selected = tripId == null ? null : live.where((t) => t['trip_id'] == tripId).firstOrNull;
+    // The trip on the big card: the one on the road, else the one the driver picked while it is still to run,
+    // else today's next trip; a finished trip stays there only when nothing is left to drive.
+    final running = live.where((t) => t['status'] == 'IN_TRANSIT').firstOrNull;
+    final selected = tripId == null ? null : live.where((t) => t['trip_id'] == tripId && t['status'] != 'COMPLETED').firstOrNull;
     final notStale = live.where((t) {
       if (t['status'] == 'COMPLETED') return false;
       final depAt = DateTime.tryParse('${t['planned_departure_time']}')?.toUtc().add(const Duration(hours: 7));
       if (depAt == null) return false;
       return !depAt.isBefore(now.subtract(const Duration(hours: 12)));
     }).firstOrNull;
-    final current = selected ?? notStale ?? live.where((t) => t['status'] != 'COMPLETED').firstOrNull ?? live.lastOrNull;
+    final kept = tripId == null ? null : live.where((t) => t['trip_id'] == tripId).firstOrNull;
+    final current = running ?? selected ?? notStale ?? kept ?? live.where((t) => t['status'] != 'COMPLETED').firstOrNull ?? live.lastOrNull;
     if (current != null) _apply(current, fresh: tripId != current['trip_id']);
     if (shiftSavedAt != null) _replayQueuedBoarding();
     notifyListeners();
@@ -1225,10 +1284,14 @@ class DriverStore extends ChangeNotifier {
     depTime = _depOf(t);
     delayMinutes = (t['delay_minutes'] as num?)?.toInt() ?? 0;
     estimatedDepTime = _estimatedDepOf(t['estimated_departure_time'], depTime, delayMinutes);
-    final depAt = DateTime.tryParse('${t['planned_departure_time']}')?.toUtc().add(const Duration(hours: 7));
+    depAt = DateTime.tryParse('${t['planned_departure_time']}')?.toUtc().add(const Duration(hours: 7));
     final today = _vnNow();
-    realClock = depAt != null && depAt.year == today.year && depAt.month == today.month && depAt.day == today.day;
+    realClock = depAt != null && depAt!.year == today.year && depAt!.month == today.month && depAt!.day == today.day;
     fare = (t['base_fare_vnd'] as num?)?.toInt() ?? fare;
+    hailFares = {
+      for (final e in ((t['hail_fares'] as Map?) ?? const {}).entries)
+        if (e.value is num) '${e.key}': (e.value as num).toInt()
+    };
     final dep = toMinutes(depTime == '--:--' ? '07:00' : depTime);
     final raw = (t['stops'] as List? ?? []).cast<Map<String, dynamic>>()..sort((a, b) => (a['order'] as num).compareTo(b['order'] as num));
     if (fresh) _plannedTimes.clear();
@@ -1624,6 +1687,36 @@ class DriverStore extends ChangeNotifier {
   bool get noShowOpen => atStop && clock >= noShowFrom();
 
   // ---------- Boarding (DRI-009 to DRI-012) ----------
+  /// A tap on "Cho lên xe" waits this long before it is sent, so a wrong tap can be taken back.
+  static const boardUndoDelay = Duration(seconds: 4);
+  final Map<String, Timer> _pendingBoards = {};
+
+  bool isBoardPending(Passenger p) => _pendingBoards.containsKey(p.ticketId);
+
+  /// Boards [p] once [boardUndoDelay] has passed without [undoBoard]; [done] gets the result.
+  void boardWithUndo(Passenger p, void Function(String? error) done) {
+    _pendingBoards.remove(p.ticketId)?.cancel();
+    _pendingBoards[p.ticketId] = Timer(boardUndoDelay, () async {
+      _pendingBoards.remove(p.ticketId);
+      done(await board(p));
+    });
+    notifyListeners();
+  }
+
+  void undoBoard(Passenger p) {
+    _pendingBoards.remove(p.ticketId)?.cancel();
+    notifyListeners();
+  }
+
+  /// Sends the boardings still inside their undo time now, before the bus leaves the stop.
+  Future<void> flushPendingBoards() async {
+    for (final id in _pendingBoards.keys.toList()) {
+      _pendingBoards.remove(id)?.cancel();
+      final p = manifest.where((m) => m.ticketId == id).firstOrNull;
+      if (p != null) await board(p);
+    }
+  }
+
   /// The server refuses an unpaid COD ticket (409 COD_PAYMENT_REQUIRED, BR-COD-006).
   Future<String?> board(Passenger p) async {
     final error = await _act(
@@ -1863,7 +1956,7 @@ class DriverStore extends ChangeNotifier {
     String? phone,
     String? name,
   }) {
-    final amount = given ?? fare;
+    final amount = given ?? hailFareTo(toStop);
     final settlement = method != null ? (changeSettlementMethods[method] ?? method) : 'CASH_RETURNED';
     final cleanPhone = (phone != null && phone.trim().isNotEmpty) ? phone.trim() : null;
     final cleanName = (name != null && name.trim().isNotEmpty) ? name.trim() : 'Khách vẫy dọc đường';
@@ -1924,6 +2017,12 @@ class DriverStore extends ChangeNotifier {
     incident = (type: type, delay: delay, at: clock);
     notifyListeners();
     return null;
+  }
+
+  /// The driver says the trouble is over: the cab stops showing the incident banner.
+  void clearIncident() {
+    incident = null;
+    notifyListeners();
   }
 
   void setOffline(bool value) {
@@ -2042,6 +2141,8 @@ class DriverStore extends ChangeNotifier {
     trip = TripState.completed;
     shift = [for (final t in shift) t.id == tripId ? ShiftTrip(t.id, t.dep, t.route, t.plate, t.booked, 'COMPLETED', t.departureTime) : t];
     notifyListeners();
+    // The trips tab then shows the next trip to drive, if the shift has one (D188).
+    if (shift.any((t) => !t.done)) unawaited(loadShift(autoFlush: false));
     return null;
   }
 

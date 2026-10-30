@@ -98,7 +98,12 @@ class _DriverChangePinScreenState extends State<DriverChangePinScreen> {
     await store.loadShift();
     if (!mounted) return;
     setState(() => _busy = false);
-    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const MainShellScreen()));
+    // Opened from the profile tab: go back to it; after a first sign-in: on to the trips.
+    if (widget.initialCurrentPin == null && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const MainShellScreen()));
+    }
     dToast(context, 'Đã đổi mã PIN');
   }
 
