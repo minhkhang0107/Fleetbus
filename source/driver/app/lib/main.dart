@@ -57,6 +57,7 @@ class _BusGoDriverAppState extends State<BusGoDriverApp> {
         title: 'BusGo Driver',
         debugShowCheckedModeBanner: false,
         theme: driverTheme(),
+        scrollBehavior: const IosScrollBehavior(),
         home: const DriverLoginScreen(restoreSession: true),
       ),
     );

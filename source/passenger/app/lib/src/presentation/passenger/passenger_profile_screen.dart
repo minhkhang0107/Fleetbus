@@ -179,6 +179,7 @@ class PassengerProfileScreen extends StatelessWidget {
             ),
             gap(8),
             TextField(
+              onTapOutside: dismissKeyboard,
               autofocus: true,
               decoration: InputDecoration(
                 hintText: 'Nhập XÓA',

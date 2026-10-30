@@ -179,7 +179,7 @@ class DriverTodayTripsScreen extends StatelessWidget {
           const SizedBox(height: 10),
           for (var i = 0; i < otherTrips.length; i++) ...[
             if (i > 0) const SizedBox(height: 10),
-            _tripTile(context, store, otherTrips[i]),
+            FadeSlideIn(index: i, child: _tripTile(context, store, otherTrips[i])),
           ],
         ] else if (wide) ...[
           const Panel(child: Text('Không có chuyến nào khác trong ca.', style: TextStyle(color: DTokens.muted, fontSize: 14))),
@@ -191,16 +191,18 @@ class DriverTodayTripsScreen extends StatelessWidget {
       child: RefreshIndicator(
         onRefresh: store.loadShift,
         child: ListView(padding: EdgeInsets.all(wide ? 24 : 16), children: [
-          if (store.shiftSavedAt != null)
-            Container(
+          Reveal(
+            visible: store.shiftSavedAt != null,
+            child: Container(
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: DTokens.warnBg, borderRadius: BorderRadius.circular(12)),
               child: Text(
-                'Mất mạng · danh sách chuyến và khách lưu lúc ${_hhmm(store.shiftSavedAt!)}. Quét vé vẫn được; máy gửi lên khi có sóng.',
+                'Mất mạng · danh sách chuyến và khách lưu lúc ${_hhmm(store.shiftSavedAt ?? DateTime.now())}. Quét vé vẫn được; máy gửi lên khi có sóng.',
                 style: dsans(size: 13, color: DTokens.warnInk),
               ),
             ),
+          ),
           Row(children: [
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

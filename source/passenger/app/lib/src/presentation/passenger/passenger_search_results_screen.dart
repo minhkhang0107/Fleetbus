@@ -14,6 +14,11 @@ class PassengerSearchResultsScreen extends StatefulWidget {
 }
 
 class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScreen> {
+  /// The day, sort and state the list on screen shows; it changes only once the new answer is in (D180).
+  String? _shownKey;
+  /// Which way the list slides when the day changes: a later day comes in from the right, an earlier from the left.
+  double _direction = 1;
+
   @override
   void initState() {
     super.initState();
@@ -46,16 +51,17 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
               store.loadTrips();
             }),
             gap(10),
-            Wrap(spacing: 8, runSpacing: 8, children: [
-              _Choice(label: 'Sớm nhất', selected: store.sort == 'time', onTap: () => store.setSort('time'), pill: true),
-              _Choice(label: 'Giá thấp', selected: store.sort == 'price', onTap: () => store.setSort('price'), pill: true),
-              _Choice(label: 'Nhiều chỗ', selected: store.sort == 'seats', onTap: () => store.setSort('seats'), pill: true),
-            ]),
+            // One control for the order of the list, the same as the tabs of the wallet (D181).
+            SegmentedSwitch<String>(
+              segments: const [('time', 'Sớm nhất'), ('price', 'Giá thấp nhất'), ('seats', 'Nhiều chỗ nhất')],
+              value: store.sort,
+              onChanged: store.setSort,
+            ),
           ])),
         ),
         const Divider(height: 1, color: PTokens.line),
         Expanded(
-          child: store.loadingTrips
+          child: _animated(store, store.loadingTrips && all.isEmpty && store.tripsError == null
               ? const Center(child: CircularProgressIndicator())
               : store.tripsError != null
               ? Padding(
@@ -98,7 +104,7 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
                   final cardWidth = (box.maxWidth - pad * 2 - 16 * (cols - 1)) / cols;
                   return ListView(padding: EdgeInsets.all(pad), children: [
                     Wrap(spacing: 16, runSpacing: 12, children: [
-                      for (final t in open) SizedBox(width: cardWidth, child: _TripCard(trip: t)),
+                      for (final (i, t) in open.indexed) SizedBox(width: cardWidth, child: FadeSlideIn(index: i, child: _TripCard(trip: t))),
                       for (final t in full)
                         SizedBox(
                           width: cardWidth,
@@ -115,40 +121,44 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
                     ]),
                   ]);
                 }),
-        ),
+        )),
       ]),
     );
   }
-}
 
-class _Choice extends StatelessWidget {
-  const _Choice({required this.label, required this.selected, required this.onTap, this.pill = false});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  final bool pill;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      selected: selected,
-      button: true,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(pill ? 999 : PTokens.radiusControl),
-        child: Container(
-          height: 36,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: selected ? PTokens.primarySoft : PTokens.surface,
-            borderRadius: BorderRadius.circular(pill ? 999 : PTokens.radiusControl),
-            border: Border.all(color: selected ? PTokens.primary : PTokens.line),
+  /// While a new day loads, the previous list stays, dimmed under a thin progress bar, instead of blinking to a
+  /// spinner; then the new list slides in. A change of sort only cross-fades.
+  Widget _animated(PassengerStore store, Widget content) {
+    final reduced = Motion.reduced(context);
+    if (!store.loadingTrips) {
+      final key = '${store.date}|${store.sort}|${store.tripsError ?? ''}';
+      final previousDay = _shownKey?.split('|').first;
+      if (previousDay != null && previousDay != store.date) _direction = store.date.compareTo(previousDay) > 0 ? 1 : -1;
+      if (previousDay == store.date) _direction = 0;
+      _shownKey = key;
+    }
+    final busy = store.loadingTrips && _shownKey != null;
+    return Stack(children: [
+      AnimatedSwitcher(
+        duration: reduced ? Duration.zero : Motion.base,
+        switchInCurve: Motion.settle,
+        switchOutCurve: Curves.easeIn,
+        layoutBuilder: (current, previous) => Stack(alignment: Alignment.topCenter, children: [...previous, if (current != null) current]),
+        transitionBuilder: (child, animation) => FadeTransition(
+          opacity: animation,
+          child: SlideTransition(position: Tween<Offset>(begin: Offset(0.08 * _direction, 0), end: Offset.zero).animate(animation), child: child),
+        ),
+        child: KeyedSubtree(
+          key: ValueKey(_shownKey ?? 'first'),
+          child: AnimatedOpacity(
+            opacity: busy ? 0.4 : 1,
+            duration: reduced ? Duration.zero : Motion.fast,
+            child: IgnorePointer(ignoring: busy, child: content),
           ),
-          child: Text(label, style: sans(size: 13, weight: selected ? FontWeight.w600 : FontWeight.w500, color: selected ? PTokens.primaryDark : PTokens.ink)),
         ),
       ),
-    );
+      if (busy) const Positioned(top: 0, left: 0, right: 0, child: LinearProgressIndicator(minHeight: 2)),
+    ]);
   }
 }
 

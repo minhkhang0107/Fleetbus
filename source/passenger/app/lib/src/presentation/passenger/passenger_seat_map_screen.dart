@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'passenger_checkout_screen.dart';
 import 'passenger_login_screen.dart';
@@ -172,8 +173,8 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
       bottomNavigationBar: BottomAction(children: [
         Expanded(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(store.seats.isEmpty ? 'Chưa chọn ghế' : 'Ghế ${store.seats.join(', ')}', style: sans(size: 12, color: PTokens.muted), overflow: TextOverflow.ellipsis),
-            Text(vnd(store.baseFare), style: mono(size: 17, weight: FontWeight.w700)),
+            TextChange(store.seats.isEmpty ? 'Chưa chọn ghế' : 'Ghế ${store.seats.join(', ')}', style: sans(size: 12, color: PTokens.muted), overflow: TextOverflow.ellipsis),
+            TextChange(vnd(store.baseFare), style: mono(size: 17, weight: FontWeight.w700)),
           ]),
         ),
         PrimaryButton(label: _holding ? 'Đang giữ ghế…' : (store.seats.isEmpty ? 'Chọn ít nhất 1 ghế' : 'Giữ ghế 10 phút'), onPressed: store.seats.isEmpty || _holding ? null : _hold),
@@ -254,18 +255,30 @@ class _SeatButton extends StatelessWidget {
         child: InkWell(
           onTap: enabled
               ? () {
-                  if (!store.toggleSeat(code)) onLimit();
+                  if (store.toggleSeat(code)) {
+                    HapticFeedback.selectionClick();
+                  } else {
+                    onLimit();
+                  }
                 }
               : null,
           borderRadius: BorderRadius.circular(PTokens.radiusControl),
-          child: Container(
-            height: 60,
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            decoration: BoxDecoration(color: bg, border: Border.all(color: border, width: 1.5), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              FittedBox(fit: BoxFit.scaleDown, child: Text(code, style: mono(size: 15, color: fg))),
-              FittedBox(fit: BoxFit.scaleDown, child: Text(sub, style: sans(size: 11, weight: FontWeight.w500, color: fg))),
-            ]),
+          // A picked seat fills with colour and gives a small pop; a released one fades back.
+          child: AnimatedScale(
+            scale: selected ? 1.0 : 0.97,
+            duration: Motion.base,
+            curve: Curves.easeOutBack,
+            child: AnimatedContainer(
+              duration: Motion.base,
+              curve: Motion.ease,
+              height: 60,
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              decoration: BoxDecoration(color: bg, border: Border.all(color: border, width: 1.5), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                FittedBox(fit: BoxFit.scaleDown, child: Text(code, style: mono(size: 15, color: fg))),
+                FittedBox(fit: BoxFit.scaleDown, child: Text(sub, style: sans(size: 11, weight: FontWeight.w500, color: fg))),
+              ]),
+            ),
           ),
         ),
       ),

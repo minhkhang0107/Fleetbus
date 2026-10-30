@@ -118,6 +118,7 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
   @override
   Widget build(BuildContext context) {
     final store = PassengerScope.of(context);
+    final offlineSince = store.walletOfflineSince;
     final upcoming = _groupTickets(store.tickets.where((t) => !t.past).toList());
     final past = _groupTickets(store.tickets.where((t) => t.past).toList());
     final list = _history ? past : upcoming;
@@ -131,21 +132,19 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
             child: PMaxWidth(maxWidth: 720, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Text('Vé của tôi', style: sans(size: 22, weight: FontWeight.w700)),
               gap(14),
-              Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
-                child: Row(children: [
-                  _tab('Sắp đi · ${upcoming.length}', !_history, () => setState(() => _history = false)),
-                  _tab('Lịch sử', _history, () => setState(() => _history = true)),
-                ]),
+              SegmentedSwitch<bool>(
+                segments: [(false, 'Sắp đi · ${upcoming.length}'), (true, 'Lịch sử')],
+                value: _history,
+                onChanged: (history) => setState(() => _history = history),
               ),
             ])),
           ),
         ),
       ),
       const Divider(height: 1, color: PTokens.line),
-      if (store.walletOfflineSince != null)
-        Container(
+      Reveal(
+        visible: offlineSince != null,
+        child: Container(
           width: double.infinity,
           color: PTokens.warnSoft,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -154,57 +153,49 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Không có mạng — vé đã lưu lúc ${_formatVnHhmm(store.walletOfflineSince!)}',
+                'Không có mạng — vé đã lưu lúc ${offlineSince == null ? '' : _formatVnHhmm(offlineSince)}',
                 style: sans(size: 13, color: PTokens.warnInk),
               ),
             ),
           ]),
         ),
+      ),
       Expanded(
-        child: store.loadingTickets && list.isEmpty
-            ? const Center(child: CircularProgressIndicator())
-            : list.isEmpty
-            ? _empty(context, store)
-            : RefreshIndicator(
-                onRefresh: store.loadTickets,
-                child: pWide(context)
-                    // Two tickets per row on wide screens.
-                    ? LayoutBuilder(builder: (context, box) {
-                        final w = (box.maxWidth - 48 - 16) / 2;
-                        return ListView(padding: const EdgeInsets.all(24), children: [
-                          Wrap(spacing: 16, runSpacing: 12, children: [for (final t in list) SizedBox(width: w, child: TicketCard(ticket: t))]),
-                        ]);
-                      })
-                    : ListView.separated(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: list.length,
-                        separatorBuilder: (_, __) => gap(12),
-                        itemBuilder: (_, i) => TicketCard(ticket: list[i]),
-                      ),
-              ),
+        child: AnimatedSwitcher(
+          duration: Motion.reduced(context) ? Duration.zero : Motion.base,
+          switchInCurve: Motion.settle,
+          transitionBuilder: (child, animation) => FadeTransition(
+            opacity: animation,
+            child: SlideTransition(position: Tween<Offset>(begin: Offset(_history ? 0.06 : -0.06, 0), end: Offset.zero).animate(animation), child: child),
+          ),
+          child: KeyedSubtree(
+            key: ValueKey(_history),
+            child: store.loadingTickets && list.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : list.isEmpty
+                ? _empty(context, store)
+                : RefreshIndicator(
+                    onRefresh: store.loadTickets,
+                    child: pWide(context)
+                        // Two tickets per row on wide screens.
+                        ? LayoutBuilder(builder: (context, box) {
+                            final w = (box.maxWidth - 48 - 16) / 2;
+                            return ListView(padding: const EdgeInsets.all(24), children: [
+                              Wrap(spacing: 16, runSpacing: 12, children: [for (final (i, t) in list.indexed) SizedBox(width: w, child: FadeSlideIn(index: i, child: TicketCard(ticket: t)))]),
+                            ]);
+                          })
+                        : ListView.separated(
+                            padding: const EdgeInsets.all(16),
+                            itemCount: list.length,
+                            separatorBuilder: (_, __) => gap(12),
+                            itemBuilder: (_, i) => FadeSlideIn(index: i, child: TicketCard(ticket: list[i])),
+                          ),
+                  ),
+          ),
+        ),
       ),
     ]);
   }
-
-  Widget _tab(String label, bool selected, VoidCallback onTap) => Expanded(
-        child: Semantics(
-          selected: selected,
-          button: true,
-          child: GestureDetector(
-            onTap: onTap,
-            child: Container(
-              height: 40,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: selected ? PTokens.surface : Colors.transparent,
-                borderRadius: BorderRadius.circular(6),
-                boxShadow: selected ? const [BoxShadow(color: Color(0x140F172A), blurRadius: 2, offset: Offset(0, 1))] : null,
-              ),
-              child: Text(label, style: sans(size: 14, weight: FontWeight.w600, color: selected ? PTokens.primaryDark : PTokens.muted)),
-            ),
-          ),
-        ),
-      );
 }
 
 class TicketCard extends StatelessWidget {

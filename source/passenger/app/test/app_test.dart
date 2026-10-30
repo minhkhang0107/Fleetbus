@@ -529,7 +529,7 @@ void main() {
     expect(store.tripsError, 'Ngày đi đã qua', reason: 'a refused day is explained, not shown as "no trips"');
   });
 
-  testWidgets('a day without a departure is still picked and labelled "không có chuyến", with the next day offered (D137)', (tester) async {
+  testWidgets('a day without a departure is still picked and labelled "Không có chuyến", with the next day offered (D137)', (tester) async {
     runDaysAnswer = ['2026-10-13', '2026-10-15'];
     addTearDown(() => runDaysAnswer = null);
     late PassengerStore store;
@@ -538,7 +538,7 @@ void main() {
       await store.loadRunDays();
     });
     await tester.pumpWidget(PassengerScope(store: store, child: const MaterialApp(home: Scaffold(body: SingleChildScrollView(padding: EdgeInsets.all(16), child: TravelDateField())))));
-    final noTrip = find.textContaining('không có chuyến');
+    final noTrip = find.text('Không có chuyến');
     expect(noTrip, findsWidgets);
     await tester.tap(noTrip.first);
     await tester.pump();
@@ -590,7 +590,7 @@ void main() {
     });
     await tester.pumpWidget(PassengerScope(store: store, child: const MaterialApp(home: Scaffold(body: Padding(padding: EdgeInsets.all(16), child: TravelDateField())))));
     expect(find.text('Chủ Nhật, 11/10/2026'), findsOneWidget);
-    await tester.tap(find.text('Ngày mai · 12/10'));
+    await tester.tap(find.text('Ngày mai'));
     await tester.pump();
     expect(store.date, '2026-10-12');
     await tester.tap(find.text('Đổi'));

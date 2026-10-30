@@ -150,12 +150,12 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
               ]),
             ),
           ),
-          Expanded(child: IndexedStack(index: _index, children: pages)),
+          Expanded(child: FadeIndexedStack(index: _index, children: pages)),
         ]),
       );
     }
     return Scaffold(
-      body: IndexedStack(index: _index, children: pages),
+      body: FadeIndexedStack(index: _index, children: pages),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(color: PTokens.surface, border: Border(top: BorderSide(color: PTokens.line))),
         child: SafeArea(
@@ -194,7 +194,8 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
         },
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Stack(clipBehavior: Clip.none, children: [
-            Icon(icon, color: color, size: 22),
+            // The chosen tab's icon gives a small bounce, as SF Symbols do on iOS 17.
+            AnimatedScale(scale: selected ? 1.12 : 1, duration: Motion.base, curve: Curves.easeOutBack, child: Icon(icon, color: color, size: 22)),
             if (dot) Positioned(right: -2, top: -1, child: Container(width: 8, height: 8, decoration: const BoxDecoration(color: PTokens.danger, shape: BoxShape.circle))),
           ]),
           const SizedBox(height: 4),

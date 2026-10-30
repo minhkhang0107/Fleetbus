@@ -47,7 +47,7 @@ class PassengerNotificationsScreen extends StatelessWidget {
             final n = notices[i];
             final ticket = n.tripId == null ? null : store.tickets.where((t) => t.tripId == n.tripId && t.active).firstOrNull;
             final open = ticket != null && ticket.status == TicketStatus.active && ticket.delay > 0;
-            return AppCard(
+            return FadeSlideIn(index: i, child: AppCard(
               onTap: open ? () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerDelayNoticeScreen(ticket: ticket))) : null,
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Row(children: [
@@ -57,7 +57,7 @@ class PassengerNotificationsScreen extends StatelessWidget {
                 gap(4),
                 Text(n.body, style: sans(size: 13, color: PTokens.muted, height: 1.5)),
               ]),
-            );
+            ));
           },
         ),
         )),
