@@ -89,6 +89,7 @@ Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
             ),
             gap(10),
             TextField(
+              onTapOutside: dismissKeyboard,
               key: const Key('cancel_account_number'),
               controller: accNumCtrl,
               keyboardType: TextInputType.number,
@@ -105,6 +106,7 @@ Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
             ),
             gap(10),
             TextField(
+              onTapOutside: dismissKeyboard,
               key: const Key('cancel_account_name'),
               controller: accNameCtrl,
               textCapitalization: TextCapitalization.characters,
@@ -231,6 +233,7 @@ Future<void> showEditRefundAccountSheet(BuildContext context, Ticket ticket) asy
           ),
           gap(10),
           TextField(
+            onTapOutside: dismissKeyboard,
             key: const Key('edit_refund_account_number'),
             controller: accNumCtrl,
             keyboardType: TextInputType.number,
@@ -247,6 +250,7 @@ Future<void> showEditRefundAccountSheet(BuildContext context, Ticket ticket) asy
           ),
           gap(10),
           TextField(
+            onTapOutside: dismissKeyboard,
             key: const Key('edit_refund_account_name'),
             controller: accNameCtrl,
             textCapitalization: TextCapitalization.characters,

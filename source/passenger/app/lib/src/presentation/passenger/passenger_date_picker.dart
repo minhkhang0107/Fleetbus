@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'passenger_store.dart';
 import 'passenger_widgets.dart';
@@ -38,10 +39,20 @@ class TravelDateField extends StatelessWidget {
               const Icon(Icons.calendar_month, color: PTokens.primary),
               const SizedBox(width: 12),
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                  Text(d.long, style: sans(size: 15, weight: FontWeight.w600)),
-                  if (d.relative != null) Text(d.relative!, style: sans(size: 12, color: PTokens.primary, weight: FontWeight.w600)),
-                ]),
+                // Always two lines, so picking a day never changes the height of the field (D180).
+                child: AnimatedSwitcher(
+                  duration: Motion.reduced(context) ? Duration.zero : Motion.base,
+                  switchInCurve: Motion.settle,
+                  layoutBuilder: (current, previous) => Stack(alignment: Alignment.centerLeft, children: [...previous, if (current != null) current]),
+                  transitionBuilder: (child, animation) => FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(position: Tween<Offset>(begin: const Offset(0, 0.25), end: Offset.zero).animate(animation), child: child),
+                  ),
+                  child: Column(key: ValueKey(store.date), crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                    Text(d.long, style: sans(size: 15, weight: FontWeight.w600)),
+                    Text(d.relative ?? 'Còn ${daysBetween(cal.today, store.date)} ngày nữa', style: sans(size: 12, color: PTokens.primary, weight: FontWeight.w600)),
+                  ]),
+                ),
               ),
               Text('Đổi', style: sans(size: 13, color: PTokens.primary, weight: FontWeight.w600)),
             ]),
@@ -49,42 +60,58 @@ class TravelDateField extends StatelessWidget {
         ),
       ),
       gap(8),
-      Wrap(spacing: 8, runSpacing: 8, children: [
-        for (final day in quick)
-          _QuickChip(day: TravelDate.of(day, today: cal.today), selected: store.date == day, runs: store.hasDeparture(day), onTap: () => store.setDate(day)),
+      // Today, tomorrow, the day after: equal tiles, so the row never shifts when one is picked (D181).
+      Row(children: [
+        for (final (i, day) in quick.indexed) ...[
+          if (i > 0) const SizedBox(width: 8),
+          Expanded(
+            child: _QuickDay(day: TravelDate.of(day, today: cal.today), selected: store.date == day, runs: store.hasDeparture(day), onTap: () => store.setDate(day)),
+          ),
+        ],
       ]),
     ]);
   }
 }
 
-class _QuickChip extends StatelessWidget {
-  const _QuickChip({required this.day, required this.selected, required this.runs, required this.onTap});
+class _QuickDay extends StatelessWidget {
+  const _QuickDay({required this.day, required this.selected, required this.runs, required this.onTap});
   final TravelDate day;
   final bool selected;
-  /// False when the route has no departure that day: still tappable (a dead chip looks broken), labelled
-  /// "không có chuyến" and the search then says so.
+  /// False when the route has no departure that day: still tappable (a dead tile looks broken); its second line
+  /// says so and the search then offers the next day that has one.
   final bool runs;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final top = selected ? PTokens.primaryDark : (runs ? PTokens.ink : PTokens.muted);
+    final bottom = selected ? PTokens.primaryDark : PTokens.muted;
     return Semantics(
       selected: selected,
       button: true,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 40),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: selected ? PTokens.primarySoft : PTokens.surface,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: selected ? PTokens.primary : PTokens.line),
-          ),
-          child: Text(
-            runs ? '${day.relative ?? day.weekday} · ${day.dayMonth}' : '${day.relative ?? day.weekday} · ${day.dayMonth} · không có chuyến',
-            style: sans(size: 13, weight: selected ? FontWeight.w600 : FontWeight.w500, color: selected ? PTokens.primaryDark : (runs ? PTokens.ink : PTokens.muted)),
+      label: '${day.relative ?? day.weekday} ${day.dayMonth}${runs ? '' : ', không có chuyến'}',
+      excludeSemantics: true,
+      child: Pressable(
+        child: InkWell(
+          onTap: () {
+            if (!selected) HapticFeedback.selectionClick();
+            onTap();
+          },
+          borderRadius: BorderRadius.circular(PTokens.radiusControl),
+          child: AnimatedContainer(
+            duration: Motion.base,
+            curve: Motion.ease,
+            height: 52,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            decoration: BoxDecoration(
+              color: selected ? PTokens.primarySoft : (runs ? PTokens.surface : PTokens.canvas),
+              borderRadius: BorderRadius.circular(PTokens.radiusControl),
+              border: Border.all(color: selected ? PTokens.primary : PTokens.line, width: selected ? 1.5 : 1),
+            ),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text(day.relative ?? day.weekday, maxLines: 1, overflow: TextOverflow.ellipsis, style: sans(size: 13, weight: FontWeight.w600, color: top)),
+              Text(runs ? day.dayMonth : 'Không có chuyến', maxLines: 1, overflow: TextOverflow.ellipsis, style: runs ? mono(size: 12, weight: FontWeight.w500, color: bottom) : sans(size: 11, color: bottom)),
+            ]),
           ),
         ),
       ),
@@ -122,7 +149,7 @@ class _TravelDateStripState extends State<TravelDateStrip> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
       final target = (index * (_cell + _spacing) - (_scroll.position.viewportDimension - _cell) / 2).clamp(0.0, _scroll.position.maxScrollExtent);
-      _scroll.animateTo(target, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+      _scroll.animateTo(target, duration: Motion.sheet, curve: Motion.settle);
     });
   }
 
@@ -154,9 +181,14 @@ class _TravelDateStripState extends State<TravelDateStrip> {
                 label: runs ? d.long : '${d.long}, không có chuyến',
                 excludeSemantics: true,
                 child: InkWell(
-                  onTap: () => widget.onChanged(d.id),
+                  onTap: () {
+                    if (!on) HapticFeedback.selectionClick();
+                    widget.onChanged(d.id);
+                  },
                   borderRadius: BorderRadius.circular(PTokens.radiusControl),
-                  child: Container(
+                  child: AnimatedContainer(
+                    duration: Motion.base,
+                    curve: Motion.ease,
                     width: _cell,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(

@@ -152,6 +152,7 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Expanded(
                 child: TextField(
+                  onTapOutside: dismissKeyboard,
                   controller: _voucher,
                   enabled: store.voucher == null,
                   textCapitalization: TextCapitalization.characters,
@@ -273,7 +274,9 @@ class _PaymentOption extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(PTokens.radiusControl),
-          child: Container(
+          child: AnimatedContainer(
+            duration: Motion.base,
+            curve: Motion.ease,
             constraints: const BoxConstraints(minHeight: 48),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
@@ -281,7 +284,11 @@ class _PaymentOption extends StatelessWidget {
               border: Border.all(color: selected ? PTokens.primary : PTokens.line),
             ),
             child: Row(children: [
-              Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 20, color: selected ? PTokens.primary : PTokens.muted),
+              AnimatedSwitcher(
+                duration: Motion.fast,
+                transitionBuilder: (child, animation) => ScaleTransition(scale: animation, child: child),
+                child: Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked, key: ValueKey(selected), size: 20, color: selected ? PTokens.primary : PTokens.muted),
+              ),
               const SizedBox(width: 10),
               Icon(icon, size: 18, color: selected ? PTokens.primary : PTokens.muted),
               const SizedBox(width: 8),

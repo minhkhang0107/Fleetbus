@@ -240,25 +240,31 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
               ],
               gap(12),
               Text('Dùng được khi mất mạng, khi lưu ảnh hoặc in. Mỗi vé chỉ lên xe một lần · màn hình đã tăng độ sáng', textAlign: TextAlign.center, style: sans(size: 12, color: PTokens.muted, height: 1.5)),
-              if (_showPin && t.pin != null) ...[
-                gap(12),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: PTokens.primarySoft, borderRadius: BorderRadius.circular(PTokens.radiusControl)),
-                  child: Column(children: [
-                    Text('Mã PIN dự phòng', style: sans(size: 13, color: const Color(0xFF1E3A8A))),
-                    Text('${t.pin!.substring(0, 3)} ${t.pin!.substring(3)}', style: mono(size: 20, weight: FontWeight.w700, color: const Color(0xFF1E3A8A))),
-                    Text(
-                      t.seat.contains(',')
-                          ? 'Đọc mã này cho tài xế nếu không quét được. Mã dùng cho cả ghế ${t.seat}.'
-                          : 'Đọc mã này cho tài xế nếu không quét được.',
-                      textAlign: TextAlign.center,
-                      style: sans(size: 12, color: const Color(0xFF1E3A8A)),
-                    ),
-                  ]),
-                ),
-              ],
+              // The backup PIN opens below the QR instead of pushing the screen down at once.
+              Reveal(
+                visible: _showPin && t.pin != null,
+                child: t.pin == null
+                    ? const SizedBox.shrink()
+                    : Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(color: PTokens.primarySoft, borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+                          child: Column(children: [
+                            Text('Mã PIN dự phòng', style: sans(size: 13, color: const Color(0xFF1E3A8A))),
+                            Text('${t.pin!.substring(0, 3)} ${t.pin!.substring(3)}', style: mono(size: 20, weight: FontWeight.w700, color: const Color(0xFF1E3A8A))),
+                            Text(
+                              t.seat.contains(',')
+                                  ? 'Đọc mã này cho tài xế nếu không quét được. Mã dùng cho cả ghế ${t.seat}.'
+                                  : 'Đọc mã này cho tài xế nếu không quét được.',
+                              textAlign: TextAlign.center,
+                              style: sans(size: 12, color: const Color(0xFF1E3A8A)),
+                            ),
+                          ]),
+                        ),
+                      ),
+              ),
             ]),
           )
         else if (t.status == TicketStatus.boarded)

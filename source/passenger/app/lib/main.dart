@@ -87,6 +87,7 @@ class _BusGoPassengerAppState extends State<BusGoPassengerApp> {
         title: 'BusGo',
         debugShowCheckedModeBanner: false,
         theme: passengerTheme(),
+        scrollBehavior: const IosScrollBehavior(),
         builder: phoneColumnBuilder,
         home: PassengerLaunchScreen(restore: widget.store.restoreOperator),
       ),

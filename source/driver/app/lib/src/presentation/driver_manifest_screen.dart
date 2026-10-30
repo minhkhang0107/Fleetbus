@@ -169,7 +169,7 @@ class DriverManifestScreen extends StatelessWidget {
                 padding: const EdgeInsets.all(20),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   if (dropOff != null) ...[dropOff, const SizedBox(height: 12)],
-                  list.isEmpty ? empty : Wrap(spacing: 12, runSpacing: 12, children: [for (final p in list) SizedBox(width: cardWidth, child: row(p))]),
+                  list.isEmpty ? empty : Wrap(spacing: 12, runSpacing: 12, children: [for (final (i, p) in list.indexed) SizedBox(width: cardWidth, child: FadeSlideIn(index: i, child: row(p)))]),
                 ]),
               );
             }),
@@ -186,7 +186,7 @@ class DriverManifestScreen extends StatelessWidget {
         const SizedBox(height: 12),
         if (dropOff != null) ...[dropOff, const SizedBox(height: 12)],
         if (list.isEmpty) empty,
-        for (final p in list) ...[row(p), const SizedBox(height: 8)],
+        for (final (i, p) in list.indexed) ...[FadeSlideIn(index: i, child: row(p)), const SizedBox(height: 8)],
       ]),
       bottomNavigationBar: SafeArea(
         child: Container(

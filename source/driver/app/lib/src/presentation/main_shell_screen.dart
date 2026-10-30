@@ -69,12 +69,12 @@ class _MainShellScreenState extends State<MainShellScreen> {
               ]),
             ),
           ),
-          Expanded(child: IndexedStack(index: _index, children: pages)),
+          Expanded(child: FadeIndexedStack(index: _index, children: pages)),
         ]),
       );
     }
     return Scaffold(
-      body: IndexedStack(index: _index, children: pages),
+      body: FadeIndexedStack(index: _index, children: pages),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(color: DTokens.panel2, border: Border(top: BorderSide(color: DTokens.lineSoft))),
         child: SafeArea(
@@ -104,7 +104,8 @@ class _MainShellScreenState extends State<MainShellScreen> {
       child: InkWell(
         onTap: () => setState(() => _index = i),
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(icon, color: color),
+          // The chosen tab's icon gives a small bounce, as SF Symbols do on iOS 17.
+          AnimatedScale(scale: selected ? 1.12 : 1, duration: Motion.base, curve: Curves.easeOutBack, child: Icon(icon, color: color)),
           const SizedBox(height: 4),
           Text(label, style: dsans(size: 13, weight: selected ? FontWeight.w600 : FontWeight.w400, color: color)),
         ]),

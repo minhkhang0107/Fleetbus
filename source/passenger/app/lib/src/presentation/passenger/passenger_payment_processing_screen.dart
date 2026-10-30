@@ -232,14 +232,7 @@ class _PassengerBookingSuccessScreenState extends State<PassengerBookingSuccessS
           ),
           Expanded(
             child: PMaxWidth(child: ListView(padding: const EdgeInsets.symmetric(horizontal: 24), children: [
-              Center(
-                child: Container(
-                  width: 72,
-                  height: 72,
-                  decoration: const BoxDecoration(color: Color(0xFFDCFCE7), shape: BoxShape.circle),
-                  child: const Icon(Icons.check, size: 36, color: PTokens.success),
-                ),
-              ),
+              const Center(child: _SuccessMark()),
               gap(20),
               Text('Đặt vé thành công', textAlign: TextAlign.center, style: sans(size: 24, weight: FontWeight.w700)),
               gap(6),
@@ -296,6 +289,42 @@ class _PassengerBookingSuccessScreenState extends State<PassengerBookingSuccessS
             ])),
           ),
         ]),
+      ),
+    );
+  }
+}
+
+/// The green circle pops in and the tick follows, with the light tap of a successful payment on iOS (D180).
+class _SuccessMark extends StatefulWidget {
+  const _SuccessMark();
+
+  @override
+  State<_SuccessMark> createState() => _SuccessMarkState();
+}
+
+class _SuccessMarkState extends State<_SuccessMark> {
+  @override
+  void initState() {
+    super.initState();
+    HapticFeedback.mediumImpact();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reduced = Motion.reduced(context);
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: reduced ? 1 : 0, end: 1),
+      duration: const Duration(milliseconds: 520),
+      curve: Curves.easeOutBack,
+      builder: (context, t, _) => Transform.scale(
+        scale: 0.5 + 0.5 * t,
+        child: Container(
+          width: 72,
+          height: 72,
+          decoration: BoxDecoration(color: const Color(0xFFDCFCE7).withValues(alpha: t.clamp(0, 1)), shape: BoxShape.circle),
+          // The tick starts once the circle is mostly there.
+          child: Transform.scale(scale: ((t - 0.4) / 0.6).clamp(0.0, 1.2), child: const Icon(Icons.check, size: 36, color: PTokens.success)),
+        ),
       ),
     );
   }

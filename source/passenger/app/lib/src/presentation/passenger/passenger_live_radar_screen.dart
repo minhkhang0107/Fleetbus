@@ -215,25 +215,30 @@ class _PassengerLiveRadarScreenState extends State<PassengerLiveRadarScreen> wit
       appBar: TopBar(title: 'Xe của chuyến ${ticket.dep}', subtitle: '${ticket.date} · ${ticket.route}', trailing: pill),
       body: Column(children: [
         if (tr == null) const LinearProgressIndicator(minHeight: 2),
-        if (banner != null)
-          Semantics(
-            liveRegion: true,
-            child: Container(
-              width: double.infinity,
-              color: signal == GpsSignal.stale || _phoneOffline ? PTokens.warnSoft : const Color(0xFFF1F5F9),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Icon(Icons.signal_wifi_off, size: 18, color: signal == GpsSignal.stale || _phoneOffline ? PTokens.warnInk : const Color(0xFF334155)),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text.rich(TextSpan(children: [
-                    TextSpan(text: banner.$1, style: sans(size: 13, weight: FontWeight.w700, color: const Color(0xFF334155))),
-                    TextSpan(text: banner.$2, style: sans(size: 13, color: const Color(0xFF334155))),
-                  ])),
+        // The banner opens and closes with the signal instead of pushing the map down at once.
+        Reveal(
+          visible: banner != null,
+          child: banner == null
+              ? const SizedBox.shrink()
+              : Semantics(
+                  liveRegion: true,
+                  child: Container(
+                    width: double.infinity,
+                    color: signal == GpsSignal.stale || _phoneOffline ? PTokens.warnSoft : const Color(0xFFF1F5F9),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Icon(Icons.signal_wifi_off, size: 18, color: signal == GpsSignal.stale || _phoneOffline ? PTokens.warnInk : const Color(0xFF334155)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text.rich(TextSpan(children: [
+                          TextSpan(text: banner.$1, style: sans(size: 13, weight: FontWeight.w700, color: const Color(0xFF334155))),
+                          TextSpan(text: banner.$2, style: sans(size: 13, color: const Color(0xFF334155))),
+                        ])),
+                      ),
+                    ]),
+                  ),
                 ),
-              ]),
-            ),
-          ),
+        ),
         Expanded(
           // Wide screens keep the map large and put the figures in a side panel.
           child: wide ? Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Expanded(child: map), SizedBox(width: 360, child: info)]) : map,
