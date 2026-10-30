@@ -259,6 +259,8 @@ void main() {
 
     await tester.tap(find.widgetWithText(BigButton, 'Kết thúc và nộp 0 đ'));
     await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(BigButton, 'Kết thúc chuyến'));
+    await tester.pumpAndSettle();
 
     expect(find.textContaining('Chưa gửi được lên máy chủ — máy sẽ gửi khi có sóng. Nộp tiền tại bến như bình thường.'), findsOneWidget);
     store.dispose();

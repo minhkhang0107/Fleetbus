@@ -104,7 +104,7 @@ class DriverPassengerListScreen extends StatelessWidget {
                           ),
                           if (p.cod > 0)
                             Text(
-                              'COD: ${vnd(p.cod)}',
+                              'Thu ${vnd(p.cod)} khi lên',
                               style: dsans(size: 13, weight: FontWeight.w600, color: DTokens.warnInk),
                             ),
                         ],

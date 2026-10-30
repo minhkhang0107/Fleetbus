@@ -70,7 +70,12 @@ class _DriverCashPaymentSectionState extends State<DriverCashPaymentSection> {
       presets = codPresets(widget.fare);
       if (customController.text.isEmpty) {
         given = widget.fare;
+      } else {
+        final typed = int.tryParse(customController.text.trim());
+        customError = typed == null || typed < widget.fare ? 'Số tiền phải từ ${vnd(widget.fare)} trở lên' : null;
       }
+      // A new fare (another drop-off) changes what the sheet's button says.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _notify());
     }
     final hasPhone = widget.phone != null && widget.phone!.trim().isNotEmpty;
     if (method == 'WALLET' && !hasPhone) {
@@ -199,8 +204,8 @@ class _DriverCashPaymentSectionState extends State<DriverCashPaymentSection> {
         ],
         const SizedBox(height: 8),
         ChoiceTile(
-          label: 'Biên lai nhận tại trạm dừng',
-          hint: debtOk ? 'Hạn mức chuyến còn ${vnd(left)}' : 'Vượt hạn mức chuyến (còn ${vnd(left)})',
+          label: 'Chưa có tiền lẻ: đưa giấy hẹn trả sau',
+          hint: debtOk ? 'Khách nhận lại tiền thừa ở bến' : 'Chuyến này đã hết mức cho nợ (còn ${vnd(left)})',
           selected: method == 'DEBT',
           enabled: debtOk,
           onTap: () {
@@ -219,6 +224,7 @@ Future<void> showCodSheet(BuildContext context, Passenger p) async {
   final store = DriverScope.read(context);
   final result = await showDriverSheet<({int given, String method})>(
     context,
+    pinnedFooter: true,
     builder: (ctx) => _CodSheetContent(passenger: p, store: store),
   );
   if (result == null || !context.mounted) return;
@@ -252,11 +258,19 @@ class _CodSheetContentState extends State<_CodSheetContent> {
   @override
   Widget build(BuildContext context) {
     final p = widget.passenger;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    return DriverSheetBody(
+      footer: BigButton(
+        label: 'Đã nhận ${vnd(given)} · Cho lên xe',
+        subtitle: hint,
+        color: DTokens.ok,
+        height: 72,
+        onPressed: (isValid && given >= p.cod) ? () => Navigator.of(context).pop((given: given, method: method)) : null,
+      ),
+      children: [
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Thu tiền vé COD', style: dsans(size: 18, weight: FontWeight.w700)),
+            Text('Thu tiền vé', style: dsans(size: 18, weight: FontWeight.w700)),
             Text('Ghế ${p.seat} · ${p.name}', style: dsans(size: 14, color: DTokens.sub)),
           ]),
         ),
@@ -283,14 +297,6 @@ class _CodSheetContentState extends State<_CodSheetContent> {
           });
         },
       ),
-      const SizedBox(height: 16),
-      BigButton(
-        label: 'Đã nhận ${vnd(given)} · Cho lên xe',
-        subtitle: hint,
-        color: DTokens.ok,
-        height: 72,
-        onPressed: (isValid && given >= p.cod) ? () => Navigator.of(context).pop((given: given, method: method)) : null,
-      ),
     ]);
   }
 }
@@ -311,6 +317,7 @@ Future<void> showHailSheet(BuildContext context) async {
   }
   final result = await showDriverSheet<({String seat, String to, int given, String method, String? phone})>(
     context,
+    pinnedFooter: true,
     builder: (ctx) => _HailSheetContent(store: store, after: after),
   );
   if (result == null || !context.mounted) return;
@@ -349,7 +356,7 @@ class _HailSheetContentState extends State<_HailSheetContent> {
     seat = widget.store.freeSeats.first;
     to = widget.after.last.id;
     phoneController = TextEditingController();
-    given = widget.store.fare;
+    given = widget.store.hailFareTo(to);
     hint = 'Đủ tiền, không có tiền thừa';
   }
 
@@ -361,9 +368,26 @@ class _HailSheetContentState extends State<_HailSheetContent> {
 
   @override
   Widget build(BuildContext context) {
-    final fare = widget.store.fare;
+    final fare = widget.store.hailFareTo(to);
     final phone = phoneController.text.trim();
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    final toName = widget.after.firstWhere((s) => s.id == to, orElse: () => widget.after.last).name;
+    return DriverSheetBody(
+      footer: BigButton(
+        label: 'Đã nhận ${vnd(given)} · Cho lên xe',
+        subtitle: hint,
+        color: DTokens.ok,
+        height: 72,
+        onPressed: (isValid && given >= fare)
+            ? () => Navigator.of(context).pop((
+                  seat: seat,
+                  to: to,
+                  given: given,
+                  method: method,
+                  phone: phone.isNotEmpty ? phone : null,
+                ))
+            : null,
+      ),
+      children: [
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -383,7 +407,7 @@ class _HailSheetContentState extends State<_HailSheetContent> {
         crossAxisSpacing: 8,
         childAspectRatio: 2.2,
         children: [
-          for (final c in widget.store.freeSeats)
+          for (final c in sortedSeats(widget.store.freeSeats))
             ChoiceTile(label: c, center: true, selected: seat == c, onTap: () => setState(() => seat = c)),
         ],
       ),
@@ -391,7 +415,12 @@ class _HailSheetContentState extends State<_HailSheetContent> {
       Text('Xuống tại', style: dsans(size: 14, weight: FontWeight.w600)),
       const SizedBox(height: 8),
       for (final s in widget.after) ...[
-        ChoiceTile(label: s.name, selected: to == s.id, onTap: () => setState(() => to = s.id)),
+        ChoiceTile(
+          label: s.name,
+          hint: vnd(widget.store.hailFareTo(s.id)),
+          selected: to == s.id,
+          onTap: () => setState(() => to = s.id),
+        ),
         const SizedBox(height: 8),
       ],
       Text('Số điện thoại (không bắt buộc)', style: dsans(size: 14, weight: FontWeight.w600)),
@@ -402,7 +431,7 @@ class _HailSheetContentState extends State<_HailSheetContent> {
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
         style: dmono(size: 15),
         decoration: const InputDecoration(
-          hintText: 'Nhập số điện thoại nếu cần cộng tiền thừa vào ví',
+          hintText: 'Số điện thoại của khách',
           contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         ),
         onChanged: (_) => setState(() {}),
@@ -412,7 +441,7 @@ class _HailSheetContentState extends State<_HailSheetContent> {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(color: DTokens.bg, borderRadius: BorderRadius.circular(10)),
         child: Row(children: [
-          Expanded(child: Text('Giá vé (giá chung của chuyến)', style: dsans(size: 14, color: DTokens.muted))),
+          Expanded(child: Text('Giá vé tới $toName', style: dsans(size: 14, color: DTokens.muted))),
           Text(vnd(fare), style: dmono(size: 22)),
         ]),
       ),
@@ -430,22 +459,6 @@ class _HailSheetContentState extends State<_HailSheetContent> {
             this.isValid = isValid;
           });
         },
-      ),
-      const SizedBox(height: 16),
-      BigButton(
-        label: 'Đã nhận ${vnd(given)} · Cho lên xe',
-        subtitle: hint,
-        color: DTokens.ok,
-        height: 72,
-        onPressed: (isValid && given >= fare)
-            ? () => Navigator.of(context).pop((
-                  seat: seat,
-                  to: to,
-                  given: given,
-                  method: method,
-                  phone: phone.isNotEmpty ? phone : null,
-                ))
-            : null,
       ),
     ]);
   }

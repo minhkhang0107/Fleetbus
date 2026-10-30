@@ -676,6 +676,10 @@ void main() {
     expect(find.byType(TextField), findsNothing);
     await tester.tap(find.widgetWithText(BigButton, 'Kết thúc và nộp 0 đ'));
     await tester.pumpAndSettle();
+    // D188: one question before an end that cannot be undone, nothing to type.
+    expect(store.trip, TripState.inTransit);
+    await tester.tap(find.widgetWithText(BigButton, 'Kết thúc chuyến'));
+    await tester.pumpAndSettle();
     expect(store.trip, TripState.completed);
     final body = jsonDecode(sent.lastWhere((r) => r.url.path.endsWith('/end')).body) as Map<String, dynamic>;
     expect(body.keys, isNot(contains('odometer_km')));
@@ -1374,7 +1378,7 @@ void main() {
     expect(find.text('A01'), findsOneWidget);
     expect(find.text('Nguyễn Văn A'), findsOneWidget);
     expect(find.text('098***123'), findsOneWidget);
-    expect(find.text('COD: 220.000 đ'), findsOneWidget);
+    expect(find.text('Thu 220.000 đ khi lên'), findsOneWidget);
     expect(find.text('Bến xe Giáp Bát → Bến xe Phía Bắc Thanh Hóa'), findsOneWidget);
 
     expect(find.text('A02'), findsOneWidget);
@@ -1385,7 +1389,7 @@ void main() {
     expect(find.text('B01'), findsOneWidget);
     expect(find.text('Lê Văn C'), findsOneWidget);
     expect(find.text('097***789'), findsOneWidget);
-    expect(find.text('COD: 150.000 đ'), findsOneWidget);
+    expect(find.text('Thu 150.000 đ khi lên'), findsOneWidget);
     expect(find.text('Bến xe Ninh Bình → Bến xe Phía Bắc Thanh Hóa'), findsOneWidget);
 
     expect(find.widgetWithText(BigButton, 'Cho lên xe'), findsNothing);
@@ -1622,9 +1626,9 @@ void main() {
     ));
     await tester.pump();
 
-    // With no home pickups: no "Đi đón khách tận nhà", but shows "Đón tại điểm: 2 khách · bấm Kiểm tra xe để xuất bến rồi Xuất bến để đón"
+    // With no home pickups: no "Đi đón khách tận nhà", but shows "Đón 2 khách tại bến · bấm Kiểm tra xe, rồi Xuất bến"
     expect(find.textContaining('Đi đón khách tận nhà'), findsNothing);
-    expect(find.textContaining('Đón tại điểm: 2 khách · bấm Kiểm tra xe để xuất bến rồi Xuất bến để đón'), findsOneWidget);
+    expect(find.textContaining('Đón 2 khách tại bến · bấm Kiểm tra xe, rồi Xuất bến'), findsOneWidget);
 
     // 2) Add a confirmed home pickup to manifest
     (trip['manifest'] as List).add({
@@ -1655,9 +1659,9 @@ void main() {
     ));
     await tester.pump();
 
-    // Now has 1 confirmed home pickup: shows "Đi đón khách tận nhà (1)" and does NOT show "Đón tại điểm" line
+    // Now has 1 confirmed home pickup: shows "Đi đón khách tận nhà (1)" and does NOT show the "Đón … tại bến" line
     expect(find.text('Đi đón khách tận nhà (1)'), findsOneWidget);
-    expect(find.textContaining('Đón tại điểm:'), findsNothing);
+    expect(find.textContaining('khách tại bến'), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
     store.dispose();

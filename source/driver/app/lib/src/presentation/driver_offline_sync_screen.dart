@@ -19,7 +19,7 @@ class DriverOfflineSyncScreen extends StatelessWidget {
           child: Row(children: [
             Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, color: store.offline ? const Color(0xFFF59E0B) : const Color(0xFF22C55E))),
             const SizedBox(width: 10),
-            Expanded(child: Text(store.offline ? 'Mất mạng · thao tác được lưu trên máy' : 'Đang kết nối', style: dsans(size: 15))),
+            Expanded(child: Text(store.offline ? 'Mất mạng · thao tác được lưu trên máy' : 'Có mạng', style: dsans(size: 15))),
             Text('${store.queue.length} chờ gửi', style: dmono(size: 14, weight: FontWeight.w600)),
           ]),
         ),
