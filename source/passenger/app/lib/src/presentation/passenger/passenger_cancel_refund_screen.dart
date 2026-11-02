@@ -229,7 +229,7 @@ Future<void> showEditRefundAccountSheet(BuildContext context, Ticket ticket) asy
       builder: (ctx, setSheetState) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Sửa tài khoản nhận hoàn', style: sans(size: 18, weight: FontWeight.w700)),
+          Text(ticket.refundInfo?.account == null ? 'Thêm tài khoản nhận hoàn' : 'Sửa tài khoản nhận hoàn', style: sans(size: 18, weight: FontWeight.w700)),
           gap(12),
           DropdownButtonFormField<String>(
             key: const Key('edit_refund_bank_picker'),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'passenger_cancel_refund_screen.dart';
 import 'passenger_login_screen.dart';
 import 'passenger_store.dart';
+import 'passenger_ticket_qr_screen.dart';
 import 'passenger_widgets.dart';
 
 /// PAX-020: newest first; a notice about a ticket opens that ticket's delay screen.
@@ -45,10 +46,22 @@ class PassengerNotificationsScreen extends StatelessWidget {
           separatorBuilder: (_, __) => gap(8),
           itemBuilder: (_, i) {
             final n = notices[i];
-            final ticket = n.tripId == null ? null : store.tickets.where((t) => t.tripId == n.tripId && t.active).firstOrNull;
-            final open = ticket != null && ticket.status == TicketStatus.active && ticket.delay > 0;
+            // A notice opens its ticket, even a cancelled one; a delay notice opens the delay screen.
+            Ticket? find() =>
+                store.tickets.where((t) => (n.ticketId != null && (t.id == n.ticketId || t.ticketIds.contains(n.ticketId))) || (n.pnr != null && t.pnr == n.pnr)).firstOrNull ??
+                (n.tripId == null ? null : store.tickets.where((t) => t.tripId == n.tripId && t.active).firstOrNull);
+            final known = find() != null || n.ticketId != null || n.pnr != null;
+            Future<void> open() async {
+              // A ticket changed since the wallet was loaded (cancelled by the company) is fetched first.
+              if (find() == null) await store.loadTickets();
+              final ticket = find();
+              if (ticket == null || !context.mounted) return;
+              final delay = ticket.status == TicketStatus.active && ticket.delay > 0 && !const {'TRIP_CANCELLED', 'TRIP_ENDED_EARLY', 'PAYMENT_SUCCESS'}.contains(n.type);
+              await Navigator.of(context).push(MaterialPageRoute(builder: (_) => delay ? PassengerDelayNoticeScreen(ticket: ticket) : PassengerTicketQrScreen(ticket: ticket)));
+            }
+
             return FadeSlideIn(index: i, child: AppCard(
-              onTap: open ? () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerDelayNoticeScreen(ticket: ticket))) : null,
+              onTap: known ? open : null,
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Row(children: [
                   Expanded(child: Text(n.title, style: sans(size: 14, weight: FontWeight.w700))),

@@ -207,20 +207,13 @@ class TicketCard extends StatelessWidget {
     final t = ticket;
     final active = !t.past && t.active;
     final platePart = t.plate.isNotEmpty ? ' · Xe ${t.plate}' : (active ? ' · Xe: Nhà xe sẽ báo' : '');
-    final status = t.refundInfo != null
-        ? (t.refundInfo!.isPending
-            ? const Pill('Đang chờ hoàn tiền', PillKind.info)
-            : (t.refundInfo!.isRefunded
-                ? const Pill('Đã hoàn tiền', PillKind.ok)
-                : const Pill('Từ chối', PillKind.danger)))
-        : switch (t.status) {
-            // A cash ticket is owed at boarding: never labelled paid (D187).
-            TicketStatus.active => t.unpaidCash ? const Pill('Trả khi lên xe', PillKind.warn) : const Pill('Đã thanh toán', PillKind.ok),
-            TicketStatus.boarded => t.past ? const Pill('Đã đi', PillKind.mute) : const Pill('Đã lên xe', PillKind.ok),
-            TicketStatus.refunding => const Pill('Đang chờ hoàn tiền', PillKind.info),
-            TicketStatus.noShow => const Pill('Vắng mặt', PillKind.mute),
-            TicketStatus.cancelled => const Pill('Đã hủy', PillKind.mute),
-          };
+    final status = switch (t.status) {
+      TicketStatus.cancelled => const Pill('Đã hủy', PillKind.mute),
+      TicketStatus.active => t.unpaidCash ? const Pill('Trả khi lên xe', PillKind.warn) : const Pill('Đã thanh toán', PillKind.ok),
+      TicketStatus.boarded => t.past ? const Pill('Đã đi', PillKind.mute) : const Pill('Đã lên xe', PillKind.ok),
+      TicketStatus.refunding => const Pill('Đang chờ hoàn tiền', PillKind.info),
+      TicketStatus.noShow => const Pill('Vắng mặt', PillKind.mute),
+    };
     return Container(
       decoration: BoxDecoration(color: PTokens.surface, borderRadius: BorderRadius.circular(PTokens.radius), border: Border.all(color: PTokens.line)),
       clipBehavior: Clip.antiAlias,
@@ -244,7 +237,7 @@ class TicketCard extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Row(children: [PnrTag(t.pnr), const Spacer(), status]),
+            Row(children: [PnrTag(t.pnr), const Spacer(), Flexible(child: status)]),
             gap(10),
             Wrap(crossAxisAlignment: WrapCrossAlignment.end, spacing: 8, children: [
               if (t.delay > 0) Text(t.dep, style: mono(size: 20, weight: FontWeight.w700, color: const Color(0xFF94A3B8), decoration: TextDecoration.lineThrough)),
@@ -265,9 +258,11 @@ class TicketCard extends StatelessWidget {
             if (t.refundInfo != null) ...[
               gap(6),
               Row(children: [
-                Text(
-                  '${t.refundInfo!.statusLabel} · ${vnd(t.refundInfo!.amountVnd)}',
-                  style: sans(size: 13, weight: FontWeight.w600, color: t.refundInfo!.isPending ? PTokens.primaryDark : (t.refundInfo!.isRefunded ? PTokens.success : PTokens.danger)),
+                Expanded(
+                  child: Text(
+                    '${t.refundInfo!.statusLabel} · ${vnd(t.refundInfo!.amountVnd)}',
+                    style: sans(size: 13, weight: FontWeight.w600, color: t.refundInfo!.isPending ? PTokens.primaryDark : (t.refundInfo!.isRefunded ? PTokens.success : PTokens.danger)),
+                  ),
                 ),
                 if (t.refundInfo!.account != null) ...[
                   const SizedBox(width: 8),
@@ -298,7 +293,7 @@ class TicketCard extends StatelessWidget {
                 })),
                 if (t.refundInfo?.isPending == true) ...[
                   const SizedBox(width: 8),
-                  Expanded(child: GhostButton(label: 'Sửa tài khoản nhận hoàn', onPressed: () {
+                  Expanded(child: GhostButton(label: t.refundInfo?.account == null ? 'Thêm tài khoản nhận hoàn' : 'Sửa tài khoản nhận hoàn', onPressed: () {
                     showEditRefundAccountSheet(context, t);
                   })),
                 ],

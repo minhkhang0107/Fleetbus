@@ -67,16 +67,28 @@ class PassengerProfileScreen extends StatelessWidget {
               _Tile(
                 icon: Icons.logout,
                 label: 'Đăng xuất',
-                onTap: () {
-                  store.logout();
-                  Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const PassengerSplashScreen()), (_) => false);
-                },
+                onTap: () => _confirmLogout(context, store),
               ),
               _Tile(icon: Icons.delete_outline, label: 'Xóa tài khoản', color: PTokens.danger, onTap: () => _confirmDeleteAccount(context, store)),
             ]),
         ])),
       ),
     ]);
+  }
+
+  Future<void> _confirmLogout(BuildContext context, PassengerStore store) async {
+    final yes = await showAppSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('Đăng xuất?', style: sans(size: 18, weight: FontWeight.w700)),
+          gap(8),
+          Text('Vé đã mua vẫn còn. Đăng nhập lại bằng số điện thoại này để xem.', style: sans(size: 14, color: PTokens.muted, height: 1.5)),
+          gap(14),
+          PrimaryButton(label: 'Đăng xuất', color: PTokens.danger, onPressed: () => Navigator.of(ctx).pop(true)),
+          gap(8),
+          GhostButton(label: 'Ở lại', onPressed: () => Navigator.of(ctx).pop(false)),
+        ]));
+    if (yes != true || !context.mounted) return;
+    store.logout();
+    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const PassengerSplashScreen()), (_) => false);
   }
 
   /// "XÓA" typed on a Vietnamese keyboard may come precomposed or as O + combining acute; "XOA" is accepted too.

@@ -566,6 +566,12 @@ export class PassengerPaymentService {
     if (matchedOrder.paid_amount_vnd < matchedOrder.amount_vnd) {
       matchedOrder.payment_status = 'PENDING_PAYMENT';
       matchedOrder.remaining_vnd = matchedOrder.amount_vnd - matchedOrder.paid_amount_vnd;
+      // The passenger tops up the rest: the QR now asks for the remaining amount only.
+      const details = matchedOrder.payment_details;
+      if (details?.bank_bin && details.account_number) {
+        details.qr_payload = generateVietQRPayload({ bankBin: details.bank_bin, accountNumber: details.account_number, amount: matchedOrder.remaining_vnd, memo: details.transfer_memo });
+        details.qr_image_url = `https://api.vietqr.io/image/${details.bank_bin}-${details.account_number}-compact.png?amount=${matchedOrder.remaining_vnd}&addInfo=${encodeURIComponent(details.transfer_memo)}&accountName=${encodeURIComponent(details.account_name || '')}`;
+      }
       matchedOrder.payment_anomalies = matchedOrder.payment_anomalies || [];
       matchedOrder.payment_anomalies.push({
         type: 'AMOUNT_MISMATCH',
@@ -1164,9 +1170,13 @@ export class PassengerPaymentService {
       policy: { tier: refundCalc.tier, percentage: refundCalc.percentage, fee_vnd: refundCalc.feeAmount },
       refund_account: cleanRefundAccount || null
     };
-    const refund = this.eventBridge && typeof this.eventBridge.requestRefund === 'function'
-      ? this.eventBridge.requestRefund(refundRequest)
-      : { refund_id: `ref_${Date.now()}`, status: 'REFUND_REQUESTED', ...refundRequest };
+    // Nothing to give back (late cancellation, unpaid cash): no refund for the office to process.
+    const refunding = refundCalc.refundAmount > 0;
+    const refund = !refunding
+      ? null
+      : this.eventBridge && typeof this.eventBridge.requestRefund === 'function'
+        ? this.eventBridge.requestRefund(refundRequest)
+        : { refund_id: `ref_${Date.now()}`, status: 'REFUND_REQUESTED', ...refundRequest };
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
       this.eventBridge.emit('TICKET_CANCELLED', {
@@ -1180,18 +1190,18 @@ export class PassengerPaymentService {
 
     return {
       success: true,
-      message: `Đã hủy vé. Yêu cầu hoàn tiền ${refundCalc.refundAmount.toLocaleString('vi-VN')} đ đang chờ xử lý`,
+      message: refunding ? `Đã hủy vé. Yêu cầu hoàn tiền ${refundCalc.refundAmount.toLocaleString('vi-VN')} đ đang chờ xử lý` : 'Đã hủy vé, không hoàn tiền theo chính sách',
       data: {
         ticket_id: ticket.ticket_id,
         pnr: ticket.pnr,
-        refund_id: refund.refund_id,
+        refund_id: refund?.refund_id ?? null,
         total_price_vnd: ticket.fare_vnd,
         refund_percentage: refundCalc.percentage,
         refund_amount_vnd: refundCalc.refundAmount,
         fee_amount_vnd: refundCalc.feeAmount,
         tier: refundCalc.tier,
         policy_message: refundCalc.message,
-        status: 'REFUND_REQUESTED',
+        status: refunding ? 'REFUND_REQUESTED' : 'CANCELLED',
         cancelled_at: cancelledAt,
         ...(cleanRefundAccount ? { refund_account: maskRefundAccount(cleanRefundAccount) } : {})
       }

@@ -30,6 +30,11 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // A cancelled or used ticket has no pass to fetch: the screen shows its refund or status instead.
+      if (widget.ticket.status != TicketStatus.active) {
+        setState(() => _loading = false);
+        return;
+      }
       final error = await PassengerScope.read(context).loadPass(widget.ticket);
       if (!mounted) return;
       setState(() {
@@ -449,10 +454,14 @@ class _RefundCard extends StatelessWidget {
             gap(8),
             KeyValue('Tên chủ tài khoản', refund.account!.accountName),
           ],
+          if (refund.isPending && refund.account == null) ...[
+            gap(10),
+            Text('Nhà xe cần số tài khoản của bạn để chuyển tiền hoàn.', style: sans(size: 13, color: PTokens.warnInk, height: 1.4)),
+          ],
           if (refund.isPending) ...[
             gap(14),
             GhostButton(
-              label: 'Sửa tài khoản nhận hoàn',
+              label: refund.account == null ? 'Thêm tài khoản nhận hoàn' : 'Sửa tài khoản nhận hoàn',
               onPressed: () => showEditRefundAccountSheet(context, ticket),
             ),
           ],

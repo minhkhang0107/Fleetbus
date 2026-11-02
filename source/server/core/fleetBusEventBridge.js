@@ -21,6 +21,17 @@ const vnParts = (iso) => {
 import { expireHomeRequests } from './homeReview.js';
 import { DEMO_DATE, addDays, parseRunId, serviceCalendar } from './serviceDate.js';
 
+/** Drops the open "amount mismatch" alerts of an order once it is paid in full (D189). */
+function clearAmountAlerts(managerService, order) {
+  if (!managerService?.alerts) return;
+  for (let i = managerService.alerts.length - 1; i >= 0; i--) {
+    const a = managerService.alerts[i];
+    if ((a.order_id === order.order_id || (order.pnr && a.message?.includes(order.pnr))) && a.type === 'PAYMENT_AMOUNT_MISMATCH') {
+      managerService.alerts.splice(i, 1);
+    }
+  }
+}
+
 /** Puts a phone hold on the driver's manifest (paid in cash on board), once per seat; a home address rides with it. */
 function addHotlineToManifest(driverTrip, reservation, farePerSeat) {
   const feeEach = Math.round((reservation.home_fee_vnd || 0) / reservation.seat_codes.length);
@@ -242,6 +253,9 @@ export class FleetBusEventBridge extends EventEmitter {
             });
           }
         }
+
+        // The rest of an underpaid transfer arrived: the office's "amount mismatch" alert is settled too.
+        clearAmountAlerts(managerService, order);
       }
 
       // D. Passenger Notification: Confirm payment & issue ticket alert
@@ -955,12 +969,25 @@ export class FleetBusEventBridge extends EventEmitter {
           operator_id: operatorOfTrip(this.services, order.trip_id)
         });
       }
+      if (trackingService && typeof trackingService.sendNotification === 'function') {
+        const phone = order.payer?.phone;
+        if (phone) {
+          trackingService.sendNotification(phone, {
+            operatorId: operatorOfTrip(this.services, order.trip_id),
+            title: 'Chưa xuất được vé',
+            body: `Nhà xe nhận ${amountVnd.toLocaleString('vi-VN')} đ cho đơn ${order.pnr} khi đơn đã hết hạn và không còn xuất vé được (ghế đã có người đặt, hoặc chuyến đã chạy hay đã hủy). Nhà xe sẽ hoàn lại ${amountVnd.toLocaleString('vi-VN')} đ về tài khoản đã chuyển. Bạn có thể đặt chuyến khác trong ứng dụng.`,
+            type: 'PAYMENT_LATE_REFUND',
+            payload: { order_id: order.order_id, pnr: order.pnr, refund_amount_vnd: amountVnd }
+          });
+        }
+      }
     });
 
     this.on('PAYMENT_ANOMALY', ({ order, receivedVnd }) => {
       if (managerService && managerService.alerts) {
         managerService.alerts.unshift({
           alert_id: `alt_amount_${Date.now()}`,
+          order_id: order.order_id,
           vehicle_plate: null,
           type: 'PAYMENT_AMOUNT_MISMATCH',
           severity: 'AMBER',
@@ -1003,6 +1030,7 @@ export class FleetBusEventBridge extends EventEmitter {
           order.payment_status = 'PAID';
           order.paid_at = new Date().toISOString();
           orderFullyCollected = true;
+          clearAmountAlerts(managerService, order);
         }
       }
 

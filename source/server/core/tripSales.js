@@ -3,10 +3,13 @@
  * cancels it. A cancelled departure refunds every ticket in full (the company's decision, never the passenger's
  * fee), tells each passenger once, frees the holds, and a payment that arrives afterwards follows the overdue
  * path (refunded, no ticket). Whole routes are suspended through the route setting `sales_suspended` (D132).
+ * A trip that ends before its final stop refunds the passengers it never picked up, and the office can end a trip
+ * the driver left running (D189).
  */
 import { operatorOfTrip } from './tenancy.js';
 import { routeServiceConfig } from './serviceAreas.js';
 import { DEMO_DATE, checkBookableDeparture, vnDate } from './serviceDate.js';
+import { DEFAULT_OPERATOR_ID } from './operators.js';
 
 export const DEFAULT_ONLINE_SALES_CUTOFF_MINUTES = 15;
 
@@ -178,6 +181,39 @@ export function setTripSales(services, operatorId, tripId, { open, reason = '', 
 }
 
 /**
+ * Cancels a live ticket for something the company did (D131, D189): a paid ticket is refunded in full, whatever
+ * the cancellation tier, and the passenger is told once. Returns the refund opened, if any.
+ */
+function cancelForCompany(services, ticket, { at, source, cancelSource = source, refundReason, notice }) {
+  const { paymentService, trackingService } = services;
+  ticket.status = 'CANCELLED';
+  ticket.cancelled_at = at;
+  ticket.cancel_source = cancelSource;
+  const cashUnpaid = ticket.payment_method === 'CASH' && ticket.cod_collected !== true;
+  const refund = cashUnpaid ? null : paymentService.eventBridge?.requestRefund?.({
+    ticket_id: ticket.ticket_id,
+    pnr: ticket.pnr,
+    trip_id: ticket.trip_id,
+    amount_vnd: ticket.fare_vnd,
+    reason: refundReason,
+    source,
+    policy: { tier: source, percentage: 100, fee_vnd: 0 }
+  });
+  paymentService.eventBridge?.emit?.('TICKET_CANCELLED', { ticketId: ticket.ticket_id, pnr: ticket.pnr, tripId: ticket.trip_id, seatCode: ticket.seat_code });
+  const money = cashUnpaid
+    ? 'Bạn chưa thanh toán nên không mất khoản nào.'
+    : `Nhà xe hoàn 100% ${ticket.fare_vnd.toLocaleString('vi-VN')} đ, đang chờ xử lý.`;
+  trackingService?.sendNotificationOnce?.(`${ticket.ticket_id}:${notice.type}`, ticket.owner_phone || ticket.passenger_phone, {
+    operatorId: operatorOfTrip(services, ticket.trip_id),
+    title: notice.title,
+    body: `${notice.text} ${money} Bạn có thể đặt chuyến khác trong ứng dụng.`,
+    type: notice.type,
+    payload: { trip_id: ticket.trip_id, ticket_id: ticket.ticket_id, pnr: ticket.pnr, refund_amount_vnd: cashUnpaid ? 0 : ticket.fare_vnd }
+  });
+  return refund || null;
+}
+
+/**
  * Cancels a departure that has not left. Every live ticket is cancelled with a 100% refund request, pending
  * payments are closed, seat and hotline holds are freed, and passengers and the driver's list follow.
  */
@@ -208,33 +244,19 @@ export function cancelTrip(services, operatorId, tripId, { reason, actor = 'offi
   let cancelledTickets = 0;
   for (const ticket of [...paymentService.tickets.values()]) {
     if (ticket.trip_id !== tripId || ticket.status !== 'ACTIVE') continue;
-    ticket.status = 'CANCELLED';
-    ticket.cancelled_at = at;
-    ticket.cancel_source = 'OPERATOR';
     cancelledTickets += 1;
-    const cashUnpaid = ticket.payment_method === 'CASH' && ticket.cod_collected !== true;
-    if (!cashUnpaid) {
-      const refund = paymentService.eventBridge?.requestRefund?.({
-        ticket_id: ticket.ticket_id,
-        pnr: ticket.pnr,
-        trip_id: tripId,
-        amount_vnd: ticket.fare_vnd,
-        reason: `Nhà xe hủy chuyến: ${text}`,
-        source: 'OPERATOR_CANCEL',
-        policy: { tier: 'OPERATOR_CANCEL', percentage: 100, fee_vnd: 0 }
-      });
-      if (refund) refunds.push(refund);
-    }
-    paymentService.eventBridge?.emit?.('TICKET_CANCELLED', { ticketId: ticket.ticket_id, pnr: ticket.pnr, tripId, seatCode: ticket.seat_code });
-    trackingService?.sendNotificationOnce?.(`${ticket.ticket_id}:TRIP_CANCELLED`, ticket.owner_phone || ticket.passenger_phone, {
-      operatorId: operatorOfTrip(services, tripId),
-      title: 'Nhà xe hủy chuyến',
-      body: cashUnpaid
-        ? `Chuyến ${ticket.route_name || ''} ${when} (vé ${ticket.pnr}, ghế ${ticket.seat_code}) đã bị hủy: ${text}. Bạn chưa thanh toán nên không mất khoản nào. Bạn có thể đặt chuyến khác trong ứng dụng.`
-        : `Chuyến ${ticket.route_name || ''} ${when} (vé ${ticket.pnr}, ghế ${ticket.seat_code}) đã bị hủy: ${text}. Nhà xe hoàn 100% ${ticket.fare_vnd.toLocaleString('vi-VN')} đ, đang chờ xử lý. Bạn có thể đặt chuyến khác trong ứng dụng.`,
-      type: 'TRIP_CANCELLED',
-      payload: { trip_id: tripId, ticket_id: ticket.ticket_id, pnr: ticket.pnr, refund_amount_vnd: cashUnpaid ? 0 : ticket.fare_vnd }
+    const refund = cancelForCompany(services, ticket, {
+      at,
+      source: 'OPERATOR_CANCEL',
+      cancelSource: 'OPERATOR',
+      refundReason: `Nhà xe hủy chuyến: ${text}`,
+      notice: {
+        type: 'TRIP_CANCELLED',
+        title: 'Nhà xe hủy chuyến',
+        text: `Chuyến ${ticket.route_name || ''} ${when} (vé ${ticket.pnr}, ghế ${ticket.seat_code}) đã bị hủy: ${text}.`
+      }
     });
+    if (refund) refunds.push(refund);
   }
 
   // Orders still waiting for the transfer close now: money arriving later is refunded, no ticket (OQ-008 path).
@@ -276,4 +298,61 @@ export function cancelTrip(services, operatorId, tripId, { reason, actor = 'offi
       closed_orders: closedOrders
     }
   };
+}
+
+/**
+ * A trip ended before its final stop (breakdown): the passengers it never picked up lose their seat through no
+ * fault of theirs, so their tickets are cancelled with a full refund and a notice, and the office is alerted (D189).
+ * Passengers already on board keep their ticket.
+ */
+export function cancelUnpickedTickets(services, tripId, reason, { now = Date.now() } = {}) {
+  const { paymentService, managerService, driverService } = services;
+  const driverTrip = driverService?.activeTrips?.get(tripId);
+  const at = new Date(now).toISOString();
+  const when = hhmmDate(driverTrip?.planned_departure_time || opsTrip(services, tripId)?.departure_time);
+  let unpicked = 0;
+  for (const passenger of driverTrip?.manifest || []) {
+    const ticket = paymentService.tickets.get(passenger.ticket_id);
+    if (['BOARDED', 'NO_SHOW', 'CANCELLED'].includes(passenger.boarding_status) || ticket?.status !== 'ACTIVE') continue;
+    passenger.boarding_status = 'CANCELLED';
+    unpicked += 1;
+    cancelForCompany(services, ticket, {
+      at,
+      source: 'TRIP_ENDED_EARLY',
+      refundReason: `Chuyến kết thúc sớm: ${reason}`,
+      notice: {
+        type: 'TRIP_ENDED_EARLY',
+        title: 'Xe không đón được bạn',
+        text: `Chuyến ${ticket.route_name || ''} ${when} (vé ${ticket.pnr}, ghế ${ticket.seat_code}) kết thúc sớm: ${reason}.`
+      }
+    });
+  }
+  managerService.alerts?.unshift?.({
+    alert_id: `alt_early_end_${tripId}`,
+    vehicle_plate: driverTrip?.vehicle_plate,
+    type: 'TRIP_ENDED_EARLY',
+    severity: 'RED',
+    message: `Chuyến ${when} kết thúc sớm: ${reason}. ${unpicked} khách chưa được đón.`,
+    created_at: at,
+    operator_id: driverTrip?.operator_id || operatorOfTrip(services, tripId),
+    trip_id: tripId
+  });
+  return unpicked;
+}
+
+/** The office ends a trip the driver left running (D189). The reason goes to the end report and the passengers. */
+export function endTripByOffice(services, operatorId, tripId, { reason, now = Date.now() }) {
+  const text = String(reason || '').trim();
+  if (text.length < 5 || text.length > 200) {
+    return { ok: false, status: 400, code: 'VALIDATION_ERROR', message: 'Cần lý do kết thúc chuyến (từ 5 đến 200 ký tự)' };
+  }
+  const driverTrip = services.driverService?.activeTrips?.get(tripId);
+  if (!driverTrip || (driverTrip.operator_id || DEFAULT_OPERATOR_ID) !== operatorId) {
+    return { ok: false, status: 404, code: 'TRIP_NOT_FOUND', message: 'Chuyến xe không tồn tại' };
+  }
+  const before = { status: driverTrip.status };
+  const ended = services.driverService.endTrip(tripId, { earlyEndReason: `Điều hành kết thúc: ${text}`, endedBy: 'OFFICE' });
+  if (!ended.success) return { ok: false, status: 400, code: ended.code, message: ended.error };
+  if (ended.data.early_end_reason) cancelUnpickedTickets(services, tripId, ended.data.early_end_reason, { now });
+  return { ok: true, before, result: ended.data };
 }

@@ -1,13 +1,14 @@
 /**
  * Office actions on what was sold (spec 3.4, 4.3, 8.4): review of home pickup / drop-off requests (D130) and
- * exceptions on one day's departure: stop or resume online sales, cancel it (D131). Every action is audited.
+ * exceptions on one day's departure: stop or resume online sales, cancel it (D131), end it when the driver left it
+ * running (D189). Every action is audited.
  */
-import { sendSuccess, sendError, parseJsonBody, clientIp } from '../middleware/httpUtils.js';
+import { sendSuccess, sendError, parseJsonBody, clientIp, clientNow } from '../middleware/httpUtils.js';
 import { listHomeRequests, reviewHomeRequest } from '../core/homeReview.js';
-import { cancelTrip, setTripSales } from '../core/tripSales.js';
+import { cancelTrip, setTripSales, endTripByOffice } from '../core/tripSales.js';
 
 const REVIEW_RE = /^\/api\/v1\/ops\/home-requests\/([^/]+)\/([^/]+)\/(confirm|reject)$/;
-const TRIP_RE = /^\/api\/v1\/ops\/trips\/([^/]+)\/(cancel|sales)$/;
+const TRIP_RE = /^\/api\/v1\/ops\/trips\/([^/]+)\/(cancel|sales|end)$/;
 const STATUSES = ['PENDING_REVIEW', 'CONFIRMED', 'REJECTED', 'WITHDRAWN', 'ALL'];
 
 export function handleTripExceptionRoutes(req, res, pathname, parsedUrl, services) {
@@ -59,6 +60,11 @@ export function handleTripExceptionRoutes(req, res, pathname, parsedUrl, service
       if (trip[2] === 'cancel') {
         const r = cancelTrip(services, req.operatorId, tripId, { reason: body.reason, actor });
         reply(r, 'TRIP_CANCEL', tripId, r.ok ? r.result : null);
+        return;
+      }
+      if (trip[2] === 'end') {
+        const r = endTripByOffice(services, req.operatorId, tripId, { reason: body.reason, now: clientNow(body) });
+        reply(r, 'TRIP_END_OFFICE', tripId, r.ok ? r.result : null);
         return;
       }
       if (typeof body.open !== 'boolean') {

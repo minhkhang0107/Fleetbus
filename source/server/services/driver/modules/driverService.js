@@ -30,6 +30,15 @@ const DEBT_LIMIT_PER_TRIP_VND = 1000000;
 // The evening before, the driver prepares early trips and home pickups start 75 min before departure.
 export const DRIVER_UPCOMING_WINDOW_MS = 12 * 3600000;
 
+// A trip may start at most this long before its timetable time (D189).
+const EARLY_START_MS = 60 * 60000;
+
+/** The clock time and the day (dd/mm) of an instant, in Vietnam time. */
+function vnWhen(ms) {
+  const vn = new Date(ms + 7 * 3600000).toISOString();
+  return { hhmm: vn.slice(11, 16), day: `${vn.slice(8, 10)}/${vn.slice(5, 7)}` };
+}
+
 /** A driver session token; `tv` ties it to the account's token version so it can be revoked (H-06). */
 function driverToken(driver, operatorId, now = Date.now()) {
   return signToken(
@@ -1035,7 +1044,7 @@ export class DriverCockpitService {
   /**
    * DRI-005: Start Trip & Activate Active Cockpit (only after the readiness checklist is complete)
    */
-  startTrip(tripId) {
+  startTrip(tripId, { now = Date.now() } = {}) {
     const trip = this.activeTrips.get(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
 
@@ -1047,8 +1056,11 @@ export class DriverCockpitService {
       };
     }
 
+    const blocked = this._startBlock(trip, now);
+    if (blocked) return { success: false, ...blocked };
+
     trip.status = 'IN_TRANSIT';
-    trip.actual_start_time = new Date().toISOString();
+    trip.actual_start_time = new Date(now).toISOString();
     this._event(trip, 'TRIP_STARTED');
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
@@ -1059,6 +1071,31 @@ export class DriverCockpitService {
       success: true,
       message: 'Chuyến đi đã bắt đầu! Đang truyền telemetry GPS về trung tâm điều hành.',
       data: this._publicTrip(trip)
+    };
+  }
+
+  /**
+   * Why this trip may not start now (D189), or null. One bus and one driver run one trip at a time, so a trip
+   * left running blocks the next until it is ended (by the driver or the office). A trip starts at most an hour
+   * before its time: started earlier it would count as departed and stop selling. The demo day keeps its own clock.
+   */
+  _startBlock(trip, now) {
+    const plate = (trip.vehicle_plate || '').trim();
+    const running = [...this.activeTrips.values()].find(o => o !== trip && o.status === 'IN_TRANSIT'
+      && ((trip.driver_id && o.driver_id === trip.driver_id) || (plate && o.vehicle_plate === plate)));
+    if (running) {
+      const when = running.planned_departure_time ? vnWhen(Date.parse(running.planned_departure_time)) : { hhmm: '--:--', day: '--/--' };
+      return {
+        code: 'OTHER_TRIP_RUNNING',
+        error: `Chuyến ${when.hhmm} ngày ${when.day} (biển số ${running.vehicle_plate || plate}) vẫn đang chạy. Kết thúc chuyến đó trước, hoặc gọi điều hành.`
+      };
+    }
+    const depMs = Date.parse(trip.planned_departure_time || '');
+    if (!Number.isFinite(depMs) || (!isProduction() && vnDate(depMs) === DEMO_DATE) || depMs - now <= EARLY_START_MS) return null;
+    const dep = vnWhen(depMs);
+    return {
+      code: 'TRIP_TOO_EARLY',
+      error: `Chưa tới giờ chạy. Chuyến ${dep.hhmm} ngày ${dep.day}, bắt đầu được từ ${vnWhen(depMs - EARLY_START_MS).hhmm}.`
     };
   }
 
@@ -2128,7 +2165,7 @@ export class DriverCockpitService {
    * DRI-017: End Trip at final terminal.
    * Cash is reconciled on the server from the manifest; totals sent by the client are ignored. A trip ends once.
    */
-  endTrip(tripId, { earlyEndReason = null } = {}) {
+  endTrip(tripId, { earlyEndReason = null, endedBy = null } = {}) {
     const trip = this.activeTrips.get(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
     if (trip.status !== 'IN_TRANSIT') {
@@ -2166,6 +2203,7 @@ export class DriverCockpitService {
       total_no_show: count('NO_SHOW'),
       unresolved_passenger_count: trip.manifest.filter(m => !settledStatuses.includes(m.boarding_status)).length,
       early_end_reason: atFinalStop ? null : reason,
+      ended_by: endedBy || 'DRIVER',
       total_cod_collected_vnd: trip.total_cod_collected_vnd,
       total_hail_collected_vnd: trip.total_hail_collected_vnd,
       total_cash_to_handover_vnd: trip.total_cod_collected_vnd + trip.total_hail_collected_vnd,
@@ -2180,9 +2218,11 @@ export class DriverCockpitService {
 
     trip.status = 'COMPLETED';
     trip.completed_at = summary.completed_at;
+    trip.ended_by = summary.ended_by;
+    trip.early_end_reason = summary.early_end_reason;
     trip.total_cash_to_handover_vnd = summary.total_cash_to_handover_vnd;
     trip.financial_reconciliation_status = summary.financial_reconciliation_status;
-    this._event(trip, 'TRIP_COMPLETED', { early_end_reason: summary.early_end_reason });
+    this._event(trip, 'TRIP_COMPLETED', { early_end_reason: summary.early_end_reason, ended_by: summary.ended_by });
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
       this.eventBridge.emit('TRIP_COMPLETED', {

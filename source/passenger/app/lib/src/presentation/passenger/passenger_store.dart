@@ -583,6 +583,87 @@ class Ticket {
   /// D178: the pass shown is the one saved on the device; the server could not be reached.
   bool qrFromCache = false;
 
+  Ticket copyWith({
+    String? id,
+    String? pnr,
+    String? orderId,
+    List<String>? ticketIds,
+    String? tripId,
+    String? route,
+    String? date,
+    String? dep,
+    String? departureTime,
+    String? seat,
+    String? pickup,
+    String? dropoff,
+    int? paid,
+    String? name,
+    TicketStatus? status,
+    String? plate,
+    String? homePickup,
+    String? homeDropoff,
+    String? pickupWindow,
+    String? pickupNotice,
+    String? homePickupStatus,
+    String? homeDropoffStatus,
+    String? homePickupReason,
+    String? homeDropoffReason,
+    bool? past,
+    String? pickupTime,
+    bool? pickupTimeEstimated,
+    String? paymentStatus,
+    String? paymentMethod,
+    int? codDue,
+    TicketRefund? refundInfo,
+    int? delay,
+    int? qrVersion,
+    String? qrValue,
+    String? pin,
+    int? refund,
+    bool? qrFromCache,
+  }) {
+    final t = Ticket(
+      id: id ?? this.id,
+      pnr: pnr ?? this.pnr,
+      orderId: orderId ?? this.orderId,
+      ticketIds: ticketIds ?? this.ticketIds,
+      tripId: tripId ?? this.tripId,
+      route: route ?? this.route,
+      date: date ?? this.date,
+      dep: dep ?? this.dep,
+      departureTime: departureTime ?? this.departureTime,
+      seat: seat ?? this.seat,
+      pickup: pickup ?? this.pickup,
+      dropoff: dropoff ?? this.dropoff,
+      paid: paid ?? this.paid,
+      name: name ?? this.name,
+      status: status ?? this.status,
+      plate: plate ?? this.plate,
+      homePickup: homePickup ?? this.homePickup,
+      homeDropoff: homeDropoff ?? this.homeDropoff,
+      pickupWindow: pickupWindow ?? this.pickupWindow,
+      pickupNotice: pickupNotice ?? this.pickupNotice,
+      homePickupStatus: homePickupStatus ?? this.homePickupStatus,
+      homeDropoffStatus: homeDropoffStatus ?? this.homeDropoffStatus,
+      homePickupReason: homePickupReason ?? this.homePickupReason,
+      homeDropoffReason: homeDropoffReason ?? this.homeDropoffReason,
+      past: past ?? this.past,
+      pickupTime: pickupTime ?? this.pickupTime,
+      pickupTimeEstimated: pickupTimeEstimated ?? this.pickupTimeEstimated,
+      paymentStatus: paymentStatus ?? this.paymentStatus,
+      paymentMethod: paymentMethod ?? this.paymentMethod,
+      codDue: codDue ?? this.codDue,
+      refundInfo: refundInfo ?? this.refundInfo,
+    );
+    t.delay = delay ?? this.delay;
+    t.qrVersion = qrVersion ?? this.qrVersion;
+    t.qrValue = qrValue ?? this.qrValue;
+    t.pin = pin ?? this.pin;
+    t.refund = refund ?? this.refund;
+    t.qrFromCache = qrFromCache ?? this.qrFromCache;
+    return t;
+  }
+
   bool get unpaidCash => paymentStatus == 'UNPAID_COD' && codDue > 0;
 
   /// Whether the ticket is paid and how, as the passenger reads it (D187).
@@ -764,7 +845,7 @@ Color? _hexColor(Object? hex) {
 }
 
 class AppNotice {
-  AppNotice(this.title, this.body, this.time, {this.tripId, this.type = '', this.id = '', this.ticketId, this.isRead = true});
+  AppNotice(this.title, this.body, this.time, {this.tripId, this.type = '', this.id = '', this.ticketId, this.pnr, this.isRead = true});
   final String title;
   final String body;
   final String time;
@@ -772,6 +853,7 @@ class AppNotice {
   final String type;
   final String id;
   final String? ticketId;
+  final String? pnr;
   final bool isRead;
 
   /// D144: the notices that make someone go out to the bus; the app shows them on top of any screen.
@@ -1030,6 +1112,13 @@ class PassengerStore extends ChangeNotifier {
   String? orderId;
   String? orderPnr;
   int orderAmount = 0;
+  /// After an underpaid transfer: what the bank reported and what is still missing (D189).
+  int orderPaidVnd = 0;
+  int orderRemainingVnd = 0;
+  bool get underpaid => orderPaidVnd > 0 && orderRemainingVnd > 0;
+  /// What the passenger still has to transfer.
+  int get amountDue => underpaid ? orderRemainingVnd : orderAmount;
+  String get underpaidNotice => 'Đã nhận ${vnd(orderPaidVnd)}. Còn thiếu ${vnd(orderRemainingVnd)}: chuyển thêm ${vnd(orderRemainingVnd)} với đúng nội dung bên dưới.';
   String bankName = '';
   String accountNumber = '';
   String transferMemo = '';
@@ -1859,6 +1948,8 @@ class PassengerStore extends ChangeNotifier {
     orderId = pay['order_id'];
     orderPnr = pay['pnr'];
     orderAmount = (pay['amount_vnd'] as num).toInt();
+    orderPaidVnd = 0;
+    orderRemainingVnd = 0;
     if (pay['payment_method'] == 'CASH') {
       paymentMethod = 'CASH';
       bankName = '';
@@ -1892,7 +1983,18 @@ class PassengerStore extends ChangeNotifier {
     if (orderId == null) return false;
     final r = await _call(() => api.verifyPaymentStatus(orderId!, manualTrigger: manual));
     lastPaymentCheckCode = r.code;
-    if (!r.ok || r.value!['payment_status'] != 'PAID') return false;
+    final order = r.value?['data'];
+    if (order is Map<String, dynamic>) {
+      orderPaidVnd = (order['paid_amount_vnd'] as num?)?.toInt() ?? orderPaidVnd;
+      orderRemainingVnd = (order['remaining_vnd'] as num?)?.toInt() ?? orderRemainingVnd;
+      // After an underpaid transfer the server's QR asks for the rest only.
+      final qr = (order['payment_details'] as Map?)?['qr_payload'];
+      if (orderRemainingVnd > 0 && qr is String && qr.isNotEmpty) vietQrPayload = qr;
+    }
+    if (!r.ok || r.value!['payment_status'] != 'PAID') {
+      notifyListeners();
+      return false;
+    }
     stopHold();
     await loadTickets();
     final issued = tickets.where((t) => t.pnr == orderPnr).toList();
@@ -1905,27 +2007,12 @@ class PassengerStore extends ChangeNotifier {
       final settledPlate = (first.plate.isNotEmpty ? first.plate : null) ??
           serverPlate ??
           (trip?.plate.isNotEmpty == true ? trip!.plate : '');
-      lastTicket = Ticket(
-        id: first.id,
-        pnr: first.pnr,
+      lastTicket = first.copyWith(
         orderId: first.orderId ?? orderId,
         ticketIds: issued.expand((t) => t.ticketIds.isNotEmpty ? t.ticketIds : [t.id]).toList(),
-        tripId: first.tripId,
-        route: first.route,
-        date: first.date,
-        dep: first.dep,
-        pickupTime: first.pickupTime,
-        pickupTimeEstimated: first.pickupTimeEstimated,
         seat: issued.map((t) => t.seat).join(', '),
-        pickup: first.pickup,
         paid: orderAmount,
-        name: first.name,
-        status: first.status,
         plate: settledPlate,
-        homePickup: first.homePickup,
-        homeDropoff: first.homeDropoff,
-        pickupWindow: first.pickupWindow,
-        paymentStatus: first.paymentStatus,
         codDue: issued.fold<int>(0, (sum, t) => sum + t.codDue),
       );
       for (final t in issued) {
@@ -1933,6 +2020,8 @@ class PassengerStore extends ChangeNotifier {
       }
     }
     orderId = null;
+    orderPaidVnd = 0;
+    orderRemainingVnd = 0;
     seats.clear();
     voucher = null;
     voucherDiscount = 0;
@@ -1947,6 +2036,8 @@ class PassengerStore extends ChangeNotifier {
     if (trip != null) await _call(() => api.releaseHold(trip!.id));
     orderId = null;
     orderPnr = null;
+    orderPaidVnd = 0;
+    orderRemainingVnd = 0;
     seats.clear();
     paymentMethod = defaultPaymentMethod;
     notifyListeners();
@@ -2007,7 +2098,7 @@ class PassengerStore extends ChangeNotifier {
     if (rows is! List) return [];
     return [
       for (final j in rows.cast<Map<String, dynamic>>())
-        Ticket.fromJson(j, past: tab == 'HISTORY')
+        Ticket.fromJson(j, past: tab == 'HISTORY' || tab == 'CANCELLED')
           ..qrValue = j['_qr'] as String?
           ..qrVersion = (j['_qr_version'] as num?)?.toInt() ?? 1
           ..pin = j['_pin'] as String?,
@@ -2020,24 +2111,35 @@ class PassengerStore extends ChangeNotifier {
     notifyListeners();
     final up = await _call(() => api.getTicketWallet(tab: 'UPCOMING'));
     final past = await _call(() => api.getTicketWallet(tab: 'HISTORY'));
+    final cancelled = await _call(() => api.getTicketWallet(tab: 'CANCELLED'));
     List<Map<String, dynamic>> rows(ApiResult<Map<String, dynamic>> r) => ((r.value!['value'] ?? r.value) as List).cast<Map<String, dynamic>>();
 
     // D178: without a network a tab keeps what is on screen, or what was saved on the device; never an empty wallet.
     Map<String, dynamic>? cache;
-    if (up.code == 'NETWORK' || past.code == 'NETWORK') {
+    if (up.code == 'NETWORK' || past.code == 'NETWORK' || cancelled.code == 'NETWORK') {
       final raw = (await SharedPreferences.getInstance()).getString(_walletCacheKey() ?? '');
       try {
         cache = raw == null ? null : jsonDecode(raw) as Map<String, dynamic>;
       } catch (_) {}
     }
     List<Ticket> offlineTab(String tab) {
-      final shown = tickets.where((t) => t.past == (tab == 'HISTORY')).toList();
+      final shown = switch (tab) {
+        'UPCOMING' => tickets.where((t) => !t.past).toList(),
+        'CANCELLED' => tickets.where((t) => t.past && t.status == TicketStatus.cancelled).toList(),
+        _ => tickets.where((t) => t.past && t.status != TicketStatus.cancelled).toList(),
+      };
       return shown.isNotEmpty ? shown : _cachedTickets(cache, tab);
     }
 
+    // History holds the trips taken and the cancelled tickets (with their refund), latest departure first.
+    final history = <Ticket>[
+      if (past.ok) ...rows(past).map((j) => Ticket.fromJson(j, past: true)) else if (past.code == 'NETWORK') ...offlineTab('HISTORY'),
+      if (cancelled.ok) ...rows(cancelled).map((j) => Ticket.fromJson(j, past: true)) else if (cancelled.code == 'NETWORK') ...offlineTab('CANCELLED'),
+    ]..sort((a, b) => (b.departureTime ?? '').compareTo(a.departureTime ?? ''));
+
     final list = <Ticket>[
       if (up.ok) ...rows(up).map(Ticket.fromJson) else if (up.code == 'NETWORK') ...offlineTab('UPCOMING'),
-      if (past.ok) ...rows(past).map((j) => Ticket.fromJson(j, past: true)) else if (past.code == 'NETWORK') ...offlineTab('HISTORY'),
+      ...history,
     ];
     for (final t in list) {
       final old = tickets.where((o) => o.id == t.id).firstOrNull;
@@ -2050,9 +2152,9 @@ class PassengerStore extends ChangeNotifier {
     }
     tickets = list;
 
-    if (up.ok && past.ok) {
+    if (up.ok && past.ok && cancelled.ok) {
       walletOfflineSince = null;
-      _walletRows = {'UPCOMING': rows(up), 'HISTORY': rows(past)};
+      _walletRows = {'UPCOMING': rows(up), 'HISTORY': rows(past), 'CANCELLED': rows(cancelled)};
       await _saveWalletCache();
       for (final tripId in tickets.where((t) => !t.past && t.active).map((t) => t.tripId).toSet()) {
         final d = await _call(() => api.getDisruptions(tripId));
@@ -2061,7 +2163,7 @@ class PassengerStore extends ChangeNotifier {
           t.delay = (minutes as num).toInt();
         }
       }
-    } else if (up.code == 'NETWORK' || past.code == 'NETWORK') {
+    } else if (up.code == 'NETWORK' || past.code == 'NETWORK' || cancelled.code == 'NETWORK') {
       walletOfflineSince = tickets.isEmpty ? null : DateTime.tryParse('${cache?['saved_at']}') ?? walletOfflineSince ?? DateTime.now();
     }
     loadingTickets = false;
@@ -2377,7 +2479,7 @@ class PassengerStore extends ChangeNotifier {
     final list = ((r.value!['value'] ?? r.value) as List).cast<Map<String, dynamic>>();
     notices = [
       for (final n in list)
-        AppNotice(n['title'] ?? '', n['body'] ?? '', _ago(n['created_at']), tripId: n['payload']?['trip_id'], type: n['type'] ?? '', id: '${n['id'] ?? ''}', ticketId: n['payload']?['ticket_id'] as String?, isRead: n['is_read'] != false),
+        AppNotice(n['title'] ?? '', n['body'] ?? '', _ago(n['created_at']), tripId: n['payload']?['trip_id'], type: n['type'] ?? '', id: '${n['id'] ?? ''}', ticketId: n['payload']?['ticket_id'] as String?, pnr: n['payload']?['pnr'] as String?, isRead: n['is_read'] != false),
     ];
     unread = list.any((n) => n['is_read'] == false);
     // D144: a new "the bus is coming" notice shows on top of the app; the first load only learns what is there.

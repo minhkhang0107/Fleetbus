@@ -119,6 +119,7 @@ export const API_CATALOG = [
   { method: 'PATCH', path: '/api/v1/ops/schedules/{scheduleId}', screen: 'MGR-032', summary: 'Change a fixed departure from the first day not on sale' },
   { method: 'DELETE', path: '/api/v1/ops/schedules/{scheduleId}/changes', screen: 'MGR-032', summary: 'Cancel the changes not on sale yet' },
   { method: 'POST', path: '/api/v1/ops/trips/{tripId}/cancel', screen: 'MGR-014', summary: 'Cancel one day\'s departure and refund its tickets in full' },
+  { method: 'POST', path: '/api/v1/ops/trips/{tripId}/end', screen: 'MGR-014', summary: 'End a trip the driver left running; passengers not picked up are refunded' },
   { method: 'POST', path: '/api/v1/ops/trips/{tripId}/sales', screen: 'MGR-014', summary: 'Stop or resume online sales of a departure' },
   { method: 'GET', path: '/api/v1/ops/home-requests', screen: 'MGR-033', summary: 'Home pickup and drop-off requests by status' },
   { method: 'POST', path: '/api/v1/ops/home-requests/{orderId}/{side}/confirm', screen: 'MGR-033', summary: 'Confirm a home pickup or drop-off' },

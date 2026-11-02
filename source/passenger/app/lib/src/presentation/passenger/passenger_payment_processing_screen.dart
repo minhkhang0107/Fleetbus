@@ -58,7 +58,9 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
     setState(() {
       _checking = false;
       if (manual && !paid) {
-        if (store.lastPaymentCheckCode == 'NETWORK') {
+        if (store.underpaid) {
+          _notYet = store.underpaidNotice;
+        } else if (store.lastPaymentCheckCode == 'NETWORK') {
           _notYet = 'Không kết nối được máy chủ. Tiền bạn đã chuyển không mất — kiểm tra mạng rồi bấm lại.';
         } else {
           _notYet = 'Chưa nhận được tiền. Hệ thống vẫn kiểm tra mỗi 3 giây; kiểm tra lại nội dung chuyển khoản.';
@@ -86,7 +88,7 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
       await saver.savePaymentQr(
         context: context,
         qrData: store.vietQrPayload,
-        amount: store.orderAmount,
+        amount: store.amountDue,
         memo: store.transferMemo,
       );
     } finally {
@@ -123,13 +125,37 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
         appBar: TopBar(title: 'Chuyển khoản', showBack: false, trailing: pnr.isEmpty ? null : PnrTag(pnr)),
         body: Column(children: [
           const HoldBanner(),
+          if (store.underpaid)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: PTokens.warnSoft,
+                border: Border.all(color: PTokens.warn),
+                borderRadius: BorderRadius.circular(PTokens.radiusControl),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.warning_amber_rounded, size: 20, color: PTokens.warnInk),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      store.underpaidNotice,
+                      style: sans(size: 13, weight: FontWeight.w600, color: PTokens.warnInk, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: PSplit(left: [
               AppCard(
                 padding: const EdgeInsets.all(16),
                 child: Column(children: [
                   Semantics(
-                    label: 'Mã VietQR cho đơn $pnr, số tiền ${vnd(store.orderAmount)}',
+                    label: 'Mã VietQR cho đơn $pnr, số tiền ${vnd(store.amountDue)}',
                     image: true,
                     child: Container(
                       padding: const EdgeInsets.all(8),
@@ -150,7 +176,7 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
                 child: Column(children: [
                   _row('Ngân hàng', store.bankName),
                   _row('Số tài khoản', store.accountNumber, copy: store.accountNumber, isMono: true),
-                  _row('Số tiền', vnd(store.orderAmount), copy: '${store.orderAmount}', isMono: true),
+                  _row('Số tiền', vnd(store.amountDue), copy: '${store.amountDue}', isMono: true),
                   _row('Nội dung', memo, copy: memo, isMono: true, color: PTokens.pnr, last: true),
                 ]),
               ),
