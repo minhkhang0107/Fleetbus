@@ -13,9 +13,9 @@ import { verifyToken } from '../core/tokens.js';
 import { applyHomeRun, findShareHolder, homeTarget } from '../core/homeTracking.js';
 import { homeConfirmed, publicRouteService, resolveHomeBooking, routeServiceConfig } from '../core/serviceAreas.js';
 import { isProduction, isVipPassengerPhone } from '../config.js';
-import { addDays, checkBookableDeparture, checkTravelDate, serviceCalendar } from '../core/serviceDate.js';
+import { addDays, checkTravelDate, serviceCalendar } from '../core/serviceDate.js';
 import { findLiveBanner, listLiveBanners } from '../core/promoBanners.js';
-import { saleBlock, saleStatus } from '../core/tripSales.js';
+import { bookingBlock, bookUntil, effectiveDepartureMs, isDemoDeparture, saleStatus } from '../core/tripSales.js';
 import { withdrawHomeRequest } from '../core/homeReview.js';
 import { changeTicketStops } from '../core/ticketChanges.js';
 import { publicFixedEndpoints } from '../core/fixedEndpoints.js';
@@ -377,14 +377,36 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       }
       date = day.date;
     }
+    const now = clientNow(parsedUrl.searchParams);
     const found = searchService.searchTrips({ originCity: origin, destinationCity: dest, vehicleType, timeSlot, date, operatorId: req.operatorId });
-    // Runs of the day that already left are not sold.
-    // Cancelled or closed departures and suspended routes are not shown as bookable (spec 6.4, D131, D132).
-    const onSale = (found.data || []).filter(t => !saleBlock(services, t.trip_id, req.operator?.service_config, t.route_id));
-    const listed = date ? onSale.filter(t => checkBookableDeparture(t.departure_time, Date.now(), { production: isProduction() }).ok) : onSale;
-    // Each trip says how its route offers pickup / drop-off (stop style and modes, set per company and route).
-    // With stop coordinates and the road shape, so the app can draw the route line without another call.
-    sendSuccess(res, listed.map(t => withAssignedBus(services, { ...(searchService.getTripDetail(t.trip_id, req.operatorId).data || t), sale_status: saleStatus(services, t.trip_id), service: publicRouteService(req.operator?.service_config, t.route_id) })));
+    const SIX_HOURS_MS = 6 * 3600 * 1000;
+    const listed = [];
+    for (const t of (found.data || [])) {
+      const detail = searchService.getTripDetail(t.trip_id, req.operatorId).data || t;
+      const block = bookingBlock(services, detail, req.operator?.service_config, { now, production: isProduction() });
+      if (block?.code === 'ROUTE_SUSPENDED' || block?.code === 'TRIP_COMPLETED') {
+        continue;
+      }
+      // A run that left hours ago is no longer worth a greyed card (D185).
+      const effectiveDeparture = effectiveDepartureMs(services, detail);
+      if (!isDemoDeparture(detail.departure_time, isProduction()) && now - effectiveDeparture > SIX_HOURS_MS) {
+        continue;
+      }
+      const bookable = !block;
+      const block_code = block ? block.code : null;
+      const block_message = block ? block.message : null;
+      const book_until = block ? block.book_until : bookUntil(services, detail, req.operator?.service_config);
+      listed.push(withAssignedBus(services, {
+        ...detail,
+        bookable,
+        block_code,
+        block_message,
+        book_until,
+        sale_status: saleStatus(services, detail.trip_id),
+        service: publicRouteService(req.operator?.service_config, detail.route_id)
+      }));
+    }
+    sendSuccess(res, listed);
     return true;
   }
 
@@ -399,9 +421,22 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
     // No stops asked means the whole route; stops given are checked against the trip (PAX-008, BR-SEAT-001)
     const pickupId = parsedUrl.searchParams.get('pickup_stop_id');
     const dropoffId = parsedUrl.searchParams.get('dropoff_stop_id');
-    const seatMap = seatMapService.getSeatMap(tripId, pickupId, dropoffId);
+    const now = clientNow(parsedUrl.searchParams);
+    const seatMap = seatMapService.getSeatMap(tripId, pickupId, dropoffId, now);
     if (seatMap.success) {
-      sendSuccess(res, seatMap.data);
+      const tripDetail = searchService.getTripDetail(tripId, req.operatorId).data || { trip_id: tripId };
+      const block = bookingBlock(services, tripDetail, req.operator?.service_config, { now, production: isProduction() });
+      const bookable = !block;
+      const block_code = block ? block.code : null;
+      const block_message = block ? block.message : null;
+      const book_until = block ? block.book_until : bookUntil(services, tripDetail, req.operator?.service_config);
+      sendSuccess(res, {
+        ...seatMap.data,
+        bookable,
+        block_code,
+        block_message,
+        book_until
+      });
     } else {
       sendError(res, seatMap.error, seatMap.code, seatMap.code === 'TRIP_NOT_FOUND' ? 404 : 400);
     }
@@ -417,18 +452,15 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       return true;
     }
     parseJsonBody(req).then(body => {
+      const now = clientNow(body);
       const userId = req.identity?.sub || body.userId;
       if (!userId) {
         sendError(res, 'Thiếu thông tin người dùng', 'USER_REQUIRED', 400);
         return;
       }
       // The trip must still be on sale; the clock is the server's (a client "now" is honoured only in tests).
-      const bookable = checkBookableDeparture(searchService.getTripDetail(tripId, req.operatorId).data?.departure_time, Date.now(), { production: isProduction() });
-      if (!bookable.ok) {
-        sendError(res, bookable.message, bookable.code, 409);
-        return;
-      }
-      const blocked = saleBlock(services, tripId, req.operator?.service_config, searchService.getTripDetail(tripId, req.operatorId).data?.route_id);
+      const tripDetail = searchService.getTripDetail(tripId, req.operatorId).data || { trip_id: tripId };
+      const blocked = bookingBlock(services, tripDetail, req.operator?.service_config, { now, production: isProduction() });
       if (blocked) {
         sendError(res, blocked.message, blocked.code, 409);
         return;
@@ -460,6 +492,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       const seatCodes = body.selectedSeats?.map(s => typeof s === 'string' ? s : s.seat_code) || body.seatCodes || [];
       const tripId = body.tripId;
       const userId = req.identity?.sub || body.userId || body.user_id;
+      const now = clientNow(body);
 
       if (!tripId) {
         sendError(res, 'Thiếu mã chuyến xe', 'TRIP_REQUIRED', 400);
@@ -488,14 +521,7 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         return;
       }
       const tripDetail = tripDetailRes.data;
-      const bookable = checkBookableDeparture(tripDetail.departure_time, Date.now(), { production: isProduction() });
-      if (!bookable.ok) {
-        sendError(res, bookable.message, bookable.code, 409);
-        return;
-      }
-
-      // Cancelled, closed or suspended since the hold: the hold no longer sells (D131, D132).
-      const blocked = saleBlock(services, tripId, req.operator?.service_config, tripDetail.route_id);
+      const blocked = bookingBlock(services, tripDetail, req.operator?.service_config, { now, production: isProduction() });
       if (blocked) {
         sendError(res, blocked.message, blocked.code, 409);
         return;
@@ -592,7 +618,9 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         dropoffStop: (tripDetail.stops || []).find(s => s.stop_id === holdCheck.data.dropoff_stop_id)?.name || body.dropoffStop || 'Bến xe Phía Bắc Thanh Hóa',
         voucherCode: applied?.code || null,
         discountVnd: applied?.discount_amount || 0,
-        paymentMethod
+        paymentMethod,
+        now,
+        production: isProduction()
       });
 
       // The code's use is taken now and given back if the payment window closes unpaid.
@@ -991,22 +1019,6 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       sendSuccess(res, result.data);
     } else {
       sendError(res, result.error, result.code, 404);
-    }
-    return true;
-  }
-
-  // GET /api/v1/passenger/profile (PAX-022)
-  if (req.method === 'GET' && pathname === '/api/v1/passenger/profile') {
-    const token = (req.headers.authorization || '').replace(/^Bearer /, '');
-    const profile = authService.getProfile(token);
-    if (profile.success) {
-      const data = { ...profile.data };
-      if (data.phone) {
-        data.wallet_balance_vnd = paymentService.getWalletBalance(data.phone, req.operatorId);
-      }
-      sendSuccess(res, data);
-    } else {
-      sendError(res, profile.error, profile.code, 401);
     }
     return true;
   }

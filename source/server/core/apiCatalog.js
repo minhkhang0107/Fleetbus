@@ -40,6 +40,7 @@ export const API_CATALOG = [
   { method: 'POST', path: '/api/v1/passenger/tickets/{ticketId}/stops', screen: 'PAX-017', summary: 'Move pickup or drop-off inside the paid segment' },
   { method: 'POST', path: '/api/v1/passenger/tickets/{ticketId}/home-request/withdraw', screen: 'PAX-017', summary: 'Withdraw a home pickup or drop-off still under review' },
   { method: 'GET', path: '/api/v1/passenger/profile', screen: 'PAX-022', summary: 'Profile from the session token' },
+  { method: 'PATCH', path: '/api/v1/passenger/profile', screen: 'PAX-022', summary: 'Change name or photo (never the phone)' },
   { method: 'DELETE', path: '/api/v1/passenger/me', screen: 'PAX-022', summary: 'Delete passenger account and personal data' },
   { method: 'GET', path: '/api/v1/trips/{tripId}/replacement-info', screen: 'PAX-024', summary: 'Vehicle replacement notice' },
   { method: 'GET', path: '/api/v1/trips/{tripId}/disruptions', screen: 'PAX-025', summary: 'Delay and disruption notice' },
@@ -158,5 +159,6 @@ export const API_CATALOG = [
   { method: 'POST', path: '/api/v1/passenger/tickets/{ticketId}/share', screen: 'PAX-018', summary: 'Share ticket tracking' },
   { method: 'GET', path: '/api/v1/service-config', screen: 'PAX-001', summary: 'Service config' },
   { method: 'POST', path: '/api/v1/service-areas/check', screen: 'PAX-005', summary: 'Check service area' },
+  { method: 'GET', path: '/api/v1/geocode/reverse', screen: 'PAX-005', summary: 'Street address of a map point (home pickup)' },
   { method: 'GET', path: '/api/v1/legal', screen: 'SH-006', summary: 'Terms of use and model and data notice of one app' }
 ];

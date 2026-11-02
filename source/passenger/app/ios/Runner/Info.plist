@@ -30,6 +30,10 @@
 	<string>BusGo dùng vị trí của bạn khi app đang mở để gợi ý điểm đón gần nhất và ghim địa chỉ đón tận nhà.</string>
 
 	<!-- Photo Library for Saving E-Tickets -->
+	<key>NSCameraUsageDescription</key>
+	<string>BusGo dùng camera khi bạn chụp ảnh đại diện cho tài khoản.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>BusGo mở thư viện ảnh khi bạn chọn ảnh đại diện cho tài khoản.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>BusGo lưu ảnh mã QR thanh toán vào thư viện ảnh của bạn.</string>
 

@@ -85,6 +85,18 @@ void main() {
     expect(find.text('Thanh Hóa'), findsOneWidget);
   });
 
+  testWidgets('a today / tomorrow / day-after tile opens the search for that day at once (D184)', (tester) async {
+    final s = await store();
+    await tester.pumpWidget(host(s, const PassengerHomeScreen()));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Ngày mai'));
+    await tester.tap(find.text('Ngày mai'));
+    await tester.pumpAndSettle();
+    expect(find.byType(PassengerSearchResultsScreen), findsOneWidget);
+    expect(s.date, '2026-10-12');
+    expect(s.trips.single.id, 't_tomorrow');
+  });
+
   testWidgets('picking any day never changes the height of the date field or the chips', (tester) async {
     final s = await store();
     await tester.pumpWidget(host(s, const SingleChildScrollView(child: TravelDateField())));

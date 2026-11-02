@@ -45,11 +45,12 @@ describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
     assert.ok(content.includes('<string>vn.busgo.passenger</string>'), 'CFBundleIdentifier must be vn.busgo.passenger');
     assert.ok(content.includes('NSLocationWhenInUseUsageDescription'), 'NSLocationWhenInUseUsageDescription must be set');
     assert.ok(content.includes('BusGo dùng vị trí của bạn khi app đang mở để gợi ý điểm đón gần nhất và ghim địa chỉ đón tận nhà.'), 'NSLocationWhenInUseUsageDescription must match policy text');
-    assert.ok(!content.includes('NSCameraUsageDescription'), 'NSCameraUsageDescription must not be set');
+    // The profile photo is taken with the camera or picked from the library (D186).
+    assert.ok(content.includes('BusGo dùng camera khi bạn chụp ảnh đại diện cho tài khoản.'), 'NSCameraUsageDescription must explain the profile photo');
     assert.ok(!content.includes('NSLocationAlwaysAndWhenInUseUsageDescription'), 'NSLocationAlwaysAndWhenInUseUsageDescription must not be set');
-    // The QR image is only added to the photos (gal asks for add-only access); the app never reads them.
+    // The QR image is added to the photos; the library is read only to pick a profile photo (D186).
     assert.ok(content.includes('NSPhotoLibraryAddUsageDescription'), 'NSPhotoLibraryAddUsageDescription must be set');
-    assert.ok(!content.includes('NSPhotoLibraryUsageDescription'), 'NSPhotoLibraryUsageDescription must not be set');
+    assert.ok(content.includes('BusGo mở thư viện ảnh khi bạn chọn ảnh đại diện cho tài khoản.'), 'NSPhotoLibraryUsageDescription must explain the profile photo');
   });
 
   it('TC-MOB-03: Flutter Dart App entry point must instantiate BusGoPassengerApp with Splash', () => {

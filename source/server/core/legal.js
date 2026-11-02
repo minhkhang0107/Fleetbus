@@ -3,8 +3,8 @@
  * The server is the single source so a change of terms needs no app release; open-source licences are listed by each client.
  */
 
-export const LEGAL_VERSION = '1.1';
-export const LEGAL_EFFECTIVE_DATE = '2026-10-29';
+export const LEGAL_VERSION = '1.2';
+export const LEGAL_EFFECTIVE_DATE = '2026-10-30';
 /** Where people write about their personal data (privacy policy, deletion requests). */
 export const PRIVACY_CONTACT_EMAIL = process.env.FLEETBUS_PRIVACY_EMAIL || 'mjnhkhang1@gmail.com';
 export const LEGAL_APPS = ['passenger', 'driver', 'manager'];
@@ -123,7 +123,7 @@ const PRIVACY = {
     },
     {
       heading: 'Dữ liệu chúng tôi thu thập',
-      body: '(1) Số điện thoại để đăng nhập bằng mã OTP. (2) Họ tên và số điện thoại của hành khách trên vé. (3) Địa chỉ và vị trí ghim trên bản đồ khi bạn đặt đón hoặc trả tận nhà. (4) Vé, đơn, số tiền, nội dung chuyển khoản và mã giao dịch ngân hàng của vé; chúng tôi không thu thập số thẻ hay mật khẩu ngân hàng. (5) Số tài khoản, ngân hàng và tên chủ tài khoản bạn nhập để nhận tiền hoàn khi hủy vé đã chuyển khoản. (6) Vị trí của điện thoại, chỉ khi bạn cho phép và chỉ lúc app đang mở, để gợi ý điểm đón; app không theo dõi vị trí của bạn khi chạy nền. (7) Mã thiết bị nhận thông báo đẩy. (8) Địa chỉ IP và thời điểm truy cập, để chống lạm dụng và bảo vệ tài khoản.'
+      body: '(1) Số điện thoại để đăng nhập bằng mã OTP. (2) Họ tên và số điện thoại của hành khách trên vé. (3) Địa chỉ và vị trí ghim trên bản đồ khi bạn đặt đón hoặc trả tận nhà. (4) Vé, đơn, số tiền, nội dung chuyển khoản và mã giao dịch ngân hàng của vé; chúng tôi không thu thập số thẻ hay mật khẩu ngân hàng. (5) Số tài khoản, ngân hàng và tên chủ tài khoản bạn nhập để nhận tiền hoàn khi hủy vé đã chuyển khoản. (6) Vị trí của điện thoại, chỉ khi bạn cho phép và chỉ lúc app đang mở, để gợi ý điểm đón; app không theo dõi vị trí của bạn khi chạy nền. (7) Mã thiết bị nhận thông báo đẩy. (8) Địa chỉ IP và thời điểm truy cập, để chống lạm dụng và bảo vệ tài khoản. (9) Tên và ảnh đại diện bạn tự đặt trong mục Cá nhân, nếu có; ảnh chỉ hiện trong app của bạn, không gửi cho tài xế, và bị xóa khi bạn xóa ảnh hoặc xóa tài khoản.'
     },
     {
       heading: 'Mục đích sử dụng',
@@ -131,7 +131,7 @@ const PRIVACY = {
     },
     {
       heading: 'Chia sẻ dữ liệu',
-      body: 'Nhà xe và tài xế của chuyến thấy tên, ghế, điểm đón và trả của bạn. Tài xế thấy số điện thoại đã che; khi cần gọi bạn lúc đón, tài xế mở được số đầy đủ và mỗi lần mở được ghi vào nhật ký chuyến. Nhà cung cấp tin nhắn SMS nhận số điện thoại và nội dung tin (mã OTP, thông báo chuyến). Google Firebase Cloud Messaging nhận mã thiết bị và nội dung thông báo ngắn. Máy chủ bản đồ OpenStreetMap France nhận địa chỉ IP và vùng bản đồ bạn xem. Ngân hàng và cổng đối soát chuyển khoản của nhà xe nhận thông tin giao dịch bạn chuyển. Người nhận link theo dõi hoặc vé bạn chia sẻ thấy chuyến và điểm đón của vé đó. Cơ quan nhà nước có thẩm quyền khi pháp luật yêu cầu.'
+      body: 'Nhà xe và tài xế của chuyến thấy tên, ghế, điểm đón và trả của bạn. Tài xế thấy số điện thoại đã che; khi cần gọi bạn lúc đón, tài xế mở được số đầy đủ và mỗi lần mở được ghi vào nhật ký chuyến. Nhà cung cấp tin nhắn SMS nhận số điện thoại và nội dung tin (mã OTP, thông báo chuyến). Google Firebase Cloud Messaging nhận mã thiết bị và nội dung thông báo ngắn. Máy chủ bản đồ OpenStreetMap France nhận địa chỉ IP và vùng bản đồ bạn xem. Khi bạn ghim vị trí đón hoặc trả tận nhà, máy chủ BusGo gửi tọa độ điểm ghim (không kèm tên hay số điện thoại) tới dịch vụ địa chỉ Nominatim của OpenStreetMap để điền sẵn địa chỉ. Ngân hàng và cổng đối soát chuyển khoản của nhà xe nhận thông tin giao dịch bạn chuyển. Người nhận link theo dõi hoặc vé bạn chia sẻ thấy chuyến và điểm đón của vé đó. Cơ quan nhà nước có thẩm quyền khi pháp luật yêu cầu.'
     },
     {
       heading: 'Lưu trữ và bảo mật',

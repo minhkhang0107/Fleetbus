@@ -77,6 +77,7 @@ describe('Spec conformance: seat inventory by segment', () => {
     assert.strictEqual(ipn.status, 200, JSON.stringify(ipn.body));
     return ipn.body.data.issued_tickets;
   }
+  const pos = (seatCodes, pickupStopId, dropoffStopId) => api('/api/v1/ops/pos/orders', { method: 'POST', token: cashier, body: { tripId: TRIP, passengerName: 'Khach Quay', phone: '0933555777', seatCodes, pickupStopId, dropoffStopId } });
   const matrix = async () => (await api(`/api/v1/ops/trips/${TRIP}/seat-matrix`, { token: dispatcher })).body.data;
   const seatRow = async (code) => (await matrix()).seats.find((s) => s.seat_code === code);
   const segmentStates = async (code) => (await seatRow(code)).segments.map((s) => s.state);
@@ -142,29 +143,31 @@ describe('Spec conformance: seat inventory by segment', () => {
   });
 
   describe('on the road', () => {
+    let ticketA06;
+    let ticketB05;
     before(async () => {
+      const a = await passenger();
+      [ticketA06] = await buy(a, ['A06'], GB, PB);
+      [ticketB05] = await buy(a, ['B05'], GB, NB);
       assert.strictEqual((await api(`/api/v1/driver/trips/${TRIP}/readiness`, { method: 'POST', token: driver, body: { checklist: READY } })).status, 200);
       assert.strictEqual((await api(`/api/v1/driver/trips/${TRIP}/start`, { method: 'POST', token: driver })).status, 200);
     });
     const arrive = (stop) => api(`/api/v1/driver/trips/${TRIP}/stops/${stop}/arrive`, { method: 'POST', token: driver });
 
     it('TC-SEG-06: a no-show frees the seat from the stop the bus has reached, not the part already driven (DRI-011, OQ-028)', async () => {
-      const a = await passenger();
-      const [ticket] = await buy(a, ['A06'], GB, PB);
       assert.deepStrictEqual(await segmentStates('A06'), ['BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'AVAILABLE']);
       assert.strictEqual((await arrive(GB)).status, 200);
       assert.strictEqual((await arrive(NB)).status, 200);
-      const res = await api(`/api/v1/driver/trips/${TRIP}/tickets/${ticket.ticket_id}/no-show`, { method: 'POST', token: driver, body: { reason: 'Không đến' } });
+      const res = await api(`/api/v1/driver/trips/${TRIP}/tickets/${ticketA06.ticket_id}/no-show`, { method: 'POST', token: driver, body: { reason: 'Không đến' } });
       assert.strictEqual(res.status, 200, JSON.stringify(res.body));
       assert.deepStrictEqual(await segmentStates('A06'), ['BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'AVAILABLE', 'AVAILABLE', 'AVAILABLE']);
       const b = await passenger();
-      assert.strictEqual((await hold(b, ['A06'], NB, PB)).status, 200, 'the seat can be sold again for the rest of the trip');
+      assert.strictEqual((await hold(b, ['A06'], NB, PB)).status, 409, 'online booking refused once the bus is in transit (D185)');
+      assert.strictEqual((await pos(['A06'], NB, PB)).status, 201, 'the counter can still sell for the rest of the trip');
       assert.strictEqual((await hold(await passenger(), ['A06'], GB, NB)).status, 409, 'the part already driven stays booked');
     });
 
     it('TC-SEG-07: a hail passenger takes a seat that is free from the current stop to the drop-off, even if sold earlier on the route (DRI-007)', async () => {
-      const a = await passenger();
-      await buy(a, ['B05'], GB, NB);
       await arrive(NB);
       const hail = await api(`/api/v1/driver/trips/${TRIP}/onboard-hail`, { method: 'POST', token: driver, body: { seat_code: 'B05', dropoff_stop_id: PB } });
       assert.strictEqual(hail.status, 201, JSON.stringify(hail.body));
@@ -173,8 +176,7 @@ describe('Spec conformance: seat inventory by segment', () => {
 
       const taken = await api(`/api/v1/driver/trips/${TRIP}/onboard-hail`, { method: 'POST', token: driver, body: { seat_code: 'B05', dropoff_stop_id: PB } });
       assert.strictEqual(taken.status, 409);
-      const b = await passenger();
-      await buy(b, ['A05'], NB, PB);
+      assert.strictEqual((await pos(['A05'], NB, PB)).status, 201, 'counter can sell from current stop onwards');
       const clash = await api(`/api/v1/driver/trips/${TRIP}/onboard-hail`, { method: 'POST', token: driver, body: { seat_code: 'A05', dropoff_stop_id: PB } });
       assert.strictEqual(clash.status, 409, 'a seat sold from the current stop onwards is not free');
     });

@@ -277,7 +277,8 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
         if (!pWide(context)) gap(14),
         AppCard(
           padding: const EdgeInsets.all(16),
-          child: Column(children: [
+          // Start-aligned: a block narrower than the card (home pickup) must line up with the other fields.
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Expanded(child: KeyValue('Mã đặt chỗ', t.pnr, isMono: true, valueColor: PTokens.pnr)),
               Expanded(child: KeyValue('Ghế', t.seat, isMono: true)),
@@ -324,7 +325,9 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
               ),
             ],
             gap(12),
-            Align(alignment: Alignment.centerLeft, child: KeyValue('Hành khách', t.name)),
+            KeyValue('Hành khách', t.name),
+            gap(12),
+            KeyValue('Thanh toán', t.paymentLabel, valueColor: t.unpaidCash ? PTokens.warnInk : PTokens.success),
           ]),
         ),
         if (t.active) ...[

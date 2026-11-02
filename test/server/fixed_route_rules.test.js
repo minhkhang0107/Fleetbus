@@ -153,6 +153,7 @@ describe('Fixed routes, schedules and home service rules', () => {
       const t = services.paymentService.tickets.get(b.ticket.ticket_id);
       assert.deepStrictEqual([t.home_pickup.status, t.home_pickup.reviewed_by], ['REJECTED', 'system']);
       assert.strictEqual(refundsOf(b.order.pnr)[0].source, 'HOME_SERVICE_REFUSED');
+      services.managerService.findTrip('trp_hn_th_01').status = 'READY';
     });
   });
 
@@ -162,7 +163,11 @@ describe('Fixed routes, schedules and home service rules', () => {
       const close = await request(`/api/v1/ops/trips/${run('trp_hn_th_03')}/sales`, { method: 'POST', token: dispatcher, body: { open: false, reason: 'Xe đầy, bán tại bến' } });
       assert.strictEqual(close.status, 200, JSON.stringify(close.body));
       assert.strictEqual(close.body.data.sale_status, 'SALES_CLOSED');
-      assert.ok(!(await search(`&date=${day2}`)).includes(run('trp_hn_th_03')));
+      const searchRes = (await request(`/api/v1/trips/search?origin=${encodeURIComponent('Hà Nội')}&destination=${encodeURIComponent('Thanh Hóa')}&date=${day2}`)).body.data;
+      const closedTrip = searchRes.find(t => t.trip_id === run('trp_hn_th_03'));
+      assert.ok(closedTrip);
+      assert.strictEqual(closedTrip.bookable, false);
+      assert.strictEqual(closedTrip.block_code, 'SALES_CLOSED');
       assert.strictEqual((await hold(run('trp_hn_th_03'), 'stp_hn_gb', 'stp_th_sam_son')).res.body.code, 'SALES_CLOSED');
       await request(`/api/v1/ops/trips/${run('trp_hn_th_03')}/sales`, { method: 'POST', token: dispatcher, body: { open: true } });
       assert.ok((await search(`&date=${day2}`)).includes(run('trp_hn_th_03')));
@@ -190,7 +195,11 @@ describe('Fixed routes, schedules and home service rules', () => {
       const refund = refundsOf(ticket.pnr)[0];
       assert.deepStrictEqual([refund.source, refund.amount_vnd, refund.status], ['OPERATOR_CANCEL', ticket.fare_vnd, 'REFUND_REQUESTED'], 'refund requested, not claimed as paid back');
       assert.ok(notifications().some(n => n.type === 'TRIP_CANCELLED' && n.body.includes('ngập')));
-      assert.ok(!(await search(`&date=${day2}`)).includes(run('trp_hn_th_02')));
+      const searchCancelled = (await request(`/api/v1/trips/search?origin=${encodeURIComponent('Hà Nội')}&destination=${encodeURIComponent('Thanh Hóa')}&date=${day2}`)).body.data;
+      const cancelledTrip = searchCancelled.find(t => t.trip_id === run('trp_hn_th_02'));
+      assert.ok(cancelledTrip);
+      assert.strictEqual(cancelledTrip.bookable, false);
+      assert.strictEqual(cancelledTrip.block_code, 'TRIP_CANCELLED');
       assert.strictEqual((await hold(run('trp_hn_th_02'), 'stp_hn_gb', 'stp_th_pb')).res.body.code, 'TRIP_CANCELLED');
       assert.strictEqual((await request(`/api/v1/ops/trips/${run('trp_hn_th_02')}/cancel`, { method: 'POST', token: dispatcher, body: { reason: 'Quốc lộ 1A ngập do lũ' } })).body.code, 'TRIP_ALREADY_CANCELLED');
       const pos = services.managerService.createPosBooking({ tripId: run('trp_hn_th_02'), passengerName: 'Khách quầy', phone: '0912000111', seatCodes: ['A09'], operatorId: 'op_saomai' });

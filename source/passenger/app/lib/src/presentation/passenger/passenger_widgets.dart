@@ -421,6 +421,43 @@ class HoldBanner extends StatelessWidget {
   }
 }
 
+/// Warning banner shown on detail and seat map screens when the trip cannot be booked (D185).
+class TripBlockedBanner extends StatelessWidget {
+  const TripBlockedBanner({super.key, required this.trip});
+  final Trip trip;
+
+  @override
+  Widget build(BuildContext context) {
+    if (trip.bookableNow) return const SizedBox.shrink();
+    final message = trip.effectiveBlockMessage;
+    return Container(
+      width: double.infinity,
+      color: PTokens.warnSoft,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.warning_amber_rounded, size: 20, color: PTokens.warnInk),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(trip.blockLabel, style: sans(size: 14, weight: FontWeight.w600, color: PTokens.warnInk)),
+                if (message != null && message.isNotEmpty) ...[
+                  gap(2),
+                  Text(message, style: sans(size: 13, color: PTokens.warnInk, height: 1.3)),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Illustration of a QR code; the real payload comes from the server (PAX-013, PAX-017).
 class QrView extends StatelessWidget {
   const QrView({super.key, required this.seed, this.size = 232, this.cells = 25, this.label});
@@ -507,6 +544,28 @@ void showToast(BuildContext context, String message) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(message, style: sans(size: 14, color: Colors.white)), duration: const Duration(seconds: 3)));
+}
+
+/// When holdSeats or createOrder fails with a code in bookingClosedCodes (D185).
+Future<void> showBookingClosedDialog(BuildContext context, PassengerStore store, String message) async {
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Không đặt được chuyến này'),
+      content: Text(message),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('Chọn chuyến khác'),
+        ),
+      ],
+    ),
+  );
+  store.stopHold();
+  if (!context.mounted) return;
+  Navigator.of(context).popUntil((route) => route.settings.name == 'search_results' || route.isFirst);
+  store.loadTrips();
 }
 
 /// Dials the company's hotline from the server profile; never a number baked into the app.

@@ -10,6 +10,7 @@ import { tripVisibleTo } from '../core/tenancy.js';
 import { validateRouteStops } from '../core/routeStops.js';
 import { endpointChoices, publicFixedEndpoints, validateFixedEndpoints } from '../core/fixedEndpoints.js';
 import { isProduction } from '../config.js';
+import { DEFAULT_CANCELLATION_POLICY, cancellationPolicyOf, normalizeCancellationPolicy, publicCancellationPolicy, validateCancellationPolicy } from '../core/cancellationPolicy.js';
 
 const AREA_RE = /^\/api\/v1\/ops\/service-areas\/([^/]+)$/;
 const AREA_ACTIVE_RE = /^\/api\/v1\/ops\/service-areas\/([^/]+)\/(activate|deactivate)$/;
@@ -185,6 +186,33 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
     return true;
   }
 
+  // GET / PUT /api/v1/ops/service-config/cancellation-policy: refund tiers the passenger agrees to before cancelling (D184).
+  if (pathname === '/api/v1/ops/service-config/cancellation-policy' && (req.method === 'GET' || req.method === 'PUT')) {
+    const view = () => ({ cancellation_policy: snapshot(cancellationPolicyOf(configOf(req))), is_default: !configOf(req).cancellation_policy, preview: publicCancellationPolicy(configOf(req)).rules });
+    if (req.method === 'GET') {
+      sendSuccess(res, view());
+      return true;
+    }
+    parseJsonBody(req).then(body => {
+      const config = configOf(req);
+      const before = snapshot(cancellationPolicyOf(config));
+      // null goes back to the default policy.
+      if (body.cancellation_policy === null) {
+        delete config.cancellation_policy;
+      } else {
+        const error = validateCancellationPolicy(body.cancellation_policy);
+        if (error) {
+          sendError(res, error, 'VALIDATION_ERROR', 400);
+          return;
+        }
+        config.cancellation_policy = normalizeCancellationPolicy(body.cancellation_policy);
+      }
+      audit(req, managerService, { action: 'CANCELLATION_POLICY_UPDATE', resource: req.operator.code, before, after: snapshot(config.cancellation_policy || DEFAULT_CANCELLATION_POLICY) });
+      sendSuccess(res, view());
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
   if (pathname === '/api/v1/ops/service-config' && req.method === 'PUT') {
     parseJsonBody(req).then(body => {
       const config = configOf(req);
@@ -214,6 +242,16 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
       if (!Number.isInteger(next.home_wait_minutes) || next.home_wait_minutes < 1 || next.home_wait_minutes > 30) {
         sendError(res, 'Thời gian xe chờ khách tại nhà là 1-30 phút', 'VALIDATION_ERROR', 400);
         return;
+      }
+      if (body.online_sales_cutoff_minutes !== undefined) {
+        const val = body.online_sales_cutoff_minutes;
+        if (!Number.isInteger(val) || val < 0 || val > 240) {
+          sendError(res, 'Giờ ngừng bán trực tuyến là số phút 0-240', 'VALIDATION_ERROR', 400);
+          return;
+        }
+        next.online_sales_cutoff_minutes = val;
+      } else if (config.online_sales_cutoff_minutes !== undefined) {
+        next.online_sales_cutoff_minutes = config.online_sales_cutoff_minutes;
       }
       const before = snapshot(config);
       Object.assign(config, { ...next, pickup_modes: [...new Set(next.pickup_modes)], dropoff_modes: [...new Set(next.dropoff_modes)], allow_home_to_home: Boolean(next.allow_home_to_home) });

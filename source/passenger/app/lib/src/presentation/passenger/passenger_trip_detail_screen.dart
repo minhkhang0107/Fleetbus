@@ -62,7 +62,10 @@ class PassengerTripDetailScreen extends StatelessWidget {
     }
     return Scaffold(
       appBar: TopBar(title: 'Điểm đón và điểm trả', subtitle: '${trip.dep} · ${TravelDate.of(trip.day.isEmpty ? store.date : trip.day).long} · ${trip.type.split(' ').first} ${trip.plate}'),
-      body: body,
+      body: Column(children: [
+        if (!trip.bookableNow) TripBlockedBanner(trip: trip),
+        Expanded(child: body),
+      ]),
       bottomNavigationBar: BottomAction(children: [
         Expanded(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -70,7 +73,12 @@ class PassengerTripDetailScreen extends StatelessWidget {
             Text(store.homeFees > 0 ? '${vnd(store.fareOf(trip))} + ${vnd(store.homeFees)}' : vnd(store.fareOf(trip)), style: mono(size: 17, weight: FontWeight.w700)),
           ]),
         ),
-        PrimaryButton(label: 'Chọn ghế', onPressed: () => Navigator.of(context).push(MaterialPageRoute(settings: const RouteSettings(name: 'seats'), builder: (_) => const PassengerSeatMapScreen()))),
+        PrimaryButton(
+          label: 'Chọn ghế',
+          onPressed: !trip.bookableNow
+              ? null
+              : () => Navigator.of(context).push(MaterialPageRoute(settings: const RouteSettings(name: 'seats'), builder: (_) => const PassengerSeatMapScreen())),
+        ),
       ]),
     );
   }

@@ -214,7 +214,8 @@ class TicketCard extends StatelessWidget {
                 ? const Pill('Đã hoàn tiền', PillKind.ok)
                 : const Pill('Từ chối', PillKind.danger)))
         : switch (t.status) {
-            TicketStatus.active => const Pill('Đã thanh toán', PillKind.ok),
+            // A cash ticket is owed at boarding: never labelled paid (D187).
+            TicketStatus.active => t.unpaidCash ? const Pill('Trả khi lên xe', PillKind.warn) : const Pill('Đã thanh toán', PillKind.ok),
             TicketStatus.boarded => t.past ? const Pill('Đã đi', PillKind.mute) : const Pill('Đã lên xe', PillKind.ok),
             TicketStatus.refunding => const Pill('Đang chờ hoàn tiền', PillKind.info),
             TicketStatus.noShow => const Pill('Vắng mặt', PillKind.mute),
@@ -252,6 +253,15 @@ class TicketCard extends StatelessWidget {
             ]),
             gap(6),
             Text(active ? '${t.date} · Ghế ${t.seat} · ${_pickupLine(t)}$platePart' : '${t.date} · Ghế ${t.seat}$platePart${t.refund != null ? ' · hoàn ${vnd(t.refund!)}' : ''}', style: sans(size: 13, color: PTokens.muted)),
+            if (active) ...[
+              gap(4),
+              // Paid or not, and how (D187): a cash ticket still owes the fare at boarding.
+              Row(children: [
+                Icon(t.unpaidCash ? Icons.payments_outlined : Icons.check_circle_outline, size: 15, color: t.unpaidCash ? PTokens.warnInk : PTokens.success),
+                const SizedBox(width: 4),
+                Expanded(child: Text(t.paymentLabel, style: sans(size: 13, weight: FontWeight.w600, color: t.unpaidCash ? PTokens.warnInk : PTokens.success))),
+              ]),
+            ],
             if (t.refundInfo != null) ...[
               gap(6),
               Row(children: [
