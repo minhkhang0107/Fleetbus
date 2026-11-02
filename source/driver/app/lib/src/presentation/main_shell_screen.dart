@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'driver_change_pin_screen.dart';
 import 'driver_login_screen.dart';
 import 'driver_about_screen.dart';
+import 'driver_device_ready.dart';
 import 'driver_offline_sync_screen.dart';
 import 'driver_schedule_screen.dart';
 import 'driver_store.dart';
@@ -135,12 +137,31 @@ class _ProfileTab extends StatelessWidget {
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(store.operatorHotline.isEmpty ? store.operatorName : '${store.operatorName} · Tổng đài ${store.operatorHotline}', style: dsans(size: 14, color: DTokens.sub)),
               ),
-            Text('Bằng lái hạng FC · còn hạn đến 31/12/2028', style: dsans(size: 14, color: DTokens.sub)),
+            if (store.licenseClass.isNotEmpty)
+              Text(
+                'Bằng lái hạng ${store.licenseClass}${_date(store.licenseValidUntil).isEmpty ? '' : ' · còn hạn đến ${_date(store.licenseValidUntil)}'}',
+                style: dsans(size: 14, color: DTokens.sub),
+              ),
           ]),
         ),
         const SizedBox(height: 12),
-        Panel(child: Text('Định vị đã cấp quyền chạy nền', style: dsans(size: 14, color: DTokens.sub))),
+        const Panel(child: DriverLocationStatus()),
         const SizedBox(height: 16),
+        if (store.operatorHotline.isNotEmpty) ...[
+          BigButton(
+            label: 'Gọi tổng đài ${store.operatorHotline}',
+            icon: Icons.call,
+            onPressed: () => _call(context, store.operatorHotline),
+          ),
+          const SizedBox(height: 12),
+        ],
+        BigButton(
+          label: 'Đổi mã PIN',
+          outline: true,
+          color: const Color(0xFFE2E8F0),
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverChangePinScreen())),
+        ),
+        const SizedBox(height: 12),
         // SH-006: terms of use and licences (D157).
         BigButton(
           label: 'Giới thiệu và điều khoản',
@@ -153,11 +174,22 @@ class _ProfileTab extends StatelessWidget {
           label: 'Kết thúc ca và đăng xuất',
           outline: true,
           color: const Color(0xFFE2E8F0),
-          onPressed: () {
+          onPressed: () async {
             if (store.trip == TripState.inTransit) {
               dToast(context, 'Chuyến đang chạy: hãy kết thúc chuyến trước');
               return;
             }
+            final yes = await showDriverSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  Text('Kết thúc ca và đăng xuất?', style: dsans(size: 18, weight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  Text('Lần sau vào ca chỉ cần nhập lại mã PIN.', style: dsans(size: 15, color: DTokens.sub, height: 1.5)),
+                  const SizedBox(height: 14),
+                  SheetActions(
+                    primary: BigButton(label: 'Đăng xuất', onPressed: () => Navigator.of(ctx).pop(true)),
+                    secondary: BigButton(label: 'Ở lại', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop(false)),
+                  ),
+                ]));
+            if (yes != true || !context.mounted) return;
             store.logout();
             Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const DriverLoginScreen()), (_) => false);
           },
@@ -165,4 +197,21 @@ class _ProfileTab extends StatelessWidget {
       ])),
     );
   }
+}
+
+/// "2028-12-31" as "31/12/2028"; anything else as it is.
+String _date(String iso) {
+  final d = DateTime.tryParse(iso);
+  if (d == null) return iso;
+  return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+}
+
+Future<void> _call(BuildContext context, String number) async {
+  var ok = false;
+  try {
+    ok = await launchUrl(Uri.parse('tel:${number.replaceAll(RegExp(r'[^0-9+]'), '')}'));
+  } catch (_) {
+    ok = false;
+  }
+  if (!ok && context.mounted) dToast(context, 'Không mở được trình gọi điện, hãy gọi $number');
 }

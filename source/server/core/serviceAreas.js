@@ -5,6 +5,7 @@
  * Being inside an area does not prove a vehicle can reach an address (narrow lanes, truck bans): the driver
  * can still report the address inaccessible, and the office reassigns the pickup.
  */
+import { publicCancellationPolicy } from './cancellationPolicy.js';
 
 export const PICKUP_MODES = ['FIXED_STOP', 'HOME_PICKUP'];
 export const DROPOFF_MODES = ['FIXED_LOCATION', 'HOME_DROPOFF'];
@@ -151,7 +152,9 @@ export function publicServiceConfig(config) {
     insurance_enabled: Boolean(config?.insurance_enabled),
     wallet_enabled: Boolean(config?.wallet_enabled),
     stop_style: config?.stop_style || 'STATIONS',
-    service_areas: (config?.service_areas || []).filter(a => a.active !== false).map(({ area_id, name, kind, polygon, fee_vnd, lead_time_minutes, service_hours, confirmation }) => ({ area_id, name, kind, polygon, fee_vnd, lead_time_minutes, service_hours, confirmation: confirmation || 'AUTO' }))
+    online_sales_cutoff_minutes: config?.online_sales_cutoff_minutes ?? 15,
+    service_areas: (config?.service_areas || []).filter(a => a.active !== false).map(({ area_id, name, kind, polygon, fee_vnd, lead_time_minutes, service_hours, confirmation }) => ({ area_id, name, kind, polygon, fee_vnd, lead_time_minutes, service_hours, confirmation: confirmation || 'AUTO' })),
+    cancellation_policy: publicCancellationPolicy(config)
   };
 }
 

@@ -23,7 +23,8 @@ const NEEDS = {
 };
 
 const APPS = {
-  passenger: { plistAllowed: ['NSLocationWhenInUseUsageDescription', 'NSPhotoLibraryAddUsageDescription'], backgroundModes: [] },
+  // Camera and photo library: the profile photo (D186), through image_picker, not permission_handler.
+  passenger: { plistAllowed: ['NSLocationWhenInUseUsageDescription', 'NSPhotoLibraryAddUsageDescription', 'NSCameraUsageDescription', 'NSPhotoLibraryUsageDescription'], backgroundModes: [] },
   driver: { plistAllowed: ['NSLocationWhenInUseUsageDescription', 'NSLocationAlwaysAndWhenInUseUsageDescription', 'NSLocationAlwaysUsageDescription', 'NSCameraUsageDescription'], backgroundModes: ['location'] }
 };
 

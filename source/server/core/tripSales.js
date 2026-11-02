@@ -6,12 +6,17 @@
  */
 import { operatorOfTrip } from './tenancy.js';
 import { routeServiceConfig } from './serviceAreas.js';
+import { DEMO_DATE, checkBookableDeparture, vnDate } from './serviceDate.js';
+
+export const DEFAULT_ONLINE_SALES_CUTOFF_MINUTES = 15;
 
 const STARTED = ['IN_TRANSIT', 'COMPLETED'];
 
 /** The ops trip as it stands, without setting a day's run up just to ask. */
 function opsTrip(services, tripId) {
-  return services.managerService?.trips?.find(t => t.trip_id === tripId) || null;
+  return services?.managerService?.findTrip?.(tripId)
+    || services?.managerService?.trips?.find(t => t.trip_id === tripId)
+    || null;
 }
 
 /**
@@ -21,13 +26,122 @@ function opsTrip(services, tripId) {
 export function saleBlock(services, tripId, operatorConfig, routeId) {
   const ops = opsTrip(services, tripId);
   if (ops?.status === 'CANCELLED') return { code: 'TRIP_CANCELLED', message: 'Nhà xe đã hủy chuyến này. Chọn chuyến khác.' };
-  // A finished run is not sold, even when the bus ran ahead of its timetable (D148). A running one still sells
-  // seats from the stops ahead.
+  // A finished run is not sold, even when the bus ran ahead of its timetable (D148). For the passenger app,
+  // decision D185 reverses D148: a running trip (IN_TRANSIT) no longer sells online seats (handled in bookingBlock).
+  // Counter POS, hotline holds, and driver hail remain unaffected.
   if (ops?.status === 'COMPLETED') return { code: 'TRIP_COMPLETED', message: 'Chuyến này đã kết thúc. Chọn chuyến khác.' };
   if (ops?.sales_closed) return { code: 'SALES_CLOSED', message: 'Chuyến đã ngừng bán vé trực tuyến. Chọn chuyến khác hoặc gọi tổng đài.' };
   if (routeServiceConfig(operatorConfig, routeId).sales_suspended) {
     return { code: 'ROUTE_SUSPENDED', message: 'Tuyến đang tạm ngừng bán vé. Chọn tuyến hoặc nhà xe khác.' };
   }
+  return null;
+}
+
+function cutoffMinutesOf(operatorConfig) {
+  const val = operatorConfig?.online_sales_cutoff_minutes ?? operatorConfig?.service_config?.online_sales_cutoff_minutes;
+  if (typeof val === 'number' && Number.isInteger(val) && val >= 0 && val <= 240) {
+    return val;
+  }
+  return DEFAULT_ONLINE_SALES_CUTOFF_MINUTES;
+}
+
+/** Seed trips dated DEMO_DATE stay bookable outside production whatever the clock says (D120). */
+export function isDemoDeparture(departureTime, production) {
+  const depMs = departureTime ? Date.parse(departureTime) : NaN;
+  return !production && Number.isFinite(depMs) && vnDate(depMs) === DEMO_DATE;
+}
+
+/** When the bus actually leaves: the timetable time plus a delay the office declared (NaN when unknown). */
+export function effectiveDepartureMs(services, trip) {
+  const departureTime = trip?.departure_time || trip?.departureTime;
+  const depMs = departureTime ? Date.parse(departureTime) : NaN;
+  const tripId = trip?.trip_id || trip?.tripId;
+  const ops = tripId ? opsTrip(services, tripId) : null;
+  return depMs + (ops?.delay_minutes ?? trip?.delay_minutes ?? 0) * 60000;
+}
+
+/** Whether the bus is on the road (driver or office says so), even ahead of its timetable. */
+export function tripStarted(services, tripId) {
+  return opsTrip(services, tripId)?.status === 'IN_TRANSIT' || services?.driverService?.activeTrips?.get?.(tripId)?.status === 'IN_TRANSIT';
+}
+
+/** The ISO instant until which passengers can book online tickets for this trip. */
+export function bookUntil(services, trip, operatorConfig) {
+  const effective = effectiveDepartureMs(services, trip);
+  if (!Number.isFinite(effective)) return null;
+  return new Date(effective - cutoffMinutesOf(operatorConfig) * 60000).toISOString();
+}
+
+/**
+ * Checks whether an online passenger booking is blocked for this trip (D185).
+ * Order of rules:
+ * 1. saleBlock: TRIP_CANCELLED / TRIP_COMPLETED / SALES_CLOSED / ROUTE_SUSPENDED
+ * 2. Bus started: ops or driver status 'IN_TRANSIT'
+ * 3. Online sales cutoff: effectiveDeparture and bookUntil
+ * 4. Date window from checkBookableDeparture
+ */
+export function bookingBlock(services, trip, operatorConfig, { now = Date.now(), production = false } = {}) {
+  const tripId = trip?.trip_id || trip?.tripId;
+  const routeId = trip?.route_id || trip?.routeId;
+  const departureTime = trip?.departure_time || trip?.departureTime;
+  const until = bookUntil(services, trip, operatorConfig);
+
+  // 1. TRIP_CANCELLED / TRIP_COMPLETED / SALES_CLOSED / ROUTE_SUSPENDED
+  const sale = saleBlock(services, tripId, operatorConfig, routeId);
+  if (sale) {
+    return { code: sale.code, message: sale.message, book_until: until };
+  }
+
+  // 2. Bus started: ops trip status 'IN_TRANSIT' or driver activeTrips status 'IN_TRANSIT'
+  if (tripStarted(services, tripId)) {
+    return {
+      code: 'TRIP_DEPARTED',
+      message: 'Xe đã xuất bến, không đặt vé trực tuyến được nữa. Chọn chuyến khác hoặc gọi tổng đài nhà xe.',
+      book_until: until
+    };
+  }
+
+  // Demo exemption: outside production, a trip whose Vietnam date is DEMO_DATE is not blocked by rules 3/4
+  if (isDemoDeparture(departureTime, production)) {
+    return null;
+  }
+
+  // If departure_time is invalid/missing, delegate to checkBookableDeparture
+  const effectiveDeparture = effectiveDepartureMs(services, trip);
+  if (!Number.isFinite(effectiveDeparture)) {
+    const depCheck = checkBookableDeparture(departureTime, now, { production });
+    return { code: depCheck.code, message: depCheck.message, book_until: null };
+  }
+
+  // 3. Online sales cutoff
+  const cutoffMinutes = cutoffMinutesOf(operatorConfig);
+  const bookUntilMs = effectiveDeparture - cutoffMinutes * 60000;
+
+  if (now >= effectiveDeparture) {
+    return {
+      code: 'TRIP_DEPARTED',
+      message: 'Chuyến xe đã chạy',
+      book_until: until
+    };
+  }
+  if (now >= bookUntilMs) {
+    return {
+      code: 'BOOKING_CUTOFF_PASSED',
+      message: `Đã hết giờ đặt vé trực tuyến (trước giờ chạy ${cutoffMinutes} phút). Gọi tổng đài nhà xe để được hỗ trợ.`,
+      book_until: until
+    };
+  }
+
+  // 4. Existing date-window rule from checkBookableDeparture (DATE_BEYOND_WINDOW etc.)
+  const depCheck = checkBookableDeparture(departureTime, now, { production });
+  if (!depCheck.ok && depCheck.code !== 'TRIP_DEPARTED') {
+    return {
+      code: depCheck.code,
+      message: depCheck.message,
+      book_until: until
+    };
+  }
+
   return null;
 }
 

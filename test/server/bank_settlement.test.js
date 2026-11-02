@@ -8,6 +8,7 @@ import { createFleetBusServer } from '../../source/server/apiServer.js';
 import { generateTotp } from '../../source/server/core/totp.js';
 import { signToken, TOKEN_PREFIXES } from '../../source/server/core/tokens.js';
 import { DEV_TOTP_SECRET } from '../../source/server/config.js';
+import { addDays, vnDate } from '../../source/server/core/serviceDate.js';
 
 const TRIP = 'trp_hn_th_01';
 const XV_TRIP = 'trp_xv_hn_th_01';
@@ -652,7 +653,8 @@ describe('Unified bank transfer settlement engine (MGR-037)', () => {
   });
 
   it('15. in production mode, webhook and staff routes ignore caller-supplied body.now', async () => {
-    const { payment } = await createOrder();
+    const futureTrip = `trp_hn_th_01_${addDays(vnDate(), 1).replaceAll('-', '')}`;
+    const { payment } = await createOrder({ tripId: futureTrip });
     const farFuture = Date.parse(payment.expires_at) + 24 * 3600 * 1000;
     const prevNodeEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';

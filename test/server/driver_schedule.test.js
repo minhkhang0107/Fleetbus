@@ -258,27 +258,31 @@ describe('Driver Monthly Schedule (DRI-021, D155)', () => {
   });
 
   it('TC-DRI-SCHED-05: month out of range / malformed → 400', async () => {
-    // Current month is 2026-10 (based on test environment / server time)
-    // Allowed: 3 months before (2026-07) to 3 months after (2027-01)
+    // Allowed: 3 months before to 3 months after the current month (Vietnam time).
+    const [y, m] = vnDate(Date.now()).slice(0, 7).split('-').map(Number);
+    const shift = (n) => {
+      const d = new Date(Date.UTC(y, m - 1 + n, 1));
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    };
 
-    // 4 months before: 2026-06 -> 400 MONTH_OUT_OF_RANGE
-    const tooEarly = await getSchedule('?month=2026-06');
+    // 4 months before -> 400 MONTH_OUT_OF_RANGE
+    const tooEarly = await getSchedule(`?month=${shift(-4)}`);
     assert.strictEqual(tooEarly.status, 400);
     assert.strictEqual(tooEarly.body.code, 'MONTH_OUT_OF_RANGE');
     assert.ok(tooEarly.body.message.includes('3 tháng'));
 
-    // 4 months after: 2027-02 -> 400 MONTH_OUT_OF_RANGE
-    const tooLate = await getSchedule('?month=2027-02');
+    // 4 months after -> 400 MONTH_OUT_OF_RANGE
+    const tooLate = await getSchedule(`?month=${shift(4)}`);
     assert.strictEqual(tooLate.status, 400);
     assert.strictEqual(tooLate.body.code, 'MONTH_OUT_OF_RANGE');
     assert.ok(tooLate.body.message.includes('3 tháng'));
 
-    // Boundary check: 2026-07 (3 months before) -> 200 OK
-    const boundaryEarly = await getSchedule('?month=2026-07');
+    // Boundary check: 3 months before -> 200 OK
+    const boundaryEarly = await getSchedule(`?month=${shift(-3)}`);
     assert.strictEqual(boundaryEarly.status, 200);
 
-    // Boundary check: 2027-01 (3 months after) -> 200 OK
-    const boundaryLate = await getSchedule('?month=2027-01');
+    // Boundary check: 3 months after -> 200 OK
+    const boundaryLate = await getSchedule(`?month=${shift(3)}`);
     assert.strictEqual(boundaryLate.status, 200);
 
     // Malformed months -> 400 INVALID_MONTH

@@ -31,8 +31,14 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
     super.initState();
     if (_restoring) _restore();
     DriverStore.savedOperatorCode().then((code) {
-      if (mounted && code.isNotEmpty) {
+      if (mounted && code.isNotEmpty && _operator.text.isEmpty) {
         setState(() => _operator.text = code);
+      }
+    });
+    // The driver who signed in last on this phone types only the PIN (D188).
+    DriverStore.savedStaffId().then((id) {
+      if (mounted && id.isNotEmpty && _id.text.isEmpty) {
+        setState(() => _id.text = id);
       }
     });
   }
@@ -80,7 +86,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
       SizedBox(width: large ? 16 : 12),
       Flexible(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('BusGo Driver', style: dsans(size: large ? 30 : 20, weight: FontWeight.w700)),
+          Text('BusGo Tài xế', style: dsans(size: large ? 30 : 20, weight: FontWeight.w700)),
           Text(subtitle, style: dsans(size: large ? 16 : 13, color: DTokens.muted)),
         ]),
       ),
@@ -107,8 +113,11 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
         TextField(
           controller: _operator,
           style: dmono(size: 18, weight: FontWeight.w600),
-          decoration: const InputDecoration(hintText: 'Ví dụ SAOMAI'),
+          decoration: const InputDecoration(hintText: 'Ví dụ SAOMAI', counterText: ''),
           textCapitalization: TextCapitalization.characters,
+          autocorrect: false,
+          enableSuggestions: false,
+          textInputAction: TextInputAction.next,
           maxLength: 20,
           inputFormatters: [
             FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
@@ -121,6 +130,9 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
         TextField(
           controller: _id,
           style: dmono(size: 18, weight: FontWeight.w600),
+          decoration: const InputDecoration(counterText: ''),
+          autocorrect: false,
+          enableSuggestions: false,
           maxLength: 20,
           textInputAction: TextInputAction.next,
         ),
@@ -153,14 +165,22 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
         body: SafeArea(
           child: Row(children: [
             Expanded(
+              // A phone on its side with the keyboard up leaves little height: the brand side scrolls instead of overflowing.
               child: Container(
                 color: DTokens.panel2,
-                padding: const EdgeInsets.all(48),
-                child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  _brand(large: true),
-                  const SizedBox(height: 24),
-                  Text('Vào ca bằng mã nhân viên và mã PIN do nhà xe cấp.', style: dsans(size: 16, color: DTokens.sub, height: 1.5)),
-                ]),
+                child: LayoutBuilder(
+                  builder: (context, box) => SingleChildScrollView(
+                    padding: EdgeInsets.all(box.maxHeight < 360 ? 20 : 48),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: (box.maxHeight - (box.maxHeight < 360 ? 40 : 96)).clamp(0, double.infinity)),
+                      child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        _brand(large: box.maxHeight >= 360),
+                        const SizedBox(height: 24),
+                        Text('Vào ca bằng mã nhân viên và mã PIN do nhà xe cấp.', style: dsans(size: 16, color: DTokens.sub, height: 1.5)),
+                      ]),
+                    ),
+                  ),
+                ),
               ),
             ),
             Expanded(

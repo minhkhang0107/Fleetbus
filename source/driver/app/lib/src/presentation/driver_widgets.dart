@@ -226,7 +226,9 @@ class DHeader extends StatelessWidget implements PreferredSizeWidget {
       );
 }
 
-Future<T?> showDriverSheet<T>(BuildContext context, {required Widget Function(BuildContext) builder}) => showModalBottomSheet<T>(
+/// [pinnedFooter]: the content lays out its own scrolling body and keeps its main button at the bottom,
+/// always in sight (a sheet built with [DriverSheetBody]).
+Future<T?> showDriverSheet<T>(BuildContext context, {required Widget Function(BuildContext) builder, bool pinnedFooter = false}) => showModalBottomSheet<T>(
       context: context,
       isScrollControlled: true,
       sheetAnimationStyle: Motion.sheetStyle,
@@ -238,17 +240,40 @@ Future<T?> showDriverSheet<T>(BuildContext context, {required Widget Function(Bu
         padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
         child: SafeArea(
           top: false,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xFF475569), borderRadius: BorderRadius.circular(999)))),
-              const SizedBox(height: 14),
-              builder(ctx),
-            ]),
-          ),
+          child: pinnedFooter
+              ? Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                  child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xFF475569), borderRadius: BorderRadius.circular(999)))),
+                    const SizedBox(height: 14),
+                    Flexible(child: builder(ctx)),
+                  ]),
+                )
+              : SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                  child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xFF475569), borderRadius: BorderRadius.circular(999)))),
+                    const SizedBox(height: 14),
+                    builder(ctx),
+                  ]),
+                ),
         ),
       ),
     );
+
+/// Body of a sheet opened with `pinnedFooter: true`: [children] scroll, [footer] stays at the bottom.
+class DriverSheetBody extends StatelessWidget {
+  const DriverSheetBody({super.key, required this.children, required this.footer});
+  final List<Widget> children;
+  final Widget footer;
+
+  @override
+  Widget build(BuildContext context) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Flexible(child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children))),
+        const SizedBox(height: 12),
+        footer,
+      ]);
+}
 
 void dToast(BuildContext context, String message) {
   ScaffoldMessenger.of(context)

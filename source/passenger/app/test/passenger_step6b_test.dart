@@ -317,6 +317,16 @@ void main() {
       expect(find.byKey(const Key('cancel_account_number')), findsOneWidget);
       expect(find.byKey(const Key('cancel_account_name')), findsOneWidget);
 
+      // D184: the policy is shown and the red button stays off until the passenger ticks that they read it.
+      expect(find.text('Chính sách hủy vé của nhà xe'), findsOneWidget);
+      expect(find.text('Hủy dưới 6 giờ trước giờ chạy: Không hoàn tiền'), findsOneWidget, reason: 'no policy from the server: the default one');
+      final cancelButton = find.ancestor(of: find.text('Hủy vé, hoàn 250.000 đ'), matching: find.byType(FilledButton));
+      expect(tester.widget<FilledButton>(cancelButton).onPressed, isNull);
+      await tester.ensureVisible(find.byKey(const Key('cancel_policy_agree')));
+      await tester.tap(find.byKey(const Key('cancel_policy_agree')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<FilledButton>(cancelButton).onPressed, isNotNull);
+
       // Tap submit with empty account number -> validation error
       await tester.tap(find.text('Hủy vé, hoàn 250.000 đ'));
       await tester.pumpAndSettle();

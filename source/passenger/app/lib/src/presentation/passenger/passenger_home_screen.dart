@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'passenger_edit_profile_screen.dart' show ProfileAvatar;
 import 'passenger_location_picker_screen.dart';
+import 'passenger_main_shell.dart';
 import 'passenger_promo_screen.dart';
 import 'passenger_search_results_screen.dart';
 import 'passenger_date_picker.dart';
@@ -14,6 +16,18 @@ import 'passenger_widgets.dart';
 /// slider, which is left out when the server has no slide. Side by side on wide screens.
 class PassengerHomeScreen extends StatelessWidget {
   const PassengerHomeScreen({super.key});
+
+  void _search(BuildContext context) {
+    final store = PassengerScope.read(context);
+    if (store.origin == store.dest) {
+      showToast(context, 'Điểm đi và điểm đến phải khác nhau.');
+      return;
+    }
+    Navigator.of(context).push(MaterialPageRoute(
+      settings: const RouteSettings(name: 'search_results'),
+      builder: (_) => const PassengerSearchResultsScreen(),
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,10 +46,12 @@ class PassengerHomeScreen extends StatelessWidget {
               Text('Bạn muốn đi đâu?', style: sans(size: 22, weight: FontWeight.w700)),
             ]),
           ),
-          CircleAvatar(
-            radius: 20,
-            backgroundColor: PTokens.primarySoft,
-            child: Text(name == null ? '?' : 'NA', style: sans(size: 14, weight: FontWeight.w600, color: PTokens.primaryDark)),
+          // The same photo or initials as the settings tab, which it opens (D186).
+          Semantics(
+            button: true,
+            label: 'Mở trang cá nhân',
+            excludeSemantics: true,
+            child: Pressable(child: GestureDetector(onTap: () => PassengerMainShell.openTab(context, 3), child: ProfileAvatar(size: 40, photo: store.userAvatar, name: name))),
           ),
         ]),
         gap(20),
@@ -71,19 +87,10 @@ class PassengerHomeScreen extends StatelessWidget {
             gap(12),
             Text('Ngày đi', style: sans(size: 12, color: PTokens.muted)),
             gap(4),
-            const TravelDateField(),
+            // A quick day tile is a search for that day, one tap instead of two (D184).
+            TravelDateField(onQuickDay: (_) => _search(context)),
             gap(12),
-            PrimaryButton(
-              label: 'Tìm chuyến',
-              icon: Icons.search,
-              onPressed: () {
-                if (store.origin == store.dest) {
-                  showToast(context, 'Điểm đi và điểm đến phải khác nhau.');
-                  return;
-                }
-                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerSearchResultsScreen()));
-              },
-            ),
+            PrimaryButton(label: 'Tìm chuyến', icon: Icons.search, onPressed: () => _search(context)),
           ]),
         ),
         if (recent.isNotEmpty) ...[
@@ -220,7 +227,7 @@ class _UpcomingCard extends StatelessWidget {
     return AppCard(
       onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerTicketQrScreen(ticket: ticket))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Row(children: [PnrTag(ticket.pnr), const Spacer(), const Pill('Đã thanh toán', PillKind.ok)]),
+        Row(children: [PnrTag(ticket.pnr), const Spacer(), ticket.unpaidCash ? const Pill('Trả khi lên xe', PillKind.warn) : const Pill('Đã thanh toán', PillKind.ok)]),
         gap(10),
         Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
           Text(ticket.departure, style: mono(size: 20, weight: FontWeight.w700)),
@@ -255,7 +262,7 @@ class _RecentChip extends StatelessWidget {
         final store = PassengerScope.read(context);
         store.setPlace(isOrigin: true, code: origin);
         store.setPlace(isOrigin: false, code: dest);
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerSearchResultsScreen()));
+        Navigator.of(context).push(MaterialPageRoute(settings: const RouteSettings(name: 'search_results'), builder: (_) => const PassengerSearchResultsScreen()));
       },
     );
   }

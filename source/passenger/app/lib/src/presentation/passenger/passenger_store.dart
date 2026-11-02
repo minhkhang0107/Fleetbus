@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:data/src/service/passenger_api_service.dart';
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
@@ -170,6 +171,53 @@ class ServiceArea {
       );
 }
 
+/// The company's cancellation policy (D184): refund tiers by hours before the departure, and the lines the passenger
+/// reads and agrees to before cancelling. The server applies the same policy; [fallback] is its default.
+class CancelPolicy {
+  const CancelPolicy({required this.tiers, required this.delayWaiverMinutes, required this.rules});
+  /// Highest bound first; the last one starts at 0 hours.
+  final List<({int minHours, int percent})> tiers;
+  final int? delayWaiverMinutes;
+  final List<String> rules;
+
+  static const fallback = CancelPolicy(
+    tiers: [(minHours: 12, percent: 100), (minHours: 6, percent: 80), (minHours: 0, percent: 0)],
+    delayWaiverMinutes: 30,
+    rules: [
+      'Hủy từ 12 giờ trở lên trước giờ chạy: Hoàn tiền 100%',
+      'Hủy trước giờ chạy 6-12 giờ: Hoàn tiền 80% (Phí hủy 20%)',
+      'Hủy dưới 6 giờ trước giờ chạy: Không hoàn tiền',
+      'Chuyến chậm hơn 30 phút so với giờ chạy: Hoàn tiền 100%, không thu phí hủy',
+      'Nhà xe không nhận đón/trả tận nhà bạn đã đặt: Hoàn tiền 100%, không thu phí hủy',
+      'Vé đã hủy không khôi phục được, ghế được nhả ngay cho người khác.',
+    ],
+  );
+
+  static CancelPolicy fromJson(Map<String, dynamic>? j) {
+    final tiers = [
+      for (final t in (j?['tiers'] as List? ?? const []))
+        (minHours: (t['min_hours_before'] as num).toInt(), percent: (t['refund_percent'] as num).toInt()),
+    ];
+    if (tiers.isEmpty) return fallback;
+    return CancelPolicy(
+      tiers: tiers,
+      delayWaiverMinutes: (j!['delay_waiver_minutes'] as num?)?.toInt(),
+      rules: [for (final r in (j['rules'] as List? ?? const [])) '$r'],
+    );
+  }
+
+  /// The tier for a cancellation [hours] before the departure, worded as the server words it.
+  ({int percent, String tier}) tierFor(double hours) {
+    var i = tiers.indexWhere((t) => hours >= t.minHours);
+    if (i < 0) i = tiers.length - 1;
+    final (minHours: from, :percent) = tiers[i];
+    final refund = percent >= 100 ? 'Hoàn tiền 100%' : (percent <= 0 ? 'Không hoàn tiền' : 'Hoàn tiền $percent% (Phí hủy ${100 - percent}%)');
+    if (i == 0) return (percent: percent, tier: from == 0 ? 'Hủy trước giờ chạy: $refund' : 'Hủy từ $from giờ trở lên trước giờ chạy: $refund');
+    final to = tiers[i - 1].minHours;
+    return (percent: percent, tier: from == 0 ? 'Hủy dưới $to giờ trước giờ chạy: $refund' : 'Hủy trước giờ chạy $from-$to giờ: $refund');
+  }
+}
+
 /// A home address the server accepted for pickup or drop-off, with its fee.
 class HomeAddress {
   const HomeAddress({required this.address, required this.lat, required this.lng, required this.feeVnd, required this.areaName, this.note = '', this.needsReview = false});
@@ -241,6 +289,16 @@ class Stop {
   String get short => name.replaceFirst('Bến xe ', '').replaceFirst('Phía Bắc Thanh Hóa', 'Phía Bắc TH');
 }
 
+const bookingClosedCodes = {
+  'TRIP_DEPARTED',
+  'BOOKING_CUTOFF_PASSED',
+  'SALES_CLOSED',
+  'TRIP_CANCELLED',
+  'TRIP_COMPLETED',
+  'ROUTE_SUSPENDED',
+  'TRIP_NOT_SCHEDULED',
+};
+
 class Trip {
   const Trip({
     required this.id,
@@ -261,6 +319,10 @@ class Trip {
     this.pickupModes = const ['FIXED_STOP'],
     this.dropoffModes = const ['FIXED_LOCATION'],
     this.routeShape = const [],
+    this.bookable = true,
+    this.blockCode,
+    this.blockMessage,
+    this.bookUntil,
   });
   /// How the route offers fixed stops: ROUTE_LINE (drawn like a bus line) or STATIONS (stations only).
   final String stopStyle;
@@ -286,6 +348,81 @@ class Trip {
   final int seatsLeft;
   final String plate;
   final List<Stop> stops;
+
+  final bool bookable;
+  final String? blockCode;
+  final String? blockMessage;
+  final DateTime? bookUntil;
+
+  bool get bookableNow => bookable && (bookUntil == null || DateTime.now().isBefore(bookUntil!));
+
+  String get blockLabel {
+    if (blockCode == 'TRIP_DEPARTED') return 'Đã xuất bến';
+    if (blockCode == 'SALES_CLOSED') return 'Nhà xe ngừng bán';
+    if (blockCode == 'TRIP_CANCELLED') return 'Nhà xe đã hủy chuyến';
+    if (blockCode == 'BOOKING_CUTOFF_PASSED' || (bookUntil != null && !DateTime.now().isBefore(bookUntil!))) {
+      return 'Hết giờ đặt online';
+    }
+    return 'Không đặt được';
+  }
+
+  String? get effectiveBlockMessage {
+    if (blockMessage != null && blockMessage!.isNotEmpty) return blockMessage;
+    if (bookUntil != null && !DateTime.now().isBefore(bookUntil!)) {
+      return 'Đã hết giờ đặt vé trực tuyến. Gọi tổng đài nhà xe để được hỗ trợ.';
+    }
+    return null;
+  }
+
+  Trip copyWith({
+    String? id,
+    String? dep,
+    String? arr,
+    String? duration,
+    String? type,
+    bool? vip,
+    int? price,
+    String? from,
+    String? to,
+    String? via,
+    int? seatsLeft,
+    String? plate,
+    List<Stop>? stops,
+    String? day,
+    String? stopStyle,
+    List<String>? pickupModes,
+    List<String>? dropoffModes,
+    List<(double, double)>? routeShape,
+    bool? bookable,
+    String? blockCode,
+    String? blockMessage,
+    DateTime? bookUntil,
+  }) {
+    return Trip(
+      id: id ?? this.id,
+      dep: dep ?? this.dep,
+      arr: arr ?? this.arr,
+      duration: duration ?? this.duration,
+      type: type ?? this.type,
+      vip: vip ?? this.vip,
+      price: price ?? this.price,
+      from: from ?? this.from,
+      to: to ?? this.to,
+      via: via ?? this.via,
+      seatsLeft: seatsLeft ?? this.seatsLeft,
+      plate: plate ?? this.plate,
+      stops: stops ?? this.stops,
+      day: day ?? this.day,
+      stopStyle: stopStyle ?? this.stopStyle,
+      pickupModes: pickupModes ?? this.pickupModes,
+      dropoffModes: dropoffModes ?? this.dropoffModes,
+      routeShape: routeShape ?? this.routeShape,
+      bookable: bookable ?? this.bookable,
+      blockCode: blockCode ?? this.blockCode,
+      blockMessage: blockMessage ?? this.blockMessage,
+      bookUntil: bookUntil ?? this.bookUntil,
+    );
+  }
 
   factory Trip.fromJson(Map<String, dynamic> j) {
     final dep = DateTime.parse(j['departure_time']).toUtc().add(const Duration(hours: 7));
@@ -334,6 +471,10 @@ class Trip {
       pickupModes: [for (final m in (j['service']?['pickup_modes'] as List? ?? const ['FIXED_STOP'])) '$m'],
       dropoffModes: [for (final m in (j['service']?['dropoff_modes'] as List? ?? const ['FIXED_LOCATION'])) '$m'],
       routeShape: [for (final p in (j['route_shape'] as List? ?? const [])) ((p[0] as num).toDouble(), (p[1] as num).toDouble())],
+      bookable: (j['bookable'] == false || j['bookable'] == 'false') ? false : true,
+      blockCode: j['block_code'] as String?,
+      blockMessage: j['block_message'] as String?,
+      bookUntil: j['book_until'] != null ? DateTime.tryParse('${j['book_until']}') : null,
     );
   }
 }
@@ -443,6 +584,21 @@ class Ticket {
   bool qrFromCache = false;
 
   bool get unpaidCash => paymentStatus == 'UNPAID_COD' && codDue > 0;
+
+  /// Whether the ticket is paid and how, as the passenger reads it (D187).
+  String get paymentLabel {
+    if (unpaidCash) return 'Chưa thanh toán · trả ${vnd(codDue)} tiền mặt khi lên xe';
+    final how = switch (paymentMethod) {
+      'CASH' || 'COD' => 'tiền mặt',
+      'VIETQR' || 'VIETQR_NAPAS247' || 'BANK_TRANSFER' => 'chuyển khoản VietQR',
+      'VNPAY_ONLINE' => 'VNPAY',
+      'COUNTER' || 'CASH_POS' => 'tại quầy',
+      'CARD_POS' => 'thẻ tại quầy',
+      _ => '',
+    };
+    return how.isEmpty ? 'Đã thanh toán' : 'Đã thanh toán · $how';
+  }
+
   bool get isTransferPayment => !unpaidCash && paymentMethod != 'CASH';
   bool get active => status == TicketStatus.active || status == TicketStatus.boarded;
   bool get isGroup => ticketIds.length > 1 || seat.contains(',');
@@ -816,6 +972,8 @@ class PassengerStore extends ChangeNotifier {
   // Session
   String? userName;
   String? userPhone;
+  /// The photo the passenger chose (D186), kept on the device so it shows offline too.
+  Uint8List? userAvatar;
   bool isVip = false;
   bool get loggedIn => api.authToken != null;
 
@@ -823,6 +981,8 @@ class PassengerStore extends ChangeNotifier {
   DateTime? walletOfflineSince;
   /// Why the last payment check had no answer ('NETWORK'), so a manual check does not blame the transfer.
   String? lastPaymentCheckCode;
+  /// Error code of the last holdSeats or createOrder failure (D185).
+  String? lastErrorCode;
   /// No station could be shown, not even saved ones; the home screen offers to try again.
   String? placesError;
 
@@ -850,6 +1010,7 @@ class PassengerStore extends ChangeNotifier {
   HomeAddress? homePickup;
   HomeAddress? homeDropoff;
   List<ServiceArea> serviceAreas = [];
+  CancelPolicy cancelPolicy = CancelPolicy.fallback;
   int get homeFees => isVip ? 0 : (homePickup?.feeVnd ?? 0) + (homeDropoff?.feeVnd ?? 0);
   int deck = 1;
   int seatColumns = 1;
@@ -1034,6 +1195,8 @@ class PassengerStore extends ChangeNotifier {
       userPhone = s['phone'] as String?;
       userName = s['name'] as String?;
       isVip = s['vip'] == true;
+      final avatar = prefs.getString(_avatarKey);
+      userAvatar = avatar == null ? null : base64Decode(avatar);
     } catch (_) {
       isVip = false;
       await prefs.remove(_sessionKey);
@@ -1186,8 +1349,7 @@ class PassengerStore extends ChangeNotifier {
     
     userPhone = phone;
     sessionExpired = false;
-    final name = r.value!['user']?['full_name'];
-    userName = name is String && name != 'Hành khách BusGo' ? name : null;
+    userName = _chosenName(r.value!['user']?['full_name']);
     isVip = r.value!['user']?['is_vip'] == true;
     devOtp = null;
     final op = r.value!['user']?['operator'];
@@ -1204,10 +1366,71 @@ class PassengerStore extends ChangeNotifier {
     return null;
   }
 
+  static String? _chosenName(Object? name) => name is String && name.trim().isNotEmpty && name != 'Hành khách BusGo' ? name : null;
+
+  static const _avatarKey = 'passenger_avatar';
+
+  static Uint8List? _avatarBytes(Object? dataUrl) {
+    if (dataUrl is! String || !dataUrl.startsWith('data:image/')) return null;
+    final comma = dataUrl.indexOf(',');
+    try {
+      return comma < 0 ? null : base64Decode(dataUrl.substring(comma + 1));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// JPEG, PNG or WebP by their first bytes; null for any other format (HEIC, GIF), which the server refuses.
+  static String? avatarMime(Uint8List bytes) {
+    bool starts(List<int> magic) => bytes.length >= magic.length && [for (var i = 0; i < magic.length; i++) bytes[i] == magic[i]].every((b) => b);
+    if (starts([0xff, 0xd8, 0xff])) return 'image/jpeg';
+    if (starts([0x89, 0x50, 0x4e, 0x47])) return 'image/png';
+    if (starts([0x52, 0x49, 0x46, 0x46])) return 'image/webp';
+    return null;
+  }
+
+  void _applyProfile(Map<String, dynamic> p) {
+    final name = _chosenName(p['full_name']);
+    if (name != null) userName = name;
+    if (p.containsKey('avatar')) userAvatar = _avatarBytes(p['avatar']);
+  }
+
+  Future<void> _saveAvatar() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (userAvatar == null) {
+      await prefs.remove(_avatarKey);
+    } else {
+      await prefs.setString(_avatarKey, base64Encode(userAvatar!));
+    }
+  }
+
+  /// PAX-022 (D186): saves a new name and / or photo; [removeAvatar] deletes the photo. The phone never changes.
+  /// Returns an error to show, or null.
+  Future<String?> updateProfile({String? name, Uint8List? avatar, bool removeAvatar = false}) async {
+    String? dataUrl;
+    if (avatar != null) {
+      final mime = avatarMime(avatar);
+      if (mime == null) return 'Chọn ảnh JPEG hoặc PNG';
+      if (avatar.length > 256 * 1024) return 'Ảnh quá lớn, hãy chọn ảnh khác';
+      dataUrl = 'data:$mime;base64,${base64Encode(avatar)}';
+    }
+    final fullName = name?.trim().replaceAll(RegExp(r'\s+'), ' ');
+    // Without a photo change the avatar is left out of the request; removing it sends null.
+    final r = await _call(() => removeAvatar || dataUrl != null ? api.updateProfile(fullName: fullName, avatar: dataUrl) : api.updateProfile(fullName: fullName));
+    if (!r.ok) return r.error;
+    _applyProfile(r.value!);
+    await _saveSession();
+    await _saveAvatar();
+    notifyListeners();
+    return null;
+  }
+
   Future<void> loadProfile() async {
     if (!loggedIn) return;
     final r = await _call(() => api.getProfile());
     if (r.ok && r.value != null) {
+      _applyProfile(r.value!);
+      unawaited(_saveAvatar());
       final bal = r.value!['wallet_balance_vnd'];
       if (bal is num) {
         walletBalanceVnd = bal.toInt();
@@ -1225,6 +1448,7 @@ class PassengerStore extends ChangeNotifier {
     api.authToken = null;
     userPhone = null;
     userName = null;
+    userAvatar = null;
     isVip = false;
     tickets = [];
     notices = [];
@@ -1234,6 +1458,7 @@ class PassengerStore extends ChangeNotifier {
     // D178: the saved wallet leaves the device with the session.
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_sessionKey);
+    await prefs.remove(_avatarKey);
     if (cacheKey != null) await prefs.remove(cacheKey);
   }
 
@@ -1389,7 +1614,23 @@ class PassengerStore extends ChangeNotifier {
     final r = await _call(() => api.getServiceConfig());
     if (!r.ok) return;
     serviceAreas = [for (final a in (r.value!['service_areas'] as List? ?? const [])) ServiceArea.fromJson(a as Map<String, dynamic>)];
+    cancelPolicy = CancelPolicy.fromJson(r.value!['cancellation_policy'] as Map<String, dynamic>?);
     notifyListeners();
+  }
+
+  /// Reads the company's cancellation policy before the cancel sheet opens; offline, the last one read (or the
+  /// default) is shown and the server still applies its own.
+  Future<void> loadCancelPolicy() async {
+    final r = await _call(() => api.getServiceConfig());
+    if (!r.ok) return;
+    cancelPolicy = CancelPolicy.fromJson(r.value!['cancellation_policy'] as Map<String, dynamic>?);
+  }
+
+  /// The street address of a pinned point, or null when the server cannot tell (D187).
+  Future<String?> addressAt(double lat, double lng) async {
+    final r = await _call(() => api.reverseGeocode(lat, lng));
+    final address = r.ok ? (r.value?['address']) : null;
+    return address is String && address.trim().isNotEmpty ? address.trim() : null;
   }
 
   /// Checks a home address with the server for this trip; returns an error to show, or null once it is set.
@@ -1467,6 +1708,22 @@ class PassengerStore extends ChangeNotifier {
       notifyListeners();
       return r.error;
     }
+    if (trip != null && r.value != null) {
+      final val = r.value!;
+      final map = val['trip'] is Map<String, dynamic> ? val['trip'] as Map<String, dynamic> : val;
+      if (map.containsKey('bookable') || map.containsKey('block_code') || map.containsKey('book_until')) {
+        final b = map['bookable'];
+        final bc = map['block_code'] as String?;
+        final bm = map['block_message'] as String?;
+        final bu = map['book_until'] != null ? DateTime.tryParse('${map['book_until']}') : null;
+        trip = trip!.copyWith(
+          bookable: (b == false || b == 'false') ? false : (b == true ? true : trip!.bookable),
+          blockCode: bc ?? trip!.blockCode,
+          blockMessage: bm ?? trip!.blockMessage,
+          bookUntil: bu ?? trip!.bookUntil,
+        );
+      }
+    }
     seatMap = (r.value!['seats'] as List).cast<Map<String, dynamic>>().map((s) {
       final state = switch ('${s['segment_state'] ?? s['state']}') {
         'AVAILABLE' => SeatState.free,
@@ -1517,6 +1774,7 @@ class PassengerStore extends ChangeNotifier {
 
   Future<String?> holdSeats() async {
     final r = await _call(() => api.holdSeats(trip!.id, List.of(seats), pickupStopId: pickup, dropoffStopId: dropoff));
+    lastErrorCode = r.ok ? null : r.code;
     if (!r.ok) {
       if (r.code == 'SEAT_LOCKED_BY_OTHER' || r.code == 'SEAT_ALREADY_BOOKED' || r.code == 'SEAT_BLOCKED') await loadSeatMap();
       return r.error;
@@ -1590,6 +1848,7 @@ class PassengerStore extends ChangeNotifier {
           insuranceSelected: insuranceEnabled && insured,
           paymentMethod: paymentMethod,
         ));
+    lastErrorCode = r.ok ? null : r.code;
     if (!r.ok) {
       // The code stopped applying since it was checked (used up, expired): drop it so the next try is at full price, shown first.
       if (r.code != null && r.code!.startsWith('VOUCHER_')) removeVoucher();
@@ -1897,24 +2156,18 @@ class PassengerStore extends ChangeNotifier {
   /// Preview of PAX-021 tiers; the server decides the refund.
   ({int percent, String tier}) refundFor(Ticket t) {
     if (t.unpaidCash) return (percent: 0, tier: 'Vé tiền mặt chưa thanh toán nên không phát sinh hoàn tiền.');
-    if (t.delay > 30) return (percent: 100, tier: 'Chuyến chậm hơn 30 phút: hoàn 100%, không phí');
+    final waiver = cancelPolicy.delayWaiverMinutes;
+    if (waiver != null && t.delay > waiver) return (percent: 100, tier: 'Chuyến chậm hơn $waiver phút: hoàn 100%, không phí');
     if (t.homePickupStatus == 'REJECTED' || t.homeDropoffStatus == 'REJECTED') {
       return (percent: 100, tier: 'Nhà xe không nhận đón/trả tận nhà: hoàn 100% tiền còn lại, không phí');
     }
     if (t.departureTime != null) {
       final depTime = DateTime.tryParse(t.departureTime!);
       if (depTime != null) {
-        final hoursUntilDeparture = depTime.difference(DateTime.now()).inMinutes / 60.0;
-        if (hoursUntilDeparture >= 12) {
-          return (percent: 100, tier: 'Hủy từ 12 giờ trở lên trước giờ chạy: Hoàn tiền 100%');
-        } else if (hoursUntilDeparture >= 6) {
-          return (percent: 80, tier: 'Hủy trước giờ chạy 6–12 giờ: Hoàn tiền 80% (Phí hủy 20%)');
-        } else {
-          return (percent: 0, tier: 'Hủy dưới 6 giờ trước giờ chạy: Không hoàn tiền');
-        }
+        return cancelPolicy.tierFor(depTime.difference(DateTime.now()).inMinutes / 60.0);
       }
     }
-    return (percent: -1, tier: 'Mức hoàn tính theo số giờ trước giờ chạy: từ 12 giờ hoàn 100%, 6 đến 12 giờ hoàn 80%, dưới 6 giờ không hoàn.');
+    return (percent: -1, tier: 'Mức hoàn tính theo số giờ trước giờ chạy, xem chính sách hủy vé bên dưới.');
   }
 
   /// Takes back a home pickup (pickupSide) or drop-off still under review; the fee is refunded (D130).
@@ -1982,12 +2235,14 @@ class PassengerStore extends ChangeNotifier {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_sessionKey);
+    await prefs.remove(_avatarKey);
     await prefs.remove('last_refund_account');
     if (cacheKey != null) await prefs.remove(cacheKey);
 
     api.authToken = null;
     userPhone = null;
     userName = null;
+    userAvatar = null;
     isVip = false;
     tickets = [];
     notices = [];

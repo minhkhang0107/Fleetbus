@@ -12,7 +12,9 @@ Future<String?> showTravelDatePicker(BuildContext context) {
 
 /// Home screen "Ngày đi": the full date (with the year and "Hôm nay"/"Ngày mai"), quick picks and the calendar.
 class TravelDateField extends StatelessWidget {
-  const TravelDateField({super.key});
+  const TravelDateField({super.key, this.onQuickDay});
+  /// Runs after a today / tomorrow / day-after tile set the date: the home screen searches that day at once (D184).
+  final ValueChanged<String>? onQuickDay;
 
   @override
   Widget build(BuildContext context) {
@@ -65,7 +67,10 @@ class TravelDateField extends StatelessWidget {
         for (final (i, day) in quick.indexed) ...[
           if (i > 0) const SizedBox(width: 8),
           Expanded(
-            child: _QuickDay(day: TravelDate.of(day, today: cal.today), selected: store.date == day, runs: store.hasDeparture(day), onTap: () => store.setDate(day)),
+            child: _QuickDay(day: TravelDate.of(day, today: cal.today), selected: store.date == day, runs: store.hasDeparture(day), onTap: () {
+              store.setDate(day);
+              onQuickDay?.call(day);
+            }),
           ),
         ],
       ]),
@@ -197,7 +202,11 @@ class _TravelDateStripState extends State<TravelDateStrip> {
                       border: Border.all(color: on ? PTokens.primary : PTokens.line),
                     ),
                     child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Text(d.relative == 'Hôm nay' ? 'Nay' : d.weekday, style: sans(size: 12, weight: FontWeight.w600, color: on ? Colors.white : (!runs ? PTokens.muted : (weekend ? PTokens.danger : PTokens.muted)))),
+                      // One line that shrinks to the cell under a large system font, instead of wrapping out of it.
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(d.relative == 'Hôm nay' ? 'Hôm nay' : d.weekday, maxLines: 1, style: sans(size: 12, weight: FontWeight.w600, color: on ? Colors.white : (!runs ? PTokens.muted : (weekend ? PTokens.danger : PTokens.muted)))),
+                      ),
                       Text(d.dayMonth, style: mono(size: 15, weight: FontWeight.w700, color: on ? Colors.white : (runs ? PTokens.ink : PTokens.muted))),
                     ]),
                   ),

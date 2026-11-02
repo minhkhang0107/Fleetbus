@@ -17,9 +17,11 @@ class UpperCaseTextFormatter extends TextInputFormatter {
 }
 
 /// PAX-021: confirm a cancellation with the refund the policy gives (tiers, or 100 % after an
-/// official delay over 30 minutes).
+/// official delay). The company's policy is shown in full and the passenger ticks that they read it before the
+/// red button works (D184).
 Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
   final store = PassengerScope.read(context);
+  await store.loadCancelPolicy();
   final r = store.refundFor(t);
   final known = r.percent >= 0;
   final amount = known ? t.paid * r.percent ~/ 100 : 0;
@@ -32,6 +34,7 @@ Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
   final accNameCtrl = TextEditingController(text: savedAccount?.accountName ?? '');
   String? validationError;
   bool cancelling = false;
+  bool agreed = false;
 
   if (!context.mounted) return;
   final yes = await showAppSheet<bool>(
@@ -58,6 +61,17 @@ Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
                     Align(alignment: Alignment.centerLeft, child: Text(r.tier, style: sans(size: 13, color: PTokens.muted, height: 1.4))),
                   ]),
           ),
+          gap(14),
+          Text('Chính sách hủy vé của nhà xe', style: sans(size: 14, weight: FontWeight.w700)),
+          gap(6),
+          for (final rule in store.cancelPolicy.rules)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('•  ', style: sans(size: 13, color: PTokens.muted, height: 1.4)),
+                Expanded(child: Text(rule, style: sans(size: 13, color: PTokens.muted, height: 1.4))),
+              ]),
+            ),
           if (needsRefundAccount) ...[
             gap(14),
             Text('Tài khoản nhận tiền hoàn', style: sans(size: 14, weight: FontWeight.w700)),
@@ -128,13 +142,24 @@ Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
           ],
           gap(10),
           Text('Ghế ${t.seat} được nhả ngay cho người khác và không lấy lại được.', style: sans(size: 13, color: PTokens.muted, height: 1.5)),
-          gap(14),
+          gap(6),
+          CheckboxListTile(
+            key: const Key('cancel_policy_agree'),
+            value: agreed,
+            onChanged: cancelling ? null : (v) => setSheetState(() => agreed = v ?? false),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            activeColor: PTokens.danger,
+            title: Text('Tôi đã đọc và đồng ý với chính sách hủy vé', style: sans(size: 14, weight: FontWeight.w600)),
+          ),
+          gap(8),
           PrimaryButton(
             label: cancelling
                 ? 'Đang hủy vé…'
                 : (!t.unpaidCash && known && amount > 0 ? 'Hủy vé, hoàn ${vnd(amount)}' : 'Hủy vé'),
             color: PTokens.danger,
-            onPressed: cancelling
+            onPressed: cancelling || !agreed
                 ? null
                 : () async {
                     Map<String, dynamic>? refundAccount;

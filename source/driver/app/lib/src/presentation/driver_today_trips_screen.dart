@@ -1,17 +1,22 @@
 import 'package:flutter/material.dart';
 
 import 'driver_cockpit_dashboard.dart';
+import 'driver_device_ready.dart';
 import 'driver_passenger_list_screen.dart';
 import 'driver_readiness_screen.dart';
 import 'driver_store.dart';
 import 'driver_widgets.dart';
 
 /// DRI-002: trips with vehicle check, pickup action, and shift trip selection.
+/// The list under the big card keeps one order (by departure, trips to drive first, finished ones last);
+/// tapping a trip highlights it and puts it on the big card without moving anything in the list (D188).
 class DriverTodayTripsScreen extends StatelessWidget {
   const DriverTodayTripsScreen({super.key});
 
   Widget _tripTile(BuildContext context, DriverStore store, ShiftTrip t) {
     final day = store.dayLabelOf(t);
+    final past = !t.done && tripDayPast(t.departureTime, store.vnNow());
+    final current = t.id == store.tripId;
     final statusText = switch (t.status) {
       'COMPLETED' => 'Đã hoàn thành',
       'CANCELLED' => 'Đã hủy',
@@ -24,10 +29,10 @@ class DriverTodayTripsScreen extends StatelessWidget {
       'IN_TRANSIT' => DPill.info,
       _ => DPill.warn,
     };
-    final canSelect = t.status != 'CANCELLED' && store.trip != TripState.inTransit;
+    final canSelect = t.status != 'CANCELLED' && store.trip != TripState.inTransit && !current;
 
     return Material(
-      color: DTokens.panel,
+      color: current ? const Color(0xFF172554) : DTokens.panel,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -43,14 +48,18 @@ class DriverTodayTripsScreen extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: DTokens.line),
+            border: Border.all(color: current ? const Color(0xFF1D4ED8) : DTokens.line, width: current ? 2 : 1),
           ),
           child: Opacity(
-            opacity: canSelect ? 1.0 : 0.65,
+            opacity: t.done && !current ? 0.65 : 1.0,
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if (current) ...[
+                Text('Đang hiện ở trên', style: dsans(size: 12, color: const Color(0xFFBFDBFE), weight: FontWeight.w600)),
+                const SizedBox(height: 4),
+              ],
               Row(children: [
                 if (day.isNotEmpty) ...[
-                  Text(day, style: dsans(size: 13, color: DTokens.primaryInk, weight: FontWeight.w600)),
+                  Text(past ? '$day · đã qua ngày' : day, style: dsans(size: 13, color: past ? DTokens.dangerInk : DTokens.primaryInk, weight: FontWeight.w600)),
                   const SizedBox(width: 8),
                 ],
                 Text(t.dep, style: dmono(size: 18)),
@@ -73,11 +82,21 @@ class DriverTodayTripsScreen extends StatelessWidget {
     final store = DriverScope.of(context);
     final codLeft = store.manifest.where((p) => p.codDue).length;
     final homes = store.manifest.where((p) => p.homePickup != null).length;
+    final now = store.vnNow();
+    final day = tripDayLabel(store.depAt, now);
+    final pastDay = tripDayPast(store.depAt, now);
+    final lateBy = store.depAt == null || pastDay ? 0 : now.difference(store.depAt!).inMinutes;
     final (pill, cta) = switch (store.trip) {
       TripState.completed => (const StatusPill('Đã hoàn thành', DPill.ok), null),
-      TripState.inTransit => (const StatusPill('Đang chạy', DPill.info), BigButton(label: 'Mở cockpit', height: 72, onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverCockpitDashboard())))),
+      TripState.inTransit => (const StatusPill('Đang chạy', DPill.info), BigButton(label: 'Mở màn hình lái xe', height: 72, onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverCockpitDashboard())))),
       TripState.readyCheck => (
-          store.readyToStart ? const StatusPill('Sẵn sàng xuất bến', DPill.ok) : const StatusPill('Chờ kiểm tra xe', DPill.warn),
+          pastDay
+              ? StatusPill('Chuyến ngày $day đã qua · hỏi điều hành', DPill.danger)
+              : lateBy > 5
+                  ? StatusPill('Trễ ${lateBy >= 60 ? '${lateBy ~/ 60} giờ ${lateBy % 60} phút' : '$lateBy phút'}', DPill.danger)
+                  : store.readyToStart
+                      ? const StatusPill('Sẵn sàng xuất bến', DPill.ok)
+                      : const StatusPill('Chờ kiểm tra xe', DPill.warn),
           BigButton(label: 'Kiểm tra xe để xuất bến', height: 72, onPressed: () {
             store.refreshTrip();
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DriverReadinessScreen()));
@@ -125,6 +144,8 @@ class DriverTodayTripsScreen extends StatelessWidget {
           ),
         ]),
         const SizedBox(height: 14),
+        if (day.isNotEmpty)
+          Text(day, style: dsans(size: 15, weight: FontWeight.w700, color: pastDay ? DTokens.dangerInk : DTokens.primaryInk)),
         Wrap(crossAxisAlignment: WrapCrossAlignment.end, spacing: 10, children: [
           Text(store.depTimeLabel, style: dmono(size: store.delayMinutes > 0 ? 20 : 32)),
           Text(store.route, style: dsans(size: 18, weight: FontWeight.w600)),
@@ -135,14 +156,14 @@ class DriverTodayTripsScreen extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(child: Stat('Điểm đón', '${store.pickupStopCount}', size: statSize)),
           const SizedBox(width: 8),
-          Expanded(child: Stat('Vé COD', '$codLeft', color: DTokens.warnInk, size: statSize)),
+          Expanded(child: Stat('Thu tiền mặt', '$codLeft', color: DTokens.warnInk, size: statSize)),
         ]),
         const SizedBox(height: 14),
         Text('Xuất phát ${store.firstStopName} · có mặt trước ${hhmm(toMinutes(store.depTime == '--:--' ? '00:30' : store.depTime) - 30)}', style: dsans(size: 14, color: DTokens.sub)),
         if (homes == 0 && store.trip == TripState.readyCheck) ...[
           const SizedBox(height: 10),
           Text(
-            'Đón tại điểm: ${store.manifest.length} khách · bấm Kiểm tra xe để xuất bến rồi Xuất bến để đón',
+            'Đón ${store.manifest.length} khách tại bến · bấm Kiểm tra xe, rồi Xuất bến',
             style: dsans(size: 13, color: DTokens.muted),
           ),
         ],
@@ -170,17 +191,25 @@ class DriverTodayTripsScreen extends StatelessWidget {
       ]),
     );
 
-    final otherTrips = store.shift.where((t) => t.id != store.tripId).toList();
+    // One fixed order: trips still to drive by departure, then the finished ones.
+    final toDrive = store.shift.where((t) => !t.done).toList();
+    final finished = store.shift.where((t) => t.done).toList();
+    final otherTrips = store.shift.length > 1 ? store.shift : const <ShiftTrip>[];
+    List<Widget> group(String title, List<ShiftTrip> trips, int from) => [
+          Text(title, style: dsans(size: 14, color: DTokens.muted, weight: FontWeight.w600)),
+          const SizedBox(height: 10),
+          for (var i = 0; i < trips.length; i++) ...[
+            if (i > 0) const SizedBox(height: 10),
+            FadeSlideIn(index: from + i, child: _tripTile(context, store, trips[i])),
+          ],
+        ];
     final otherList = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (otherTrips.isNotEmpty) ...[
-          Text('Chuyến khác trong ca', style: dsans(size: 14, color: DTokens.muted, weight: FontWeight.w600)),
-          const SizedBox(height: 10),
-          for (var i = 0; i < otherTrips.length; i++) ...[
-            if (i > 0) const SizedBox(height: 10),
-            FadeSlideIn(index: i, child: _tripTile(context, store, otherTrips[i])),
-          ],
+          if (toDrive.isNotEmpty) ...group('Chuyến cần chạy (${toDrive.length})', toDrive, 0),
+          if (toDrive.isNotEmpty && finished.isNotEmpty) const SizedBox(height: 18),
+          if (finished.isNotEmpty) ...group('Đã chạy xong (${finished.length})', finished, toDrive.length),
         ] else if (wide) ...[
           const Panel(child: Text('Không có chuyến nào khác trong ca.', style: TextStyle(color: DTokens.muted, fontSize: 14))),
         ],
@@ -213,6 +242,7 @@ class DriverTodayTripsScreen extends StatelessWidget {
             const StatusPill('Trong ca', DPill.ok),
           ]),
           const SizedBox(height: 16),
+          const DriverDeviceReadyBanner(),
           if (wide)
             // Tablet: the trip to drive on the left, what comes after it on the right.
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
