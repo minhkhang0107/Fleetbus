@@ -35,6 +35,9 @@ import { handleScheduleRoutes } from './routes/scheduleRoutes.js';
 import { handleStaffRoutes } from './routes/staffRoutes.js';
 import { handleTripExceptionRoutes } from './routes/tripExceptionRoutes.js';
 import { handleLegalRoutes } from './routes/legalRoutes.js';
+import { handlePassengerProfileRoutes } from './routes/passengerProfileRoutes.js';
+import { handleGeocodeRoutes } from './routes/geocodeRoutes.js';
+import { createGeocoder } from './core/geocode.js';
 import { renderOnboardingPage, renderOnboardingNotFound } from './web/onboarding.js';
 import { renderTripSharePage } from './web/tripShare.js';
 import { renderLegalPage, renderLegalNotFound, renderAccountDeletionPage } from './web/legalPages.js';
@@ -98,6 +101,7 @@ export function createFleetBusServer(customServices = {}) {
     managerService: customServices.managerService || new ManagerOperationsService(),
     tenantDbs: customServices.tenantDbs || openTenantDbs(customServices.dataDir !== undefined ? customServices.dataDir : defaultDataDir(), customServices.env),
     fetchImpl: customServices.fetchImpl || globalThis.fetch,
+    geocoder: customServices.geocoder || createGeocoder({ fetchImpl: customServices.fetchImpl || globalThis.fetch, env: customServices.env || process.env }),
     rateLimits: createAuthRateLimiters(customServices.rateLimits),
     env: customServices.env || process.env,
     eventBridge,
@@ -139,6 +143,8 @@ export function createFleetBusServer(customServices = {}) {
   function dispatchRoutes(req, res, pathname, parsedUrl) {
     try {
       if (handleLegalRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handlePassengerProfileRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handleGeocodeRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handlePassengerRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleDriverRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleTripExceptionRoutes(req, res, pathname, parsedUrl, services)) return;

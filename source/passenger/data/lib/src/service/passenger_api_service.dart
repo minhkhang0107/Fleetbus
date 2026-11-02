@@ -293,6 +293,11 @@ class PassengerApiClientService {
     return _post('/api/v1/service-areas/check', body: {'kind': kind, 'lat': lat, 'lng': lng, if (tripId != null) 'trip_id': tripId});
   }
 
+  /// Street address of a map point, to fill the home pickup form (D187).
+  Future<Map<String, dynamic>> reverseGeocode(double lat, double lng) {
+    return _get('/api/v1/geocode/reverse', query: {'lat': '$lat', 'lng': '$lng'});
+  }
+
   /// A link the ticket owner sends to relatives so they can follow the bus without the app.
   Future<Map<String, dynamic>> shareTicketTracking(String ticketId) {
     return _post('/api/v1/passenger/tickets/$ticketId/share');
@@ -526,6 +531,16 @@ class PassengerApiClientService {
   }
 
   /**
+   * PAX-022 (D186): change the name and / or the photo (a data URL, or null to remove it). The phone never changes.
+   */
+  Future<Map<String, dynamic>> updateProfile({String? fullName, Object? avatar = _unset}) {
+    return _patch('/api/v1/passenger/profile', body: {
+      if (fullName != null) 'full_name': fullName,
+      if (avatar != _unset) 'avatar': avatar,
+    });
+  }
+
+  /**
    * PAX-024: Vehicle replacement notice
    */
   Future<Map<String, dynamic>> getReplacementInfo(String tripId) {
@@ -548,3 +563,6 @@ class SearchRefused implements Exception {
   @override
   String toString() => message;
 }
+
+/// Marks an argument the caller did not pass, so `null` can still mean "remove".
+const Object _unset = Object();

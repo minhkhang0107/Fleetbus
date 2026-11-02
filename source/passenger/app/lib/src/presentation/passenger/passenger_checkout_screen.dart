@@ -77,6 +77,10 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
     if (!mounted) return;
     setState(() => _creating = false);
     if (error != null) {
+      if (bookingClosedCodes.contains(store.lastErrorCode)) {
+        await showBookingClosedDialog(context, store, error);
+        return;
+      }
       // The server dropped a code that no longer applies: show it next to the field.
       if (store.voucher == null && _voucherOk) {
         setState(() {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'passenger_date_picker.dart';
@@ -13,29 +15,50 @@ class PassengerSearchResultsScreen extends StatefulWidget {
   State<PassengerSearchResultsScreen> createState() => _PassengerSearchResultsScreenState();
 }
 
-class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScreen> {
+class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScreen> with WidgetsBindingObserver {
   /// The day, sort and state the list on screen shows; it changes only once the new answer is in (D180).
   String? _shownKey;
   /// Which way the list slides when the day changes: a later day comes in from the right, an earlier from the left.
   double _direction = 1;
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => PassengerScope.read(context).loadTrips());
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _timer = null;
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      PassengerScope.read(context).loadTrips();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final store = PassengerScope.of(context);
     final all = store.trips;
-    final open = all.where((t) => t.seatsLeft > 0).toList()
+    final open = all.where((t) => t.bookableNow && t.seatsLeft > 0).toList()
       ..sort((a, b) => switch (store.sort) {
             'price' => a.price.compareTo(b.price),
             'seats' => b.seatsLeft.compareTo(a.seatsLeft),
             _ => a.dep.compareTo(b.dep),
           });
-    final full = all.where((t) => t.seatsLeft == 0).toList();
+    final full = all.where((t) => t.bookableNow && t.seatsLeft == 0).toList();
+    final blocked = all.where((t) => !t.bookableNow).toList();
     return Scaffold(
       appBar: TopBar(
         title: '${store.originPlace.city} → ${store.destPlace.city}',
@@ -118,6 +141,23 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
                             ]),
                           ),
                         ),
+                      for (final t in blocked)
+                        SizedBox(
+                          width: cardWidth,
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(borderRadius: BorderRadius.circular(PTokens.radius), border: Border.all(color: PTokens.lineStrong)),
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text('${t.dep} · ${t.type} · ${t.blockLabel}', style: sans(size: 14, weight: FontWeight.w600, color: PTokens.muted)),
+                              gap(4),
+                              Text('Bến xe ${t.from} → ${t.to}', style: sans(size: 13, color: PTokens.muted)),
+                              if (t.effectiveBlockMessage != null && t.effectiveBlockMessage!.isNotEmpty) ...[
+                                gap(4),
+                                Text(t.effectiveBlockMessage!, style: sans(size: 13, color: PTokens.muted)),
+                              ],
+                            ]),
+                          ),
+                        ),
                     ]),
                   ]);
                 }),
@@ -182,19 +222,25 @@ class _TripCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       onTap: () {
         PassengerScope.read(context).chooseTrip(trip);
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerTripDetailScreen()));
+        Navigator.of(context).push(MaterialPageRoute(
+          settings: const RouteSettings(name: 'trip_detail'),
+          builder: (_) => const PassengerTripDetailScreen(),
+        ));
       },
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
-          Flexible(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(color: trip.vip ? PTokens.primarySoft : const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(4)),
-              child: Text(trip.type, overflow: TextOverflow.ellipsis, maxLines: 1, style: sans(size: 12, weight: FontWeight.w600, color: trip.vip ? PTokens.primaryDark : const Color(0xFF334155))),
+          // The vehicle type takes all the room the fare leaves (a Spacer beside it took half and cut the name).
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: trip.vip ? PTokens.primarySoft : const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(4)),
+                child: Text(trip.type, overflow: TextOverflow.ellipsis, maxLines: 1, style: sans(size: 12, weight: FontWeight.w600, color: trip.vip ? PTokens.primaryDark : const Color(0xFF334155))),
+              ),
             ),
           ),
           const SizedBox(width: 8),
-          const Spacer(),
           Text(vnd(store.fareOf(trip)), style: mono(size: 17, weight: FontWeight.w700)),
         ]),
         gap(12),

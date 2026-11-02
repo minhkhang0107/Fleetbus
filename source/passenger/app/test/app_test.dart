@@ -23,6 +23,7 @@ import 'package:app/src/presentation/passenger/passenger_widgets.dart';
 import 'package:app/src/presentation/passenger/passenger_promo_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_profile_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:data/src/service/passenger_api_service.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -764,6 +765,47 @@ void main() {
 
     store.setPickup('stp_nb');
     expect(store.homePickup, isNull, reason: 'choosing a fixed stop drops the home address');
+  });
+
+  testWidgets('home pickup: after "use my location" the address line is optional; a pin tapped on the map still needs one (D183)', (tester) async {
+    passengerPermissions = FakePassengerPermissions(position: (lat: 20.99, lng: 105.84));
+    final store = (await tester.runAsync(storeWithServer))!;
+    await tester.runAsync(() async {
+      await store.verifyOtp('0987654321', '123456');
+      await store.loadTrips();
+      store.chooseTrip(store.trips.single);
+      await Future<void>.delayed(Duration.zero);
+    });
+    await tester.pumpWidget(MaterialApp(home: PassengerScope(store: store, child: const PassengerHomeAddressScreen(pickupSide: true))));
+    await tester.pump();
+
+    await tester.tap(find.text('Xác nhận địa chỉ'));
+    await tester.pump();
+    expect(find.text('Chạm lên bản đồ để chọn vị trí đón'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Dùng vị trí của tôi'));
+    await tester.tap(find.text('Dùng vị trí của tôi'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Địa chỉ (không bắt buộc, đã có vị trí của bạn)'), findsOneWidget);
+
+    await tester.tap(find.byType(FlutterMap));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Địa chỉ (số nhà, ngõ, đường)'), findsOneWidget, reason: 'a pin moved by hand is no longer the phone position');
+    await tester.tap(find.text('Xác nhận địa chỉ'));
+    await tester.pump();
+    expect(find.text('Địa chỉ cần 5-200 ký tự'), findsOneWidget);
+
+    await tester.tap(find.text('Dùng vị trí của tôi'));
+    await tester.pump();
+    await tester.pump();
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Xác nhận địa chỉ'));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pump();
+    expect(store.homePickup?.address, 'Vị trí hiện tại của khách (20.99000, 105.84000)');
+    expect(bodyOf('/service-areas/check'), {'kind': 'PICKUP', 'lat': 20.99, 'lng': 105.84, 'trip_id': 'trp_hn_th_01'});
   });
 
   test('a ticket shows its home pickup and window, and a tracking link is made absolute', () async {

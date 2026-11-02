@@ -25,6 +25,7 @@ dependencies:
   shared_preferences: ^2.5.6
   flutter_widget_from_html_core: ^0.17.4
   url_launcher: ^6.3.3
+  image_picker: ^1.2.4
 dev_dependencies:
   flutter_test:
     sdk: flutter

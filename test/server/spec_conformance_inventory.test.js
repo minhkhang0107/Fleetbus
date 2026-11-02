@@ -175,6 +175,12 @@ describe('Spec conformance: seat inventory integrity', () => {
     assert.strictEqual(seatState('A09'), 'BOOKED');
     const late = await hold(['A09'], 'u_too_late');
     assert.strictEqual(late.status, 409);
+
+    // D185: reset trip status so subsequent passenger hold tests are not blocked by IN_TRANSIT
+    const drv = services.driverService.activeTrips.get(TRIP);
+    if (drv) drv.status = 'READY';
+    const mgr = services.managerService.findTrip(TRIP);
+    if (mgr) mgr.status = 'SCHEDULED';
   });
 
   it('TC-SPEC-A31: one active hold per user and trip, never extended by repeating it (PAX-009, PAX-010)', async () => {
