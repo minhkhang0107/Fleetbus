@@ -276,7 +276,7 @@ describe('Trip start and end rules', () => {
     services.driverService.activeTrips.delete(tripId);
   });
 
-  it('5. early end cancels + refunds + notifies unpicked passengers and adds the alert', async () => {
+  it('5. early end refunds unpicked and stranded passengers, notifies them and adds the alert', async () => {
     const tripId = 'trp_test_early_passengers';
     const departureTime = '2026-08-28T07:00:00+07:00';
 
@@ -320,9 +320,12 @@ describe('Trip start and end rules', () => {
       passenger_phone: '0983334455'
     };
 
+    const tktAlighted = { ...tktBoarded, ticket_id: 'tkt_early_alighted_04', pnr: 'BG-EP04', seat_code: 'A04', owner_phone: '0984445566', passenger_phone: '0984445566' };
+
     services.paymentService.tickets.set(tktPrepaid.ticket_id, tktPrepaid);
     services.paymentService.tickets.set(tktCash.ticket_id, tktCash);
     services.paymentService.tickets.set(tktBoarded.ticket_id, tktBoarded);
+    services.paymentService.tickets.set(tktAlighted.ticket_id, tktAlighted);
 
     services.driverService.activeTrips.set(tripId, {
       trip_id: tripId,
@@ -344,7 +347,8 @@ describe('Trip start and end rules', () => {
       manifest: [
         { ticket_id: tktPrepaid.ticket_id, pnr: tktPrepaid.pnr, seat_code: tktPrepaid.seat_code, boarding_status: 'NOT_BOARDED', payment_method: 'VIETQR' },
         { ticket_id: tktCash.ticket_id, pnr: tktCash.pnr, seat_code: tktCash.seat_code, boarding_status: 'NOT_BOARDED', payment_method: 'CASH' },
-        { ticket_id: tktBoarded.ticket_id, pnr: tktBoarded.pnr, seat_code: tktBoarded.seat_code, boarding_status: 'BOARDED', payment_method: 'VIETQR' }
+        { ticket_id: tktBoarded.ticket_id, pnr: tktBoarded.pnr, seat_code: tktBoarded.seat_code, boarding_status: 'BOARDED', payment_method: 'VIETQR' },
+        { ticket_id: tktAlighted.ticket_id, pnr: tktAlighted.pnr, seat_code: tktAlighted.seat_code, boarding_status: 'BOARDED', alighted_at: '2026-08-28T08:00:00+07:00', payment_method: 'VIETQR' }
       ]
     });
 
@@ -355,6 +359,8 @@ describe('Trip start and end rules', () => {
       body: { reason: 'Sự cố trục trặc kỹ thuật động cơ' }
     });
     assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.data.unpicked_count, 2);
+    assert.strictEqual(res.body.data.stranded_count, 1);
 
     // 1. Prepaid unboarded passenger: cancelled + 100% refund
     assert.strictEqual(tktPrepaid.status, 'CANCELLED');
@@ -374,8 +380,18 @@ describe('Trip start and end rules', () => {
     const cashRefund = refunds.find(r => r.ticket_id === tktCash.ticket_id);
     assert.strictEqual(cashRefund, undefined, 'Unpaid cash ticket should have no refund');
 
-    // 3. Boarded passenger is unchanged
-    assert.strictEqual(tktBoarded.status, 'BOARDED');
+    // 3. On board short of their stop: refunded in full (D190); already dropped off: unchanged
+    assert.strictEqual(tktBoarded.status, 'CANCELLED');
+    assert.strictEqual(tktBoarded.cancel_source, 'TRIP_INTERRUPTED');
+    const strandedRefund = refunds.find(r => r.ticket_id === tktBoarded.ticket_id);
+    assert.strictEqual(strandedRefund.amount_vnd, 220000);
+    assert.strictEqual(strandedRefund.source, 'TRIP_INTERRUPTED');
+    const strandedNotif = (services.trackingService.getNotifications(tktBoarded.passenger_phone, 'op_saomai').data || [])
+      .find(n => n.type === 'TRIP_INTERRUPTED' && n.payload?.ticket_id === tktBoarded.ticket_id);
+    assert.strictEqual(strandedNotif.title, 'Chuyến dừng giữa đường');
+    assert.ok(strandedNotif.body.includes('dừng trước điểm trả của bạn'));
+    assert.strictEqual(tktAlighted.status, 'BOARDED');
+    assert.strictEqual(refunds.find(r => r.ticket_id === tktAlighted.ticket_id), undefined);
 
     // 4. Passenger notifications
     const prepaidNotifs = services.trackingService.getNotifications(tktPrepaid.passenger_phone, 'op_saomai').data || [];
@@ -398,13 +414,14 @@ describe('Trip start and end rules', () => {
     assert.ok(alert, 'RED alert must be pushed to manager alerts');
     assert.strictEqual(alert.severity, 'RED');
     assert.ok(alert.message.includes('07:00 ngày 28/08'));
-    assert.ok(alert.message.includes('2 khách chưa được đón'));
+    assert.ok(alert.message.includes('2 khách chưa được đón, 1 khách trên xe chưa tới điểm trả'));
 
     // Clean up
     services.driverService.activeTrips.delete(tripId);
     services.paymentService.tickets.delete(tktPrepaid.ticket_id);
     services.paymentService.tickets.delete(tktCash.ticket_id);
     services.paymentService.tickets.delete(tktBoarded.ticket_id);
+    services.paymentService.tickets.delete(tktAlighted.ticket_id);
   });
 
   it('6. normal end at the final stop changes no ticket', async () => {

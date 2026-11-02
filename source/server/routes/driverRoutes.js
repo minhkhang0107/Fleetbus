@@ -5,7 +5,7 @@
 
 import { sendSuccess, sendError, parseJsonBody, clientNow } from '../middleware/httpUtils.js';
 import { isProduction } from '../config.js';
-import { cancelUnpickedTickets } from '../core/tripSales.js';
+import { refundEarlyEnd } from '../core/tripSales.js';
 
 
 // An unpaid COD ticket is a 409 that tells the app which fare to collect (DRI-010, DRI-012).
@@ -410,7 +410,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     parseJsonBody(req).then(body => {
       const result = driverService.endTrip(tripId, { earlyEndReason: body.early_end_reason ?? body.earlyEndReason });
       if (result.success) {
-        if (result.data.early_end_reason) cancelUnpickedTickets(services, tripId, result.data.early_end_reason, { now: clientNow(body) });
+        if (result.data.early_end_reason) refundEarlyEnd(services, tripId, result.data.early_end_reason, { now: clientNow(body) });
         sendSuccess(res, result.data || result);
       } else {
         sendError(res, result.error, result.code, result.code === 'TRIP_NOT_FOUND' ? 404 : 400);

@@ -47,7 +47,8 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
       _store?.removeListener(_onStore);
       _store = store..addListener(_onStore);
       if (wasNull && _index == 1) {
-        store.loadTickets();
+        // After this frame: loading notifies the scope, which is still being built here.
+        WidgetsBinding.instance.addPostFrameCallback((_) => store.loadTickets());
       }
     }
   }

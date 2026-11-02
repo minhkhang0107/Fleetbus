@@ -218,6 +218,11 @@ class _TripCard extends StatelessWidget {
     int toMin(String hhmm) => int.parse(hhmm.substring(0, 2)) * 60 + int.parse(hhmm.substring(3, 5));
     final mins = (toMin(ride.off.time) - toMin(ride.on.time) + 24 * 60) % (24 * 60);
     final rideDuration = '${mins ~/ 60} giờ${mins % 60 == 0 ? '' : ' ${mins % 60} phút'}';
+    // Search is by province (D190): a trip that skips the station picked on the home screen says where it stops instead.
+    final missed = [
+      if (store.originPlace.station.isNotEmpty && ride.on.name != store.originPlace.station) 'Không đón ở ${store.originPlace.station}: lên xe tại ${ride.on.name}',
+      if (store.destPlace.station.isNotEmpty && ride.off.name != store.destPlace.station) 'Không dừng ở ${store.destPlace.station}: xuống tại ${ride.off.name}',
+    ];
     return AppCard(
       padding: const EdgeInsets.all(16),
       onTap: () {
@@ -258,6 +263,10 @@ class _TripCard extends StatelessWidget {
           ),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [Text(ride.off.time, style: mono(size: 20, weight: FontWeight.w700)), Text(ride.off.short, style: sans(size: 12, color: PTokens.muted))]),
         ]),
+        for (final m in missed) ...[
+          gap(8),
+          Text(m, key: const Key('trip_card_other_stop'), style: sans(size: 12, weight: FontWeight.w600, color: const Color(0xFFB45309))),
+        ],
         const Divider(height: 20, color: Color(0xFFF1F5F9)),
         Row(children: [
           Text(few ? 'Sắp hết: còn ${trip.seatsLeft} chỗ' : 'Còn ${trip.seatsLeft} chỗ', style: sans(size: 13, weight: FontWeight.w600, color: few ? const Color(0xFFB45309) : PTokens.success)),

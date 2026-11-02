@@ -188,6 +188,22 @@ void main() {
 
   Widget host(PassengerStore s, Widget child) => PassengerScope(store: s, child: MaterialApp(home: child));
 
+  testWidgets('D190: a trip that skips the station shown on home says where it stops instead', (tester) async {
+    final samSon = sampleTrip('t_samson', '09:00')
+      ..['stops'] = [
+        stops.first,
+        {...stops.last, 'stop_id': 'ss', 'name': 'Bến xe Sầm Sơn'},
+      ];
+    final s = await createStore(tripsAnswer: [sampleTrip('t_main', '08:00'), samSon]);
+
+    await tester.pumpWidget(host(s, const PassengerSearchResultsScreen()));
+    await tester.pumpAndSettle();
+
+    // Only the Sầm Sơn trip carries the note; the one ending at Phía Bắc does not.
+    expect(find.byKey(const Key('trip_card_other_stop')), findsOneWidget);
+    expect(find.text('Không dừng ở Bến xe Phía Bắc: xuống tại Bến xe Sầm Sơn'), findsOneWidget);
+  });
+
   testWidgets('(a) search results show a departed trip greyed with "Đã xuất bến" and it is not tappable, and a bookable one is', (tester) async {
     final departed = sampleTrip(
       't_departed',

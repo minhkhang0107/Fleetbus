@@ -39,9 +39,10 @@ Quy tắc chi tiết ở `decision-log.md`, dòng D189. Sau khi sửa:
 
 ![Chuyển thiếu, sau](full-round-2026-11-02/after-underpaid.png) ![Hủy vé, sau](full-round-2026-11-02/after-cancel-sheet.png) ![Lịch sử, sau](full-round-2026-11-02/after-history-cancelled.png) ![Vé nhà xe hủy, sau](full-round-2026-11-02/after-cancelled-ticket.png) ![Đã nhập tài khoản hoàn](full-round-2026-11-02/after-refund-account.png) ![Hỏi trước khi đăng xuất](full-round-2026-11-02/after-logout-confirm.png)
 
-## Còn lại, chưa làm
+## Việc còn lại, đã làm (D190)
 
-- App điều hành chưa có nút "Kết thúc chuyến" và "Hủy chuyến" trên giao diện; mới có API.
-- Khách **đã lên xe** khi xe hỏng giữa đường: chưa có luồng chuyển xe hay hoàn một phần.
-- Hủy một ghế trong đơn nhiều ghế (một người không đi được): app hủy cả đơn.
-- Tìm chuyến tới "BX Phía Bắc Thanh Hóa" vẫn hiện chuyến chỉ trả khách ở Sầm Sơn (tìm theo tỉnh). Cần xác nhận đây có phải ý đồ.
+- Khách **đang trên xe** khi chuyến dừng giữa đường: hủy vé, hoàn 100%, thông báo "Chuyến dừng giữa đường". Khách đã xuống xe thì không đổi gì. Muốn chở tiếp thì đổi xe thay vì kết thúc chuyến.
+- Web điều hành có nút "Kết thúc chuyến" (bấm hai lần, cần lý do). Đã thử trên trình duyệt: chuyến chuyển sang COMPLETED.
+- Hủy từng ghế trong đơn nhiều ghế từ màn đặt thành công: khách chọn ghế, tiền hoàn tính theo ghế đã chọn.
+- Tìm theo tỉnh giữ nguyên. Thẻ chuyến báo khi xe không dừng ở bến khách đang xem.
+- Lỗi phụ, tìm ra khi viết test: mở app ở tab Vé gọi tải vé ngay trong lúc dựng giao diện (lỗi `setState during build` ở bản debug). Đã chuyển việc tải vé sang sau khung hình đầu.

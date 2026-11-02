@@ -2297,13 +2297,21 @@ class PassengerStore extends ChangeNotifier {
     await prefs.setString('last_refund_account', jsonEncode(account.toJson()));
   }
 
-  Future<ApiResult<int>> cancelTicket(Ticket t, {Map<String, dynamic>? refundAccount}) async {
-    final r = await _call(() => api.cancelTicket(t.id, refundAccount: refundAccount));
-    if (!r.ok) return ApiResult(null, r.error, r.code);
+  /// Cancels the ticket, or the chosen seats of a multi-seat order one by one (D190); returns the refund asked for.
+  Future<ApiResult<int>> cancelTicket(Ticket t, {List<String>? ids, Map<String, dynamic>? refundAccount}) async {
+    var amount = 0;
+    for (final id in ids ?? [t.id]) {
+      final r = await _call(() => api.cancelTicket(id, refundAccount: refundAccount));
+      if (!r.ok) {
+        // Seats cancelled before the failure stay cancelled: show them as they are now.
+        await loadTickets();
+        return ApiResult(null, r.error, r.code);
+      }
+      amount += (r.value!['refund_amount_vnd'] as num?)?.toInt() ?? 0;
+    }
     if (refundAccount != null) {
       await saveLastRefundAccount(RefundAccount.fromJson(refundAccount));
     }
-    final amount = (r.value!['refund_amount_vnd'] as num?)?.toInt() ?? 0;
     await loadTickets();
     await loadNotices();
     return ApiResult(amount);

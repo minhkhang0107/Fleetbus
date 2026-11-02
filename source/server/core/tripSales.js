@@ -3,8 +3,8 @@
  * cancels it. A cancelled departure refunds every ticket in full (the company's decision, never the passenger's
  * fee), tells each passenger once, frees the holds, and a payment that arrives afterwards follows the overdue
  * path (refunded, no ticket). Whole routes are suspended through the route setting `sales_suspended` (D132).
- * A trip that ends before its final stop refunds the passengers it never picked up, and the office can end a trip
- * the driver left running (D189).
+ * A trip that ends before its final stop refunds the passengers it never picked up (D189) and those still on board
+ * short of their stop (D190), and the office can end a trip the driver left running (D189).
  */
 import { operatorOfTrip } from './tenancy.js';
 import { routeServiceConfig } from './serviceAreas.js';
@@ -303,28 +303,39 @@ export function cancelTrip(services, operatorId, tripId, { reason, actor = 'offi
 /**
  * A trip ended before its final stop (breakdown): the passengers it never picked up lose their seat through no
  * fault of theirs, so their tickets are cancelled with a full refund and a notice, and the office is alerted (D189).
- * Passengers already on board keep their ticket.
+ * Passengers on board who had not reached their stop are refunded the same way (D190); those already dropped off are
+ * untouched. To carry them on instead, the office swaps the vehicle (MGR-023) rather than ending the trip.
  */
-export function cancelUnpickedTickets(services, tripId, reason, { now = Date.now() } = {}) {
+export function refundEarlyEnd(services, tripId, reason, { now = Date.now() } = {}) {
   const { paymentService, managerService, driverService } = services;
   const driverTrip = driverService?.activeTrips?.get(tripId);
   const at = new Date(now).toISOString();
   const when = hhmmDate(driverTrip?.planned_departure_time || opsTrip(services, tripId)?.departure_time);
   let unpicked = 0;
+  let stranded = 0;
   for (const passenger of driverTrip?.manifest || []) {
     const ticket = paymentService.tickets.get(passenger.ticket_id);
-    if (['BOARDED', 'NO_SHOW', 'CANCELLED'].includes(passenger.boarding_status) || ticket?.status !== 'ACTIVE') continue;
+    const where = `Chuyến ${ticket?.route_name || ''} ${when} (vé ${ticket?.pnr}, ghế ${ticket?.seat_code})`;
+    // On board and not yet at their stop (D190): the company did not carry them there, so they are refunded in full.
+    if (passenger.boarding_status === 'BOARDED') {
+      if (passenger.alighted_at || !['BOARDED', 'ACTIVE'].includes(ticket?.status)) continue;
+      stranded += 1;
+      cancelForCompany(services, ticket, {
+        at,
+        source: 'TRIP_INTERRUPTED',
+        refundReason: `Chuyến dừng giữa đường: ${reason}`,
+        notice: { type: 'TRIP_INTERRUPTED', title: 'Chuyến dừng giữa đường', text: `${where} dừng trước điểm trả của bạn: ${reason}.` }
+      });
+      continue;
+    }
+    if (['NO_SHOW', 'CANCELLED'].includes(passenger.boarding_status) || ticket?.status !== 'ACTIVE') continue;
     passenger.boarding_status = 'CANCELLED';
     unpicked += 1;
     cancelForCompany(services, ticket, {
       at,
       source: 'TRIP_ENDED_EARLY',
       refundReason: `Chuyến kết thúc sớm: ${reason}`,
-      notice: {
-        type: 'TRIP_ENDED_EARLY',
-        title: 'Xe không đón được bạn',
-        text: `Chuyến ${ticket.route_name || ''} ${when} (vé ${ticket.pnr}, ghế ${ticket.seat_code}) kết thúc sớm: ${reason}.`
-      }
+      notice: { type: 'TRIP_ENDED_EARLY', title: 'Xe không đón được bạn', text: `${where} kết thúc sớm: ${reason}.` }
     });
   }
   managerService.alerts?.unshift?.({
@@ -332,12 +343,12 @@ export function cancelUnpickedTickets(services, tripId, reason, { now = Date.now
     vehicle_plate: driverTrip?.vehicle_plate,
     type: 'TRIP_ENDED_EARLY',
     severity: 'RED',
-    message: `Chuyến ${when} kết thúc sớm: ${reason}. ${unpicked} khách chưa được đón.`,
+    message: `Chuyến ${when} kết thúc sớm: ${reason}. ${unpicked} khách chưa được đón, ${stranded} khách trên xe chưa tới điểm trả (hoàn 100%).`,
     created_at: at,
     operator_id: driverTrip?.operator_id || operatorOfTrip(services, tripId),
     trip_id: tripId
   });
-  return unpicked;
+  return { unpicked, stranded };
 }
 
 /** The office ends a trip the driver left running (D189). The reason goes to the end report and the passengers. */
@@ -353,6 +364,6 @@ export function endTripByOffice(services, operatorId, tripId, { reason, now = Da
   const before = { status: driverTrip.status };
   const ended = services.driverService.endTrip(tripId, { earlyEndReason: `Điều hành kết thúc: ${text}`, endedBy: 'OFFICE' });
   if (!ended.success) return { ok: false, status: 400, code: ended.code, message: ended.error };
-  if (ended.data.early_end_reason) cancelUnpickedTickets(services, tripId, ended.data.early_end_reason, { now });
-  return { ok: true, before, result: ended.data };
+  const refunded = ended.data.early_end_reason ? refundEarlyEnd(services, tripId, ended.data.early_end_reason, { now }) : { unpicked: 0, stranded: 0 };
+  return { ok: true, before, result: { ...ended.data, unpicked_count: refunded.unpicked, stranded_count: refunded.stranded } };
 }
