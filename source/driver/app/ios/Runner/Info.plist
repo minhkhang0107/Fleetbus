@@ -60,6 +60,8 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
+		<!-- D192: pushes from the office reach the app in the background -->
+		<string>remote-notification</string>
 	</array>
 
 	<!-- App Transport Security for Local Network & Dev APIs -->

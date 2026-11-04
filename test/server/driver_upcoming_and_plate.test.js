@@ -118,19 +118,17 @@ describe('Task T2: Driver upcoming trips within 12 hours & schedule template def
   });
 
   describe('Plate fallback for runs made from schedules', () => {
-    it('TC-PLATE-RUN-01: unassigned trp_hn_th_02 run returns template plate_number on tickets and plateProvider', async () => {
-      // Read the actual template plate value from search data (not hard-coded)
+    it('TC-PLATE-RUN-01: an unassigned run has no plate on its tickets, as in search; the bus the office gives it shows later (D191)', async () => {
+      // The catalog's sample plate is not the run's bus.
       const templateDetail = services.searchService.getTripDetail('trp_hn_th_02');
-      assert.strictEqual(templateDetail.success, true);
-      const expectedTemplatePlate = templateDetail.data.plate_number;
-      assert.strictEqual(expectedTemplatePlate, '29B-991.02', 'schedule template plate in search data');
+      assert.strictEqual(templateDetail.data.plate_number, '29B-991.02', 'schedule template plate in search data');
 
       const date = addDays(vnDate(Date.now()), 3);
       const runId = `trp_hn_th_02_${date.replaceAll('-', '')}`;
 
       // 1. Check plateProvider direct call
       const plateFromProvider = services.paymentService.plateProvider(runId);
-      assert.strictEqual(plateFromProvider, expectedTemplatePlate, 'plateProvider returns template plate for unassigned run');
+      assert.strictEqual(plateFromProvider, null, 'no bus yet, no plate');
 
       // 2. Buy a ticket via HTTP and check issued ticket vehicle_plate
       const hold = await request(`/api/v1/passenger/trips/${runId}/hold-seats`, {
@@ -156,14 +154,20 @@ describe('Task T2: Driver upcoming trips within 12 hours & schedule template def
       const settle = services.paymentService.settlePayment(booking.body.data.payment.order_id);
       assert.strictEqual(settle.success, true);
       const issuedTicket = settle.data.tickets[0];
-      assert.strictEqual(issuedTicket.vehicle_plate, expectedTemplatePlate, 'paid ticket has schedule default plate');
+      assert.strictEqual(issuedTicket.vehicle_plate, null, 'paid ticket has no plate before a bus is assigned');
 
       // 3. Check wallet endpoint /api/v1/passenger/tickets
       const wallet = await request('/api/v1/passenger/tickets?filter=UPCOMING', { token: paxToken });
       assert.strictEqual(wallet.status, 200);
       const ticketInWallet = wallet.body.data.find(t => t.ticket_id === issuedTicket.ticket_id);
       assert.ok(ticketInWallet, 'ticket is in upcoming wallet');
-      assert.strictEqual(ticketInWallet.vehicle_plate, expectedTemplatePlate, 'wallet ticket has schedule default plate');
+      assert.strictEqual(ticketInWallet.vehicle_plate ?? null, null, 'wallet ticket has no plate yet');
+
+      // 4. The office assigns a bus: the wallet shows it.
+      services.eventBridge.ensureRunOperations(runId);
+      services.managerService.findTrip(runId).vehicle_plate = '29B-444.12';
+      const later = await request('/api/v1/passenger/tickets?filter=UPCOMING', { token: paxToken });
+      assert.strictEqual(later.body.data.find(t => t.ticket_id === issuedTicket.ticket_id).vehicle_plate, '29B-444.12');
     });
 
     it('TC-PLATE-RUN-02: assigned bus on the run still wins over schedule template plate fallback', () => {

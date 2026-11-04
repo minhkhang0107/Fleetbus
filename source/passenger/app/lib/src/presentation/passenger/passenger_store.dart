@@ -1534,6 +1534,8 @@ class PassengerStore extends ChangeNotifier {
 
   Future<void> logout() async {
     final cacheKey = _walletCacheKey();
+    // D192: this phone stops getting the account's pushes; the request leaves before the session is cleared.
+    if (pushToken != null && loggedIn) unawaited(_call(() => api.registerDevice(platform: defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android')));
     api.authToken = null;
     userPhone = null;
     userName = null;
@@ -2490,8 +2492,8 @@ class PassengerStore extends ChangeNotifier {
         AppNotice(n['title'] ?? '', n['body'] ?? '', _ago(n['created_at']), tripId: n['payload']?['trip_id'], type: n['type'] ?? '', id: '${n['id'] ?? ''}', ticketId: n['payload']?['ticket_id'] as String?, pnr: n['payload']?['pnr'] as String?, isRead: n['is_read'] != false),
     ];
     unread = list.any((n) => n['is_read'] == false);
-    // D144: a new "the bus is coming" notice shows on top of the app; the first load only learns what is there.
-    final fresh = notices.where((n) => !n.isRead && !_seenNotices.contains(n.id) && AppNotice.alertTypes.contains(n.type)).toList();
+    // D144, D191: every new unread notice shows as a heads-up on top of the app; the first load only learns what is there.
+    final fresh = notices.where((n) => !n.isRead && !_seenNotices.contains(n.id)).toList();
     if (_noticesLoaded && fresh.isNotEmpty) pendingAlert = fresh.first;
     _seenNotices.addAll(notices.map((n) => n.id));
     _noticesLoaded = true;
@@ -2501,11 +2503,21 @@ class PassengerStore extends ChangeNotifier {
   final Set<String> _seenNotices = {};
   bool _noticesLoaded = false;
 
-  /// The newest "the bus is coming" notice not shown yet (D144); the shell shows it and clears it.
+  /// The newest notice not shown yet (D191); the shell shows it and clears it.
   AppNotice? pendingAlert;
 
   /// D145: the phone's push token (Firebase), sent with the device so the server can push instead of texting.
   String? pushToken;
+
+  /// D192: a push the passenger tapped; the shell opens what it is about once someone is signed in, then clears it.
+  AppNotice? pushToOpen;
+
+  void openFromPush(AppNotice notice) {
+    pushToOpen = notice;
+    // The phone already showed it: the next notice load must not show it again on top of the app.
+    if (notice.id.isNotEmpty) _seenNotices.add(notice.id);
+    notifyListeners();
+  }
 
   Future<void> setPushToken(String? token) async {
     if (token == null || token == pushToken) return;

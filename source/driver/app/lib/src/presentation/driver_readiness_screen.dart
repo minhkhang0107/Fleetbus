@@ -14,6 +14,18 @@ class DriverReadinessScreen extends StatelessWidget {
   const DriverReadinessScreen({super.key});
 
   Future<void> _confirmStart(BuildContext context, DriverStore store) async {
+    // Too early: say from when, rather than asking and then being refused (D191).
+    final opens = store.startOpensAt;
+    if (opens != null) {
+      await showDriverSheet<void>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Chưa tới giờ xuất bến', style: dsans(size: 18, weight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            Text('Chuyến ${store.depTimeLabel} xuất bến được từ $opens. Kiểm tra xe đã lưu, tới giờ bấm Xuất bến.', style: dsans(size: 16, color: DTokens.sub, height: 1.5)),
+            const SizedBox(height: 14),
+            BigButton(label: 'Đã hiểu', height: 56, onPressed: () => Navigator.of(ctx).pop()),
+          ]));
+      return;
+    }
     await driverPermissions.requestNotifications();
     if (!context.mounted) return;
     if (!await ensureDriverLocation(context)) return;
@@ -117,7 +129,7 @@ class DriverReadinessScreen extends StatelessWidget {
           ),
         );
     final start = BigButton(
-      label: done < 6 ? 'Còn ${6 - done} mục chưa kiểm tra' : 'Xuất bến',
+      label: done < 6 ? 'Còn ${6 - done} mục chưa kiểm tra' : (store.startOpensAt == null ? 'Xuất bến' : 'Xuất bến từ ${store.startOpensAt}'),
       subtitle: done < 6 ? null : '${store.manifest.length} khách · ${store.stops.isEmpty ? '' : store.stops.first.short} ${store.depTimeLabel}',
       color: DTokens.ok,
       height: 72,

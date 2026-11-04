@@ -404,12 +404,21 @@ class PassengerRouteMapState extends State<PassengerRouteMap> with TickerProvide
       }
     }
 
+    // No road shape for this route: a dashed line through the stops, in order, so the way still reads (D191).
+    final stopPts = [for (final s in _effectiveStops) if (s.lat != 0 || s.lng != 0) LatLng(s.lat, s.lng)];
     final polylines = <Polyline>[
       if (routePts.length >= 2)
         Polyline(
           points: routePts,
           strokeWidth: 5,
           color: const Color(0xFF94A3B8),
+        )
+      else if (stopPts.length >= 2)
+        Polyline(
+          points: stopPts,
+          strokeWidth: 4,
+          color: const Color(0xFF94A3B8),
+          pattern: StrokePattern.dashed(segments: const [12, 8]),
         ),
       if (closestIndex >= 1)
         Polyline(
