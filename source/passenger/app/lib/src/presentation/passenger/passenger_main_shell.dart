@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'passenger_heads_up.dart';
 import 'passenger_home_screen.dart';
-import 'passenger_live_radar_screen.dart';
 import 'passenger_notifications_screen.dart';
 import 'passenger_profile_screen.dart';
 import 'passenger_store.dart';
@@ -50,6 +50,8 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
         // After this frame: loading notifies the scope, which is still being built here.
         WidgetsBinding.instance.addPostFrameCallback((_) => store.loadTickets());
       }
+      // A push tapped before the shell was there (it started the app) opens once the shell is up (D192).
+      if (store.pushToOpen != null) WidgetsBinding.instance.addPostFrameCallback((_) => _onStore());
     }
   }
 
@@ -58,6 +60,7 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
     WidgetsBinding.instance.removeObserver(this);
     _poll?.cancel();
     _store?.removeListener(_onStore);
+    hideHeadsUp();
     super.dispose();
   }
 
@@ -81,7 +84,7 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
     }
   }
 
-  /// D144: "the bus is coming" shows on top of whatever screen is open, with a way to see the bus.
+  /// D144: new notices show as a heads-up on top of whatever screen is open.
   void _onStore() {
     final store = _store;
     if (store == null || !mounted) return;
@@ -89,44 +92,27 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
     if (_bannerTicketId != null) {
       final current = store.tickets.where((t) => t.id == _bannerTicketId).firstOrNull;
       if (current != null && (current.status == TicketStatus.boarded || current.past)) {
-        ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+        hideHeadsUp();
         _bannerTicketId = null;
       }
+    }
+
+    final tapped = store.pushToOpen;
+    if (tapped != null && store.loggedIn) {
+      store.pushToOpen = null;
+      unawaited(openNotice(context, store, tapped));
     }
 
     final alert = store.pendingAlert;
     if (alert == null) return;
     store.pendingAlert = null;
     _bannerTicketId = alert.ticketId;
-    final ticket = store.tickets.where((t) => t.id == alert.ticketId).firstOrNull;
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.clearMaterialBanners();
-    messenger.showMaterialBanner(MaterialBanner(
-      backgroundColor: PTokens.primarySoft,
-      leading: const Icon(Icons.directions_bus, color: PTokens.primary),
-      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(alert.title, style: sans(size: 15, weight: FontWeight.w700, color: PTokens.ink)),
-        Text(alert.body, style: sans(size: 13, color: PTokens.ink)),
-      ]),
-      actions: [
-        TextButton(
-          onPressed: () {
-            _bannerTicketId = null;
-            messenger.hideCurrentMaterialBanner();
-          },
-          child: const Text('Đóng'),
-        ),
-        if (ticket != null)
-          TextButton(
-            onPressed: () {
-              _bannerTicketId = null;
-              messenger.hideCurrentMaterialBanner();
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerLiveRadarScreen(ticket: ticket)));
-            },
-            child: const Text('Xem xe'),
-          ),
-      ],
-    ));
+
+    showHeadsUp(
+      context,
+      notice: alert,
+      onTap: () => openNotice(context, store, alert),
+    );
   }
 
   @override

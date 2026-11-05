@@ -24,8 +24,8 @@ const NEEDS = {
 
 const APPS = {
   // Camera and photo library: the profile photo (D186), through image_picker, not permission_handler.
-  passenger: { plistAllowed: ['NSLocationWhenInUseUsageDescription', 'NSPhotoLibraryAddUsageDescription', 'NSCameraUsageDescription', 'NSPhotoLibraryUsageDescription'], backgroundModes: [] },
-  driver: { plistAllowed: ['NSLocationWhenInUseUsageDescription', 'NSLocationAlwaysAndWhenInUseUsageDescription', 'NSLocationAlwaysUsageDescription', 'NSCameraUsageDescription'], backgroundModes: ['location'] }
+  passenger: { plistAllowed: ['NSLocationWhenInUseUsageDescription', 'NSPhotoLibraryAddUsageDescription', 'NSCameraUsageDescription', 'NSPhotoLibraryUsageDescription'], backgroundModes: ['remote-notification'] },
+  driver: { plistAllowed: ['NSLocationWhenInUseUsageDescription', 'NSLocationAlwaysAndWhenInUseUsageDescription', 'NSLocationAlwaysUsageDescription', 'NSCameraUsageDescription'], backgroundModes: ['location', 'remote-notification'] }
 };
 
 describe('iOS permissions match what each app uses', () => {
@@ -55,8 +55,8 @@ describe('iOS permissions match what each app uses', () => {
 });
 
 describe('iOS deployment target covers every plugin', () => {
-  // The lowest iOS each app's plugins accept (firebase_messaging needs 15); pod install fails below it.
-  for (const [app, minimum] of Object.entries({ passenger: 15, driver: 14 })) {
+  // The lowest iOS each app's plugins accept (firebase_messaging needs 15, both apps since D192); pod install fails below it.
+  for (const [app, minimum] of Object.entries({ passenger: 15, driver: 15 })) {
     it(`${app}: Podfile, Xcode project and Flutter framework agree on iOS ${minimum}`, () => {
       assert.match(read(`source/${app}/app/ios/Podfile`), new RegExp(`^platform :ios, '${minimum}\\.0'`, 'm'));
       const targets = [...read(`source/${app}/app/ios/Runner.xcodeproj/project.pbxproj`).matchAll(/IPHONEOS_DEPLOYMENT_TARGET = ([\d.]+);/g)].map(m => m[1]);

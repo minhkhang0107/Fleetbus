@@ -1718,6 +1718,25 @@ async function loadAbout() {
 }
 
 // ---------- overview ----------
+// D191: the office reads what an alert is about, not its code.
+const ALERT_TYPE_LABELS = {
+  DEPARTURE_MISSED: 'Chưa xuất bến',
+  DELAY_WARNING: 'Trễ giờ',
+  TRIP_DELAY: 'Trễ giờ',
+  GPS_LIVE: 'GPS',
+  PAYMENT_AMOUNT_MISMATCH: 'Sai số tiền',
+  PAYMENT_UNMATCHED: 'Tiền chưa khớp đơn',
+  PAYMENT_UNMATCHED_OVERDUE: 'Tiền chưa khớp đơn',
+  TRIP_ENDED_EARLY: 'Kết thúc sớm',
+  TRIP_CANCELLED: 'Hủy chuyến',
+  EMERGENCY_VEHICLE_SWAP: 'Đổi xe',
+  HOME_PICKUP_INACCESSIBLE: 'Đón tận nhà',
+  SOS_INCIDENT: 'Sự cố',
+  VEHICLE_BREAKDOWN: 'Sự cố',
+  ACCIDENT: 'Sự cố',
+  TRAFFIC_JAM: 'Sự cố'
+};
+
 async function loadOverview() {
   const [k, a] = await Promise.all([api('/api/v1/ops/dashboard/kpis'), api('/api/v1/ops/alerts')]);
   if (!k.ok) { $('#kpis').innerHTML = `<div class="error">${esc(k.message)}</div>`; return; }
@@ -1733,7 +1752,28 @@ async function loadOverview() {
   // Alerts that could not be read are not "no alerts": the office must not take silence for calm.
   if (!a.ok) { $('#alerts').innerHTML = `<p class="error">Chưa tải được cảnh báo: ${esc(a.message)}</p>`; return; }
   const alerts = a.data.alerts || [];
-  $('#alerts').innerHTML = alerts.length ? alerts.map(x => `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><span class="pill ${x.severity === 'RED' ? 'danger' : x.severity === 'AMBER' ? 'warn' : 'ok'}">${esc(x.type)}</span><span class="grow">${esc(x.message)}</span><span class="muted mono">${esc(x.vehicle_plate || '')}</span></div>`).join('') : '<p class="muted">Không có cảnh báo.</p>';
+  $('#alerts').innerHTML = alerts.length ? alerts.map(x => {
+    const label = ALERT_TYPE_LABELS[x.type] || x.type;
+    const isClickable = Boolean(x.trip_id);
+    const clickAttrs = isClickable
+      ? ` role="button" tabindex="0" style="padding:6px 0;border-bottom:1px solid var(--line);cursor:pointer" data-trip-id="${esc(x.trip_id)}"`
+      : ' style="padding:6px 0;border-bottom:1px solid var(--line)"';
+    return `<div class="row"${clickAttrs}><span class="pill ${x.severity === 'RED' ? 'danger' : x.severity === 'AMBER' ? 'warn' : 'ok'}">${esc(label)}</span><span class="grow">${esc(x.message)}</span><span class="muted mono">${esc(x.vehicle_plate || '')}</span></div>`;
+  }).join('') : '<p class="muted">Không có cảnh báo.</p>';
+
+  document.querySelectorAll('#alerts [data-trip-id]').forEach(el => {
+    const go = () => {
+      show('dispatch');
+      openTrip(el.dataset.tripId);
+    };
+    el.addEventListener('click', go);
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        go();
+      }
+    });
+  });
 }
 
 // ---------- dispatch ----------

@@ -90,6 +90,21 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // POST /api/v1/driver/devices (D192): the driver app's push token, none when the driver signs out
+  if (pathname === '/api/v1/driver/devices' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const driverId = req.identity?.sub;
+      if (!driverId) {
+        sendError(res, 'Cần đăng nhập', 'UNAUTHORIZED', 401);
+        return;
+      }
+      const token = typeof body.token === 'string' && body.token.length <= 4096 ? body.token : null;
+      const platform = ['android', 'ios'].includes(body.platform) ? body.platform : null;
+      sendSuccess(res, services.messenger.registerDriverDevice(driverId, { token, platform, operatorId: req.operatorId }));
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
   // GET /api/v1/driver/schedule (DRI-021)
   if (pathname === '/api/v1/driver/schedule' && req.method === 'GET') {
     const driverId = req.identity?.sub || req.headers['x-driver-id'] || 'drv_8821a';

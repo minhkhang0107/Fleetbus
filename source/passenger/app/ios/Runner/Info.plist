@@ -37,6 +37,12 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>BusGo lưu ảnh mã QR thanh toán vào thư viện ảnh của bạn.</string>
 
+	<!-- D192: pushes (Firebase Cloud Messaging) reach the app while it is in the background -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

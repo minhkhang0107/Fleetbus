@@ -111,3 +111,9 @@ flutter {
 }
 
 dependencies {}
+
+// Push notifications (D192): Firebase is set up from google-services.json when it is in this folder; without it the
+// app reads the Firebase settings from --dart-define (docs/firebase-push.md), or simply has no push.
+if (file("google-services.json").exists()) {
+    apply plugin: "com.google.gms.google-services"
+}

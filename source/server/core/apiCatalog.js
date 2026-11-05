@@ -48,6 +48,7 @@ export const API_CATALOG = [
   { method: 'POST', path: '/api/v1/driver/auth/change-pin', screen: 'DRI-001', summary: 'Change temporary driver PIN' },
   { method: 'GET', path: '/api/v1/driver/trips/today', screen: 'DRI-002', summary: 'Trips assigned for today' },
   { method: 'GET', path: '/api/v1/driver/schedule', screen: 'DRI-021', summary: 'Driver monthly trip schedule' },
+  { method: 'POST', path: '/api/v1/driver/devices', screen: 'DRI-001', summary: 'Register the driver app push token (D192)' },
   { method: 'GET', path: '/api/v1/driver/trips/{tripId}', screen: 'DRI-003', summary: 'Pre-start trip detail' },
   { method: 'POST', path: '/api/v1/driver/trips/{tripId}/readiness', screen: 'DRI-004', summary: 'Submit the readiness checklist' },
   { method: 'POST', path: '/api/v1/driver/trips/{tripId}/start', screen: 'DRI-005', summary: 'Start the trip' },

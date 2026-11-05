@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'src/presentation/driver_about_screen.dart';
 import 'src/presentation/driver_login_screen.dart';
+import 'src/presentation/driver_push.dart';
 import 'src/presentation/driver_store.dart';
 import 'src/presentation/driver_widgets.dart';
 
@@ -26,6 +29,8 @@ class _BusGoDriverAppState extends State<BusGoDriverApp> {
   void initState() {
     super.initState();
     widget.store.addListener(_onStore);
+    // D192: the office's changes reach the phone by push when the Firebase settings are in the build.
+    unawaited(startDriverPush(widget.store));
   }
 
   @override
@@ -36,6 +41,13 @@ class _BusGoDriverAppState extends State<BusGoDriverApp> {
 
   /// A session the server ended (H-06) sends the driver back to the login screen with the reason.
   void _onStore() {
+    // A push while the app is open: the trips already reload; say what the office changed.
+    final pushed = widget.store.pushMessage;
+    if (pushed != null) {
+      widget.store.pushMessage = null;
+      final context = _navigator.currentContext;
+      if (context != null) dToast(context, pushed);
+    }
     final reason = widget.store.sessionEnded;
     if (reason == null) return;
     widget.store.sessionEnded = null;
