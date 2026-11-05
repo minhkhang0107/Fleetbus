@@ -10,6 +10,7 @@ import { maskPhone, normalizePlate } from '../services/passenger/core/formatters
 import { ADMIN_ROLE } from '../core/gateway.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { parseServiceDate, scheduleChangeFrom, vnDate } from '../core/serviceDate.js';
+import { missedDepartureAlerts } from '../core/missedDepartures.js';
 import { isProduction } from '../config.js';
 import { resolveHomeBooking, routeServiceConfig } from '../core/serviceAreas.js';
 import { BUILTIN_LAYOUTS, validateLayout, findLayout } from '../core/seatLayouts.js';
@@ -136,8 +137,17 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
 
   // GET /api/v1/ops/dashboard/kpis (MGR-002)
   if (pathname === '/api/v1/ops/dashboard/kpis' && req.method === 'GET') {
+    const now = clientNow(parsedUrl.searchParams);
+    const derived = missedDepartureAlerts(managerService, req.operatorId, now);
     const kpis = managerService.getOperationsDashboardKPIs(req.operatorId);
-    sendSuccess(res, kpis.data || kpis);
+    const data = kpis.data || kpis;
+    if (data?.kpi_metrics) {
+      data.kpi_metrics.active_alerts_count = (data.kpi_metrics.active_alerts_count || 0) + derived.length;
+    }
+    if (Array.isArray(data?.recent_alerts)) {
+      data.recent_alerts = [...derived, ...data.recent_alerts];
+    }
+    sendSuccess(res, data);
     return true;
   }
 
@@ -1102,7 +1112,10 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
 
   // GET /api/v1/ops/alerts (MGR-025)
   if (pathname === '/api/v1/ops/alerts' && req.method === 'GET') {
-    const alerts = req.operatorId ? managerService.alerts.filter(a => (a.operator_id || DEFAULT_OPERATOR_ID) === req.operatorId) : managerService.alerts;
+    const now = clientNow(parsedUrl.searchParams);
+    const derived = missedDepartureAlerts(managerService, req.operatorId, now);
+    const stored = req.operatorId ? managerService.alerts.filter(a => (a.operator_id || DEFAULT_OPERATOR_ID) === req.operatorId) : managerService.alerts;
+    const alerts = [...derived, ...stored];
     sendSuccess(res, { total: alerts.length, alerts });
     return true;
   }

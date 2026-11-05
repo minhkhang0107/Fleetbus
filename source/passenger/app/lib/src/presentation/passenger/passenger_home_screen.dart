@@ -110,7 +110,7 @@ class PassengerHomeScreen extends StatelessWidget {
           gap(20),
           Text('Chuyến sắp đi', style: sans(size: 15, weight: FontWeight.w600)),
           gap(10),
-          _UpcomingCard(ticket: upcoming.last),
+          _UpcomingCard(tickets: nextBooking(upcoming)),
         ],
       ], right: [
         if (store.banners.isNotEmpty) ...[
@@ -218,12 +218,20 @@ class _PlaceField extends StatelessWidget {
   }
 }
 
+/// D191: the booking that leaves first, with all its seats (the wallet keeps one ticket per seat).
+List<Ticket> nextBooking(List<Ticket> upcoming) {
+  final sorted = [...upcoming]..sort((a, b) => (a.departureTime ?? '').compareTo(b.departureTime ?? ''));
+  final first = sorted.first;
+  return sorted.where((t) => t.pnr == first.pnr && t.tripId == first.tripId).toList();
+}
+
 class _UpcomingCard extends StatelessWidget {
-  const _UpcomingCard({required this.ticket});
-  final Ticket ticket;
+  const _UpcomingCard({required this.tickets});
+  final List<Ticket> tickets;
 
   @override
   Widget build(BuildContext context) {
+    final ticket = tickets.first;
     return AppCard(
       onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerTicketQrScreen(ticket: ticket))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -236,7 +244,7 @@ class _UpcomingCard extends StatelessWidget {
         ]),
         gap(10),
         Row(children: [
-          Expanded(child: Text('${ticket.date} · Ghế ${ticket.seat}', style: sans(size: 13, color: PTokens.muted))),
+          Expanded(child: Text('${ticket.date} · Ghế ${tickets.map((t) => t.seat).join(', ')}', style: sans(size: 13, color: PTokens.muted))),
           Text('Mở vé', style: sans(size: 13, weight: FontWeight.w600, color: PTokens.primaryDark)),
         ]),
       ]),

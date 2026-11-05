@@ -1,9 +1,34 @@
 import 'package:flutter/material.dart';
 
 import 'passenger_cancel_refund_screen.dart';
+import 'passenger_live_radar_screen.dart';
 import 'passenger_login_screen.dart';
 import 'passenger_store.dart';
+import 'passenger_ticket_qr_screen.dart';
 import 'passenger_widgets.dart';
+
+/// The ticket a notice is about: by ticket id or PNR, else the active ticket of its trip.
+Ticket? findNoticeTicket(PassengerStore store, AppNotice n) =>
+    store.tickets.where((t) => (n.ticketId != null && (t.id == n.ticketId || t.ticketIds.contains(n.ticketId))) || (n.pnr != null && t.pnr == n.pnr)).firstOrNull ??
+    (n.tripId == null ? null : store.tickets.where((t) => t.tripId == n.tripId && t.active).firstOrNull);
+
+bool noticeOpens(PassengerStore store, AppNotice n) =>
+    findNoticeTicket(store, n) != null || n.ticketId != null || n.pnr != null;
+
+/// Opens what a notice is about (D191): the bus on the map while it is coming, else the ticket or its delay screen.
+Future<void> openNotice(BuildContext context, PassengerStore store, AppNotice n) async {
+  // A ticket changed since the wallet was loaded (cancelled by the company) is fetched first.
+  if (findNoticeTicket(store, n) == null) await store.loadTickets();
+  final ticket = findNoticeTicket(store, n);
+  if (ticket == null || !context.mounted) return;
+  if (AppNotice.alertTypes.contains(n.type)) {
+    final live = ticket.status == TicketStatus.active && !ticket.past;
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => live ? PassengerLiveRadarScreen(ticket: ticket) : PassengerTicketQrScreen(ticket: ticket)));
+    return;
+  }
+  final delay = ticket.status == TicketStatus.active && ticket.delay > 0 && !const {'TRIP_CANCELLED', 'TRIP_ENDED_EARLY', 'PAYMENT_SUCCESS'}.contains(n.type);
+  await Navigator.of(context).push(MaterialPageRoute(builder: (_) => delay ? PassengerDelayNoticeScreen(ticket: ticket) : PassengerTicketQrScreen(ticket: ticket)));
+}
 
 /// PAX-020: newest first; a notice about a ticket opens that ticket's delay screen.
 class PassengerNotificationsScreen extends StatelessWidget {
@@ -45,10 +70,10 @@ class PassengerNotificationsScreen extends StatelessWidget {
           separatorBuilder: (_, __) => gap(8),
           itemBuilder: (_, i) {
             final n = notices[i];
-            final ticket = n.tripId == null ? null : store.tickets.where((t) => t.tripId == n.tripId && t.active).firstOrNull;
-            final open = ticket != null && ticket.status == TicketStatus.active && ticket.delay > 0;
+            final known = noticeOpens(store, n);
+
             return FadeSlideIn(index: i, child: AppCard(
-              onTap: open ? () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerDelayNoticeScreen(ticket: ticket))) : null,
+              onTap: known ? () => openNotice(context, store, n) : null,
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Row(children: [
                   Expanded(child: Text(n.title, style: sans(size: 14, weight: FontWeight.w700))),

@@ -517,6 +517,7 @@ Future<T?> showAppSheet<T>(BuildContext context, {required Widget Function(Build
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     sheetAnimationStyle: Motion.sheetStyle,
     isDismissible: dismissible,
     enableDrag: dismissible,
@@ -532,7 +533,8 @@ Future<T?> showAppSheet<T>(BuildContext context, {required Widget Function(Build
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: PTokens.lineStrong, borderRadius: BorderRadius.circular(999)))),
             const SizedBox(height: 14),
-            builder(ctx),
+            // A long sheet (policy, bank fields, keyboard up) scrolls under its handle instead of overflowing.
+            Flexible(child: SingleChildScrollView(child: builder(ctx))),
           ]),
         ),
       ),

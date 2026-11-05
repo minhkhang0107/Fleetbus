@@ -4,6 +4,15 @@ import { createFleetBusServer } from '../../source/server/apiServer.js';
 import { vnDate, runId } from '../../source/server/core/serviceDate.js';
 import { MOCK_TRIPS_DATABASE, reloadScheduleTemplates } from '../../source/server/services/passenger/modules/search.js';
 
+/** The month after the current one (Vietnam time) and its dates. */
+function nextMonth() {
+  const [y, m] = vnDate(Date.now()).slice(0, 7).split('-').map(Number);
+  const first = new Date(Date.UTC(y, m, 1));
+  const days = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const month = first.toISOString().slice(0, 7);
+  return { month, dates: Array.from({ length: days }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`) };
+}
+
 describe('Driver Monthly Schedule (DRI-021, D155)', () => {
   let server;
   let baseUrl;
@@ -152,56 +161,38 @@ describe('Driver Monthly Schedule (DRI-021, D155)', () => {
       driver_id: 'drv_8821a'
     };
 
-    const res = await getSchedule('?month=2026-11');
+    // Next month: every day is still to come, so a schedule default lists each run day (D155 skips past days).
+    const { month, dates } = nextMonth();
+    const res = await getSchedule(`?month=${month}`);
     assert.strictEqual(res.status, 200);
     const { days } = res.body.data;
 
-    // November 2026 has 30 days:
-    // 2026-11-01 is Sunday (weekday 7) -> does not run
-    // 2026-11-02 is Monday (weekday 1) -> runs!
-    // 2026-11-03 is Tuesday (weekday 2) -> does not run
-    // 2026-11-04 is Wednesday (weekday 3) -> runs!
-    // 2026-11-05 is Thursday (weekday 4) -> does not run
-    // 2026-11-06 is Friday (weekday 5) -> runs!
-    // 2026-11-07 is Saturday (weekday 6) -> does not run
-    // 2026-11-08 is Sunday (weekday 7) -> does not run
-
-    // Check Sunday 2026-11-01 has NO mwf trip
-    const day01 = days.find((d) => d.date === '2026-11-01');
-    assert.ok(!day01?.trips.some((t) => t.trip_id.startsWith(templateId)));
-
-    // Check Monday 2026-11-02 has SCHEDULE_DEFAULT entry
-    const day02 = days.find((d) => d.date === '2026-11-02');
-    assert.ok(day02, '2026-11-02 must have trips');
-    const run02 = day02.trips.find((t) => t.trip_id === runId(templateId, '2026-11-02'));
-    assert.ok(run02, 'Run on 2026-11-02 must be found');
-    assert.strictEqual(run02.source, 'SCHEDULE_DEFAULT');
-    assert.strictEqual(run02.status, 'SCHEDULED');
-    assert.strictEqual(run02.departure, '09:15');
-    assert.strictEqual(run02.vehicle_plate, '29B-882.19');
-    assert.strictEqual(run02.passengers, null);
-    assert.strictEqual(run02.delay_minutes, 0);
-    assert.strictEqual(run02.cash_handed_in_vnd, null);
-
-    // Check Tuesday 2026-11-03 has NO mwf trip
-    const day03 = days.find((d) => d.date === '2026-11-03');
-    assert.ok(!day03?.trips.some((t) => t.trip_id.startsWith(templateId)));
-
-    // Check Wednesday 2026-11-04 has SCHEDULE_DEFAULT entry
-    const day04 = days.find((d) => d.date === '2026-11-04');
-    assert.ok(day04, '2026-11-04 must have trips');
-    const run04 = day04.trips.find((t) => t.trip_id === runId(templateId, '2026-11-04'));
-    assert.ok(run04, 'Run on 2026-11-04 must be found');
-    assert.strictEqual(run04.source, 'SCHEDULE_DEFAULT');
-
-    // Count all MWF runs in Nov 2026: Mondays (2, 9, 16, 23, 30 = 5), Wednesdays (4, 11, 18, 25 = 4), Fridays (6, 13, 20, 27 = 4) -> 13 runs total
+    const weekday = (date) => new Date(`${date}T00:00:00Z`).getUTCDay() || 7;
+    const runDays = dates.filter((d) => [1, 3, 5].includes(weekday(d)));
+    for (const date of dates) {
+      const run = days.find((d) => d.date === date)?.trips.find((t) => t.trip_id.startsWith(templateId));
+      if (!runDays.includes(date)) {
+        assert.ok(!run, `${date} does not run`);
+        continue;
+      }
+      assert.ok(run, `${date} must have the run`);
+      assert.strictEqual(run.trip_id, runId(templateId, date));
+      assert.strictEqual(run.source, 'SCHEDULE_DEFAULT');
+      assert.strictEqual(run.status, 'SCHEDULED');
+      assert.strictEqual(run.departure, '09:15');
+      assert.strictEqual(run.vehicle_plate, '29B-882.19');
+      assert.strictEqual(run.passengers, null);
+      assert.strictEqual(run.delay_minutes, 0);
+      assert.strictEqual(run.cash_handed_in_vnd, null);
+    }
     const allMwfRuns = days.flatMap((d) => d.trips).filter((t) => t.trip_id.startsWith(templateId));
-    assert.strictEqual(allMwfRuns.length, 13);
+    assert.strictEqual(allMwfRuns.length, runDays.length);
   });
 
   it('TC-DRI-SCHED-03: a trip-level reassignment to another driver removes that day', async () => {
     const templateId = 'trp_test_mwf_template';
-    const reassignDate = '2026-11-04'; // Wednesday
+    const { month, dates } = nextMonth();
+    const reassignDate = dates.find((d) => new Date(`${d}T00:00:00Z`).getUTCDay() === 3); // first Wednesday
     const runTripId = runId(templateId, reassignDate);
 
     // Reassign this specific run to drv_9912b at trip-level
@@ -219,15 +210,15 @@ describe('Driver Monthly Schedule (DRI-021, D155)', () => {
       delay_minutes: 0
     });
 
-    // Query for drv_8821a: run on 2026-11-04 must NOT appear
-    const res = await getSchedule('?month=2026-11', driverToken);
+    // Query for drv_8821a: that run must NOT appear
+    const res = await getSchedule(`?month=${month}`, driverToken);
     assert.strictEqual(res.status, 200);
     const day04 = res.body.data.days.find((d) => d.date === reassignDate);
     const runForDriver = day04?.trips.find((t) => t.trip_id === runTripId);
     assert.strictEqual(runForDriver, undefined, 'Reassigned trip must not appear for the original driver');
 
-    // Query for drv_9912b: run on 2026-11-04 MUST appear as ASSIGNED
-    const otherRes = await getSchedule('?month=2026-11', otherDriverToken);
+    // Query for drv_9912b: that run MUST appear as ASSIGNED
+    const otherRes = await getSchedule(`?month=${month}`, otherDriverToken);
     assert.strictEqual(otherRes.status, 200);
     const otherDay04 = otherRes.body.data.days.find((d) => d.date === reassignDate);
     const runForOther = otherDay04?.trips.find((t) => t.trip_id === runTripId);

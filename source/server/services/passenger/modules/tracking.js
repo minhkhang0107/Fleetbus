@@ -499,8 +499,8 @@ export class PassengerTrackingService {
 
     userNotifs.unshift(notif);
     this.notifications.set(normalized, userNotifs);
-    // D144: the moments that make someone go out to the bus also leave by push or SMS.
-    this.messenger?.dispatch?.({ operatorId, phone: normalized, title, body, type, payload, link });
+    // D144, D192: by push when the phone has a token (every notice), else the moments that make someone go out by SMS.
+    this.messenger?.dispatch?.({ operatorId, phone: normalized, title, body, type, payload, link, noticeId: notif.id });
 
     return { success: true, data: notif };
   }

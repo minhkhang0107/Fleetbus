@@ -1718,6 +1718,25 @@ async function loadAbout() {
 }
 
 // ---------- overview ----------
+// D191: the office reads what an alert is about, not its code.
+const ALERT_TYPE_LABELS = {
+  DEPARTURE_MISSED: 'Chưa xuất bến',
+  DELAY_WARNING: 'Trễ giờ',
+  TRIP_DELAY: 'Trễ giờ',
+  GPS_LIVE: 'GPS',
+  PAYMENT_AMOUNT_MISMATCH: 'Sai số tiền',
+  PAYMENT_UNMATCHED: 'Tiền chưa khớp đơn',
+  PAYMENT_UNMATCHED_OVERDUE: 'Tiền chưa khớp đơn',
+  TRIP_ENDED_EARLY: 'Kết thúc sớm',
+  TRIP_CANCELLED: 'Hủy chuyến',
+  EMERGENCY_VEHICLE_SWAP: 'Đổi xe',
+  HOME_PICKUP_INACCESSIBLE: 'Đón tận nhà',
+  SOS_INCIDENT: 'Sự cố',
+  VEHICLE_BREAKDOWN: 'Sự cố',
+  ACCIDENT: 'Sự cố',
+  TRAFFIC_JAM: 'Sự cố'
+};
+
 async function loadOverview() {
   const [k, a] = await Promise.all([api('/api/v1/ops/dashboard/kpis'), api('/api/v1/ops/alerts')]);
   if (!k.ok) { $('#kpis').innerHTML = `<div class="error">${esc(k.message)}</div>`; return; }
@@ -1733,7 +1752,28 @@ async function loadOverview() {
   // Alerts that could not be read are not "no alerts": the office must not take silence for calm.
   if (!a.ok) { $('#alerts').innerHTML = `<p class="error">Chưa tải được cảnh báo: ${esc(a.message)}</p>`; return; }
   const alerts = a.data.alerts || [];
-  $('#alerts').innerHTML = alerts.length ? alerts.map(x => `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><span class="pill ${x.severity === 'RED' ? 'danger' : x.severity === 'AMBER' ? 'warn' : 'ok'}">${esc(x.type)}</span><span class="grow">${esc(x.message)}</span><span class="muted mono">${esc(x.vehicle_plate || '')}</span></div>`).join('') : '<p class="muted">Không có cảnh báo.</p>';
+  $('#alerts').innerHTML = alerts.length ? alerts.map(x => {
+    const label = ALERT_TYPE_LABELS[x.type] || x.type;
+    const isClickable = Boolean(x.trip_id);
+    const clickAttrs = isClickable
+      ? ` role="button" tabindex="0" style="padding:6px 0;border-bottom:1px solid var(--line);cursor:pointer" data-trip-id="${esc(x.trip_id)}"`
+      : ' style="padding:6px 0;border-bottom:1px solid var(--line)"';
+    return `<div class="row"${clickAttrs}><span class="pill ${x.severity === 'RED' ? 'danger' : x.severity === 'AMBER' ? 'warn' : 'ok'}">${esc(label)}</span><span class="grow">${esc(x.message)}</span><span class="muted mono">${esc(x.vehicle_plate || '')}</span></div>`;
+  }).join('') : '<p class="muted">Không có cảnh báo.</p>';
+
+  document.querySelectorAll('#alerts [data-trip-id]').forEach(el => {
+    const go = () => {
+      show('dispatch');
+      openTrip(el.dataset.tripId);
+    };
+    el.addEventListener('click', go);
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        go();
+      }
+    });
+  });
 }
 
 // ---------- dispatch ----------
@@ -1962,6 +2002,13 @@ function messagesBlock(d) {
 function saleBlock(t) {
   if (t.status === 'CANCELLED') return `<div class="section-title">Bán vé</div><p class="error" style="margin:0">Đã hủy chuyến${t.cancel_reason ? `: ${esc(t.cancel_reason)}` : ''}. Vé đã bán được hoàn 100%, chờ duyệt hoàn tiền.</p>`;
   const canDispatch = state.user?.role === 'PLATFORM_ADMIN' || ['FLEET_DIRECTOR', 'DISPATCHER'].includes(state.user?.role);
+  if (canDispatch && t.status === 'IN_TRANSIT') {
+    // The driver forgot to end the run, or it stopped for good on the road (D189, D190).
+    return `<div class="section-title">Kết thúc chuyến</div>
+    <p class="muted" style="margin:0 0 8px">Dùng khi tài xế quên bấm kết thúc, hoặc xe dừng hẳn giữa đường. Khách chưa được đón và khách trên xe chưa tới điểm trả được hủy vé, hoàn 100% và nhận thông báo. Muốn chở tiếp thì đổi xe thay vì kết thúc.</p>
+    <form class="row" id="endTripForm"><input class="grow" style="border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px" name="reason" placeholder="Lý do kết thúc (khách nhận được)" maxlength="200"><button class="btn danger" type="submit">Kết thúc chuyến</button></form>
+    <div class="error" id="endTripError"></div>`;
+  }
   if (!canDispatch || ['IN_TRANSIT', 'COMPLETED'].includes(t.status)) return '';
   return `<div class="section-title">Bán vé và hủy chuyến</div>
     <div class="row" style="margin-bottom:8px"><span class="grow">${t.sales_closed ? `<span class="pill warn">Đang ngừng bán trực tuyến</span>${t.sales_closed_reason ? ` <span class="muted">${esc(t.sales_closed_reason)}</span>` : ''}` : '<span class="pill ok">Đang bán trực tuyến</span>'}</span>
@@ -1986,6 +2033,19 @@ function bindSaleBlock(tripId, t) {
     const r = await api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/cancel`, { method: 'POST', idempotent: true, body: { reason } });
     if (!r.ok) { $('#cancelTripError').textContent = r.message; armed = false; btn.textContent = 'Hủy chuyến'; return; }
     toast(`Đã hủy chuyến: ${r.data.cancelled_tickets} vé chờ hoàn ${vnd(r.data.refund_total_vnd)}, khách đã được báo`);
+    loadBoard(); openTrip(tripId);
+  });
+  let endArmed = false;
+  $('#endTripForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const reason = e.target.reason.value.trim();
+    const btn = e.target.querySelector('button');
+    if (reason.length < 5) { $('#endTripError').textContent = 'Cần lý do (từ 5 ký tự) để ghi vào báo cáo và báo khách'; return; }
+    if (!endArmed) { endArmed = true; btn.textContent = 'Bấm lần nữa để kết thúc chuyến'; $('#endTripError').textContent = ''; return; }
+    const r = await api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/end`, { method: 'POST', idempotent: true, body: { reason } });
+    if (!r.ok) { $('#endTripError').textContent = r.message; endArmed = false; btn.textContent = 'Kết thúc chuyến'; return; }
+    const refunded = (r.data.unpicked_count || 0) + (r.data.stranded_count || 0);
+    toast(refunded ? `Đã kết thúc chuyến: ${refunded} vé được hoàn 100%, khách đã được báo` : 'Đã kết thúc chuyến');
     loadBoard(); openTrip(tripId);
   });
 }

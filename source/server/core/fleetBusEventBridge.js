@@ -21,6 +21,17 @@ const vnParts = (iso) => {
 import { expireHomeRequests } from './homeReview.js';
 import { DEMO_DATE, addDays, parseRunId, serviceCalendar } from './serviceDate.js';
 
+/** Drops the open "amount mismatch" alerts of an order once it is paid in full (D189). */
+function clearAmountAlerts(managerService, order) {
+  if (!managerService?.alerts) return;
+  for (let i = managerService.alerts.length - 1; i >= 0; i--) {
+    const a = managerService.alerts[i];
+    if ((a.order_id === order.order_id || (order.pnr && a.message?.includes(order.pnr))) && a.type === 'PAYMENT_AMOUNT_MISMATCH') {
+      managerService.alerts.splice(i, 1);
+    }
+  }
+}
+
 /** Puts a phone hold on the driver's manifest (paid in cash on board), once per seat; a home address rides with it. */
 function addHotlineToManifest(driverTrip, reservation, farePerSeat) {
   const feeEach = Math.round((reservation.home_fee_vnd || 0) / reservation.seat_codes.length);
@@ -131,12 +142,11 @@ export class FleetBusEventBridge extends EventEmitter {
         if (scheduleId) {
           const presetPlate = managerService?.defaultPlateFor?.(scheduleId);
           if (presetPlate) return presetPlate;
-          const template = services.searchService?.getTripDetail?.(scheduleId)?.data;
-          const templatePlate = template?.plate_number || template?.vehicle_plate || null;
-          if (templatePlate) return templatePlate;
         }
         const defaultPlate = managerService?.defaultPlateFor?.(tripId);
         if (defaultPlate) return defaultPlate;
+        // A day's run with no bus yet has no plate, as search shows (D191): the catalog's sample plate is not its bus.
+        if (run) return null;
         const detail = services.searchService?.getTripDetail?.(tripId)?.data;
         const runPlate = detail?.plate_number || detail?.vehicle_plate || null;
         if (runPlate) return runPlate;
@@ -242,6 +252,9 @@ export class FleetBusEventBridge extends EventEmitter {
             });
           }
         }
+
+        // The rest of an underpaid transfer arrived: the office's "amount mismatch" alert is settled too.
+        clearAmountAlerts(managerService, order);
       }
 
       // D. Passenger Notification: Confirm payment & issue ticket alert
@@ -434,8 +447,11 @@ export class FleetBusEventBridge extends EventEmitter {
         if (driverService && driverService.activeTrips) {
           const trip = driverService.activeTrips.get(tripId);
           if (trip && trip.manifest) {
+            // A passenger with several seats hears it once (D191).
+            const told = new Set();
             for (const p of trip.manifest) {
-              if (p.passenger_phone) {
+              if (p.passenger_phone && !told.has(p.passenger_phone)) {
+                told.add(p.passenger_phone);
                 trackingService.sendNotification(p.passenger_phone, { operatorId: operatorOfTrip(this.services, tripId),
                   title: 'Thông báo sự cố chuyến đi',
                   body: `Chuyến ${tripId} gặp sự cố: ${incident.description}. Dự kiến trễ khoảng ${incident.estimated_delay_minutes || 0} phút.`,
@@ -724,18 +740,27 @@ export class FleetBusEventBridge extends EventEmitter {
           }
         }
       }
-      const changed = (previous?.vehicle_plate && previous.vehicle_plate !== vehiclePlate) || (previous?.driver_id && previous.driver_id !== driverId);
-      if (!changed || !paymentService?.tickets || !trackingService?.sendNotificationOnce) return;
       const at = catalogTrip?.departure_time ? new Date(Date.parse(catalogTrip.departure_time) + 7 * 3600000).toISOString() : null;
       const when = at ? `${at.slice(11, 16)} ngày ${at.slice(8, 10)}/${at.slice(5, 7)}` : tripId;
+      this._pushAssignmentToDrivers({ tripId, when, route: catalogTrip?.route_name, vehiclePlate, driverId, previous, departure: catalogTrip?.departure_time });
+      const changed = (previous?.vehicle_plate && previous.vehicle_plate !== vehiclePlate) || (previous?.driver_id && previous.driver_id !== driverId);
+      if (!changed || !paymentService?.tickets || !trackingService?.sendNotificationOnce) return;
+      // One notice per passenger and booking, naming all their seats (D191), not one per seat.
+      const groups = new Map();
       for (const ticket of paymentService.tickets.values()) {
         if (ticket.trip_id !== tripId || !['ACTIVE', 'BOARDED'].includes(ticket.status)) continue;
-        trackingService.sendNotificationOnce(`${ticket.ticket_id}:ASSIGNED:${vehiclePlate}:${driverId}`, ticket.passenger_phone, {
+        const key = `${ticket.pnr || ticket.ticket_id}:${ticket.passenger_phone}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(ticket);
+      }
+      for (const [key, tickets] of groups) {
+        const seats = tickets.map(t => t.seat_code).join(', ');
+        trackingService.sendNotificationOnce(`${key}:ASSIGNED:${vehiclePlate}:${driverId}`, tickets[0].passenger_phone, {
           operatorId: operatorOfTrip(this.services, tripId),
           title: 'Nhà xe đổi xe hoặc tài xế',
-          body: `Chuyến ${when} của bạn chạy xe ${vehiclePlate}, tài xế ${driverName}. Vé và ghế ${ticket.seat_code} giữ nguyên.`,
+          body: `Chuyến ${when} của bạn chạy xe ${vehiclePlate}, tài xế ${driverName}. Vé và ghế ${seats} giữ nguyên.`,
           type: 'TRIP_REASSIGNED',
-          payload: { trip_id: tripId, ticket_id: ticket.ticket_id, vehicle_plate: vehiclePlate }
+          payload: { trip_id: tripId, ticket_id: tickets[0].ticket_id, pnr: tickets[0].pnr, vehicle_plate: vehiclePlate }
         });
       }
     });
@@ -768,8 +793,11 @@ export class FleetBusEventBridge extends EventEmitter {
         if (driverService && driverService.activeTrips) {
           const trip = driverService.activeTrips.get(tripId);
           if (trip && trip.manifest) {
+            // A passenger with several seats hears it once (D191).
+            const told = new Set();
             for (const p of trip.manifest) {
-              if (p.passenger_phone) {
+              if (p.passenger_phone && !told.has(p.passenger_phone)) {
+                told.add(p.passenger_phone);
                 trackingService.sendNotification(p.passenger_phone, { operatorId: operatorOfTrip(this.services, tripId),
                   title: 'Đổi xe khẩn cấp',
                   body: `Chuyến xe của bạn được chuyển sang xe biển số mới ${newPlate} do: ${reason}. Vị trí ghế của bạn được giữ nguyên!`,
@@ -955,12 +983,25 @@ export class FleetBusEventBridge extends EventEmitter {
           operator_id: operatorOfTrip(this.services, order.trip_id)
         });
       }
+      if (trackingService && typeof trackingService.sendNotification === 'function') {
+        const phone = order.payer?.phone;
+        if (phone) {
+          trackingService.sendNotification(phone, {
+            operatorId: operatorOfTrip(this.services, order.trip_id),
+            title: 'Chưa xuất được vé',
+            body: `Nhà xe nhận ${amountVnd.toLocaleString('vi-VN')} đ cho đơn ${order.pnr} khi đơn đã hết hạn và không còn xuất vé được (ghế đã có người đặt, hoặc chuyến đã chạy hay đã hủy). Nhà xe sẽ hoàn lại ${amountVnd.toLocaleString('vi-VN')} đ về tài khoản đã chuyển. Bạn có thể đặt chuyến khác trong ứng dụng.`,
+            type: 'PAYMENT_LATE_REFUND',
+            payload: { order_id: order.order_id, pnr: order.pnr, refund_amount_vnd: amountVnd }
+          });
+        }
+      }
     });
 
     this.on('PAYMENT_ANOMALY', ({ order, receivedVnd }) => {
       if (managerService && managerService.alerts) {
         managerService.alerts.unshift({
           alert_id: `alt_amount_${Date.now()}`,
+          order_id: order.order_id,
           vehicle_plate: null,
           type: 'PAYMENT_AMOUNT_MISMATCH',
           severity: 'AMBER',
@@ -1003,6 +1044,7 @@ export class FleetBusEventBridge extends EventEmitter {
           order.payment_status = 'PAID';
           order.paid_at = new Date().toISOString();
           orderFullyCollected = true;
+          clearAmountAlerts(managerService, order);
         }
       }
 
@@ -1279,6 +1321,25 @@ export class FleetBusEventBridge extends EventEmitter {
    * Sets up the ops and driver trips of a schedule's run (`<schedule>_<YYYYMMDD>`) from the schedule: same route,
    * bus and driver, nothing sold. Returns { managerTrip, driverTrip } or null for anything else.
    */
+  /**
+   * D192: the drivers hear of a change on their phone: the new driver of a trip, the one it was taken from, or the
+   * same driver when only the bus changed. Nothing for a trip already gone.
+   */
+  _pushAssignmentToDrivers({ tripId, when, route, vehiclePlate, driverId, previous, departure }) {
+    const messenger = this.services?.messenger;
+    if (!messenger?.dispatchDriver || (departure && Date.parse(departure) < Date.now())) return;
+    const operatorId = operatorOfTrip(this.services, tripId);
+    const payload = { trip_id: tripId };
+    if (driverId && driverId !== previous?.driver_id) {
+      messenger.dispatchDriver({ operatorId, driverId, type: 'TRIP_ASSIGNED', title: 'Bạn có chuyến mới', body: `Chuyến ${when}${route ? `, ${route}` : ''}, xe ${vehiclePlate}. Mở app để xem khách và điểm đón.`, payload });
+      if (previous?.driver_id) {
+        messenger.dispatchDriver({ operatorId, driverId: previous.driver_id, type: 'TRIP_UNASSIGNED', title: 'Chuyến đã chuyển cho tài xế khác', body: `Chuyến ${when}${previous.vehicle_plate ? ` (xe ${previous.vehicle_plate})` : ''} không còn trong lịch của bạn.`, payload });
+      }
+    } else if (driverId && previous?.vehicle_plate && previous.vehicle_plate !== vehiclePlate) {
+      messenger.dispatchDriver({ operatorId, driverId, type: 'TRIP_VEHICLE_CHANGED', title: 'Chuyến đổi xe', body: `Chuyến ${when} chạy xe ${vehiclePlate} thay cho xe ${previous.vehicle_plate}.`, payload });
+    }
+  }
+
   ensureRunOperations(tripId) {
     const { searchService, managerService, driverService } = this.services || {};
     const run = parseRunId(tripId);

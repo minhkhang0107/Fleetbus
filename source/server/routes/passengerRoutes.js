@@ -21,15 +21,16 @@ import { changeTicketStops } from '../core/ticketChanges.js';
 import { publicFixedEndpoints } from '../core/fixedEndpoints.js';
 import { validateRefundAccount, maskRefundAccount } from '../core/bankAccounts.js';
 import { deletePassengerAccount } from '../services/passenger/modules/accountDeletion.js';
+import { validateVietnamPhone } from '../services/passenger/core/formatters.js';
 
 // The plate passengers see is the bus the office gave the run; a day's run with no bus yet shows none.
 function withAssignedBus(services, trip) {
   const ops = services.managerService?.trips?.find(t => t.trip_id === trip.trip_id);
   const vehicle = ops?.vehicle_id && services.managerService.vehicles?.find(v => v.vehicle_id === ops.vehicle_id);
+  const taken = services.seatMapService?.getOccupiedSeatCodes?.(trip.trip_id)?.length || 0;
   if (vehicle) {
     // The bus decides the seats (D147): its model, its layout's size, and what is still free on it.
     const layout = services.managerService.layoutOfVehicle(vehicle.vehicle_id);
-    const taken = services.seatMapService?.getOccupiedSeatCodes?.(trip.trip_id)?.length || 0;
     return {
       ...trip,
       plate_number: ops.vehicle_plate || vehicle.plate_number,
@@ -39,8 +40,27 @@ function withAssignedBus(services, trip) {
       available_seats_count: Math.max(0, layout.seats.length - taken)
     };
   }
-  if (ops) return { ...trip, plate_number: ops.vehicle_plate || null };
-  return trip.schedule_id ? { ...trip, plate_number: services.managerService?.defaultPlateFor?.(trip.schedule_id) ?? null } : trip;
+  // No bus yet: the catalog's seats, less those already taken (D189).
+  const listed = { ...trip, available_seats_count: Math.max(0, (trip.total_seats ?? 0) - taken) };
+  if (ops) return { ...listed, plate_number: ops.vehicle_plate || null };
+  return trip.schedule_id ? { ...listed, plate_number: services.managerService?.defaultPlateFor?.(trip.schedule_id) ?? null } : listed;
+}
+
+// A passenger may hold at most this many unpaid pay-on-board orders that have not left yet (D189).
+const CASH_ORDER_LIMIT = 2;
+
+/** Orders the phone booked with cash on board, not paid yet, whose bus has not left. */
+function unpaidCashOrders(paymentService, operatorId, phone, now) {
+  const norm = (p) => (p ? validateVietnamPhone(p).normalized || p : null);
+  const owner = norm(phone);
+  const orders = new Set();
+  for (const t of paymentService.tickets.values()) {
+    if ((t.operator_id || DEFAULT_OPERATOR_ID) !== operatorId || t.payment_method !== 'CASH' || t.cod_collected === true || t.status !== 'ACTIVE') continue;
+    if (!owner || norm(t.owner_phone) !== owner) continue;
+    const upcoming = isDemoDeparture(t.departure_time, isProduction()) || Date.parse(t.departure_time) >= now;
+    if (upcoming) orders.add(t.order_id || t.pnr);
+  }
+  return orders.size;
 }
 
 // With authentication enforced, a ticket or order may only be used by its owner (or its holder, where allowed).
@@ -595,6 +615,15 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
       }
       if (paymentMethod === 'CASH' && totalVnd === 0) {
         paymentMethod = 'VIETQR_NAPAS247';
+      }
+
+      if (paymentMethod === 'CASH') {
+        const operatorId = req.operatorId || tripDetail.operator_id || DEFAULT_OPERATOR_ID;
+        const phone = req.identity?.phone || checkoutValidation.data.payer?.phone;
+        if (unpaidCashOrders(paymentService, operatorId, phone, now) >= CASH_ORDER_LIMIT) {
+          sendError(res, `Bạn đang có ${CASH_ORDER_LIMIT} đơn trả tiền mặt khi lên xe chưa đi. Chuyển khoản để đặt thêm, hoặc hủy bớt đơn cũ.`, 'CASH_LIMIT_REACHED', 422);
+          return;
+        }
       }
 
       if (paymentMethod !== 'CASH' && totalVnd > 0 && (!req.operator?.bank?.bin || !req.operator?.bank?.account_number)) {

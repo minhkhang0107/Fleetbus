@@ -620,6 +620,11 @@ class ManagerApiService {
     return _post('/ops/trips/${Uri.encodeComponent(tripId)}/cancel', body: {'reason': reason}, idempotent: true, idempotencyKey: idempotencyKey);
   }
 
+  // MGR-014 (D189): End a trip the driver left running; passengers not picked up are refunded
+  Future<Map<String, dynamic>> endTrip(String tripId, {required String reason, String? idempotencyKey}) {
+    return _post('/ops/trips/${Uri.encodeComponent(tripId)}/end', body: {'reason': reason}, idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
   // MGR-014 (D131): Stop (open: false) or resume (open: true) online sales of a departure
   Future<Map<String, dynamic>> setTripSales(String tripId, {required bool open, String? reason, String? idempotencyKey}) {
     return _post('/ops/trips/${Uri.encodeComponent(tripId)}/sales', body: {'open': open, if (reason != null) 'reason': reason}, idempotent: true, idempotencyKey: idempotencyKey);

@@ -85,6 +85,19 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('a route with no road shape is drawn as a dashed line through its stops (D191)', (tester) async {
+    const stops = [
+      TrackingStop(stopId: 's1', name: 'Giáp Bát', lat: 20.98, lng: 105.84),
+      TrackingStop(stopId: 's2', name: 'Sầm Sơn', lat: 19.74, lng: 105.90),
+    ];
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: PassengerRouteMap(route: [], stops: stops, pickupStopId: 's1', dropoffStopId: 's2'))));
+    await tester.pumpAndSettle();
+    final lines = tester.widget<PolylineLayer>(find.byType(PolylineLayer)).polylines;
+    expect(lines, hasLength(1));
+    expect(lines.single.points, const [LatLng(20.98, 105.84), LatLng(19.74, 105.90)]);
+    expect(lines.single.pattern, isNot(const StrokePattern.solid()));
+  });
+
   testWidgets('with no bus → no "Theo xe"', (tester) async {
     const route = [
       (20.98, 105.84),
@@ -451,12 +464,12 @@ void main() {
     await tester.pump(const Duration(seconds: 4));
   });
 
-  test('a new "bus is coming" notice becomes an alert; the first load and other types do not (D144)', () async {
+  test('a new unread notice of any type becomes an alert on a later load; the first load does not (D144)', () async {
     var round = 0;
     final client = MockClient((req) async {
       final list = [
         {'id': 'n1', 'title': 'Thanh toán thành công', 'body': 'x', 'type': 'PAYMENT_SUCCESS', 'is_read': false, 'created_at': '2026-08-27T21:00:00Z', 'payload': {}},
-        if (round > 0) {'id': 'n2', 'title': 'Xe sắp tới đón bạn', 'body': 'Bạn là điểm đón tiếp theo', 'type': 'PICKUP_APPROACHING', 'is_read': false, 'created_at': '2026-08-27T22:50:00Z', 'payload': {'ticket_id': 'tkt_05'}},
+        if (round > 0) {'id': 'n2', 'title': 'Thanh toán thành công lần 2', 'body': 'Bạn đã thanh toán thêm', 'type': 'PAYMENT_SUCCESS', 'is_read': false, 'created_at': '2026-08-27T22:50:00Z', 'payload': {'ticket_id': 'tkt_05'}},
       ];
       return http.Response(jsonEncode({'status': 'success', 'data': list}), 200, headers: {'content-type': 'application/json; charset=utf-8'});
     });
@@ -466,7 +479,8 @@ void main() {
     expect(store.pendingAlert, isNull, reason: 'what is there at start is not news');
     round = 1;
     await store.loadNotices();
-    expect(store.pendingAlert?.title, 'Xe sắp tới đón bạn');
+    expect(store.pendingAlert?.title, 'Thanh toán thành công lần 2');
+    expect(store.pendingAlert?.type, 'PAYMENT_SUCCESS');
     expect(store.pendingAlert?.ticketId, 'tkt_05');
   });
 

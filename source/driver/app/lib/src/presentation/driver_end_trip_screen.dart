@@ -53,7 +53,7 @@ class DriverEndTripScreen extends StatelessWidget {
     );
     final report = <Widget>[
       if (!(store.lastStop && store.atStop) && store.earlyEndReason != null) ...[
-        Panel(color: DTokens.dangerBg, child: Text('Kết thúc trước bến cuối. Lý do: ${store.earlyEndReason}', style: dsans(size: 14, color: DTokens.dangerInk))),
+        Panel(color: DTokens.dangerBg, child: Text('Kết thúc trước bến cuối. Lý do: ${store.earlyEndReason}\nKhách chưa đón và khách còn trên xe được nhà xe hoàn tiền, app tự báo khách.', style: dsans(size: 14, color: DTokens.dangerInk, height: 1.4))),
         const SizedBox(height: 12),
       ],
       if (open.isNotEmpty) ...[
