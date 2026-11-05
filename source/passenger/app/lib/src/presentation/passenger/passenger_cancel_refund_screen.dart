@@ -24,6 +24,19 @@ Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
   await store.loadCancelPolicy();
   final r = store.refundFor(t);
   final known = r.percent >= 0;
+  // A multi-seat order (the success screen) cancels the seats the passenger picks, one ticket each (D190).
+  final ids = t.ticketIds.isNotEmpty ? t.ticketIds : [t.id];
+  final seatCodes = t.seat.split(',').map((s) => s.trim()).toList();
+  final seats = [
+    for (var i = 0; i < ids.length; i++)
+      (
+        id: ids[i],
+        seat: store.tickets.where((x) => x.id == ids[i]).firstOrNull?.seat ?? (seatCodes.length == ids.length ? seatCodes[i] : ids[i]),
+        paid: store.tickets.where((x) => x.id == ids[i]).firstOrNull?.paid ?? t.paid ~/ ids.length,
+      ),
+  ];
+  final chosen = {...ids};
+  int paidOf() => ids.length == 1 ? t.paid : seats.where((s) => chosen.contains(s.id)).fold(0, (sum, s) => sum + s.paid);
   final amount = known ? t.paid * r.percent ~/ 100 : 0;
   final needsRefundAccount = !t.unpaidCash && t.paymentMethod != 'CASH' && (amount > 0 || r.percent > 0 || r.percent == -1);
 
@@ -40,11 +53,31 @@ Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
   final yes = await showAppSheet<bool>(
     context,
     builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setSheetState) => Column(
+      builder: (ctx, setSheetState) {
+        final paid = paidOf();
+        final refund = known ? paid * r.percent ~/ 100 : 0;
+        final chosenSeats = seats.where((s) => chosen.contains(s.id)).map((s) => s.seat).join(', ');
+        return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text('Hủy vé ${t.pnr}?', style: sans(size: 18, weight: FontWeight.w700)),
           gap(12),
+          if (seats.length > 1) ...[
+            Text('Chọn ghế muốn hủy', style: sans(size: 14, weight: FontWeight.w700)),
+            gap(6),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final s in seats)
+                FilterChip(
+                  key: Key('cancel_seat_${s.seat}'),
+                  label: Text(s.seat, style: mono(size: 13, weight: FontWeight.w600)),
+                  selected: chosen.contains(s.id),
+                  onSelected: cancelling ? null : (on) => setSheetState(() => on ? chosen.add(s.id) : chosen.remove(s.id)),
+                ),
+            ]),
+            gap(4),
+            Text('Ghế không chọn vẫn giữ nguyên, đi bình thường.', style: sans(size: 12, color: PTokens.muted)),
+            gap(12),
+          ],
           AppCard(
             child: t.unpaidCash
                 ? Align(
@@ -52,10 +85,10 @@ Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
                     child: Text('Vé tiền mặt chưa thanh toán nên không phát sinh hoàn tiền.', style: sans(size: 13, color: PTokens.muted, height: 1.4)),
                   )
                 : Column(children: [
-                    Row(children: [Text('Đã trả', style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(vnd(t.paid), style: mono(size: 14))]),
+                    Row(children: [Text('Đã trả', style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(vnd(paid), style: mono(size: 14))]),
                     if (known) ...[
                       gap(4),
-                      Row(children: [Text('Được hoàn', style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(vnd(amount), style: mono(size: 14, weight: FontWeight.w700))]),
+                      Row(children: [Text('Được hoàn', style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(vnd(refund), style: mono(size: 14, weight: FontWeight.w700))]),
                     ],
                     gap(6),
                     Align(alignment: Alignment.centerLeft, child: Text(r.tier, style: sans(size: 13, color: PTokens.muted, height: 1.4))),
@@ -141,7 +174,7 @@ Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
             Text(validationError!, style: sans(size: 13, weight: FontWeight.w500, color: PTokens.danger)),
           ],
           gap(10),
-          Text('Ghế ${t.seat} được nhả ngay cho người khác và không lấy lại được.', style: sans(size: 13, color: PTokens.muted, height: 1.5)),
+          Text('Ghế $chosenSeats được nhả ngay cho người khác và không lấy lại được.', style: sans(size: 13, color: PTokens.muted, height: 1.5)),
           gap(6),
           CheckboxListTile(
             key: const Key('cancel_policy_agree'),
@@ -157,9 +190,9 @@ Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
           PrimaryButton(
             label: cancelling
                 ? 'Đang hủy vé…'
-                : (!t.unpaidCash && known && amount > 0 ? 'Hủy vé, hoàn ${vnd(amount)}' : 'Hủy vé'),
+                : (!t.unpaidCash && known && refund > 0 ? 'Hủy vé, hoàn ${vnd(refund)}' : 'Hủy vé'),
             color: PTokens.danger,
-            onPressed: cancelling || !agreed
+            onPressed: cancelling || !agreed || chosen.isEmpty
                 ? null
                 : () async {
                     Map<String, dynamic>? refundAccount;
@@ -186,7 +219,7 @@ Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
                     }
 
                     setSheetState(() => cancelling = true);
-                    final result = await store.cancelTicket(t, refundAccount: refundAccount);
+                    final result = await store.cancelTicket(t, ids: ids.where(chosen.contains).toList(), refundAccount: refundAccount);
                     if (!ctx.mounted) return;
                     if (!result.ok) {
                       setSheetState(() {
@@ -205,7 +238,8 @@ Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
           gap(8),
           GhostButton(label: 'Giữ vé', onPressed: cancelling ? null : () => Navigator.of(ctx).pop(false)),
         ],
-      ),
+      );
+      },
     ),
   );
   if (yes != true) return;

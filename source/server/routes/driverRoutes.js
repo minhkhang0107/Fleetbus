@@ -5,7 +5,7 @@
 
 import { sendSuccess, sendError, parseJsonBody, clientNow } from '../middleware/httpUtils.js';
 import { isProduction } from '../config.js';
-import { cancelUnpickedTickets } from '../core/tripSales.js';
+import { refundEarlyEnd } from '../core/tripSales.js';
 
 
 // An unpaid COD ticket is a 409 that tells the app which fare to collect (DRI-010, DRI-012).
@@ -87,6 +87,21 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const driverId = req.identity?.sub || req.headers['x-driver-id'] || 'drv_8821a';
     const result = driverService.getTodayTrips(driverId);
     sendSuccess(res, { ...result.data, trips: (result.data.trips || []).map(t => withStopTimes(t, services)) });
+    return true;
+  }
+
+  // POST /api/v1/driver/devices (D192): the driver app's push token, none when the driver signs out
+  if (pathname === '/api/v1/driver/devices' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const driverId = req.identity?.sub;
+      if (!driverId) {
+        sendError(res, 'Cần đăng nhập', 'UNAUTHORIZED', 401);
+        return;
+      }
+      const token = typeof body.token === 'string' && body.token.length <= 4096 ? body.token : null;
+      const platform = ['android', 'ios'].includes(body.platform) ? body.platform : null;
+      sendSuccess(res, services.messenger.registerDriverDevice(driverId, { token, platform, operatorId: req.operatorId }));
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 
@@ -410,7 +425,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     parseJsonBody(req).then(body => {
       const result = driverService.endTrip(tripId, { earlyEndReason: body.early_end_reason ?? body.earlyEndReason });
       if (result.success) {
-        if (result.data.early_end_reason) cancelUnpickedTickets(services, tripId, result.data.early_end_reason, { now: clientNow(body) });
+        if (result.data.early_end_reason) refundEarlyEnd(services, tripId, result.data.early_end_reason, { now: clientNow(body) });
         sendSuccess(res, result.data || result);
       } else {
         sendError(res, result.error, result.code, result.code === 'TRIP_NOT_FOUND' ? 404 : 400);

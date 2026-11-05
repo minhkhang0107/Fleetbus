@@ -1021,7 +1021,7 @@ export class ManagerOperationsService {
           const vehicle = this.vehicles.find(v => v.vehicle_id === t.vehicle_id);
           return {
             ...t,
-            route_name: route ? route.name : t.route_id,
+            route_name: t.route_name || this._scheduleName(t.schedule_id) || (route ? route.name : t.route_id),
             driver_name: this.drivers.find(d => d.driver_id === t.driver_id)?.full_name || 'Chưa gán',
             booked_seats: t.booked_seats || 0,
             held_seats: t.held_seats || 0,
@@ -1208,6 +1208,12 @@ export class ManagerOperationsService {
    * The ops record of a schedule's run: the schedule's bus and driver (the office's default for the schedule
    * first, else the seed trip's), nothing sold yet.
    */
+  /** The name of a schedule as passengers see it (D191), for runs set up before they kept their own. */
+  _scheduleName(scheduleId) {
+    if (!scheduleId) return null;
+    return this.eventBridge?.services?.searchService?.getTripDetail?.(scheduleId)?.data?.route_name || null;
+  }
+
   createRunTrip(templateId, runTripId, trip) {
     const existing = this.trips.find(t => t.trip_id === runTripId);
     if (existing) return existing;
@@ -1219,6 +1225,8 @@ export class ManagerOperationsService {
       schedule_id: templateId,
       driver_id: preset?.driver_id || template?.driver_id || null,
       route_id: trip.route_id || template?.route_id || null,
+      // The schedule's own name: two schedules of one route can end at different places (Sầm Sơn, D191).
+      route_name: trip.route_name || template?.route_name || null,
       vehicle_id: preset?.vehicle_id || template?.vehicle_id || null,
       // No bus yet means no plate: the catalog's sample plate is not a bus the office gave.
       vehicle_plate: presetVehicle?.plate_number || template?.vehicle_plate || null,

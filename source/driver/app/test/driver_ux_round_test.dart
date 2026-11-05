@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:app/src/presentation/driver_manifest_screen.dart';
 import 'package:app/src/presentation/driver_permissions.dart';
+import 'package:app/src/presentation/driver_readiness_screen.dart';
 import 'package:app/src/presentation/driver_store.dart';
 import 'package:app/src/presentation/driver_today_trips_screen.dart';
 import 'package:app/src/presentation/driver_widgets.dart';
@@ -118,6 +119,85 @@ void main() {
     expect(store.tripId, 'trp_done');
     await store.loadShift();
     expect(store.tripId, 'trp_next');
+    store.dispose();
+  });
+
+  test('a trip hours past its time with no one on board does not hide the next trip to drive (D191)', () async {
+    final store = storeWith([
+      tripJson('trp_missed', '2026-10-30T07:00:00+07:00', 'DISPATCHED'),
+      tripJson('trp_evening', '2026-10-30T19:30:00+07:00', 'DISPATCHED'),
+    ]);
+    await store.loadShift();
+    expect(store.tripId, 'trp_evening');
+    // Nothing else left today: the overdue trip still shows.
+    final alone = storeWith([tripJson('trp_missed', '2026-10-30T07:00:00+07:00', 'DISPATCHED')]);
+    await alone.loadShift();
+    expect(alone.tripId, 'trp_missed');
+    store.dispose();
+    alone.dispose();
+  });
+
+  testWidgets('more than an hour before its time the start button says from when and asks nothing (D191)', (tester) async {
+    final sent = <http.Request>[];
+    final store = storeWith([tripJson('trp_next', '2026-10-30T14:00:00+07:00', 'DISPATCHED')], sent: sent);
+    await tester.runAsync(store.loadShift);
+    for (var i = 0; i < 6; i++) {
+      store.toggleCheck(i, true);
+    }
+    await tester.pumpWidget(DriverScope(store: store, child: const MaterialApp(home: DriverReadinessScreen())));
+    await tester.pumpAndSettle();
+    expect(find.text('Xuất bến từ 13:00'), findsOneWidget);
+    await tester.tap(find.text('Xuất bến từ 13:00'));
+    await tester.pumpAndSettle();
+    expect(find.text('Chưa tới giờ xuất bến'), findsOneWidget);
+    expect(find.textContaining('xuất bến được từ 13:00'), findsOneWidget);
+    expect(sent.where((r) => r.url.path.endsWith('/start')), isEmpty);
+    store.dispose();
+  });
+
+  test('a tapped push puts its trip on the big card, but never while a trip is on the road (D192)', () async {
+    final store = storeWith([
+      tripJson('trp_next', '2026-10-30T14:00:00+07:00', 'DISPATCHED'),
+      tripJson('trp_given', '2026-10-30T18:00:00+07:00', 'DISPATCHED'),
+    ]);
+    // Before sign-in the push waits; nothing is loaded.
+    await store.openFromPush('trp_given');
+    expect(store.tripId, isNull);
+    store.api.authToken = 'tok';
+    await store.openFromPush('trp_given');
+    expect(store.tripId, 'trp_given');
+
+    final onRoad = storeWith([
+      tripJson('trp_running', '2026-10-30T09:00:00+07:00', 'IN_TRANSIT'),
+      tripJson('trp_given', '2026-10-30T18:00:00+07:00', 'DISPATCHED'),
+    ])..api.authToken = 'tok';
+    await onRoad.openFromPush('trp_given');
+    expect(onRoad.tripId, 'trp_running');
+    store.dispose();
+    onRoad.dispose();
+  });
+
+  test('the push token reaches the server once signed in, and signing out sends none (D192)', () async {
+    final sent = <http.Request>[];
+    final store = storeWith([tripJson('trp_next', '2026-10-30T14:00:00+07:00', 'DISPATCHED')], sent: sent);
+    await store.setPushToken('drv-token');
+    expect(sent.where((r) => r.url.path.endsWith('/driver/devices')), isEmpty, reason: 'not signed in yet');
+    store.api.authToken = 'tok';
+    store.pushToken = null;
+    await store.setPushToken('drv-token');
+    expect(jsonDecode(sent.last.body), {'platform': 'android', 'token': 'drv-token'});
+    store.logout();
+    await Future<void>.delayed(Duration.zero);
+    expect(jsonDecode(sent.where((r) => r.url.path.endsWith('/driver/devices')).last.body), {'platform': 'android'});
+    store.dispose();
+  });
+
+  test('a push while the app is open reloads the trips and leaves the office\'s words to show (D192)', () async {
+    final sent = <http.Request>[];
+    final store = storeWith([tripJson('trp_next', '2026-10-30T14:00:00+07:00', 'DISPATCHED')], sent: sent)..api.authToken = 'tok';
+    await store.onPushWhileOpen('Bạn có chuyến mới', 'Chuyến 14:00 ngày 30/10, xe 29B-882.19.');
+    expect(store.pushMessage, 'Bạn có chuyến mới. Chuyến 14:00 ngày 30/10, xe 29B-882.19.');
+    expect(sent.where((r) => r.url.path.endsWith('/driver/trips/today')), isNotEmpty);
     store.dispose();
   });
 

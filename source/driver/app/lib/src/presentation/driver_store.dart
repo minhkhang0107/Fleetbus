@@ -750,6 +750,55 @@ class DriverStore extends ChangeNotifier {
   }
 
   /// Restores the saved session while its token has not expired; true when the driver is signed in again.
+  /// D192: the phone's push token (Firebase), sent once signed in so the office's changes reach the driver.
+  String? pushToken;
+
+  /// A trip a push was about while nobody was signed in yet; opened after sign-in.
+  String? _pushedTrip;
+
+  /// The text of a push that came while the app is open, for the app to show; the app clears it.
+  String? pushMessage;
+
+  String get _platform => defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android';
+
+  Future<void> setPushToken(String? token) async {
+    if (token == null || token == pushToken) return;
+    pushToken = token;
+    if (api.authToken != null) await _registerDevice();
+  }
+
+  Future<void> _registerDevice() async {
+    if (pushToken == null) return;
+    try {
+      await api.registerDevice(token: pushToken, platform: _platform);
+    } catch (_) {}
+  }
+
+  void _afterSignIn() {
+    unawaited(_registerDevice());
+    final pushed = _pushedTrip;
+    _pushedTrip = null;
+    if (pushed != null) unawaited(openFromPush(pushed));
+  }
+
+  /// A tapped push about a trip: the trips reload and that trip goes on the big card, unless a trip is on the road.
+  Future<void> openFromPush(String? pushedTripId) async {
+    if (api.authToken == null) {
+      _pushedTrip = pushedTripId;
+      return;
+    }
+    await loadShift();
+    if (pushedTripId == null || trip == TripState.inTransit || pushedTripId == tripId) return;
+    if (shift.any((t) => t.id == pushedTripId && t.status != 'CANCELLED' && t.status != 'COMPLETED')) await selectTrip(pushedTripId);
+  }
+
+  /// A push while the app is open: the trips reload and the app shows what the office said.
+  Future<void> onPushWhileOpen(String title, String body) async {
+    pushMessage = body.isEmpty ? title : '$title. $body';
+    notifyListeners();
+    if (api.authToken != null) await loadShift();
+  }
+
   Future<bool> restoreSession() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_sessionKey);
@@ -778,6 +827,7 @@ class DriverStore extends ChangeNotifier {
     await _loadQueueForDriver();
     notifyListeners();
     unawaited(loadShift(autoFlush: false));
+    _afterSignIn();
     return true;
   }
 
@@ -1063,6 +1113,7 @@ class DriverStore extends ChangeNotifier {
     }
     await _loadQueueForDriver();
     await _loadTelemetryBufferForDriver();
+    _afterSignIn();
     return null;
   }
 
@@ -1081,6 +1132,8 @@ class DriverStore extends ChangeNotifier {
   }
 
   void logout() {
+    // D192: this phone stops getting the driver's pushes; the request leaves before the session is cleared.
+    if (pushToken != null && api.authToken != null) unawaited(api.registerDevice(platform: _platform).then((_) {}, onError: (_) {}));
     api.authToken = null;
     unawaited(SharedPreferences.getInstance().then((prefs) => prefs.remove(_sessionKey)));
     telemetryBuffer.clear();
@@ -1146,17 +1199,24 @@ class DriverStore extends ChangeNotifier {
     final live = trips.where((t) => t['status'] != 'CANCELLED').toList();
     final now = _vnNow();
     // The trip on the big card: the one on the road, else the one the driver picked while it is still to run,
-    // else today's next trip; a finished trip stays there only when nothing is left to drive.
+    // else the next trip to drive (one at most 2 h past its time, D191), else one left over from today;
+    // a finished trip stays there only when nothing is left to drive.
     final running = live.where((t) => t['status'] == 'IN_TRANSIT').firstOrNull;
     final selected = tripId == null ? null : live.where((t) => t['trip_id'] == tripId && t['status'] != 'COMPLETED').firstOrNull;
-    final notStale = live.where((t) {
-      if (t['status'] == 'COMPLETED') return false;
-      final depAt = DateTime.tryParse('${t['planned_departure_time']}')?.toUtc().add(const Duration(hours: 7));
-      if (depAt == null) return false;
-      return !depAt.isBefore(now.subtract(const Duration(hours: 12)));
-    }).firstOrNull;
+    Map<String, dynamic>? toDriveSince(Duration back) => live.where((t) {
+          if (t['status'] == 'COMPLETED') return false;
+          final depAt = DateTime.tryParse('${t['planned_departure_time']}')?.toUtc().add(const Duration(hours: 7));
+          if (depAt == null) return false;
+          return !depAt.isBefore(now.subtract(back));
+        }).firstOrNull;
     final kept = tripId == null ? null : live.where((t) => t['trip_id'] == tripId).firstOrNull;
-    final current = running ?? selected ?? notStale ?? kept ?? live.where((t) => t['status'] != 'COMPLETED').firstOrNull ?? live.lastOrNull;
+    final current = running ??
+        selected ??
+        toDriveSince(const Duration(hours: 2)) ??
+        toDriveSince(const Duration(hours: 12)) ??
+        kept ??
+        live.where((t) => t['status'] != 'COMPLETED').firstOrNull ??
+        live.lastOrNull;
     if (current != null) _apply(current, fresh: tripId != current['trip_id']);
     if (shiftSavedAt != null) _replayQueuedBoarding();
     notifyListeners();
@@ -1241,6 +1301,17 @@ class DriverStore extends ChangeNotifier {
   final Map<String, String> _plannedTimes = {};
 
   DateTime vnNow() => _now().toUtc().add(const Duration(hours: 7));
+
+  /// D189: the server lets a trip start at most this long before its time.
+  static const earlyStart = Duration(minutes: 60);
+
+  /// When the trip on the big card may set off, while that is still to come (D191); null once it may.
+  String? get startOpensAt {
+    final dep = shift.where((t) => t.id == tripId).firstOrNull?.departureTime;
+    if (dep == null) return null;
+    final opens = dep.subtract(earlyStart);
+    return vnNow().isBefore(opens) ? hhmm(opens.hour * 60 + opens.minute) : null;
+  }
   DateTime _vnNow() => vnNow();
   String dayLabelOf(ShiftTrip t) => t.dayLabel(vnNow());
   int _realMinutes() {

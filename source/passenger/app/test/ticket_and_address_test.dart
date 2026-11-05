@@ -16,6 +16,16 @@ import 'fake_permissions.dart';
 /// D187: the ticket says whether it is paid and how; "my location" fills a street address; the home screen shows
 /// the passenger's own photo or initials.
 void main() {
+  test('the home card shows the booking that leaves first, with all its seats (D191)', () {
+    Ticket t(String id, String pnr, String seat, String dep) => Ticket(id: id, pnr: pnr, tripId: 'trp_$pnr', route: 'Hà Nội — Thanh Hóa', date: 'T4 04/11', dep: dep.substring(11, 16), seat: seat, pickup: 'Giáp Bát', paid: 250000, name: 'An', status: TicketStatus.active, departureTime: dep);
+    final next = nextBooking([
+      t('t3', 'BG-2', 'B01', '2026-11-05T07:00:00+07:00'),
+      t('t1', 'BG-1', 'A03', '2026-11-04T19:30:00+07:00'),
+      t('t2', 'BG-1', 'A04', '2026-11-04T19:30:00+07:00'),
+    ]);
+    expect(next.map((x) => x.seat), ['A03', 'A04']);
+  });
+
   final geocoded = <String>[];
 
   PassengerStore store({String? address}) {

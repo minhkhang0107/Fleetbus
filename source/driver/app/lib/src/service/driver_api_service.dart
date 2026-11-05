@@ -121,6 +121,11 @@ class DriverApiClientService {
     return json;
   }
 
+  /// D192: the phone's push token, so the office's changes reach the driver; none when signing out.
+  Future<Map<String, dynamic>> registerDevice({String? token, required String platform}) {
+    return _post('/api/v1/driver/devices', body: {'platform': platform, if (token != null) 'token': token});
+  }
+
   /// DRI-001: replaces the temporary PIN the company gave (D150).
   Future<Map<String, dynamic>> changePin({
     required String currentPin,
