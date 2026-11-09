@@ -5,7 +5,7 @@ import { createFleetBusServer } from '../../source/server/apiServer.js';
 import { findOperatorById } from '../../source/server/core/operators.js';
 
 test('TC-PAX-CASH-01: cash payment method booking, COD collection, operator toggle, cancellation, and revenue', async (t) => {
-  const { server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: null });
+  const { server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: 'off' });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
 

@@ -130,7 +130,7 @@ describe('Route & Station Builder: Newly onboarded operator creates stations, ro
     const dispCreate = await request('/api/v1/ops/staff', {
       method: 'POST',
       token: directorA.token,
-      body: { username: 'dieu_phoi@phuongnam.vn', full_name: 'Lê Điều Phối', role: 'DISPATCHER' }
+      body: { username: 'dieu_phoi@phuongnam.vn', full_name: 'Lê Điều Phối', role: 'STAFF', permissions: ['DISPATCH', 'SCHEDULES', 'FLEET', 'DRIVERS'] }
     });
     assert.strictEqual(dispCreate.status, 201);
     const dispTemp = dispCreate.body.data.temporary_password;
@@ -148,7 +148,7 @@ describe('Route & Station Builder: Newly onboarded operator creates stations, ro
     const cashCreate = await request('/api/v1/ops/staff', {
       method: 'POST',
       token: directorA.token,
-      body: { username: 'thu_ngan@phuongnam.vn', full_name: 'Trần Thu Ngân', role: 'CASHIER' }
+      body: { username: 'thu_ngan@phuongnam.vn', full_name: 'Trần Thu Ngân', role: 'STAFF', permissions: ['TICKETING', 'BOOKINGS_VIEW', 'PAYMENTS'] }
     });
     assert.strictEqual(cashCreate.status, 201);
     const cashTemp = cashCreate.body.data.temporary_password;

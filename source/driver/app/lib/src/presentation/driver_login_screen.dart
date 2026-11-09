@@ -6,6 +6,7 @@ import 'driver_change_pin_screen.dart';
 import 'driver_store.dart';
 import 'driver_widgets.dart';
 import 'main_shell_screen.dart';
+import '../service/driver_api_service.dart';
 
 /// DRI-001: staff id and 6-digit PIN. No GPS or device status before the shift starts (D101).
 class DriverLoginScreen extends StatefulWidget {
@@ -29,6 +30,13 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final store = DriverScope.read(context);
+      if (!store.api.isSecure) {
+        setState(() => _error = insecureConnectionErrorMessage);
+      }
+    });
     if (_restoring) _restore();
     DriverStore.savedOperatorCode().then((code) {
       if (mounted && code.isNotEmpty && _operator.text.isEmpty) {

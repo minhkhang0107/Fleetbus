@@ -13,7 +13,7 @@ function decodePayload(token) {
 }
 
 test('TC-VIP: VIP passenger account lifecycle and permissions', async (t) => {
-  const { server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: null });
+  const { server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: 'off' });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
 
@@ -220,7 +220,7 @@ test('TC-VIP: VIP passenger account lifecycle and permissions', async (t) => {
 });
 
 test('TC-VIP: VIP passenger order pricing and zero-fare settlement', async (t) => {
-  const { server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: null });
+  const { server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: 'off' });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
 
@@ -385,7 +385,7 @@ test('TC-VIP: VIP passenger order pricing and zero-fare settlement', async (t) =
 });
 
 test('TC-VIP: Ready-made test driver for newly created bus companies', async (t) => {
-  const { server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: null });
+  const { server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: 'off' });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
 

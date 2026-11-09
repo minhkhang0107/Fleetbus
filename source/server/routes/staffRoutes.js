@@ -3,7 +3,7 @@
  * FLEET_DIRECTOR manages office staff accounts.
  */
 import { sendSuccess, sendError, parseJsonBody, clientIp } from '../middleware/httpUtils.js';
-import { listStaff, createStaff, updateStaff, resetStaffPassword } from '../services/manager/modules/staffAccounts.js';
+import { listStaff, createStaff, updateStaff, resetStaffPassword, getPermissionsCatalog } from '../services/manager/modules/staffAccounts.js';
 
 const STAFF_RESET_RE = /^\/api\/v1\/ops\/staff\/([^/]+)\/reset-password$/;
 const STAFF_ONE_RE = /^\/api\/v1\/ops\/staff\/([^/]+)$/;
@@ -26,6 +26,12 @@ export function handleStaffRoutes(req, res, pathname, parsedUrl, services) {
   });
 
   const withBody = (fn) => parseJsonBody(req).then(fn).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+
+  // GET /api/v1/ops/staff/permissions-catalog
+  if (pathname === '/api/v1/ops/staff/permissions-catalog' && req.method === 'GET') {
+    sendSuccess(res, getPermissionsCatalog());
+    return true;
+  }
 
   // GET /api/v1/ops/staff
   if (pathname === '/api/v1/ops/staff' && req.method === 'GET') {
@@ -77,7 +83,10 @@ export function handleStaffRoutes(req, res, pathname, parsedUrl, services) {
         return;
       }
       const { staff } = result.data;
-      audit('STAFF_UPDATE', staff.user_id, result.before, staff);
+      const action = (body.permissions !== undefined || body.totp_required !== undefined)
+        ? 'STAFF_PERMISSIONS_UPDATE'
+        : 'STAFF_UPDATE';
+      audit(action, staff.user_id, result.before, staff);
       sendSuccess(res, { staff });
     });
     return true;

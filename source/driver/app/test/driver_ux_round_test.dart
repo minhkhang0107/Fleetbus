@@ -70,7 +70,7 @@ void main() {
         data = {'ticket_id': jsonDecode(req.body)['ticket_id']};
       } else {
         final id = path.split('/').where((s) => s.startsWith('trp_')).firstOrNull;
-        if (id != null) data = byId[id];
+        if (id != null) data = trips.where((t) => t['trip_id'] == id).firstOrNull ?? byId[id];
       }
       return http.Response(jsonEncode({'status': 'success', 'data': data ?? {}}), 200, headers: {'content-type': 'application/json; charset=utf-8'});
     });
@@ -135,6 +135,23 @@ void main() {
     expect(alone.tripId, 'trp_missed');
     store.dispose();
     alone.dispose();
+  });
+
+  test('an auto-picked overdue trip yields to the next trip on reload unless explicitly picked (D191)', () async {
+    final trips = [tripJson('trp_missed', '2026-10-30T07:00:00+07:00', 'DISPATCHED')];
+    final store = storeWith(trips);
+    await store.loadShift();
+    expect(store.tripId, 'trp_missed');
+
+    trips.add(tripJson('trp_evening', '2026-10-30T19:30:00+07:00', 'DISPATCHED'));
+    await store.loadShift();
+    expect(store.tripId, 'trp_evening');
+
+    await store.selectTrip('trp_missed');
+    expect(store.tripId, 'trp_missed');
+    await store.loadShift();
+    expect(store.tripId, 'trp_missed');
+    store.dispose();
   });
 
   testWidgets('more than an hour before its time the start button says from when and asks nothing (D191)', (tester) async {
@@ -262,6 +279,43 @@ void main() {
     await tester.pump(DriverStore.boardUndoDelay + const Duration(milliseconds: 100));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     expect(sent.where((r) => r.url.path.endsWith('/boarding/manual')), hasLength(1));
+    store.dispose();
+  });
+
+  test('cancelled manifest items are dropped so manifest has 1 passenger and shift entry counts 1', () async {
+    final store = storeWith([
+      tripJson(
+        'trp_cancel_test',
+        '2026-10-30T14:00:00+07:00',
+        'READY',
+        manifest: [
+          {
+            'ticket_id': 'tkt_active',
+            'seat_code': 'A03',
+            'passenger_name': 'Nguyễn An',
+            'pickup_stop_id': 'stp_a',
+            'dropoff_stop_id': 'stp_c',
+            'boarding_status': 'NOT_BOARDED',
+            'payment_method': 'CASH',
+            'cod_amount_vnd': 220000,
+          },
+          {
+            'ticket_id': 'tkt_cancelled',
+            'seat_code': 'B03',
+            'passenger_name': 'Trần Bình',
+            'pickup_stop_id': 'stp_a',
+            'dropoff_stop_id': 'stp_c',
+            'boarding_status': 'CANCELLED',
+            'payment_method': 'CASH',
+            'cod_amount_vnd': 220000,
+          },
+        ],
+      ),
+    ]);
+    await store.loadShift();
+    expect(store.manifest, hasLength(1));
+    expect(store.manifest.first.seat, 'A03');
+    expect(store.shift.first.booked, 1);
     store.dispose();
   });
 }

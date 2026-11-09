@@ -13,7 +13,7 @@ const TRIP = 'trp_hn_th_01';
 const HOUR = 3600 * 1000;
 
 function startServer() {
-  const { server, services } = createFleetBusServer({ authMode: 'off' });
+  const { server, services } = createFleetBusServer({ authMode: 'off', webhookSecret: 'off' });
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => resolve({ server, services, baseUrl: `http://127.0.0.1:${server.address().port}` }));
   });

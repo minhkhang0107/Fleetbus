@@ -65,6 +65,12 @@ void main() {
           'boarding_status': 'ISSUED',
           'payment_method': 'VIETQR',
           'cod_amount_vnd': 0,
+          'boarding_check': {
+            'qr_version': 1,
+            'qr_digest': 'sig',
+            'pin_digest': 'pin_hash',
+            'group_digest': 'grp_sig',
+          },
         },
         {
           'ticket_id': 't_a02',
@@ -308,6 +314,12 @@ void main() {
   });
 
   testWidgets('business error during flush removes the item and displays the error on DriverOfflineSyncScreen', (tester) async {
+    trip['manifest'][0]['boarding_check'] = {
+      'qr_version': 1,
+      'qr_digest': 'dup',
+      'pin_digest': 'pin_hash',
+      'group_digest': 'grp_sig',
+    };
     final store = DriverStore(api: buildApi());
     expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
 

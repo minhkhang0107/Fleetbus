@@ -13,22 +13,51 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+const insecureConnectionErrorMessage =
+    'Kết nối tới máy chủ không an toàn. Cập nhật ứng dụng hoặc liên hệ nhà xe.';
+
+class InsecureConnectionException implements Exception {
+  final String message;
+  const InsecureConnectionException([this.message = insecureConnectionErrorMessage]);
+  @override
+  String toString() => message;
+}
+
+/// Helper function to check if a backend URL is permitted.
+/// In release mode, URLs not starting with https:// are rejected.
+/// In debug/profile mode, http:// URLs are permitted.
+bool isSecureApiUrl(String url, {bool releaseMode = kReleaseMode}) {
+  if (releaseMode) {
+    return url.startsWith('https://');
+  }
+  return true;
+}
+
+bool isBaseUrlAllowed(String url, {bool releaseMode = kReleaseMode}) =>
+    isSecureApiUrl(url, releaseMode: releaseMode);
+
 /// Helper function to resolve the target backend URL adaptively across Android & iOS
-String resolveDriverBaseUrl([String? customUrl]) {
+String resolveDriverBaseUrl([String? customUrl, bool releaseMode = kReleaseMode]) {
+  String url;
   if (customUrl != null && customUrl.isNotEmpty) {
-    return customUrl;
+    url = customUrl;
+  } else {
+    // Physical device on the LAN: --dart-define=FLEETBUS_API_URL=http://<host-ip>:3000
+    const fromDefine = String.fromEnvironment('FLEETBUS_API_URL');
+    if (fromDefine.isNotEmpty) {
+      url = fromDefine;
+    } else if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      // Android emulator loopback alias to host machine
+      url = 'http://10.0.2.2:3000';
+    } else {
+      // iOS Simulator, macOS/Web, desktop, or default host
+      url = 'http://localhost:3000';
+    }
   }
-  // Physical device on the LAN: --dart-define=FLEETBUS_API_URL=http://<host-ip>:3000
-  const fromDefine = String.fromEnvironment('FLEETBUS_API_URL');
-  if (fromDefine.isNotEmpty) {
-    return fromDefine;
+  if (!isSecureApiUrl(url, releaseMode: releaseMode)) {
+    return '';
   }
-  // Android emulator loopback alias to host machine
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    return 'http://10.0.2.2:3000';
-  }
-  // iOS Simulator, macOS/Web, desktop, or default host
-  return 'http://localhost:3000';
+  return url;
 }
 
 /// A new random key for one logical mutation. Reuse the same key when retrying that mutation.
@@ -43,6 +72,7 @@ class DriverApiClientService {
   final String baseUrl;
   final http.Client _client;
   final Duration timeout;
+  final bool releaseMode;
 
   /// Session token of the signed-in driver (set by [login]).
   String? authToken;
@@ -54,8 +84,17 @@ class DriverApiClientService {
     this.authToken,
     this.operatorCode,
     this.timeout = const Duration(seconds: 20),
-  })  : baseUrl = resolveDriverBaseUrl(baseUrl),
+    this.releaseMode = kReleaseMode,
+  })  : baseUrl = resolveDriverBaseUrl(baseUrl, releaseMode),
         _client = client ?? http.Client();
+
+  bool get isSecure => baseUrl.isNotEmpty && isSecureApiUrl(baseUrl, releaseMode: releaseMode);
+
+  static const _insecureError = <String, dynamic>{
+    'status': 'error',
+    'message': insecureConnectionErrorMessage,
+    'code': 'INSECURE_CONNECTION',
+  };
 
   Map<String, String> _headers({String? idempotencyKey}) => {
     'Content-Type': 'application/json',
@@ -69,6 +108,7 @@ class DriverApiClientService {
   }
 
   Future<Map<String, dynamic>> _get(String path, {Map<String, String>? query}) async {
+    if (!isSecure) return _insecureError;
     var uri = Uri.parse('$baseUrl$path');
     if (query != null && query.isNotEmpty) {
       uri = uri.replace(queryParameters: query);
@@ -82,6 +122,7 @@ class DriverApiClientService {
     bool idempotent = false,
     String? idempotencyKey,
   }) async {
+    if (!isSecure) return _insecureError;
     final response = await _client.post(
       Uri.parse('$baseUrl$path'),
       headers: _headers(idempotencyKey: idempotent ? (idempotencyKey ?? newDriverIdempotencyKey()) : null),

@@ -8,6 +8,7 @@ import { createFleetBusServer } from '../../source/server/apiServer.js';
 import { generateTotp } from '../../source/server/core/totp.js';
 import { signToken, TOKEN_PREFIXES } from '../../source/server/core/tokens.js';
 import { DEV_TOTP_SECRET } from '../../source/server/config.js';
+import { MOCK_MANAGERS_DB } from '../../source/server/services/manager/modules/managerService.js';
 import { addDays, vnDate } from '../../source/server/core/serviceDate.js';
 
 const TRIP = 'trp_hn_th_01';
@@ -33,8 +34,8 @@ describe('Unified bank transfer settlement engine (MGR-037)', () => {
     return code;
   };
 
-  const api = async (path, { method = 'GET', body, token, operatorCode, key } = {}) => {
-    const headers = { 'Content-Type': 'application/json' };
+  const api = async (path, { method = 'GET', body, token, operatorCode, key, headers: extraHeaders = {} } = {}) => {
+    const headers = { 'Content-Type': 'application/json', ...extraHeaders };
     if (token) headers.Authorization = `Bearer ${token}`;
     if (operatorCode) headers['X-Operator-Code'] = operatorCode;
     if (method === 'POST') headers['Idempotency-Key'] = key || crypto.randomUUID();
@@ -71,7 +72,7 @@ describe('Unified bank transfer settlement engine (MGR-037)', () => {
   };
 
   before(async () => {
-    ({ server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: null }));
+    ({ server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: 'off' }));
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     baseUrl = `http://127.0.0.1:${server.address().port}`;
 
@@ -97,6 +98,11 @@ describe('Unified bank transfer settlement engine (MGR-037)', () => {
       method: 'POST',
       body: { username: 'dispatcher@busgo.vn', password: 'disp123' }
     })).body.data.token;
+
+    // The server only honours tokens of accounts it holds (D196), so the test accounts exist.
+    const ensureAccount = (account) => { if (!MOCK_MANAGERS_DB.some(m => m.user_id === account.user_id)) MOCK_MANAGERS_DB.push({ active: true, totp_enrolled: true, ...account }); };
+    ensureAccount({ user_id: 'mgr_xv_dir', username: 'director@xuyenviet.vn', role: 'FLEET_DIRECTOR', permissions: ['ALL'], operator_id: 'op_xuyenviet' });
+    ensureAccount({ user_id: 'mgr_sm_fin', username: 'fin@busgo.vn', role: 'STAFF', permissions: ['PAYMENTS', 'REFUNDS', 'BOOKINGS_VIEW', 'AUDIT_VIEW'], operator_id: 'op_saomai' });
 
     xvDirectorToken = signToken(
       {
@@ -659,14 +665,18 @@ describe('Unified bank transfer settlement engine (MGR-037)', () => {
     const prevNodeEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
     try {
+      const hookBody = {
+        transferMemo: payment.payment_details.transfer_memo,
+        amountVnd: payment.amount_vnd,
+        bankRef: 'FT_PROD_NOW_IGNORED',
+        now: farFuture
+      };
+      const raw = JSON.stringify(hookBody);
+      const sig = crypto.createHmac('sha256', services.config?.webhookSecret || 'off').update(raw).digest('hex');
       const res = await api('/api/v1/webhooks/vietqr/SAOMAI/ipn', {
         method: 'POST',
-        body: {
-          transferMemo: payment.payment_details.transfer_memo,
-          amountVnd: payment.amount_vnd,
-          bankRef: 'FT_PROD_NOW_IGNORED',
-          now: farFuture
-        }
+        headers: { 'x-signature': sig },
+        body: hookBody
       });
       assert.strictEqual(res.status, 200);
       assert.strictEqual(res.body.data.settled, true);
@@ -713,12 +723,15 @@ describe('Unified bank transfer settlement engine (MGR-037)', () => {
     assert.strictEqual(cashRes.status, 200);
     const foundSmCash = cashRes.body.data.orders.find(o => o.order_id === smOrder.payment.order_id);
     assert.ok(foundSmCash, 'Sao Mai order must be visible to cashier');
-    // Cashier sees masked phone
-    assert.ok(foundSmCash.payer_phone.includes('*'), 'Cashier must see masked phone number');
-    assert.notStrictEqual(foundSmCash.payer_phone, '0912340001');
+    // Cashier has TICKETING so sees unmasked phone to contact passenger
+    assert.strictEqual(foundSmCash.payer_phone, '0912340001');
 
     const finRes = await api('/api/v1/ops/pending-payments', { token: financeToken });
     assert.strictEqual(finRes.status, 200);
+    const foundSmFin = finRes.body.data.orders.find(o => o.order_id === smOrder.payment.order_id);
+    assert.ok(foundSmFin, 'Sao Mai order must be visible to finance');
+    // Finance staff (no TICKETING/DISPATCH) sees masked phone
+    assert.ok(foundSmFin.payer_phone.includes('*'), 'Finance must see masked phone number');
 
     const dispRes = await api('/api/v1/ops/pending-payments', { token: dispatcherToken });
     assert.strictEqual(dispRes.status, 403);

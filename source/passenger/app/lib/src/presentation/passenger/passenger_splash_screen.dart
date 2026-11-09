@@ -20,6 +20,20 @@ class _PassengerSplashScreenState extends State<PassengerSplashScreen> {
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final store = PassengerScope.read(context);
+      if (!store.api.isSecure) {
+        setState(() {
+          _error = insecureMessage;
+        });
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _codeController.dispose();
     super.dispose();

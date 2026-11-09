@@ -24,6 +24,7 @@ dependencies:
   # D192: push from the office (Firebase Cloud Messaging)
   firebase_core: ^4.15.0
   firebase_messaging: ^16.7.0
+  crypto: ^3.0.6
 dev_dependencies:
   flutter_test:
     sdk: flutter

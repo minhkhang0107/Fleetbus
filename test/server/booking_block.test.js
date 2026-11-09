@@ -45,7 +45,7 @@ describe('Booking block and sales cutoff rules (D185)', () => {
   };
 
   before(async () => {
-    ({ server, services } = createFleetBusServer());
+    ({ server, services } = createFleetBusServer({ webhookSecret: 'off' }));
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     baseUrl = `http://127.0.0.1:${server.address().port}`;
 

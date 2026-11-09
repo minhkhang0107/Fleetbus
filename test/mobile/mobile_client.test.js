@@ -34,7 +34,10 @@ describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
     assert.ok(!content.includes('android.permission.ACCESS_WIFI_STATE'), 'ACCESS_WIFI_STATE must not be declared');
     assert.ok(content.includes('android:label="BusGo"'), 'Label must be BusGo');
     assert.ok(content.includes('android:scheme="busgo"'), 'Deep link scheme busgo must be configured');
-    assert.ok(content.includes('android:usesCleartextTraffic="true"'), 'Cleartext traffic must be enabled for dev APIs');
+    // Release builds speak HTTPS only; debug builds may reach a dev server over plain HTTP (D197).
+    assert.ok(!content.includes('usesCleartextTraffic="true"'), 'Release manifest must not allow cleartext traffic');
+    const debugManifest = fs.readFileSync(path.join(path.dirname(androidManifestPath), '..', 'debug', 'AndroidManifest.xml'), 'utf8');
+    assert.ok(debugManifest.includes('android:usesCleartextTraffic="true"'), 'Debug manifest allows cleartext for dev APIs');
   });
 
   it('TC-MOB-02: iOS Info.plist must have BusGo bundle identity and privacy usage strings', () => {

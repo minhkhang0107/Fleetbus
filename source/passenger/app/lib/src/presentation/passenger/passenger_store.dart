@@ -1033,6 +1033,7 @@ String vnd(int amount) {
 String maskPhone(String phone) => phone.length < 7 ? phone : '${phone.substring(0, 4)} *** ${phone.substring(phone.length - 3)}';
 
 const _networkError = 'Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.';
+const insecureMessage = insecureConnectionErrorMessage;
 
 class PassengerStore extends ChangeNotifier {
   PassengerStore({PassengerApiClientService? api}) : api = api ?? PassengerApiClientService();
@@ -1120,6 +1121,7 @@ class PassengerStore extends ChangeNotifier {
   int get amountDue => underpaid ? orderRemainingVnd : orderAmount;
   String get underpaidNotice => 'Đã nhận ${vnd(orderPaidVnd)}. Còn thiếu ${vnd(orderRemainingVnd)}: chuyển thêm ${vnd(orderRemainingVnd)} với đúng nội dung bên dưới.';
   String bankName = '';
+  String accountName = '';
   String accountNumber = '';
   String transferMemo = '';
   String vietQrPayload = '';
@@ -1199,6 +1201,7 @@ class PassengerStore extends ChangeNotifier {
   }
 
   Future<String?> selectOperator(String rawCode) async {
+    if (!api.isSecure) return insecureConnectionErrorMessage;
     final code = rawCode.trim().toUpperCase();
     if (code.isEmpty) return 'Nhập mã nhà xe';
     
@@ -1377,6 +1380,12 @@ class PassengerStore extends ChangeNotifier {
   }
 
   Future<void> loadPlaces() async {
+    if (!api.isSecure) {
+      places = {};
+      placesError = insecureConnectionErrorMessage;
+      notifyListeners();
+      return;
+    }
     final prefs = await SharedPreferences.getInstance();
     final op = operator?.code ?? api.operatorCode ?? prefs.getString('operator_code') ?? '';
     try {
@@ -1614,6 +1623,13 @@ class PassengerStore extends ChangeNotifier {
   }
 
   Future<void> loadTrips() async {
+    if (!api.isSecure) {
+      trips = [];
+      tripsError = insecureConnectionErrorMessage;
+      loadingTrips = false;
+      notifyListeners();
+      return;
+    }
     loadingTrips = true;
     tripsError = null;
     notifyListeners();
@@ -1955,6 +1971,7 @@ class PassengerStore extends ChangeNotifier {
     if (pay['payment_method'] == 'CASH') {
       paymentMethod = 'CASH';
       bankName = '';
+      accountName = '';
       accountNumber = '';
       transferMemo = '';
       vietQrPayload = '';
@@ -1964,6 +1981,7 @@ class PassengerStore extends ChangeNotifier {
     }
     paymentMethod = 'VIETQR_NAPAS247';
     bankName = details?['bank_name'] ?? '';
+    accountName = details?['account_name'] ?? '';
     accountNumber = details?['account_number'] ?? '';
     transferMemo = details?['transfer_memo'] ?? '';
     vietQrPayload = details?['qr_payload'] ?? '';
@@ -1989,9 +2007,12 @@ class PassengerStore extends ChangeNotifier {
     if (order is Map<String, dynamic>) {
       orderPaidVnd = (order['paid_amount_vnd'] as num?)?.toInt() ?? orderPaidVnd;
       orderRemainingVnd = (order['remaining_vnd'] as num?)?.toInt() ?? orderRemainingVnd;
-      // After an underpaid transfer the server's QR asks for the rest only.
-      final qr = (order['payment_details'] as Map?)?['qr_payload'];
+      final payDetails = order['payment_details'] as Map?;
+      final qr = payDetails?['qr_payload'];
       if (orderRemainingVnd > 0 && qr is String && qr.isNotEmpty) vietQrPayload = qr;
+      if (payDetails?['account_name'] is String && (payDetails!['account_name'] as String).isNotEmpty) {
+        accountName = payDetails['account_name'] as String;
+      }
     }
     if (!r.ok || r.value!['payment_status'] != 'PAID') {
       notifyListeners();

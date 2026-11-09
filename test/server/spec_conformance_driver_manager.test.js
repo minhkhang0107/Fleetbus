@@ -25,7 +25,7 @@ describe('Spec conformance: driver lifecycle, COD, privacy and fleet', () => {
   let baseUrl;
 
   before(async () => {
-    ({ server, services } = createFleetBusServer({ authMode: 'off' }));
+    ({ server, services } = createFleetBusServer({ authMode: 'off', webhookSecret: 'off' }));
     const op = findOperatorById('op_saomai');
     if (op?.service_config) op.service_config.wallet_enabled = true;
     await new Promise((resolve) => {

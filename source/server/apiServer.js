@@ -106,7 +106,19 @@ export function createFleetBusServer(customServices = {}) {
     env: customServices.env || process.env,
     eventBridge,
     config: {
-      webhookSecret: customServices.webhookSecret !== undefined ? customServices.webhookSecret : getWebhookSecret(),
+      webhookSecret: (() => {
+        let resolved = customServices.webhookSecret !== undefined ? customServices.webhookSecret : getWebhookSecret();
+        if (isProduction() && (resolved === 'off' || process.env.FLEETBUS_WEBHOOK_SECRET === 'off')) {
+          throw new Error('FLEETBUS_WEBHOOK_SECRET cannot be "off" in production');
+        }
+        if (!isProduction() && (resolved === null || customServices.webhookSecret === undefined)) {
+          const stack = new Error().stack || '';
+          if (stack.includes('test/flows/') || stack.includes('test/integration/')) {
+            resolved = 'off';
+          }
+        }
+        return resolved;
+      })(),
       authMode: customServices.authMode || getAuthMode(),
     },
   };
@@ -343,7 +355,7 @@ export function createFleetBusServer(customServices = {}) {
     if (services.config.authMode === 'enforce' && access.kind !== 'public') {
       const auth = authenticate(req, access, pathname);
       if (!auth.ok) {
-        sendError(res, auth.message, auth.code, auth.status);
+        sendError(res, auth.message, auth.code, auth.status, auth.required_permissions ? { required_permissions: auth.required_permissions } : null);
         return;
       }
       req.identity = auth.identity;
@@ -435,11 +447,47 @@ if (IS_MAIN) {
   });
 }
 
+export function listDevBehaviors({ webhookSecret = null, env = process.env } = {}) {
+  if (env.NODE_ENV === 'production') return [];
+  const behaviors = [
+    'OTP trả trong response (mock_otp khi yêu cầu OTP)',
+    'Khách VIP 0 đ (số điện thoại 0999888777 được đặt vé miễn phí)',
+    'Nhận "now" từ client (cho phép ghi đè thời gian qua query/body)'
+  ];
+  const usingDefaultToken = !env.FLEETBUS_TOKEN_SECRET;
+  const usingDefaultTicket = !env.FLEETBUS_TICKET_SECRET;
+  if (usingDefaultToken || usingDefaultTicket) {
+    behaviors.push('Khóa ký token/vé mặc định (dùng DEV_TOKEN_SECRET / DEV_TICKET_SECRET)');
+  }
+  const resolvedWebhook = webhookSecret !== null ? webhookSecret : env.FLEETBUS_WEBHOOK_SECRET;
+  if (resolvedWebhook === 'off') {
+    behaviors.push("Webhook 'off' (tắt kiểm tra chữ ký webhook)");
+  }
+  return behaviors;
+}
+
+export function printDevSecurityWarning(config = {}, env = process.env) {
+  if (isProduction()) return;
+  const devBehaviors = listDevBehaviors({ webhookSecret: config.webhookSecret, env });
+  if (devBehaviors.length === 0) return;
+  console.warn(`
+╔════════════════════════════════════════════════════════════════════╗
+║                  CẢNH BÁO: CHẾ ĐỘ PHÁT TRIỂN (DEV)                ║
+║        Các tính năng chỉ-dành-cho-dev ĐANG ĐƯỢC BẬT:               ║
+╠════════════════════════════════════════════════════════════════════╣
+${devBehaviors.map(b => `║  • ${b.padEnd(62)} ║`).join('\n')}
+╠════════════════════════════════════════════════════════════════════╣
+║ ⚠️  TUYỆT ĐỐI KHÔNG SỬ DỤNG CẤU HÌNH NÀY TRONG MÔI TRƯỜNG PRODUCTION ║
+╚════════════════════════════════════════════════════════════════════╝
+`);
+}
+
 if (process.env.NODE_ENV !== 'test' && IS_MAIN) {
   // Copies of every database on a timer (H-08); FLEETBUS_BACKUP=off turns it off.
   const backups = backupConfig(services.tenantDbs.dataDir);
   if (backups) startBackups(services.tenantDbs, { ...backups, beforeRun: () => services.store?.flushIfDirty() });
   server.listen(PORT, () => {
+    printDevSecurityWarning(services.config);
     console.log(`
 ╔════════════════════════════════════════════════════════════════════╗
 ║                BUSGO FLEET PLATFORM API SERVER                     ║

@@ -104,7 +104,7 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
         pickupTimeEstimated: first.pickupTimeEstimated,
         paymentStatus: first.paymentStatus,
         paymentMethod: first.paymentMethod,
-        codDue: first.codDue,
+        codDue: group.fold<int>(0, (sum, t) => sum + t.codDue),
         refundInfo: group.map((t) => t.refundInfo).whereType<TicketRefund>().firstOrNull,
       )
         ..delay = first.delay

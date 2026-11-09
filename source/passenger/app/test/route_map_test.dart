@@ -85,6 +85,18 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('the map never takes the keyboard focus, so text fields on screens above it keep theirs (D194)', (tester) async {
+    // flutter_map focuses itself by default; on a phone that closed the keyboard of the checkout opened over the trip map.
+    const stops = [
+      TrackingStop(stopId: 's1', name: 'Giáp Bát', lat: 20.98, lng: 105.84),
+      TrackingStop(stopId: 's2', name: 'Sầm Sơn', lat: 19.74, lng: 105.90),
+    ];
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: PassengerRouteMap(route: [], stops: stops, pickupStopId: 's1', dropoffStopId: 's2'))));
+    await tester.pumpAndSettle();
+    final keyboard = tester.widget<FlutterMap>(find.byType(FlutterMap)).options.interactionOptions.keyboardOptions;
+    expect(keyboard.autofocus, isFalse);
+  });
+
   testWidgets('a route with no road shape is drawn as a dashed line through its stops (D191)', (tester) async {
     const stops = [
       TrackingStop(stopId: 's1', name: 'Giáp Bát', lat: 20.98, lng: 105.84),

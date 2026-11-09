@@ -24,7 +24,6 @@
         android:label="BusGo Driver"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true"
         android:hardwareAccelerated="true">
 
         <!-- D192: the channel MainActivity creates, for pushes that name none. -->

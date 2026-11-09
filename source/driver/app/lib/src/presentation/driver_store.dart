@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/widgets.dart';
 import 'package:geolocator/geolocator.dart';
@@ -82,6 +83,28 @@ class DriverStop {
 
 enum PaxStatus { waiting, boarded, noShow }
 
+/// What the server sends so a scan can be checked with no network: the current QR and group QR signatures and a PIN digest (D194).
+class BoardingCheck {
+  const BoardingCheck({
+    required this.qrVersion,
+    required this.qrDigest,
+    required this.pinDigest,
+    this.groupDigest,
+  });
+
+  final int qrVersion;
+  final String qrDigest;
+  final String pinDigest;
+  final String? groupDigest;
+
+  factory BoardingCheck.fromJson(Map<String, dynamic> j) => BoardingCheck(
+        qrVersion: (j['qr_version'] as num?)?.toInt() ?? int.tryParse('${j['qr_version']}') ?? 0,
+        qrDigest: '${j['qr_digest'] ?? ''}',
+        pinDigest: '${j['pin_digest'] ?? ''}',
+        groupDigest: j['group_digest']?.toString(),
+      );
+}
+
 class Passenger {
   Passenger({
     required this.ticketId,
@@ -107,6 +130,7 @@ class Passenger {
     this.homeMissed = false,
     this.isHotline = false,
     this.pnr,
+    this.boardingCheck,
   });
   final String ticketId;
   final String seat;
@@ -122,6 +146,7 @@ class Passenger {
   final bool hail;
   final bool isHotline;
   final String? pnr;
+  final BoardingCheck? boardingCheck;
 
   /// Home pickup / drop-off address (spec 3.1); the passenger still rides from [from] to [to].
   final String? homePickup;
@@ -150,6 +175,7 @@ class Passenger {
     String? meetingPoint,
     bool? homeMissed,
     bool? paid,
+    BoardingCheck? boardingCheck,
   }) =>
       Passenger(
         ticketId: ticketId,
@@ -175,10 +201,15 @@ class Passenger {
         homeMissed: homeMissed ?? this.homeMissed,
         isHotline: isHotline,
         pnr: pnr,
+        boardingCheck: boardingCheck ?? this.boardingCheck,
       );
 
   factory Passenger.fromJson(Map<String, dynamic> j) {
     final boardedAt = DateTime.tryParse('${j['boarded_at']}')?.toUtc().add(const Duration(hours: 7));
+    final bcRaw = j['boarding_check'];
+    final boardingCheck = bcRaw is Map<String, dynamic>
+        ? BoardingCheck.fromJson(bcRaw)
+        : (bcRaw is Map ? BoardingCheck.fromJson(Map<String, dynamic>.from(bcRaw)) : null);
     return Passenger(
       ticketId: j['ticket_id'],
       seat: j['seat_code'] ?? '',
@@ -216,8 +247,10 @@ class Passenger {
       homeMissed: j['home_pickup']?['missed_at'] != null,
       isHotline: j['source'] == 'HOTLINE',
       pnr: j['pnr']?.toString(),
+      boardingCheck: boardingCheck,
     );
   }
+
 }
 
 String? _window(dynamic home) {
@@ -854,6 +887,7 @@ class DriverStore extends ChangeNotifier {
 
   // Current trip, as the server last returned it
   String? tripId;
+  String? _pickedTripId;
   String route = '';
   String plate = '';
   String depTime = '--:--';
@@ -1075,6 +1109,7 @@ class DriverStore extends ChangeNotifier {
 
   // ---------- Session (DRI-001, DRI-002) ----------
   Future<String?> login(String opCode, String staff, String pin) async {
+    if (!api.isSecure) return insecureConnectionErrorMessage;
     if (opCode.trim().isEmpty) return 'Nhập mã nhà xe.';
     if (staff.trim().isEmpty) return 'Nhập mã nhân viên hoặc số điện thoại.';
     if (!RegExp(r'^\d{6}$').hasMatch(pin)) return 'Mã PIN gồm đúng 6 chữ số.';
@@ -1147,6 +1182,7 @@ class DriverStore extends ChangeNotifier {
     _retryTimer?.cancel();
     _retryTimer = null;
     tripId = null;
+    _pickedTripId = null;
     shift = [];
     manifest = [];
     _road = null;
@@ -1191,7 +1227,7 @@ class DriverStore extends ChangeNotifier {
           _depLabelOf(t),
           routeLabel(t['route_name'] ?? ''),
           t['vehicle_plate'] ?? '',
-          (t['manifest'] as List? ?? []).length,
+          (t['manifest'] as List? ?? []).where((m) => m is Map && m['boarding_status'] != 'CANCELLED').length,
           t['status'] ?? '',
           DateTime.tryParse('${t['planned_departure_time']}')?.toUtc().add(const Duration(hours: 7)),
         ),
@@ -1202,7 +1238,7 @@ class DriverStore extends ChangeNotifier {
     // else the next trip to drive (one at most 2 h past its time, D191), else one left over from today;
     // a finished trip stays there only when nothing is left to drive.
     final running = live.where((t) => t['status'] == 'IN_TRANSIT').firstOrNull;
-    final selected = tripId == null ? null : live.where((t) => t['trip_id'] == tripId && t['status'] != 'COMPLETED').firstOrNull;
+    final selected = _pickedTripId == null ? null : live.where((t) => t['trip_id'] == _pickedTripId && t['status'] != 'COMPLETED').firstOrNull;
     Map<String, dynamic>? toDriveSince(Duration back) => live.where((t) {
           if (t['status'] == 'COMPLETED') return false;
           final depAt = DateTime.tryParse('${t['planned_departure_time']}')?.toUtc().add(const Duration(hours: 7));
@@ -1252,9 +1288,22 @@ class DriverStore extends ChangeNotifier {
       final payload = '${a.body?['qrPayload'] ?? ''}';
       final parts = payload.split('|');
       if (parts.length > 2 && parts[0] == 'BUSGO') boarded.add(parts[2]);
-      if (parts.length > 1 && parts[0] == 'BUSGO_GRP') boarded.addAll(manifest.where((m) => m.pnr == parts[1]).map((m) => m.ticketId));
+      if (parts.length > 4 && parts[0] == 'BUSGO_GRP') {
+        final memberIds = parts[4].split(',').map((m) => m.trim().split(':').first).toSet();
+        boarded.addAll(manifest.where((m) => m.pnr == parts[1] && memberIds.contains(m.ticketId)).map((m) => m.ticketId));
+      } else if (parts.length > 1 && parts[0] == 'BUSGO_GRP') {
+        boarded.addAll(manifest.where((m) => m.pnr == parts[1]).map((m) => m.ticketId));
+      }
       final pin = payload.split(':');
-      if (pin.length == 3 && pin[0] == 'PIN') boarded.add(pin[1]);
+      if (pin.length == 3 && pin[0] == 'PIN') {
+        final tktId = pin[1];
+        final pnr = manifest.where((m) => m.ticketId == tktId).firstOrNull?.pnr;
+        if (pnr != null && pnr.isNotEmpty) {
+          boarded.addAll(manifest.where((m) => m.pnr == pnr).map((m) => m.ticketId));
+        } else {
+          boarded.add(tktId);
+        }
+      }
     }
     if (boarded.isEmpty) return;
     manifest = [
@@ -1396,7 +1445,11 @@ class DriverStore extends ChangeNotifier {
       for (final p in manifest)
         if (p.status == PaxStatus.waiting) p.ticketId
     };
-    manifest = (t['manifest'] as List? ?? []).cast<Map<String, dynamic>>().map(Passenger.fromJson).toList();
+    manifest = (t['manifest'] as List? ?? [])
+        .cast<Map<String, dynamic>>()
+        .where((m) => m['boarding_status'] != 'CANCELLED')
+        .map(Passenger.fromJson)
+        .toList();
     for (final p in manifest) {
       if (p.status == PaxStatus.boarded && waiting.contains(p.ticketId)) _boardedOnClock.putIfAbsent(p.ticketId, () => clock);
     }
@@ -1456,6 +1509,7 @@ class DriverStore extends ChangeNotifier {
     final r = await _call(() => api.getTrip(tripId));
     if (r.error != null) return r.error;
     if (r.data != null) {
+      _pickedTripId = tripId;
       if (this.tripId != tripId) _stopTimers();
       _apply(r.data!, fresh: this.tripId != tripId);
       notifyListeners();
@@ -1858,39 +1912,129 @@ class DriverStore extends ChangeNotifier {
     required String key,
   }) async {
     List<Passenger> matching;
-    if (knownPassenger != null) {
-      final pnr = knownPassenger.pnr;
+    if (knownPassenger != null || payload.startsWith('PIN:')) {
+      final pin = payload.startsWith('PIN:') ? payload.split(':')[2] : '';
+      final ticketId = payload.startsWith('PIN:') ? payload.split(':')[1] : (knownPassenger?.ticketId ?? '');
+      final p = manifest.where((m) => m.ticketId == ticketId).firstOrNull ?? knownPassenger;
+      if (p == null) {
+        await _dropQueued(key);
+        return (
+          error: 'Vé không có trong danh sách chuyến này (có thể đã hủy hoặc của chuyến khác). Gọi nhà xe.',
+          code: 'TICKET_NOT_FOUND',
+          data: null,
+        );
+      }
+
+      final expectedPinDigest = p.boardingCheck?.pinDigest ?? '';
+      final computedPinDigest = sha256.convert(utf8.encode('${p.ticketId}|$pin')).toString();
+      if (expectedPinDigest.isEmpty || computedPinDigest.toLowerCase() != expectedPinDigest.toLowerCase()) {
+        await _dropQueued(key);
+        return (
+          error: 'Mã PIN không đúng.',
+          code: 'INVALID_PIN',
+          data: null,
+        );
+      }
+
+      final pnr = p.pnr;
       matching = (pnr != null && pnr.isNotEmpty)
           ? manifest.where((m) => m.pnr == pnr).toList()
-          : [knownPassenger];
-      if (matching.isEmpty) matching = [knownPassenger];
-    } else {
+          : [p];
+      if (matching.isEmpty) matching = [p];
+    } else if (payload.startsWith('BUSGO_GRP|')) {
       final parts = payload.split('|');
-      if (payload.startsWith('BUSGO_GRP|')) {
-        final pnr = parts.length > 1 ? parts[1] : '';
-        matching = manifest.where((m) => m.pnr != null && m.pnr == pnr).toList();
-      } else if (payload.startsWith('BUSGO|')) {
-        final pnr = parts.length > 1 ? parts[1] : '';
-        final ticketId = parts.length > 2 ? parts[2] : '';
-        if (ticketId.isNotEmpty) {
-          matching = manifest.where((m) => m.ticketId == ticketId).toList();
-        } else {
-          matching = const [];
-        }
-        if (matching.isEmpty && pnr.isNotEmpty) {
-          matching = manifest.where((m) => m.pnr != null && m.pnr == pnr).toList();
-        }
-      } else {
-        // Not a FleetBus pass: nothing to check it against without the server.
-        matching = const [];
-      }
-    }
+      final pnr = parts.length > 1 ? parts[1] : '';
+      final scannedHmac = parts.length > 5 ? parts[5] : '';
+      final membersStr = parts.length > 4 ? parts[4] : '';
+      final memberTicketIds = membersStr
+          .split(',')
+          .map((m) => m.trim())
+          .where((m) => m.isNotEmpty)
+          .map((m) => m.split(':').first)
+          .toSet();
 
-    if (matching.isEmpty) {
+      final pnrItems = manifest.where((m) => m.pnr != null && m.pnr == pnr).toList();
+      if (pnrItems.isEmpty) {
+        await _dropQueued(key);
+        return (
+          error: 'Vé không có trong danh sách chuyến này (có thể đã hủy hoặc của chuyến khác). Gọi nhà xe.',
+          code: 'TICKET_NOT_FOUND',
+          data: null,
+        );
+      }
+
+      final hmacMatches = scannedHmac.isNotEmpty &&
+          pnrItems.any((m) =>
+              m.boardingCheck?.groupDigest != null &&
+              m.boardingCheck!.groupDigest!.toLowerCase() == scannedHmac.toLowerCase());
+      if (!hmacMatches) {
+        await _dropQueued(key);
+        return (
+          error: 'Mã nhóm cũ hoặc không hợp lệ. Đề nghị khách mở lại vé trong app, hoặc quét từng vé.',
+          code: 'INVALID_SIGNATURE',
+          data: null,
+        );
+      }
+
+      matching = pnrItems.where((m) => memberTicketIds.contains(m.ticketId)).toList();
+      if (matching.isEmpty) {
+        await _dropQueued(key);
+        return (
+          error: 'Vé không có trong danh sách chuyến này (có thể đã hủy hoặc của chuyến khác). Gọi nhà xe.',
+          code: 'TICKET_NOT_FOUND',
+          data: null,
+        );
+      }
+    } else if (payload.startsWith('BUSGO|')) {
+      final parts = payload.split('|');
+      final ticketId = parts.length > 2 ? parts[2] : '';
+      final item = manifest.where((m) => m.ticketId == ticketId).firstOrNull;
+      if (item == null) {
+        await _dropQueued(key);
+        return (
+          error: 'Vé không có trong danh sách chuyến này (có thể đã hủy hoặc của chuyến khác). Gọi nhà xe.',
+          code: 'TICKET_NOT_FOUND',
+          data: null,
+        );
+      }
+
+      final bc = item.boardingCheck;
+      if (bc == null) {
+        await _dropQueued(key);
+        return (
+          error: 'Mất mạng, máy chưa có dữ liệu để kiểm vé này. Nhập mã PIN hoặc chờ có sóng.',
+          code: 'OFFLINE_UNVERIFIED',
+          data: null,
+        );
+      }
+
+      final versionStr = parts.length > 3 ? parts[3] : '';
+      final scannedVersion = int.tryParse(versionStr.startsWith('v') ? versionStr.substring(1) : versionStr);
+      if (scannedVersion == null || scannedVersion != bc.qrVersion) {
+        await _dropQueued(key);
+        return (
+          error: 'Khách đã đổi mã QR. Đề nghị khách mở lại vé trong app.',
+          code: 'QR_REVOKED',
+          data: null,
+        );
+      }
+
+      final scannedHmac = parts.length > 4 ? parts[4] : '';
+      if (scannedHmac.isEmpty || scannedHmac.toLowerCase() != bc.qrDigest.toLowerCase()) {
+        await _dropQueued(key);
+        return (
+          error: 'Mã vé bị sửa hoặc giả. Không cho lên xe.',
+          code: 'INVALID_SIGNATURE',
+          data: null,
+        );
+      }
+
+      matching = [item];
+    } else {
       await _dropQueued(key);
       return (
-        error: 'Mất mạng và vé không có trong danh sách chuyến này. Gọi nhà xe để kiểm tra.',
-        code: 'TICKET_NOT_FOUND',
+        error: 'Không phải mã vé BusGo. Đề nghị khách mở vé trong app.',
+        code: 'INVALID_FORMAT',
         data: null,
       );
     }

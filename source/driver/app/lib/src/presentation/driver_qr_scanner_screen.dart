@@ -51,7 +51,9 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
     final payload = capture.barcodes.map((b) => b.rawValue).whereType<String>().firstOrNull;
     if (payload == null || _busy) return;
     setState(() => _busy = true);
-    await _scanner?.stop();
+    try {
+      await _scanner?.stop();
+    } catch (_) {}
     if (!mounted) return;
     final store = DriverScope.read(context);
     final r = await store.boardWithQr(payload);
@@ -67,7 +69,9 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
         await showCodSheet(context, passenger);
         if (!mounted) return;
         setState(() => _busy = false);
-        await _scanner?.start();
+        try {
+          await _scanner?.start();
+        } catch (_) {}
         return;
       }
     }
@@ -84,7 +88,9 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
       );
       if (!mounted) return;
       setState(() => _busy = false);
-      await _scanner?.start();
+      try {
+        await _scanner?.start();
+      } catch (_) {}
       return;
     }
     final boardedList = (r.data?['boarded_passengers'] as List?)?.cast<Map<String, dynamic>>() ?? [];
@@ -95,15 +101,26 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
     final title = r.error == null
         ? (seats.length > 1 ? 'Đã lên xe ${seats.length} ghế: ${seats.join(', ')}' : 'Hợp lệ${seat != null ? ' · Ghế $seat' : ''}')
         : (isAlreadyBoarded ? 'Vé này đã lên xe' : 'Không cho lên xe');
+    final message = r.error == null
+        ? (name != null ? '$name đã lên xe.' : 'Khách đã lên xe.')
+        : _plainError(r.error);
     await _result(
       context,
       r.error == null,
       title,
-      r.error == null ? (name != null ? '$name đã lên xe.' : 'Khách đã lên xe.') : r.error!,
+      message,
     );
     if (!mounted) return;
     setState(() => _busy = false);
-    await _scanner?.start();
+    try {
+      await _scanner?.start();
+    } catch (_) {}
+  }
+
+  /// The reason the driver reads: the words of the server or of the offline check, never a bare code (D194).
+  static String _plainError(String? error) {
+    final text = (error ?? '').replaceAll(RegExp(r'\s*\([A-Z0-9_]+\)'), '').trim();
+    return text.isEmpty || RegExp(r'^[A-Z0-9_]+$').hasMatch(text) ? 'Vé không hợp lệ. Không cho lên xe.' : text;
   }
 
   Future<void> _pinEntry(BuildContext context) async {
@@ -150,7 +167,7 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
                 if (r.error != null) {
                   setSheet(() => error = r.code == 'INVALID_PIN'
                       ? 'Mã PIN không đúng với vé ghế ${selected.seat}.'
-                      : (r.code == 'ALREADY_BOARDED' ? 'Vé này đã lên xe' : r.error));
+                      : (r.code == 'ALREADY_BOARDED' ? 'Vé này đã lên xe' : _plainError(r.error)));
                   return;
                 }
                 final boardedList = (r.data?['boarded_passengers'] as List?)?.cast<Map<String, dynamic>>() ?? [];

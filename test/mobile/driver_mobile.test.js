@@ -32,7 +32,10 @@ describe('Phase Driver Mobile: Android & iOS Platform Integrity Test Suite', () 
     assert.ok(content.includes('android.permission.CAMERA'), 'CAMERA permission required');
     assert.ok(content.includes('<uses-feature android:name="android.hardware.camera" android:required="false" />'), 'Camera feature must not be required');
     assert.ok(content.includes('android:label="BusGo Driver"'), 'Label must be BusGo Driver');
-    assert.ok(content.includes('android:usesCleartextTraffic="true"'), 'Cleartext traffic must be enabled for dev APIs');
+    // Release builds speak HTTPS only; debug builds may reach a dev server over plain HTTP (D197).
+    assert.ok(!content.includes('usesCleartextTraffic="true"'), 'Release manifest must not allow cleartext traffic');
+    const debugManifest = fs.readFileSync(path.join(path.dirname(driverManifestPath), '..', 'debug', 'AndroidManifest.xml'), 'utf8');
+    assert.ok(debugManifest.includes('android:usesCleartextTraffic="true"'), 'Debug manifest allows cleartext for dev APIs');
   });
 
   it('TC-DRV-MOB-02: Driver iOS Info.plist must have BusGo Driver bundle identity and privacy usage strings', () => {

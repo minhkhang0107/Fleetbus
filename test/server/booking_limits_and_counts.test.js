@@ -32,7 +32,7 @@ describe('Booking limits, search seat counts, and alert resolution', () => {
   };
 
   before(async () => {
-    ({ server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: null }));
+    ({ server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: 'off' }));
     await new Promise(resolve => server.listen(0, resolve));
     baseUrl = `http://127.0.0.1:${server.address().port}`;
 

@@ -171,10 +171,34 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
               ),
             ], right: [
               if (!pWide(context)) gap(14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: PTokens.warnSoft,
+                  border: Border.all(color: PTokens.warn),
+                  borderRadius: BorderRadius.circular(PTokens.radiusControl),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.shield_outlined, size: 16, color: PTokens.warnInk),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Chỉ chuyển khoản theo mã QR trong app. Nhà xe không bao giờ nhắn số tài khoản khác qua tin nhắn hay điện thoại.',
+                        style: sans(size: 12, weight: FontWeight.w600, color: PTokens.warnInk, height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              gap(10),
               AppCard(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: Column(children: [
                   _row('Ngân hàng', store.bankName),
+                  _row('Chủ tài khoản', store.accountName.trim().isEmpty ? '—' : store.accountName, isBold: true),
                   _row('Số tài khoản', store.accountNumber, copy: store.accountNumber, isMono: true),
                   _row('Số tiền', vnd(store.amountDue), copy: '${store.amountDue}', isMono: true),
                   _row('Nội dung', memo, copy: memo, isMono: true, color: PTokens.pnr, last: true),
@@ -208,20 +232,42 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
     );
   }
 
-  Widget _row(String label, String value, {String? copy, bool isMono = false, Color color = PTokens.ink, bool last = false}) => Container(
-        constraints: const BoxConstraints(minHeight: 48),
-        decoration: BoxDecoration(border: last ? null : const Border(bottom: BorderSide(color: Color(0xFFF1F5F9)))),
-        child: Row(children: [
-          SizedBox(width: 96, child: Text(label, style: sans(size: 13, color: PTokens.muted))),
-          Expanded(child: Text(value, style: isMono ? mono(size: 15, weight: FontWeight.w700, color: color) : sans(size: 14, weight: FontWeight.w600))),
-          if (copy != null)
-            TextButton(
-              onPressed: () => _copy(copy),
-              style: TextButton.styleFrom(backgroundColor: PTokens.primarySoft, foregroundColor: PTokens.primaryDark, minimumSize: const Size(44, 36), textStyle: sans(size: 13, weight: FontWeight.w600)),
-              child: const Text('Sao chép'),
+  Widget _row(
+    String label,
+    String value, {
+    String? copy,
+    bool isMono = false,
+    bool isBold = false,
+    Color color = PTokens.ink,
+    bool last = false,
+  }) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 48),
+      decoration: BoxDecoration(border: last ? null : const Border(bottom: BorderSide(color: Color(0xFFF1F5F9)))),
+      child: Row(children: [
+        SizedBox(width: 96, child: Text(label, style: sans(size: 13, color: PTokens.muted))),
+        Expanded(
+          child: Text(
+            value,
+            style: isMono
+                ? mono(size: 15, weight: FontWeight.w700, color: color)
+                : sans(size: 14, weight: isBold ? FontWeight.w700 : FontWeight.w600),
+          ),
+        ),
+        if (copy != null)
+          TextButton(
+            onPressed: () => _copy(copy),
+            style: TextButton.styleFrom(
+              backgroundColor: PTokens.primarySoft,
+              foregroundColor: PTokens.primaryDark,
+              minimumSize: const Size(44, 36),
+              textStyle: sans(size: 13, weight: FontWeight.w600),
             ),
-        ]),
-      );
+            child: const Text('Sao chép'),
+          ),
+      ]),
+    );
+  }
 }
 
 /// PAX-015: success; going back from here never returns to checkout (BR-SUCCESS-001).

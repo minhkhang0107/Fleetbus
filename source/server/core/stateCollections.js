@@ -13,6 +13,7 @@ import { MOCK_TRIPS_DATABASE, STATIONS_DATABASE, reloadScheduleTemplates } from 
 import { MOCK_MANAGERS_DB } from '../services/manager/modules/managerService.js';
 import { MOCK_DRIVERS_DB } from '../services/driver/modules/driverService.js';
 import { PASSENGER_REVOCATIONS } from '../services/passenger/modules/auth.js';
+import { normalizeStaffAccount } from '../services/manager/modules/staffAccounts.js';
 
 export function stateCollections(services, { idempotency } = {}) {
   const { authService, seatMapService, paymentService, trackingService, driverService, managerService } = services;
@@ -37,7 +38,11 @@ export function stateCollections(services, { idempotency } = {}) {
     listCollection('operators', () => OPERATORS, platform, { platformFirst: true }),
     listCollection('stations', () => STATIONS_DATABASE, platform),
     // Staff accounts: a company's staff in its database, platform admins (no company) in the platform's.
-    listCollection('staff_accounts', () => MOCK_MANAGERS_DB, (u) => u.operator_id || PLATFORM_SCOPE),
+    listCollection('staff_accounts', () => MOCK_MANAGERS_DB, (u) => u.operator_id || PLATFORM_SCOPE, {
+      afterRestore: () => {
+        for (const u of MOCK_MANAGERS_DB) normalizeStaffAccount(u);
+      }
+    }),
     mapCollection('staff_login_guard', () => managerService.loginGuard.entries, platform),
     mapCollection('driver_login_guard', () => driverService.loginGuard.entries, platform),
 

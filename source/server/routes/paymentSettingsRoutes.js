@@ -7,6 +7,7 @@
 import { sendSuccess, sendError, parseJsonBody, clientIp } from '../middleware/httpUtils.js';
 import { defaultServiceConfig, operatorPaymentConfig } from '../core/operators.js';
 import { ALLOWED_PAYMENT_METHODS, getProvider, listProviders, maskCredentials, maskSecret } from '../core/payments/providers.js';
+import { isDirector, hasStaffPermission } from '../core/gateway.js';
 
 function requestOrigin(req) {
   const rawProto = req.headers['x-forwarded-proto'];
@@ -17,13 +18,20 @@ function requestOrigin(req) {
   return `${proto}://${host}`;
 }
 
+function maskAccountNumber(acc) {
+  if (!acc) return null;
+  const str = String(acc);
+  return str.length > 4 ? '****' + str.slice(-4) : str;
+}
+
 function buildPaymentSettingsView(req, services) {
   const op = req.operator;
-  const { methods, transfer_provider } = operatorPaymentConfig(op);
+  const { methods, transfer_provider, manual_confirm_limit_vnd } = operatorPaymentConfig(op);
   const providerObj = getProvider(transfer_provider);
   const credEntry = services.paymentService.gatewayCredentials.get(op.operator_id);
   const activeValues = credEntry?.provider === transfer_provider ? (credEntry.values || {}) : {};
   const origin = requestOrigin(req);
+  const director = isDirector(req);
 
   const reconciliationEnabled = Boolean(
     providerObj?.auto
@@ -31,9 +39,28 @@ function buildPaymentSettingsView(req, services) {
     && activeValues?.api_token
   );
 
+  let bank = null;
+  if (op.bank) {
+    bank = {
+      ...op.bank,
+      account_number: director ? op.bank.account_number : maskAccountNumber(op.bank.account_number)
+    };
+  }
+
+  let bank_pending = null;
+  if (op.bank_pending) {
+    bank_pending = {
+      ...op.bank_pending,
+      account_number: director ? op.bank_pending.account_number : maskAccountNumber(op.bank_pending.account_number)
+    };
+  }
+
   return {
     methods,
     transfer_provider,
+    manual_confirm_limit_vnd,
+    bank,
+    bank_pending,
     providers: listProviders(),
     credentials: maskCredentials(transfer_provider, activeValues),
     // Only a provider that calls us has a webhook address to paste into its dashboard.
@@ -97,7 +124,7 @@ export function handlePaymentSettingsRoutes(req, res, pathname, parsedUrl, servi
 
   // GET /api/v1/ops/payment-settings
   if (pathname === '/api/v1/ops/payment-settings' && req.method === 'GET') {
-    if (req.identity && !['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'PLATFORM_ADMIN'].includes(req.identity.role)) {
+    if (req.identity && !isDirector(req) && !hasStaffPermission(req, 'PAYMENTS') && !hasStaffPermission(req, 'REFUNDS')) {
       sendError(res, 'Vai trò của bạn không được phép thực hiện thao tác này', 'FORBIDDEN', 403);
       return true;
     }
@@ -107,7 +134,7 @@ export function handlePaymentSettingsRoutes(req, res, pathname, parsedUrl, servi
 
   // PUT /api/v1/ops/payment-settings
   if (pathname === '/api/v1/ops/payment-settings' && req.method === 'PUT') {
-    if (req.identity && !['FLEET_DIRECTOR', 'PLATFORM_ADMIN'].includes(req.identity.role)) {
+    if (req.identity && !isDirector(req)) {
       sendError(res, 'Vai trò của bạn không được phép thực hiện thao tác này', 'FORBIDDEN', 403);
       return true;
     }
@@ -151,15 +178,27 @@ export function handlePaymentSettingsRoutes(req, res, pathname, parsedUrl, servi
         return;
       }
 
+      let manual_confirm_limit_vnd = currentCfg.manual_confirm_limit_vnd;
+      if (body.manual_confirm_limit_vnd !== undefined) {
+        const limit = Number(body.manual_confirm_limit_vnd);
+        if (!Number.isInteger(limit) || limit < 0) {
+          sendError(res, 'Ngưỡng xác nhận thủ công (manual_confirm_limit_vnd) phải là số nguyên không âm', 'VALIDATION_ERROR', 400);
+          return;
+        }
+        manual_confirm_limit_vnd = limit;
+      }
+
       const beforeAudit = {
         methods: [...currentCfg.methods],
         transfer_provider: currentCfg.transfer_provider,
+        manual_confirm_limit_vnd: currentCfg.manual_confirm_limit_vnd,
         credentials: maskCredentials(existingCred?.provider || currentCfg.transfer_provider, existingCred?.values)
       };
 
       op.service_config.payment = {
         methods,
-        transfer_provider: provider.id
+        transfer_provider: provider.id,
+        manual_confirm_limit_vnd
       };
       op.service_config.allow_cash_payment = methods.includes('CASH');
 
@@ -178,6 +217,7 @@ export function handlePaymentSettingsRoutes(req, res, pathname, parsedUrl, servi
       const afterAudit = {
         methods: [...methods],
         transfer_provider: provider.id,
+        manual_confirm_limit_vnd,
         credentials: maskCredentials(provider.id, nextValues)
       };
 
@@ -197,9 +237,38 @@ export function handlePaymentSettingsRoutes(req, res, pathname, parsedUrl, servi
     return true;
   }
 
+  // POST /api/v1/ops/payment-settings/bank-change/cancel (DIRECTOR_ONLY)
+  if (pathname === '/api/v1/ops/payment-settings/bank-change/cancel' && req.method === 'POST') {
+    if (req.identity && !isDirector(req)) {
+      sendError(res, 'Chức năng này chỉ dành cho Giám đốc điều hành', 'FORBIDDEN', 403);
+      return true;
+    }
+    const op = req.operator;
+    if (!op.bank_pending) {
+      sendError(res, 'Không có yêu cầu đổi tài khoản ngân hàng đang chờ', 'NO_PENDING_BANK_CHANGE', 400);
+      return true;
+    }
+    const before = { ...op.bank_pending };
+    delete op.bank_pending;
+
+    managerService.recordAudit({
+      actor: req.identity?.sub || 'anonymous',
+      role: req.identity?.role || null,
+      ip: clientIp(req),
+      operator_id: op.operator_id,
+      action: 'BANK_CHANGE_CANCELLED',
+      resource: op.code,
+      before,
+      after: null
+    });
+
+    sendSuccess(res, { success: true, message: 'Đã hủy yêu cầu đổi tài khoản nhận tiền' });
+    return true;
+  }
+
   // POST /api/v1/ops/payment-settings/test
   if (pathname === '/api/v1/ops/payment-settings/test' && req.method === 'POST') {
-    if (req.identity && !['FLEET_DIRECTOR', 'PLATFORM_ADMIN'].includes(req.identity.role)) {
+    if (req.identity && !isDirector(req)) {
       sendError(res, 'Vai trò của bạn không được phép thực hiện thao tác này', 'FORBIDDEN', 403);
       return true;
     }

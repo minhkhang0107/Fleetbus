@@ -51,7 +51,7 @@ describe('Launch security (B-01, B-03, H-05)', () => {
   before(async () => {
     ({ server, services } = createFleetBusServer({
       authMode: 'enforce',
-      webhookSecret: null,
+      webhookSecret: 'off',
       fetchImpl: fakeFetch
     }));
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
