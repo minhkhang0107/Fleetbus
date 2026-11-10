@@ -133,6 +133,73 @@
       overflow-y: visible;
     }
   }
+  .dispatch-split.timeline-mode {
+    display: flex !important;
+    flex-direction: column !important;
+    height: auto !important;
+    gap: 16px;
+  }
+  .dispatch-split.timeline-mode .dispatch-col-right {
+    height: auto;
+    max-height: none;
+  }
+  .board-week-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 6px 0 10px;
+  }
+  .week-day-btn {
+    flex: 1 1 110px;
+    min-width: 105px;
+    max-width: 180px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 4px;
+    background: #fff;
+    border: 1px solid var(--line, #cbd5e1);
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: center;
+    font-family: inherit;
+    transition: all 0.15s ease;
+    box-sizing: border-box;
+  }
+  .week-day-btn:hover {
+    background: var(--surface-hover, #f8fafc);
+    border-color: var(--line-strong, #94a3b8);
+  }
+  .week-day-btn.sel {
+    background: #eff6ff;
+    border-color: #0284c7;
+    box-shadow: 0 0 0 1px #0284c7;
+  }
+  .week-day-btn .day-title {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text, #0f172a);
+  }
+  .week-day-btn.sel .day-title {
+    color: #0284c7;
+  }
+  .week-day-btn .day-status {
+    font-size: 11px;
+    margin-top: 2px;
+    line-height: 1.2;
+  }
+  .week-day-btn .day-status.unassigned {
+    color: #ef4444;
+    font-weight: 600;
+  }
+  .week-day-btn .day-status.ready {
+    color: #10b981;
+    font-weight: 600;
+  }
+  .week-day-btn .day-status.empty {
+    color: #94a3b8;
+  }
   .tab-btn {
     background: none;
     border: none;
@@ -219,13 +286,68 @@
   }
   .deck-title { font-weight: 700; font-size: 13px; margin: 0 0 6px; color: var(--ink); }
   .deck-grid { display: grid; gap: 6px; justify-content: center; }
+  /* Routes & Stops (MGR-011) */
+  .routes-split {
+    display: grid;
+    grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+  @media (max-width: 1199px) {
+    .routes-split {
+      grid-template-columns: 1fr;
+    }
+  }
+  .route-item {
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 1px solid var(--line);
+    margin-bottom: 8px;
+    background: #fff;
+    transition: border-color 0.15s, background-color 0.15s;
+  }
+  .route-item:hover {
+    background: #f8fafc;
+  }
+  .route-item.active {
+    border-color: var(--primary);
+    background: #eff6ff;
+  }
+  .route-stop-marker {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-weight: 700;
+    font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    box-sizing: border-box;
+  }
+  .route-stop-marker.station {
+    background: #2563eb;
+    color: #fff;
+    border: 2px solid #fff;
+  }
+  .route-stop-marker.roadside {
+    background: #64748b;
+    color: #fff;
+    border: 2px solid #fff;
+  }
+  .route-stop-marker.hidden-stop {
+    opacity: 0.45;
+  }
+  .input-error {
+    border-color: #ef4444 !important;
+    background-color: #fef2f2 !important;
+  }
   @media (max-width: 900px) {
     #app { grid-template-columns: 1fr; }
     nav { height: auto; position: static; overflow: visible; flex-direction: row; flex-wrap: wrap; }
     .nav-list { overflow-y: visible; flex-direction: row; flex-wrap: wrap; }
     .nav-group { flex-direction: row; flex-wrap: wrap; }
     .nav-footer, nav .spacer, nav .who { display: none; }
-    .split, .layoutsSplit { grid-template-columns: 1fr; }
+    .split, .layoutsSplit, .routes-split { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -304,6 +426,7 @@
       <div class="nav-group" id="navGroupFleet">
         <div class="nav-group-title">ĐỘI XE & TUYẾN</div>
         <button data-view="schedules">Lịch chạy</button>
+        <button data-view="routes">Tuyến &amp; điểm dừng</button>
         <button data-view="fleet">Đội xe</button>
         <button data-view="drivers">Tài xế</button>
         <button data-view="layouts">Sơ đồ ghế</button>
@@ -380,9 +503,19 @@
         <input type="date" id="boardDate">
         <span class="muted" id="boardInfo" style="font-weight:600;color:var(--text);margin-left:4px"></span>
       </div>
-      <div class="row" id="boardFilters" style="gap:6px;margin:4px 0 12px;flex-wrap:wrap"></div>
-      <div class="dispatch-split">
-        <div class="card scroll dispatch-col-left" style="padding:0"><table><thead><tr><th style="width:65px">Giờ</th><th>Tuyến</th><th style="min-width:110px">Xe · Tài xế</th><th style="width:75px">Ghế</th><th style="min-width:90px">Trạng thái</th></tr></thead><tbody id="board"></tbody></table></div>
+      <div id="boardWeekStrip" class="board-week-strip"></div>
+      <div class="row" style="justify-content:space-between;align-items:center;margin:4px 0 12px;flex-wrap:wrap;gap:8px">
+        <div class="row" id="boardFilters" style="gap:6px;flex-wrap:wrap"></div>
+        <div class="row" id="dispatchViewToggle" style="gap:4px">
+          <button class="btn" id="btnViewList" type="button" style="padding:4px 10px;font-size:12.5px">Danh sách</button>
+          <button class="btn" id="btnViewTimeline" type="button" style="padding:4px 10px;font-size:12.5px">Theo xe</button>
+        </div>
+      </div>
+      <div class="dispatch-split" id="dispatchContainer">
+        <div class="card scroll dispatch-col-left" id="boardTableCard" style="padding:0"><table><thead><tr><th style="width:65px">Giờ</th><th>Tuyến</th><th style="min-width:110px">Xe · Tài xế</th><th style="width:75px">Ghế</th><th style="min-width:90px">Trạng thái</th></tr></thead><tbody id="board"></tbody></table></div>
+        <div class="card hidden" id="boardTimelineCard" style="padding:16px;overflow-x:auto">
+          <div id="boardTimeline"></div>
+        </div>
         <div class="card dispatch-col-right" id="tripDetail" style="padding:16px"><p class="muted">Chọn một chuyến để xem chi tiết.</p></div>
       </div>
     </div>
@@ -392,18 +525,35 @@
       <h2>Lịch chạy cố định</h2>
       <p class="muted" style="margin:-6px 0 8px">Mỗi dòng là một giờ xuất bến cố định của tuyến. Mỗi ngày lịch chạy có một chuyến để bán vé.</p>
       <p style="margin:0 0 14px" id="scheduleRule"></p>
-      <div class="split bannerSplit">
-        <div class="card scroll" style="padding:0" id="schedulesBox"></div>
-        <form class="card" id="scheduleForm" novalidate>
-          <div class="section-title" style="margin-top:0" id="scheduleFormTitle">Thêm giờ chạy</div>
-          <div class="field"><label for="sRoute">Tuyến</label><select id="sRoute" name="route_id"></select></div>
-          <div class="row">
-            <div class="field grow"><label for="sTime">Giờ xuất bến</label><input id="sTime" name="departure" type="time" required></div>
-            <div class="field grow"><label for="sDur">Thời gian chạy (phút)</label><input id="sDur" name="duration_minutes" type="number" min="15" max="1440"></div>
+
+      <div class="toolbar" style="margin-bottom:12px;justify-content:space-between">
+        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn primary" type="button" id="scheduleAddBtn">+ Thêm giờ chạy</button>
+          <div class="row" style="gap:6px;align-items:center">
+            <span class="muted" style="font-size:13px">Lọc theo tuyến:</span>
+            <select id="scheduleRouteFilter" style="border:1px solid var(--line-strong);border-radius:8px;padding:6px 10px;background:#fff">
+              <option value="">Tất cả tuyến</option>
+            </select>
           </div>
-          <label class="row" style="margin:0 0 10px" id="sExtraField"><input type="checkbox" name="extra" id="sExtra"> Chuyến tăng cường (chạy một ngày, bán ngay)</label>
-          <div class="field hidden" id="sExtraDateField"><label for="sExtraDate">Ngày chạy tăng cường</label><input id="sExtraDate" name="extra_date" type="date"></div>
-          <div id="sRecurring">
+        </div>
+        <span class="muted" id="schedulesFilterCount"></span>
+      </div>
+
+      <div class="card scroll" style="padding:0" id="schedulesBox"></div>
+    </div>
+
+    <!-- Schedule Form Modal Holder -->
+    <div id="scheduleFormHolder" class="hidden">
+      <form class="card" id="scheduleForm" novalidate>
+        <div class="section-title" style="margin-top:0" id="scheduleFormTitle">Thêm giờ chạy</div>
+        <div class="field"><label for="sRoute">Tuyến</label><select id="sRoute" name="route_id"></select></div>
+        <div class="row">
+          <div class="field grow"><label for="sTime">Giờ xuất bến</label><input id="sTime" name="departure" type="time" required></div>
+          <div class="field grow"><label for="sDur">Thời gian chạy (phút)</label><input id="sDur" name="duration_minutes" type="number" min="15" max="1440"></div>
+        </div>
+        <label class="row" style="margin:0 0 10px" id="sExtraField"><input type="checkbox" name="extra" id="sExtra"> Chuyến tăng cường (chạy một ngày, bán ngay)</label>
+        <div class="field hidden" id="sExtraDateField"><label for="sExtraDate">Ngày chạy tăng cường</label><input id="sExtraDate" name="extra_date" type="date"></div>
+        <div id="sRecurring">
           <div class="field" style="margin-bottom:4px"><label>Ngày chạy trong tuần</label></div>
           <div class="dayPick" id="sDays"></div>
           <div class="row">
@@ -411,72 +561,153 @@
             <div class="field grow hidden" id="sEffField"><label for="sEff">Thay đổi có hiệu lực từ</label><input id="sEff" name="effective_from" type="date"></div>
             <div class="field grow"><label for="sTo">Chạy đến (trống = không hạn)</label><input id="sTo" name="valid_to" type="date"></div>
           </div>
-          </div>
-          <div class="field"><label for="sFare">Giá vé (đ)</label><input id="sFare" name="base_fare_vnd" type="number" min="10000" step="1000"></div>
-          <label class="row" style="margin:0 0 12px"><input type="checkbox" name="active" checked> Đang chạy</label>
-          <div class="error" id="scheduleError"></div>
-          <div class="row"><button class="btn primary" type="submit" id="scheduleSave">Thêm giờ chạy</button><button class="btn hidden" type="button" id="scheduleCancel">Hủy sửa</button></div>
-        </form>
-      </div>
+        </div>
+        <div class="field"><label for="sFare">Giá vé (đ)</label><input id="sFare" name="base_fare_vnd" type="number" min="10000" step="1000"></div>
+        <label class="row" style="margin:0 0 12px"><input type="checkbox" name="active" checked> Đang chạy</label>
+        <div class="error" id="scheduleError"></div>
+        <div class="row" style="margin-top:10px;justify-content:flex-end;gap:8px">
+          <button class="btn" type="button" id="scheduleCancel">Hủy sửa</button>
+          <button class="btn primary" type="submit" id="scheduleSave">Thêm giờ chạy</button>
+        </div>
+      </form>
+    </div>
 
-      <div class="split" style="margin-top:24px">
-        <form class="card" id="stationForm" novalidate>
-          <div class="section-title" style="margin-top:0">Thêm bến/điểm đón</div>
-          <div class="field"><label for="stName">Tên bến/điểm</label><input id="stName" name="name" placeholder="Ví dụ: Bến xe Đà Lạt" required minlength="3"></div>
-          <div class="row">
-            <div class="field grow"><label for="stCity">Tỉnh/thành phố</label><input id="stCity" name="city" placeholder="Ví dụ: Lâm Đồng" required></div>
-            <div class="field grow"><label for="stKind">Loại điểm</label>
-              <select id="stKind" name="kind">
-                <option value="STATION">Bến xe</option>
-                <option value="ROADSIDE">Điểm dọc đường</option>
-              </select>
+    <!-- Routes & Stops Panel (MGR-011) -->
+    <div data-panel="routes" class="hidden">
+      <h2>Tuyến &amp; điểm dừng</h2>
+      <p class="muted" style="margin:-6px 0 14px">Quản lý danh sách các tuyến, lộ trình điểm dừng, giờ đến dự tính và cấu hình đón trả.</p>
+
+      <div class="routes-split">
+        <!-- Left: List of routes -->
+        <div>
+          <div class="toolbar" style="margin-bottom:12px;justify-content:space-between">
+            <button class="btn primary" type="button" id="routesNewBtn">+ Tạo tuyến mới</button>
+            <span class="muted" id="routesCount"></span>
+          </div>
+          <div class="error" id="routesListError" style="margin-bottom:6px"></div>
+          <div id="routesListBox"></div>
+        </div>
+
+        <!-- Right: Selected route details -->
+        <div id="routeDetailView">
+          <div class="card" id="routeDetailCard">
+            <div id="routeDetailContent">
+              <p class="muted">Chọn một tuyến để xem lộ trình và cấu hình điểm dừng.</p>
             </div>
           </div>
-          <div class="field"><label for="stAddress">Địa chỉ</label><input id="stAddress" name="address" placeholder="Ví dụ: 01 Tô Hiến Thành, Phường 3, Đà Lạt"></div>
-          <div class="row">
-            <div class="field grow"><label for="stLat">Vĩ độ (8–23.5)</label><input id="stLat" name="lat" type="number" step="any" placeholder="11.9404" required></div>
-            <div class="field grow"><label for="stLng">Kinh độ (102–110)</label><input id="stLng" name="lng" type="number" step="any" placeholder="108.4583" required></div>
-          </div>
-          <div class="error" id="stationError"></div>
-          <div class="row"><button class="btn primary" type="submit" id="stationSave">Thêm bến/điểm đón</button></div>
-        </form>
-
-        <form class="card" id="routeForm" novalidate>
-          <div class="section-title" style="margin-top:0">Tạo tuyến mới</div>
-          <div class="field"><label for="rtName">Tên tuyến</label><input id="rtName" name="name" placeholder="Ví dụ: Hà Nội — Đà Lạt (Cao tốc)" required minlength="3"></div>
-          
-          <div class="field" style="margin-bottom:6px"><label>Danh sách điểm dừng theo thứ tự</label></div>
-          <div class="row" style="margin-bottom:8px">
-            <div class="field grow" style="margin-bottom:0">
-              <select id="rtStopPick"></select>
-            </div>
-            <button class="btn" type="button" id="rtAddStop">Thêm điểm</button>
-          </div>
-          
-          <div class="scroll" style="max-height:160px;border:1px solid var(--line);border-radius:8px;padding:6px;margin-bottom:12px">
-            <table style="width:100%;font-size:13px" id="rtStopsTable">
-              <thead><tr><th>STT</th><th>Điểm dừng</th><th>Đón</th><th>Trả</th><th></th></tr></thead>
-              <tbody id="rtStopsList"><tr><td colspan="5" class="muted">Chưa có điểm dừng nào được chọn</td></tr></tbody>
-            </table>
-          </div>
-
-          <div class="section-title" style="font-size:14px;margin:8px 0 6px">Giờ chạy đầu tiên của tuyến</div>
-          <div class="row">
-            <div class="field grow"><label for="rtDeparture">Giờ xuất bến</label><input id="rtDeparture" name="departure" type="time" required value="08:00"></div>
-            <div class="field grow"><label for="rtDuration">Thời gian chạy (phút)</label><input id="rtDuration" name="duration_minutes" type="number" min="15" max="1440" value="180"></div>
-            <div class="field grow"><label for="rtFare">Giá vé (đ)</label><input id="rtFare" name="base_fare_vnd" type="number" min="10000" step="1000" value="250000"></div>
-          </div>
-          <div class="row">
-            <div class="field grow"><label for="rtVehicleType">Loại xe</label><select id="rtVehicleType" name="vehicle_type"></select></div>
-            <div class="field grow"><label for="rtTotalSeats">Số ghế</label><input id="rtTotalSeats" name="total_seats" type="number" min="1" max="100" value="22"></div>
-            <div class="field grow"><label for="rtDistance">Cự ly (km)</label><input id="rtDistance" name="distance_km" type="number" min="1" value="150"></div>
-          </div>
-          <div class="field" style="margin-bottom:4px"><label>Ngày chạy trong tuần</label></div>
-          <div class="dayPick" id="rtDays"></div>
-          <div class="error" id="routeError"></div>
-          <div class="row"><button class="btn primary" type="submit" id="routeSave">Tạo tuyến mới</button></div>
-        </form>
+        </div>
       </div>
+
+      <!-- Section: Stations and roadside stops at bottom -->
+      <div style="margin-top:28px">
+        <div class="section-title" style="font-size:16px;margin-bottom:6px">Bến và điểm dừng</div>
+        <p class="muted" style="margin:0 0 14px">Tất cả bến xe và điểm đón dọc đường của nhà xe. Bấm lên bản đồ để lấy tọa độ tự động khi thêm điểm mới.</p>
+        <div class="split">
+          <div class="card">
+            <div class="section-title" style="margin-top:0">Bản đồ bến và điểm đón</div>
+            <div id="stationsMap" class="map" style="height:320px;margin-bottom:10px"></div>
+            <div class="muted" style="font-size:12px">Bấm vào vị trí trên bản đồ để tự động điền kinh độ và vĩ độ (5 chữ số thập phân).</div>
+          </div>
+
+          <div>
+            <form class="card" id="stationForm" novalidate style="margin-bottom:16px">
+              <div class="section-title" style="margin-top:0">Thêm bến/điểm đón</div>
+              <div class="field"><label for="stName">Tên bến/điểm</label><input id="stName" name="name" placeholder="Ví dụ: Bến xe Đà Lạt" required minlength="3"></div>
+              <div class="row">
+                <div class="field grow"><label for="stCity">Tỉnh/thành phố</label><input id="stCity" name="city" placeholder="Ví dụ: Lâm Đồng" required></div>
+                <div class="field grow"><label for="stKind">Loại điểm</label>
+                  <select id="stKind" name="kind">
+                    <option value="STATION">Bến xe</option>
+                    <option value="ROADSIDE">Điểm dọc đường</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field"><label for="stAddress">Địa chỉ</label><input id="stAddress" name="address" placeholder="Ví dụ: 01 Tô Hiến Thành, Phường 3, Đà Lạt"></div>
+              <div class="row">
+                <div class="field grow"><label for="stLat">Vĩ độ (8–23.5)</label><input id="stLat" name="lat" type="number" step="any" placeholder="11.9404" required></div>
+                <div class="field grow"><label for="stLng">Kinh độ (102–110)</label><input id="stLng" name="lng" type="number" step="any" placeholder="108.4583" required></div>
+              </div>
+              <div class="error" id="stationError"></div>
+              <div class="row"><button class="btn primary" type="submit" id="stationSave">Thêm bến/điểm đón</button></div>
+            </form>
+
+            <div class="card scroll" style="padding:0;max-height:280px">
+              <table style="width:100%;font-size:13px">
+                <thead><tr><th>Điểm</th><th>Tỉnh/TP</th><th>Loại</th></tr></thead>
+                <tbody id="stationsTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Route Builder Modal Holder -->
+    <div id="routeFormHolder" class="hidden">
+      <form class="card" id="routeForm" novalidate>
+        <div class="section-title" style="margin-top:0">Tạo tuyến mới</div>
+        <div class="field"><label for="rtName">Tên tuyến</label><input id="rtName" name="name" placeholder="Ví dụ: Hà Nội — Đà Lạt (Cao tốc)" required minlength="3"></div>
+        
+        <div class="field" style="margin-bottom:6px"><label>Điểm dừng theo thứ tự</label></div>
+        <div class="row" style="margin-bottom:8px;gap:8px;flex-wrap:wrap">
+          <div class="field" style="margin-bottom:0;flex:1 1 150px"><input id="rtStopSearch" placeholder="Tìm điểm: tên hoặc tỉnh" autocomplete="off"></div>
+          <div class="field" style="margin-bottom:0;flex:2 1 220px"><select id="rtStopPick"></select></div>
+          <button class="btn" type="button" id="rtAddStop">Thêm điểm</button>
+        </div>
+        <div class="row" style="margin-bottom:6px;gap:8px;align-items:center;flex-wrap:wrap">
+          <label for="rtInsertPos" class="muted" style="font-size:12.5px">Điểm thêm vào:</label>
+          <select id="rtInsertPos" style="width:auto">
+            <option value="auto">Tự chèn vào giữa tuyến, chỗ đi ít vòng nhất</option>
+            <option value="end">Cuối tuyến</option>
+          </select>
+        </div>
+
+        <div id="rtMap" class="map" style="height:260px;margin-bottom:6px"></div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Bấm chấm xám để thêm điểm có sẵn. Bấm chỗ trống trên bản đồ để tạo điểm mới ngay tại đó.</div>
+        <div id="rtRoadInfo" style="font-size:12.5px;font-weight:600;margin-bottom:8px"></div>
+        <div id="rtNewStop" class="card hidden" style="padding:10px;margin-bottom:10px;border-color:var(--brand,#2563eb)">
+          <div style="font-weight:600;margin-bottom:6px">Điểm mới tại <span class="mono" id="rtNewStopCoords"></span></div>
+          <div class="row" style="gap:8px;flex-wrap:wrap">
+            <div class="field" style="flex:2 1 180px"><label for="rtNewName">Tên điểm</label><input id="rtNewName" placeholder="Ví dụ: Ngã ba Bỉm Sơn" minlength="3"></div>
+            <div class="field" style="flex:1 1 120px"><label for="rtNewCity">Tỉnh/thành phố</label><input id="rtNewCity"></div>
+            <div class="field" style="flex:1 1 130px"><label for="rtNewKind">Loại điểm</label>
+              <select id="rtNewKind"><option value="ROADSIDE">Điểm dọc đường</option><option value="STATION">Bến xe</option></select>
+            </div>
+          </div>
+          <div class="field"><label for="rtNewAddress">Địa chỉ (không bắt buộc)</label><input id="rtNewAddress"></div>
+          <div class="error" id="rtNewError"></div>
+          <div class="row" style="gap:8px;justify-content:flex-end">
+            <button class="btn" type="button" id="rtNewCancel">Bỏ</button>
+            <button class="btn primary" type="button" id="rtNewSave">Tạo và thêm vào tuyến</button>
+          </div>
+        </div>
+
+        <div class="scroll" style="max-height:160px;border:1px solid var(--line);border-radius:8px;padding:6px;margin-bottom:12px">
+          <table style="width:100%;font-size:13px" id="rtStopsTable">
+            <thead><tr><th>STT</th><th>Điểm dừng</th><th>Đón</th><th>Trả</th><th></th></tr></thead>
+            <tbody id="rtStopsList"><tr><td colspan="5" class="muted">Chưa có điểm dừng nào được chọn</td></tr></tbody>
+          </table>
+        </div>
+
+        <div class="section-title" style="font-size:14px;margin:8px 0 6px">Giờ chạy đầu tiên của tuyến</div>
+        <div class="row">
+          <div class="field grow"><label for="rtDeparture">Giờ xuất bến</label><input id="rtDeparture" name="departure" type="time" required value="08:00"></div>
+          <div class="field grow"><label for="rtDuration">Thời gian chạy (phút)</label><input id="rtDuration" name="duration_minutes" type="number" min="15" max="1440" value="180"></div>
+          <div class="field grow"><label for="rtFare">Giá vé (đ)</label><input id="rtFare" name="base_fare_vnd" type="number" min="10000" step="1000" value="250000"></div>
+        </div>
+        <div class="row">
+          <div class="field grow"><label for="rtVehicleType">Loại xe</label><select id="rtVehicleType" name="vehicle_type"></select></div>
+          <div class="field grow"><label for="rtTotalSeats">Số ghế</label><input id="rtTotalSeats" name="total_seats" type="number" min="1" max="100" value="22"></div>
+          <div class="field grow"><label for="rtDistance">Cự ly (km)</label><input id="rtDistance" name="distance_km" type="number" min="1" value="150"></div>
+        </div>
+        <div class="field" style="margin-bottom:4px"><label>Ngày chạy trong tuần</label></div>
+        <div class="dayPick" id="rtDays"></div>
+        <div class="error" id="routeError"></div>
+        <div class="row" style="margin-top:10px;justify-content:flex-end;gap:8px">
+          <button class="btn" type="button" id="routeCancelBtn">Hủy</button>
+          <button class="btn primary" type="submit" id="routeSave">Tạo tuyến mới</button>
+        </div>
+      </form>
     </div>
 
     <!-- Fleet Management (MGR-005, MGR-006) -->
@@ -1151,6 +1382,87 @@ function fmtDateShort(val) {
 
 const hhmm = (iso) => fmtTime(iso);
 const dmy = (iso) => fmtDateShort(iso);
+
+const VN_SHORT_WEEKDAYS = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+function fmtWeekDayButton(ymd) {
+  const p = parseVnParts(ymd);
+  if (!p) return ymd;
+  const idx = VN_WEEKDAYS.indexOf(p.weekday);
+  const wd = idx >= 0 ? VN_SHORT_WEEKDAYS[idx] : '';
+  return `${wd} ${p.day}/${p.month}`;
+}
+
+function shortRouteName(name) {
+  if (!name) return '';
+  const clean = name.replace(/\([^)]*\)/g, '').trim();
+  const parts = clean.split(/\s*[-—–]\s*/);
+  if (parts.length >= 2) {
+    const toShort = (part) => {
+      const words = part.trim().split(/\s+/).filter(Boolean);
+      if (words.length > 1) {
+        return words.slice(0, 2).map(w => w[0].toUpperCase()).join('');
+      }
+      return part.trim().slice(0, 4);
+    };
+    return `${toShort(parts[0])}–${toShort(parts[1])}`;
+  }
+  return clean.length > 10 ? clean.slice(0, 8) + '…' : clean;
+}
+
+function getTripMinutes(isoStr, refDate) {
+  const p = parseVnParts(isoStr);
+  if (!p) return null;
+  const tripDate = `${p.year}-${p.month}-${p.day}`;
+  let dayOffset = 0;
+  if (refDate && tripDate !== refDate) {
+    const t1 = new Date(refDate + 'T00:00:00Z').getTime();
+    const t2 = new Date(tripDate + 'T00:00:00Z').getTime();
+    dayOffset = Math.round((t2 - t1) / 86400000);
+  }
+  return dayOffset * 1440 + Number(p.hours) * 60 + Number(p.minutes);
+}
+
+function getTimelineBlockStyle(t) {
+  if (t.status === 'CANCELLED') {
+    return {
+      bg: 'repeating-linear-gradient(45deg, #f1f5f9, #f1f5f9 8px, #e2e8f0 8px, #e2e8f0 16px)',
+      border: '1px dashed #94a3b8',
+      color: '#64748b',
+      textDec: 'line-through'
+    };
+  }
+  const hasNoVehOrDrv = !t.vehicle_id || !t.driver_id || t.driver_name === 'Chưa gán';
+  if (hasNoVehOrDrv) {
+    return {
+      bg: '#fee2e2',
+      border: '1px solid #ef4444',
+      color: '#991b1b',
+      textDec: 'none'
+    };
+  }
+  if (t.status === 'IN_TRANSIT') {
+    return {
+      bg: '#dcfce7',
+      border: '1px solid #10b981',
+      color: '#166534',
+      textDec: 'none'
+    };
+  }
+  if (t.status === 'COMPLETED') {
+    return {
+      bg: '#f1f5f9',
+      border: '1px solid #cbd5e1',
+      color: '#64748b',
+      textDec: 'none'
+    };
+  }
+  return {
+    bg: '#e0f2fe',
+    border: '1px solid #0284c7',
+    color: '#0369a1',
+    textDec: 'none'
+  };
+}
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
 function toast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 3500); }
 function store(key, value) { try { value === null ? sessionStorage.removeItem(key) : sessionStorage.setItem(key, value); } catch (_) {} }
@@ -1174,6 +1486,7 @@ const NAV_PERMISSIONS = {
   bookings: ['BOOKINGS_VIEW'],
   payments: ['PAYMENTS', 'REFUNDS'],
   schedules: ['SCHEDULES'],
+  routes: ['SCHEDULES'],
   service: ['SCHEDULES'],
   fleet: ['FLEET'],
   layouts: ['FLEET'],
@@ -2100,7 +2413,13 @@ function show(view) {
   if (state.user?.role === 'PLATFORM_ADMIN' && view !== 'platform' && view !== 'about' && !state.platformCode) {
     toast('Chọn nhà xe ở thanh trên để xem dữ liệu điều hành');
   }
-  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, fleet: loadFleet, drivers: loadDrivers, layouts: loadLayouts, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, vouchers: loadVouchers, payments: loadPayments, staff: loadStaff, audit: loadAudit, company: loadCompany, about: loadAbout, platform: loadOperators })[view]?.();
+  ({ overview: () => every(loadOverview), dispatch: () => every(loadBoard), schedules: loadSchedules, routes: loadRoutesPanel, fleet: loadFleet, drivers: loadDrivers, layouts: loadLayouts, live: openLive, bookings: loadBookings, service: loadService, homereq: () => every(loadHomeRequests), banners: loadBanners, vouchers: loadVouchers, payments: loadPayments, staff: loadStaff, audit: loadAudit, company: loadCompany, about: loadAbout, platform: loadOperators })[view]?.();
+  if (view === 'routes') {
+    setTimeout(() => {
+      fitRouteMap();
+      routesPanelState?.stationsMap?.invalidateSize();
+    }, 60);
+  }
 }
 
 // ---------- common modal component (MGR Step 5) ----------
@@ -2111,6 +2430,10 @@ function restoreModalNodes() {
   if (fForm) $('#fleetFormHolder')?.appendChild(fForm);
   const dForm = bodyEl.querySelector('#driverForm');
   if (dForm) $('#driverFormHolder')?.appendChild(dForm);
+  const sForm = bodyEl.querySelector('#scheduleForm');
+  if (sForm) $('#scheduleFormHolder')?.appendChild(sForm);
+  const rForm = bodyEl.querySelector('#routeForm');
+  if (rForm) $('#routeFormHolder')?.appendChild(rForm);
 }
 
 function openModal(title, content) {
@@ -2869,6 +3192,31 @@ async function loadOverview() {
 let boardTrips = [];
 let boardFilter = 'all';
 let currentTripTab = null;
+let lastBoardHtml = '';
+let dispatchView = 'list';
+try {
+  dispatchView = localStorage.getItem('dispatch_view') || 'list';
+} catch (_) {}
+
+function applyDispatchView() {
+  const isTimeline = dispatchView === 'timeline';
+  $('#btnViewList')?.classList.toggle('primary', !isTimeline);
+  $('#btnViewTimeline')?.classList.toggle('primary', isTimeline);
+  $('#boardTableCard')?.classList.toggle('hidden', isTimeline);
+  $('#boardTimelineCard')?.classList.toggle('hidden', !isTimeline);
+  $('#dispatchContainer')?.classList.toggle('timeline-mode', isTimeline);
+}
+
+function setDispatchView(view) {
+  dispatchView = view;
+  try {
+    localStorage.setItem('dispatch_view', view);
+  } catch (_) {}
+  applyDispatchView();
+}
+
+$('#btnViewList')?.addEventListener('click', () => setDispatchView('list'));
+$('#btnViewTimeline')?.addEventListener('click', () => setDispatchView('timeline'));
 
 $('#boardDate')?.addEventListener('change', () => {
   if (!$('#boardDate').value) $('#boardDate').value = getVnTodayYmd();
@@ -2893,6 +3241,59 @@ $('#boardNext')?.addEventListener('click', () => {
   loadBoard();
 });
 
+// Delegated click listeners registered once
+$('#board')?.addEventListener('click', (e) => {
+  const tr = e.target.closest('tr[data-trip]');
+  if (tr?.dataset.trip) {
+    openTrip(tr.dataset.trip);
+  }
+});
+$('#boardTimelineCard')?.addEventListener('click', (e) => {
+  const blk = e.target.closest('[data-trip]');
+  if (blk?.dataset.trip) {
+    openTrip(blk.dataset.trip);
+  }
+});
+
+function renderWeekStrip(summaryDays = [], selectedDay, startDay) {
+  const el = $('#boardWeekStrip');
+  if (!el) return;
+  const dayMap = new Map((summaryDays || []).map(d => [d.date, d]));
+  let html = '';
+  for (let i = 0; i < 7; i++) {
+    const d = shiftDateStr(startDay, i);
+    const dayData = dayMap.get(d) || { total: 0, no_vehicle: 0, no_driver: 0, cancelled: 0 };
+    const missing = Math.max(dayData.no_vehicle || 0, dayData.no_driver || 0);
+    const isSel = d === selectedDay;
+    let statusClass = 'empty';
+    let statusText = 'Không chạy';
+    if (missing > 0) {
+      statusClass = 'unassigned';
+      statusText = `${missing} chưa gán`;
+    } else if ((dayData.total || 0) > 0) {
+      statusClass = 'ready';
+      statusText = 'Đủ xe';
+    }
+    html += `
+      <button type="button" class="week-day-btn ${isSel ? 'sel' : ''}" data-date="${esc(d)}">
+        <span class="day-title">${esc(fmtWeekDayButton(d))}</span>
+        <span class="day-status ${statusClass}">${esc(statusText)}</span>
+      </button>
+    `;
+  }
+  el.innerHTML = html;
+  el.querySelectorAll('button[data-date]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetDate = btn.dataset.date;
+      if (targetDate && targetDate !== $('#boardDate').value) {
+        $('#boardDate').value = targetDate;
+        state.selectedTrip = null;
+        loadBoard();
+      }
+    });
+  });
+}
+
 function renderBoardFilters() {
   const counts = countTripFilters(boardTrips);
   const filterBtns = [
@@ -2912,39 +3313,156 @@ function renderBoardFilters() {
       boardFilter = btn.dataset.filter;
       renderBoardFilters();
       renderBoardTrips();
+      renderBoardTimeline();
     });
   });
 }
 
 function renderBoardTrips() {
   const filtered = boardTrips.filter(t => filterTrip(t, boardFilter));
+  let newHtml = '';
   if (!filtered.length) {
-    $('#board').innerHTML = '<tr><td colspan="5" class="muted" style="text-align:center;padding:24px">Không có chuyến nào.</td></tr>';
+    newHtml = '<tr><td colspan="5" class="muted" style="text-align:center;padding:24px">Không có chuyến nào.</td></tr>';
+  } else {
+    newHtml = filtered.map(t => {
+      const mins = getMinutesUntilDeparture(t.departure_time);
+      let vehDriverHtml = '';
+      if (t.vehicle_plate) {
+        vehDriverHtml = `<div class="mono font-semibold" style="white-space:nowrap">${esc(t.vehicle_plate)}</div>` +
+          (t.driver_name ? `<div class="muted" style="font-size:12px;white-space:nowrap">${esc(t.driver_name)}</div>` : `<div style="font-size:12px;white-space:nowrap"><span class="pill ${mins <= 60 ? 'danger' : 'warn'}">Chưa có TX</span></div>`);
+      } else {
+        vehDriverHtml = `<span class="pill ${mins <= 60 ? 'danger' : 'warn'}">Chưa gán xe</span>` +
+          (t.driver_name ? `<div class="muted" style="font-size:12px;white-space:nowrap">${esc(t.driver_name)}</div>` : '');
+      }
+      const isSelected = state.selectedTrip === t.trip_id;
+      return `
+        <tr class="click ${isSelected ? 'sel' : ''}" data-trip="${esc(t.trip_id)}">
+          <td class="mono" style="white-space:nowrap;font-weight:600">${esc(hhmm(t.departure_time))}</td>
+          <td><div style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;word-break:break-word;font-size:13px;line-height:1.3" title="${esc(t.trip_id)} · ${esc(t.route_name || t.route_id || '')}">${esc(t.route_name || t.route_id || '')}</div></td>
+          <td style="white-space:nowrap">${vehDriverHtml}</td>
+          <td class="mono" style="white-space:nowrap">${esc(t.booked_seats ?? 0)}/${esc(t.total_seats ?? 0)}${t.held_seats ? `<div class="muted" style="font-size:12px">giữ ${esc(t.held_seats)}</div>` : ''}</td>
+          <td>${pill(t.status)}${t.delay_minutes ? ` <span class="pill warn">+${esc(t.delay_minutes)}p</span>` : ''}${t.sales_closed && t.status !== 'CANCELLED' ? ' <span class="pill warn">Ngừng bán</span>' : ''}</td>
+        </tr>`;
+    }).join('');
+  }
+  const el = $('#board');
+  if (el && newHtml !== lastBoardHtml) {
+    el.innerHTML = newHtml;
+    lastBoardHtml = newHtml;
+  }
+}
+
+function renderBoardTimeline() {
+  const container = $('#boardTimeline');
+  if (!container) return;
+  const filtered = boardTrips.filter(t => filterTrip(t, boardFilter));
+  if (!filtered.length) {
+    container.innerHTML = '<p class="muted" style="text-align:center;padding:24px">Không có chuyến nào.</p>';
     return;
   }
-  $('#board').innerHTML = filtered.map(t => {
-    const mins = getMinutesUntilDeparture(t.departure_time);
-    let vehDriverHtml = '';
-    if (t.vehicle_plate) {
-      vehDriverHtml = `<div class="mono font-semibold" style="white-space:nowrap">${esc(t.vehicle_plate)}</div>` +
-        (t.driver_name ? `<div class="muted" style="font-size:12px;white-space:nowrap">${esc(t.driver_name)}</div>` : `<div style="font-size:12px;white-space:nowrap"><span class="pill ${mins <= 60 ? 'danger' : 'warn'}">Chưa có TX</span></div>`);
-    } else {
-      vehDriverHtml = `<span class="pill ${mins <= 60 ? 'danger' : 'warn'}">Chưa gán xe</span>` +
-        (t.driver_name ? `<div class="muted" style="font-size:12px;white-space:nowrap">${esc(t.driver_name)}</div>` : '');
+  const dateStr = $('#boardDate').value || getVnTodayYmd();
+  let minHour = 4;
+  let maxHour = 24;
+
+  const tripTimeData = new Map();
+  filtered.forEach(t => {
+    const startMin = getTripMinutes(t.departure_time, dateStr);
+    let endMin = t.arrival_time ? getTripMinutes(t.arrival_time, dateStr) : (startMin !== null ? startMin + 120 : null);
+    if (startMin !== null) {
+      if (endMin === null || endMin <= startMin) endMin = startMin + 60;
+      tripTimeData.set(t.trip_id, { startMin, endMin });
+      const sh = Math.floor(startMin / 60);
+      const eh = Math.ceil(endMin / 60);
+      if (sh < minHour) minHour = Math.max(0, sh);
+      if (eh > maxHour) maxHour = eh;
     }
-    const isSelected = state.selectedTrip === t.trip_id;
-    return `
-      <tr class="click ${isSelected ? 'sel' : ''}" data-trip="${esc(t.trip_id)}">
-        <td class="mono" style="white-space:nowrap;font-weight:600">${esc(hhmm(t.departure_time))}</td>
-        <td><div style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;word-break:break-word;font-size:13px;line-height:1.3" title="${esc(t.trip_id)} · ${esc(t.route_name || t.route_id || '')}">${esc(t.route_name || t.route_id || '')}</div></td>
-        <td style="white-space:nowrap">${vehDriverHtml}</td>
-        <td class="mono" style="white-space:nowrap">${esc(t.booked_seats ?? 0)}/${esc(t.total_seats ?? 0)}${t.held_seats ? `<div class="muted" style="font-size:12px">giữ ${esc(t.held_seats)}</div>` : ''}</td>
-        <td>${pill(t.status)}${t.delay_minutes ? ` <span class="pill warn">+${esc(t.delay_minutes)}p</span>` : ''}${t.sales_closed && t.status !== 'CANCELLED' ? ' <span class="pill warn">Ngừng bán</span>' : ''}</td>
-      </tr>`;
-  }).join('');
-  document.querySelectorAll('#board tr[data-trip]').forEach(tr => {
-    tr.addEventListener('click', () => openTrip(tr.dataset.trip));
   });
+
+  const totalHours = maxHour - minHour;
+  // Fit the day into the card; scroll inside the card only on narrow screens.
+  const hourWidth = Math.max(36, Math.floor((container.clientWidth - 140 - 16) / totalHours) || 0);
+  const trackWidth = totalHours * hourWidth;
+
+  let hourMarkersHtml = '';
+  for (let h = minHour; h <= maxHour; h++) {
+    const leftPx = (h - minHour) * hourWidth;
+    hourMarkersHtml += `<span style="position:absolute;left:${leftPx}px;transform:translateX(-50%);font-size:11px;font-weight:600;color:var(--muted);">${String(h).padStart(2, '0')}:00</span>`;
+  }
+
+  let gridLinesHtml = '';
+  for (let h = minHour; h <= maxHour; h++) {
+    const leftPx = (h - minHour) * hourWidth;
+    gridLinesHtml += `<div style="position:absolute;left:${140 + leftPx}px;top:0;bottom:0;width:1px;border-left:1px dashed var(--line);pointer-events:none;z-index:1;"></div>`;
+  }
+
+  const unassignedTrips = filtered.filter(t => !t.vehicle_id);
+  const vehMap = new Map();
+  filtered.forEach(t => {
+    if (t.vehicle_id) {
+      if (!vehMap.has(t.vehicle_id)) {
+        vehMap.set(t.vehicle_id, {
+          id: t.vehicle_id,
+          plate: t.vehicle_plate || t.vehicle_id,
+          trips: []
+        });
+      }
+      vehMap.get(t.vehicle_id).trips.push(t);
+    }
+  });
+  const sortedVehicles = Array.from(vehMap.values()).sort((a, b) => a.plate.localeCompare(b.plate));
+
+  const rows = [
+    { isUnassigned: true, label: 'Chưa gán xe', trips: unassignedTrips },
+    ...sortedVehicles.map(v => ({ isUnassigned: false, label: v.plate, trips: v.trips }))
+  ];
+
+  let rowsHtml = '';
+  rows.forEach(row => {
+    let tripsHtml = '';
+    row.trips.forEach(t => {
+      const times = tripTimeData.get(t.trip_id);
+      if (!times) return;
+      const left = Math.max(0, ((times.startMin - minHour * 60) / 60) * hourWidth);
+      const width = Math.max(30, ((times.endMin - times.startMin) / 60) * hourWidth);
+      const st = getTimelineBlockStyle(t);
+      const isSelected = state.selectedTrip === t.trip_id;
+      const shortName = shortRouteName(t.route_name || t.route_id || '');
+      const blockText = `${hhmm(t.departure_time)} ${shortName}`;
+      const driverTitle = t.driver_name ? `Tài xế: ${t.driver_name}` : 'Chưa có tài xế';
+      const tooltip = `${driverTitle} · ${t.route_name || t.route_id || ''} (${hhmm(t.departure_time)}–${hhmm(t.arrival_time)})`;
+
+      tripsHtml += `
+        <div class="timeline-trip-block ${isSelected ? 'sel' : ''}" data-trip="${esc(t.trip_id)}"
+          title="${esc(tooltip)}"
+          style="position:absolute;left:${left}px;width:${width}px;top:4px;height:28px;background:${st.bg};border:${st.border};color:${st.color};text-decoration:${st.textDec};border-radius:4px;padding:0 6px;display:flex;align-items:center;font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;box-sizing:border-box;z-index:${isSelected ? 5 : 3};${isSelected ? 'box-shadow:0 0 0 2px #0f172a;' : ''}">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(blockText)}</span>
+        </div>`;
+    });
+
+    rowsHtml += `
+      <div style="display:flex;align-items:center;border-bottom:1px solid var(--line);min-height:38px;position:relative;z-index:2;">
+        <div style="width:140px;min-width:140px;padding:6px 8px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;" title="${esc(row.label)}">
+          ${row.isUnassigned ? '<span class="pill warn" style="font-size:11.5px">Chưa gán xe</span>' : `<span class="mono">${esc(row.label)}</span>`}
+        </div>
+        <div style="position:relative;width:${trackWidth}px;height:36px;">
+          ${tripsHtml}
+        </div>
+      </div>`;
+  });
+
+  container.innerHTML = `
+    <div style="min-width:${trackWidth + 140}px;font-size:13px;">
+      <div style="display:flex;border-bottom:2px solid var(--line);padding-bottom:6px;margin-bottom:2px;">
+        <div style="width:140px;min-width:140px;padding:4px 8px;font-weight:600;color:var(--muted);font-size:12px;">Xe / Chuyến</div>
+        <div style="position:relative;width:${trackWidth}px;height:18px;">
+          ${hourMarkersHtml}
+        </div>
+      </div>
+      <div style="position:relative;">
+        ${gridLinesHtml}
+        ${rowsHtml}
+      </div>
+    </div>`;
 }
 
 async function loadBoard() {
@@ -2952,15 +3470,29 @@ async function loadBoard() {
     $('#boardDate').value = getVnTodayYmd();
   }
   const day = $('#boardDate').value;
-  const r = await api(`/api/v1/ops/dispatch/board?date=${encodeURIComponent(day)}`);
-  if (!r.ok) {
-    $('#board').innerHTML = `<tr><td colspan="5" class="error">${esc(r.message)}</td></tr>`;
+  const today = getVnTodayYmd();
+  const isWithin6 = (day >= today && day <= shiftDateStr(today, 6));
+  const startDay = isWithin6 ? today : day;
+
+  const [boardRes, summaryRes] = await Promise.all([
+    api(`/api/v1/ops/dispatch/board?date=${encodeURIComponent(day)}`),
+    api(`/api/v1/ops/dispatch/summary?from=${encodeURIComponent(startDay)}&days=7`)
+  ]);
+
+  if (summaryRes.ok && summaryRes.data?.days) {
+    renderWeekStrip(summaryRes.data.days, day, startDay);
+  }
+
+  if (!boardRes.ok) {
+    $('#board').innerHTML = `<tr><td colspan="5" class="error">${esc(boardRes.message)}</td></tr>`;
     return;
   }
-  boardTrips = r.data?.trips || [];
-  $('#boardInfo').textContent = `${r.data?.total_trips ?? boardTrips.length} chuyến · ${fmtDateLong(r.data?.shift_date || day)}`;
+  boardTrips = boardRes.data?.trips || [];
+  $('#boardInfo').textContent = `${boardRes.data?.total_trips ?? boardTrips.length} chuyến · ${fmtDateLong(boardRes.data?.shift_date || day)}`;
   renderBoardFilters();
   renderBoardTrips();
+  renderBoardTimeline();
+  applyDispatchView();
   if (state.selectedTrip) refreshTripLive();
 }
 
@@ -3060,6 +3592,12 @@ function renderManifest(manifestData, query = '') {
 async function openTrip(tripId) {
   state.selectedTrip = tripId;
   document.querySelectorAll('#board tr[data-trip]').forEach(tr => tr.classList.toggle('sel', tr.dataset.trip === tripId));
+  document.querySelectorAll('.timeline-trip-block').forEach(b => {
+    const isSel = b.dataset.trip === tripId;
+    b.classList.toggle('sel', isSel);
+    b.style.boxShadow = isSel ? '0 0 0 2px #0f172a' : '';
+    b.style.zIndex = isSel ? '5' : '3';
+  });
   const canDispatch = can('DISPATCH');
   const canCancelTrip = can('TRIP_CANCEL');
   const canViewManifest = can(['BOOKINGS_VIEW', 'DISPATCH']);
@@ -3079,6 +3617,10 @@ async function openTrip(tripId) {
   const holds = holdsRes?.ok ? (holdsRes.data?.holds || []) : [];
   if (!trip.ok) { $('#tripDetail').innerHTML = `<div class="error">${esc(trip.message)}</div>`; return; }
   const t = { ...(boardTrips.find(b => b.trip_id === tripId) || {}), ...trip.data };
+  if (assignOpts?.ok && assignOpts.data) {
+    assignOpts.data.vehicle_plate = assignOpts.data.vehicle_plate || t.vehicle_plate;
+    assignOpts.data.driver_name = assignOpts.data.driver_name || t.driver_name;
+  }
   const s = inv.ok ? inv.data.summary || {} : {};
   const stops = track?.stops || [];
   const stopsMap = Object.fromEntries([...stops, ...(opsData?.stops || [])].map(st => [st.stop_id, st.name]));
@@ -3173,6 +3715,7 @@ async function openTrip(tripId) {
     <div id="paneRoute" class="trip-pane ${activeTab === 'route' ? '' : 'hidden'}">
       <div id="tripMap" class="map"></div>
       <div class="muted" id="tripTrack" style="margin-top:6px"></div>
+      ${opsData?.home_run_map ? homeRunMapBlock(opsData.home_run_map, opsData.home_run_outlook) : ''}
       <div class="section-title">Điểm dừng</div>
       ${opsData ? `<table><thead><tr><th>Trạm</th><th>Trạng thái</th><th title="Khách đón / đã lên / đã loại">Đón</th><th title="Khách xuống">Trả</th></tr></thead><tbody>${opsData.stops.map(st => `<tr><td>${esc(st.name)}${st.counts.home_pickups ? ` <span class="pill warn">${esc(st.counts.home_pickups)} tận nhà</span>` : ''}</td><td>${stopPill(st.lifecycle_status, st.departed_at)}</td><td class="mono">${esc(st.counts.confirmed)} / ${esc(st.counts.boarded)} / ${esc(st.counts.excluded)}</td><td class="mono">${esc(st.counts.dropoffs + st.counts.alighted)}</td></tr>`).join('')}</tbody></table>
         ${opsData.home_pickups.length ? `<div class="section-title">Đón tận nhà (theo thứ tự xe đi đón)</div>${opsData.home_pickups.map(h => `<div class="row" style="padding:3px 0"><span class="mono muted">${h.position ? `#${esc(h.position)}` : ''}</span><span class="mono">${esc(h.seat_code)}</span><span class="grow">${esc(h.address)}${h.source === 'HOTLINE' ? ' <span class="pill">tổng đài</span>' : ''}</span><span class="mono muted">${h.appointment_at ? `hẹn ${esc(hhmm(h.appointment_at))}` : (h.window_from ? `${esc(hhmm(h.window_from))}–${esc(hhmm(h.window_to))}` : '')}</span>${homeStatePill(h)}</div>`).join('')}` : ''}`
@@ -3214,12 +3757,14 @@ async function openTrip(tripId) {
     </div>`;
 
   drawTripMap(track);
+  drawHomeRunMap(opsData?.home_run_map, track?.bus_position);
   if (activeTab === 'route') {
     setTimeout(() => {
       if (state.maps.trip) {
         state.maps.trip.invalidateSize();
         if (state.maps.tripBounds) state.maps.trip.fitBounds(state.maps.tripBounds, { padding: [20, 20] });
       }
+      fitHomeRunMap();
     }, 50);
   }
 
@@ -3243,6 +3788,7 @@ async function openTrip(tripId) {
             state.maps.trip.invalidateSize();
             if (state.maps.tripBounds) state.maps.trip.fitBounds(state.maps.tripBounds, { padding: [20, 20] });
           }
+          fitHomeRunMap();
         }, 50);
       }
     });
@@ -3256,21 +3802,62 @@ async function openTrip(tripId) {
   });
 
   $('#assignForm select[name=vehicle]')?.addEventListener('change', (e) => {
-    const chosenVeh = (assignOpts.data?.vehicles || []).find(v => v.vehicle_id === e.target.value);
+    const vehId = e.target.value;
+    const chosenVeh = (assignOpts.data?.vehicles || []).find(v => v.vehicle_id === vehId);
     const drvSelect = $('#assignForm select[name=driver]');
+    const currVal = drvSelect?.value;
     if (drvSelect) {
-      const currVal = drvSelect.value;
       drvSelect.innerHTML = renderDriverOptions(assignOpts.data?.drivers || [], chosenVeh, currVal);
     }
+    const chosenDrv = (assignOpts.data?.drivers || []).find(d => d.driver_id === drvSelect?.value);
+    const infoEl = $('#assignInfoBoxContainer');
+    if (infoEl) {
+      infoEl.innerHTML = renderAssignInfoBox(chosenVeh, chosenDrv);
+    }
   });
+
+  $('#assignForm select[name=driver]')?.addEventListener('change', (e) => {
+    const drvId = e.target.value;
+    const vehSelect = $('#assignForm select[name=vehicle]');
+    const chosenVeh = (assignOpts.data?.vehicles || []).find(v => v.vehicle_id === vehSelect?.value);
+    const chosenDrv = (assignOpts.data?.drivers || []).find(d => d.driver_id === drvId);
+    const infoEl = $('#assignInfoBoxContainer');
+    if (infoEl) {
+      infoEl.innerHTML = renderAssignInfoBox(chosenVeh, chosenDrv);
+    }
+  });
+
   $('#assignForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
     $('#assignError').textContent = '';
-    const r = await api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/assign`, { method: 'POST', idempotent: true, body: { vehicleId: f.vehicle.value, driverId: f.driver.value, scope: f.schedule.checked ? 'SCHEDULE' : 'TRIP' } });
-    if (!r.ok) { $('#assignError').textContent = r.message; return; }
-    toast(`Đã gán xe ${r.data.vehicle_plate}, tài xế ${r.data.driver_name}`);
-    loadBoard(); openTrip(tripId);
+    const scopeRadio = f.querySelector('input[name=scope]:checked');
+    const scope = scopeRadio ? scopeRadio.value : 'TRIP';
+    const r = await api(`/api/v1/ops/trips/${encodeURIComponent(tripId)}/assign`, {
+      method: 'POST',
+      idempotent: true,
+      body: {
+        vehicleId: f.vehicle.value,
+        driverId: f.driver.value,
+        scope
+      }
+    });
+    if (!r.ok) {
+      $('#assignError').textContent = r.message;
+      return;
+    }
+    let msg = `Đã gán xe ${r.data.vehicle_plate}, tài xế ${r.data.driver_name}`;
+    if (r.data.scope === 'SCHEDULE') {
+      if (r.data.applied_runs !== undefined && r.data.applied_runs !== null) {
+        msg += ` · Đã áp dụng ${r.data.applied_runs} ngày sau`;
+      }
+      if (r.data.skipped_runs && r.data.skipped_runs.length > 0) {
+        msg += ` · Bỏ qua ${r.data.skipped_runs.length} ngày do xe hoặc tài xế bận`;
+      }
+    }
+    toast(msg);
+    loadBoard();
+    openTrip(tripId);
   });
 
   $('#delayForm')?.addEventListener('submit', async (e) => {
@@ -3472,48 +4059,218 @@ function getDriverFitReason(driver, vehicle) {
   return null;
 }
 
-function renderDriverOptions(drivers, vehicle, selectedDriverId) {
-  return '<option value="">— Chọn tài xế —</option>' + (drivers || []).map(d => {
+function renderVehicleOptions(vehicles = [], selectedVehId) {
+  const suitable = [];
+  const diffLayout = [];
+  const unavailable = [];
+
+  for (const v of vehicles) {
+    const isSel = selectedVehId ? (v.vehicle_id === selectedVehId) : v.assigned;
+    let dayTripsStr = '';
+    if (v.day_trips && v.day_trips.length > 0) {
+      dayTripsStr = ' · đã có ' + v.day_trips.map(t => `${hhmm(t.departure_time)}–${hhmm(t.arrival_time)}`).join(', ');
+    }
+    const reasonText = (!v.available && v.reason) ? ` — ${v.reason}` : '';
+    const text = `${v.plate_number} · ${v.total_seats} chỗ${dayTripsStr}${reasonText}`;
+    const disabled = !v.available && !isSel ? 'disabled' : '';
+    const selected = isSel ? 'selected' : '';
+    const optHtml = `<option value="${esc(v.vehicle_id)}" ${selected} ${disabled}>${esc(text)}</option>`;
+
+    if (!v.available && !isSel) {
+      unavailable.push(optHtml);
+    } else if (v.layout_match === false) {
+      diffLayout.push(optHtml);
+    } else {
+      suitable.push(optHtml);
+    }
+  }
+
+  let html = '<option value="">— Chọn xe —</option>';
+  if (suitable.length) {
+    html += `<optgroup label="Phù hợp">${suitable.join('')}</optgroup>`;
+  }
+  if (diffLayout.length) {
+    html += `<optgroup label="Khác sơ đồ ghế">${diffLayout.join('')}</optgroup>`;
+  }
+  if (unavailable.length) {
+    html += `<optgroup label="Không dùng được">${unavailable.join('')}</optgroup>`;
+  }
+  return html;
+}
+
+function renderDriverOptions(drivers = [], vehicle, selectedDriverId) {
+  const ready = [];
+  const unavailable = [];
+
+  for (const d of drivers) {
     const fitReason = getDriverFitReason(d, vehicle);
-    const available = d.available && !fitReason;
-    const isSelected = selectedDriverId ? (d.driver_id === selectedDriverId) : d.assigned;
-    const reasonText = fitReason || d.reason;
-    const disabled = !available && !isSelected;
-    return `<option value="${esc(d.driver_id)}" ${isSelected ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${esc(d.full_name)} · ${esc(d.staff_id)}${reasonText ? ` — ${esc(reasonText)}` : ''}</option>`;
-  }).join('');
+    const isSel = selectedDriverId ? (d.driver_id === selectedDriverId) : d.assigned;
+    const isAvailable = d.available && !fitReason;
+    let dayTripsStr = '';
+    if (d.day_trips && d.day_trips.length > 0) {
+      dayTripsStr = ' · đã có ' + d.day_trips.map(t => `${hhmm(t.departure_time)}–${hhmm(t.arrival_time)}`).join(', ');
+    }
+    // D199: hours already driven that day, against the 10 h limit
+    if (d.driven_minutes > 0) dayTripsStr += ` · đã lái ${Math.floor(d.driven_minutes / 60)}g${d.driven_minutes % 60 ? String(d.driven_minutes % 60).padStart(2, '0') : ''}/10g`;
+    const reasonText = (!isAvailable && (fitReason || d.reason)) ? ` — ${fitReason || d.reason}` : '';
+    const licText = d.license_class ? ` · bằng ${d.license_class}` : '';
+    const text = `${d.full_name}${licText}${dayTripsStr}${reasonText}`;
+    const disabled = !isAvailable && !isSel ? 'disabled' : '';
+    const selected = isSel ? 'selected' : '';
+    const optHtml = `<option value="${esc(d.driver_id)}" ${selected} ${disabled}>${esc(text)}</option>`;
+
+    if (!isAvailable && !isSel) {
+      unavailable.push(optHtml);
+    } else {
+      ready.push(optHtml);
+    }
+  }
+
+  let html = '<option value="">— Chọn tài xế —</option>';
+  if (ready.length) {
+    html += `<optgroup label="Rảnh">${ready.join('')}</optgroup>`;
+  }
+  if (unavailable.length) {
+    html += `<optgroup label="Không dùng được">${unavailable.join('')}</optgroup>`;
+  }
+  return html;
+}
+
+function renderAssignInfoBox(vehicle, driver) {
+  if (!vehicle && !driver) return '';
+  let html = '<div style="margin-top:8px;font-size:12px;background:#fff;border:1px solid var(--line);border-radius:6px;padding:8px 10px">';
+  if (vehicle) {
+    html += `<div><b>Xe ${esc(vehicle.plate_number || vehicle.vehicle_id)}:</b> `;
+    if (vehicle.day_trips && vehicle.day_trips.length > 0) {
+      const tripsList = vehicle.day_trips.map(t => `${hhmm(t.departure_time)} → ${hhmm(t.arrival_time)} ${t.route_name || ''}`).join(', ');
+      html += `đã có <span class="mono">${esc(tripsList)}</span>`;
+    } else {
+      html += `<span class="muted">chưa có chuyến nào hôm nay</span>`;
+    }
+    html += `</div>`;
+
+    if (vehicle.layout_match === false) {
+      const layoutName = vehicle.layout_name || 'chưa rõ';
+      html += `<div style="margin-top:6px;padding:6px 8px;background:#fefce8;border:1px solid #fde047;border-radius:4px;color:#854d0e">Xe này khác sơ đồ ghế của chuyến (${esc(layoutName)}). Khách đặt theo sơ đồ cũ có thể phải đổi ghế.</div>`;
+    }
+  }
+
+  if (driver) {
+    html += `<div style="margin-top:${vehicle ? '6px' : '0'}"><b>Tài xế ${esc(driver.full_name)}:</b> `;
+    if (driver.day_trips && driver.day_trips.length > 0) {
+      const tripsList = driver.day_trips.map(t => `${hhmm(t.departure_time)} → ${hhmm(t.arrival_time)} ${t.route_name || ''}`).join(', ');
+      html += `đã có <span class="mono">${esc(tripsList)}</span>`;
+    } else {
+      html += `<span class="muted">chưa có chuyến nào hôm nay</span>`;
+    }
+    html += `</div>`;
+
+    const fitReason = getDriverFitReason(driver, vehicle);
+    if (fitReason) {
+      html += `<div style="margin-top:6px;padding:6px 8px;background:#fef2f2;border:1px solid #fca5a5;border-radius:4px;color:#991b1b">${esc(fitReason)}</div>`;
+    }
+  }
+  html += '</div>';
+  return html;
 }
 
 // Bus and driver of the trip: unavailable ones stay listed, greyed, with the reason.
 function assignBlock(o) {
   const locked = ['IN_TRANSIT', 'COMPLETED', 'CANCELLED'].includes(o.status);
-  const opt = (value, label, x) => `<option value="${esc(value)}" ${x.assigned ? 'selected' : ''} ${!x.available && !x.assigned ? 'disabled' : ''}>${esc(label)}${x.reason && !x.assigned ? ` — ${esc(x.reason)}` : ''}</option>`;
   const selectedVeh = (o.vehicles || []).find(v => v.assigned) || (o.vehicle_id ? (o.vehicles || []).find(v => v.vehicle_id === o.vehicle_id) : null);
+  const selectedDrv = (o.drivers || []).find(d => d.assigned) || (o.driver_id ? (o.drivers || []).find(d => d.driver_id === o.driver_id) : null);
+
+  if (locked) {
+    const plateStr = selectedVeh?.plate_number || o.vehicle_plate || (o.vehicle_id ? `Xe ${o.vehicle_id}` : 'Chưa có xe');
+    const drvStr = selectedDrv?.full_name || o.driver_name || (o.driver_id ? `Tài xế ${o.driver_id}` : 'Chưa có tài xế');
+    return `
+      <form id="assignForm" class="card" style="padding:10px 14px;margin:8px 0 12px;background:#f8fafc">
+        <div style="font-weight:700;font-size:13px;margin-bottom:6px">Xe và tài xế</div>
+        <div class="muted" style="font-size:13px">Xe ${esc(plateStr)} · Tài xế ${esc(drvStr)} (chuyến đã chạy, không đổi được)</div>
+      </form>`;
+  }
+
+  const expectedReq = o.expected_layout_name
+    ? ` · Chuyến bán sơ đồ ${esc(o.expected_layout_name)}${o.expected_seats ? ` · ${esc(o.expected_seats)} chỗ` : ''}`
+    : '';
+
   return `
-    <form id="assignForm" class="card" style="padding:10px 12px;margin:8px 0 12px;background:#f8fafc">
-      <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
-        <div class="field" style="flex:1;min-width:140px;margin-bottom:0">
+    <form id="assignForm" class="card" style="padding:12px 14px;margin:8px 0 12px;background:#f8fafc">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Xe và tài xế<span class="muted" style="font-weight:normal;font-size:12px">${expectedReq}</span></div>
+      <div class="row" style="gap:10px;align-items:flex-start;flex-wrap:wrap">
+        <div class="field" style="flex:1;min-width:200px;margin-bottom:0">
           <label style="font-size:12px;font-weight:600">Xe</label>
-          <select name="vehicle" required ${locked ? 'disabled' : ''} style="width:100%">
-            <option value="">— Chọn xe —</option>
-            ${(o.vehicles || []).map(v => opt(v.vehicle_id, `${v.plate_number} · ${v.model} · ${v.total_seats} chỗ`, v)).join('')}
+          <select name="vehicle" required style="width:100%">
+            ${renderVehicleOptions(o.vehicles || [], o.vehicle_id)}
           </select>
         </div>
-        <div class="field" style="flex:1;min-width:140px;margin-bottom:0">
+        <div class="field" style="flex:1;min-width:200px;margin-bottom:0">
           <label style="font-size:12px;font-weight:600">Tài xế</label>
-          <select name="driver" required ${locked ? 'disabled' : ''} style="width:100%">
+          <select name="driver" required style="width:100%">
             ${renderDriverOptions(o.drivers || [], selectedVeh, o.driver_id)}
           </select>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;padding-bottom:4px">
-          <label class="row" style="gap:4px;font-size:12px;margin:0;cursor:pointer" title="Áp dụng cho các ngày sau của lịch chạy này">
-            <input type="checkbox" name="schedule" ${locked ? 'disabled' : ''}> Áp dụng các ngày sau
-          </label>
-          ${locked ? '<span class="muted" style="font-size:12px">(Đã khóa)</span>' : `<button class="btn primary" type="submit" style="white-space:nowrap">${o.vehicle_id ? 'Đổi xe / TX' : 'Gán xe / TX'}</button>`}
-        </div>
       </div>
-      <div class="error" id="assignError" style="margin-top:4px"></div>
-      ${!locked && o.sold_seats ? `<div class="muted" style="font-size:11.5px;margin-top:4px">Đã bán ${esc(o.sold_seats)} ghế: khách sẽ được báo nếu đổi xe/tài xế.</div>` : ''}
+      <div id="assignInfoBoxContainer">
+        ${renderAssignInfoBox(selectedVeh, selectedDrv)}
+      </div>
+      <div style="margin:10px 0 8px;display:flex;flex-direction:column;gap:6px">
+        <label class="row" style="gap:6px;font-size:12.5px;cursor:pointer;margin:0">
+          <input type="radio" name="scope" value="TRIP" checked> Chỉ chuyến này
+        </label>
+        <label class="row" style="gap:6px;font-size:12.5px;cursor:pointer;margin:0">
+          <input type="radio" name="scope" value="SCHEDULE"> Chuyến này và các ngày sau của giờ ${esc(hhmm(o.departure_time))} (những ngày chưa có xe, tài xế)
+        </label>
+      </div>
+      <div class="row" style="align-items:center;justify-content:space-between;gap:8px;margin-top:6px;flex-wrap:wrap">
+        <button class="btn primary" type="submit" style="white-space:nowrap">${o.vehicle_id ? 'Đổi xe / TX' : 'Gán xe / TX'}</button>
+        ${o.sold_seats ? `<span class="muted" style="font-size:12px">Đã bán ${esc(o.sold_seats)} ghế: khách sẽ được báo nếu đổi xe/tài xế.</span>` : ''}
+      </div>
+      <div class="error" id="assignError" style="margin-top:6px"></div>
     </form>`;
+}
+// D202: the home run on its own map (the trip map shows the whole route, the doors would be one dot).
+function homeRunMapBlock(m, outlook) {
+  const late = outlook?.late_departure_minutes > 0
+    ? `<div class="pill danger" style="margin-top:6px;white-space:normal">Đón xong về bến khoảng ${esc(hhmm(outlook.back_at))}, trễ giờ xuất bến ${esc(outlook.late_departure_minutes)} phút. Cân nhắc tách bớt khách sang xe trung chuyển.</div>`
+    : (outlook?.back_at ? `<div class="muted" style="margin-top:6px;font-size:12.5px">Đón xong về bến khoảng ${esc(hhmm(outlook.back_at))}.</div>` : '');
+  return `
+    <div class="section-title">Bản đồ đi đón tận nhà</div>
+    <div style="font-size:13px;margin-bottom:6px"><b>${esc(m.doors.length)} nhà</b> · ${esc(m.distance_km)} km tới ${esc(m.end?.name || 'bến')} · ${m.source === 'ROAD' ? 'thứ tự và giờ tính theo đường bộ' : '<span class="muted">ước tính theo đường thẳng, đang lấy đường bộ</span>'}${m.slower_than_best_minutes > 0 ? ` · <span class="pill warn">tài xế tự xếp, chậm hơn gợi ý ${esc(m.slower_than_best_minutes)} phút</span>` : ''}</div>
+    <div id="homeRunMap" class="map" style="height:300px"></div>
+    ${late}`;
+}
+function drawHomeRunMap(m, busPos) {
+  if (state.maps.homeRun) { state.maps.homeRun.remove(); state.maps.homeRun = null; }
+  const el = $('#homeRunMap'); if (!el || !m) return;
+  const map = newMap(el); state.maps.homeRun = map;
+  const bounds = [];
+  if (m.line?.length >= 2) {
+    L.polyline(m.line, m.line_on_road ? { color: '#2563eb', weight: 4 } : { color: '#2563eb', weight: 3, dashArray: '6 6' }).addTo(map);
+  }
+  m.doors.forEach(d => {
+    // d.position is the number in the run list (collected doors keep theirs); d.next is where the bus goes now.
+    const size = d.next ? 26 : 22;
+    L.marker([d.lat, d.lng], { zIndexOffset: d.next ? 1000 : 0, icon: L.divIcon({ className: '', html: `<div class="route-stop-marker station" style="width:${size}px;height:${size}px${d.next ? ';background:#d97706;border-color:#fff' : ''}">${d.position}</div>`, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }) })
+      .bindTooltip(`${d.position}. ${d.address || ''}${d.seats?.length ? ` · ghế ${d.seats.join(', ')}` : ''}`).addTo(map);
+    bounds.push([d.lat, d.lng]);
+  });
+  if (m.end) {
+    L.circleMarker([m.end.lat, m.end.lng], { radius: 8, color: '#0f172a', fillColor: '#fff', fillOpacity: 1, weight: 3 }).bindTooltip(`Kết thúc: ${m.end.name || 'bến'}`).addTo(map);
+    bounds.push([m.end.lat, m.end.lng]);
+  }
+  if (busPos && Number.isFinite(busPos.lat)) {
+    L.circleMarker([busPos.lat, busPos.lng], { radius: 7, color: '#fff', fillColor: '#16a34a', fillOpacity: 1, weight: 2 }).bindTooltip('Xe').addTo(map);
+    bounds.push([busPos.lat, busPos.lng]);
+  }
+  state.maps.homeRunBounds = bounds;
+  fitHomeRunMap();
+  setTimeout(fitHomeRunMap, 60);
+}
+function fitHomeRunMap() {
+  const map = state.maps.homeRun; if (!map) return;
+  map.invalidateSize();
+  if (state.maps.homeRunBounds?.length) map.fitBounds(state.maps.homeRunBounds, { padding: [24, 24], maxZoom: 16 });
 }
 function drawTripMap(track) {
   if (state.maps.trip) { state.maps.trip.remove(); state.maps.trip = null; }
@@ -3887,9 +4644,10 @@ async function loadService() {
       <button class="btn primary" type="submit">Lưu điểm đi, điểm đến</button>
     </form>
     <div class="card" style="margin-bottom:16px">
-      <div class="section-title" style="margin-top:0">Theo từng tuyến</div>
-      <p class="muted" style="margin:0 0 8px">"Theo nhà xe" dùng cấu hình chung bên dưới. Tuyến kiểu xe buýt vẽ lộ trình với mọi điểm đón trả dọc đường; tuyến chỉ tại bến chỉ cho chọn bến.</p>
-      <div id="routeConfigs"></div>
+      <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <span class="muted">Cấu hình điểm đón trả, giờ đến và cách đón trả theo từng tuyến đã chuyển sang mục riêng.</span>
+        <button class="btn" type="button" id="openRoutesViewBtn">Mở Tuyến &amp; điểm dừng</button>
+      </div>
     </div>
     <div class="split">
       <form class="card" id="modesForm">
@@ -3925,10 +4683,10 @@ async function loadService() {
     const pick = (n) => [...f.querySelectorAll(`input[name="${n}"]:checked`)].map(i => i.value);
     const r2 = await api('/api/v1/ops/service-config', { method: 'PUT', idempotent: true, body: { pickup_modes: pick('pickup_modes'), dropoff_modes: pick('dropoff_modes'), stop_style: f.stop_style.value, allow_home_to_home: f.allow_home_to_home.checked, approaching_threshold_minutes: Number(f.approaching_threshold_minutes.value), home_wait_minutes: Number(f.home_wait_minutes.value) } });
     $('#modesError').textContent = r2.ok ? '' : r2.message;
-    if (r2.ok) { toast('Đã lưu chế độ đón trả'); loadRouteConfigs(); }
+    if (r2.ok) { toast('Đã lưu chế độ đón trả'); }
   });
+  $('#openRoutesViewBtn')?.addEventListener('click', () => show('routes'));
   drawAreas(c.service_areas || []);
-  loadRouteConfigs();
   loadEndpoints();
 }
 // Fixed origin and destination of the passenger app (D135).
@@ -3958,66 +4716,6 @@ async function loadEndpoints() {
 }
 let companyStopStyle = 'STATIONS';
 const STOP_STYLE_LABEL = { ROUTE_LINE: 'Tuyến kiểu xe buýt (điểm đón trả dọc đường)', STATIONS: 'Chỉ tại bến' };
-// Stops of a route: arrival time (empty = estimated from the road), pickup / drop-off, shown to passengers.
-function stopsEditor(rt) {
-  if (!rt.stops?.length) return '<p class="muted" style="margin:0">Tuyến chưa có chuyến trong lịch, chưa có điểm dừng.</p>';
-  const own = rt.own.stops || {};
-  return `<details><summary style="cursor:pointer;font-weight:600">Điểm dừng (${rt.stops.length}) · giờ đến, đón trả, ẩn hiện</summary>
-    <table style="margin-top:8px"><thead><tr><th>Điểm</th><th>Loại</th><th>Giờ đến (phút sau xuất bến)</th><th>Đón</th><th>Trả</th><th>Hiện với khách</th></tr></thead><tbody>
-    ${rt.stops.map((st, i) => `<tr data-stop="${esc(st.stop_id)}" data-route-id="${esc(rt.route_id)}">
-      <td>${esc(st.name)}</td><td>${st.kind === 'ROADSIDE' ? '<span class="pill">Dọc đường</span>' : '<span class="pill info">Bến xe</span>'}</td>
-      <td><input name="offset" inputmode="numeric" style="width:90px;border:1px solid var(--line-strong);border-radius:6px;padding:4px 6px" value="${Number.isInteger(own[st.stop_id]?.offset_minutes) ? own[st.stop_id].offset_minutes : ''}" placeholder="${esc(st.offset_minutes)}" ${i === 0 ? 'disabled title="Điểm xuất phát"' : ''}> ${st.time_source === 'ESTIMATED' ? '<span class="muted" style="font-size:12px">ước tính</span>' : ''}</td>
-      <td><input type="checkbox" name="pickup" ${(own[st.stop_id]?.pickup ?? st.base_pickup) ? 'checked' : ''}></td>
-      <td><input type="checkbox" name="dropoff" ${(own[st.stop_id]?.dropoff ?? st.base_dropoff) ? 'checked' : ''}></td>
-      <td><input type="checkbox" name="visible" ${st.hidden ? '' : 'checked'} ${i === 0 ? 'disabled' : ''}></td></tr>`).join('')}
-    </tbody></table>
-    <button class="btn primary" style="margin-top:8px" data-save-stops="${esc(rt.route_id)}">Lưu điểm dừng</button></details>`;
-}
-async function loadRouteConfigs() {
-  const box = $('#routeConfigs'); if (!box) return;
-  const r = await api('/api/v1/ops/service-config/routes');
-  if (!r.ok) { box.innerHTML = `<p class="error">${esc(r.message)}</p>`; return; }
-  const modeBoxes = (route, name, modes) => `<label class="row" style="gap:6px"><input type="checkbox" data-inherit="${name}" ${route.own[name] ? '' : 'checked'}> Theo nhà xe</label>` +
-    modes.map(m => `<label class="row" style="gap:6px"><input type="checkbox" name="${name}" value="${m}" ${route[name].includes(m) ? 'checked' : ''} ${route.own[name] ? '' : 'disabled'}> ${esc(MODE_LABEL[m])}</label>`).join('');
-  box.innerHTML = `<table><thead><tr><th>Tuyến</th><th>Kiểu điểm đón trả</th><th>Đón</th><th>Trả</th><th>Bán vé</th><th></th></tr></thead><tbody>${r.data.routes.map(rt => `
-    <tr data-route="${esc(rt.route_id)}"><td>${esc(rt.name)}<div class="muted mono" style="font-size:12px">${esc(rt.route_id)}</div></td>
-      <td><select name="stop_style"><option value="">Theo nhà xe (${esc(STOP_STYLE_LABEL[companyStopStyle])})</option>${Object.entries(STOP_STYLE_LABEL).map(([v, l]) => `<option value="${v}" ${rt.own.stop_style === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></td>
-      <td>${modeBoxes(rt, 'pickup_modes', ['FIXED_STOP', 'HOME_PICKUP'])}</td>
-      <td>${modeBoxes(rt, 'dropoff_modes', ['FIXED_LOCATION', 'HOME_DROPOFF'])}</td>
-      <td><label class="row" style="gap:6px" title="Vé đã bán giữ nguyên; muốn hủy chuyến của ngày nào thì hủy trên bảng điều độ"><input type="checkbox" name="sales_suspended" ${rt.own.sales_suspended ? 'checked' : ''}> Tạm ngừng bán</label></td>
-      <td><button class="btn" data-save>Lưu</button></td></tr>
-    <tr data-stops-of="${esc(rt.route_id)}"><td colspan="6" style="padding-top:0">${stopsEditor(rt)}</td></tr>`).join('')}</tbody></table>`;
-  box.querySelectorAll('button[data-save-stops]').forEach(b => b.addEventListener('click', async () => {
-    const routeId = b.dataset.saveStops;
-    const rows = [...box.querySelectorAll(`tr[data-stop][data-route-id="${routeId}"]`)];
-    const stops = {};
-    for (const row of rows) {
-      const raw = row.querySelector('input[name="offset"]').value.trim();
-      if (raw !== '' && !/^\d+$/.test(raw)) { toast('Giờ đến là số phút sau giờ xuất bến'); return; }
-      stops[row.dataset.stop] = {
-        offset_minutes: raw === '' ? null : Number(raw),
-        pickup: row.querySelector('input[name="pickup"]').checked,
-        dropoff: row.querySelector('input[name="dropoff"]').checked,
-        hidden: !row.querySelector('input[name="visible"]').checked
-      };
-    }
-    const r2 = await api(`/api/v1/ops/service-config/routes/${encodeURIComponent(routeId)}`, { method: 'PUT', body: { stops } });
-    toast(r2.ok ? 'Đã lưu điểm dừng' : r2.message);
-    if (r2.ok) loadRouteConfigs();
-  }));
-  box.querySelectorAll('input[data-inherit]').forEach(cb => cb.addEventListener('change', () => {
-    cb.closest('td').querySelectorAll(`input[name="${cb.dataset.inherit}"]`).forEach(i => { i.disabled = cb.checked; });
-  }));
-  box.querySelectorAll('button[data-save]').forEach(b => b.addEventListener('click', async () => {
-    const row = b.closest('tr');
-    if (!row.dataset.route) return;
-    const modes = (name) => row.querySelector(`input[data-inherit="${name}"]`).checked ? null : [...row.querySelectorAll(`input[name="${name}"]:checked`)].map(i => i.value);
-    const body = { stop_style: row.querySelector('select[name="stop_style"]').value || null, pickup_modes: modes('pickup_modes'), dropoff_modes: modes('dropoff_modes'), sales_suspended: row.querySelector('input[name="sales_suspended"]').checked || null };
-    const r2 = await api(`/api/v1/ops/service-config/routes/${encodeURIComponent(row.dataset.route)}`, { method: 'PUT', body });
-    toast(r2.ok ? 'Đã lưu cấu hình tuyến' : r2.message);
-    if (r2.ok) loadRouteConfigs();
-  }));
-}
 const draft = { points: [], layer: null };
 function drawAreas(areas) {
   if (state.maps.area) { state.maps.area.remove(); }
@@ -4082,14 +4780,13 @@ function changeText(u) {
   if (!u.active) return 'ngừng chạy';
   return `${u.departure} · ${daysText(u.days_of_week)} · ${vnd(u.base_fare_vnd)}${u.valid_to ? ` · đến ${ddmm(u.valid_to)}` : ''}`;
 }
+let schedulesRouteFilterValue = '';
 async function loadSchedules() {
   const r = await api('/api/v1/ops/schedules');
   if (!r.ok) {
     $('#schedulesBox').innerHTML = `<p class="error" style="padding:16px">${esc(r.status === 403 ? 'Chỉ giám đốc và điều độ sửa được lịch chạy.' : r.message)}</p>`;
-    $('#scheduleForm').classList.add('hidden');
     return;
   }
-  $('#scheduleForm').classList.remove('hidden');
   schedules.list = r.data.schedules || [];
   schedules.routes = r.data.routes || [];
   schedules.changeFrom = r.data.change_from;
@@ -4104,8 +4801,28 @@ async function loadSchedules() {
   }
   loadStationPicker();
   loadVehicleTypes();
+
+  const filterEl = $('#scheduleRouteFilter');
+  if (filterEl) {
+    const curVal = schedulesRouteFilterValue || '';
+    filterEl.innerHTML = '<option value="">Tất cả tuyến</option>' + schedules.routes.map(rt => `<option value="${esc(rt.route_id)}" ${rt.route_id === curVal ? 'selected' : ''}>${esc(rt.name)}</option>`).join('');
+    filterEl.onchange = () => {
+      schedulesRouteFilterValue = filterEl.value;
+      renderSchedulesTable();
+    };
+  }
+  renderSchedulesTable();
+}
+
+function renderSchedulesTable() {
+  const filteredList = schedulesRouteFilterValue
+    ? schedules.list.filter(sc => sc.route_id === schedulesRouteFilterValue)
+    : schedules.list;
+  const countEl = $('#schedulesFilterCount');
+  if (countEl) countEl.textContent = `${filteredList.length} giờ chạy`;
+
   let lastRoute = null;
-  $('#schedulesBox').innerHTML = schedules.list.length ? `<table><thead><tr><th>Giờ</th><th>Ngày chạy · áp dụng</th><th>Giá</th><th>Trạng thái</th><th></th></tr></thead><tbody>${schedules.list.map(sc => {
+  $('#schedulesBox').innerHTML = filteredList.length ? `<table><thead><tr><th>Giờ</th><th>Ngày chạy · áp dụng</th><th>Giá</th><th>Trạng thái</th><th></th></tr></thead><tbody>${filteredList.map(sc => {
     const routeName = schedules.routes.find(rt => rt.route_id === sc.route_id)?.name || sc.route_name;
     const head = sc.route_id !== lastRoute ? `<tr><td colspan="5" style="background:#f8fafc;font-weight:700">${esc(routeName)}</td></tr>` : '';
     lastRoute = sc.route_id;
@@ -4117,9 +4834,12 @@ async function loadSchedules() {
     const willRun = lastSettings(sc).active;
     return `${head}<tr class="${schedules.editing === sc.schedule_id ? 'sel' : ''}"><td style="min-width:150px"><span class="mono" style="font-size:16px;font-weight:700">${esc(sc.departure)}</span><div class="muted" style="font-size:12px">${esc(sc.duration_minutes)} phút${sc.route_name !== routeName ? ` · ${esc(sc.route_name)}` : ''}</div><div class="muted" style="font-size:12px">${esc(sc.vehicle_title || sc.vehicle_type)}</div></td><td>${dayChips(sc.days_of_week)}<div class="muted" style="font-size:12px;margin-top:4px">${span}</div>${changes}</td><td class="mono" style="white-space:nowrap">${esc(vnd(sc.base_fare_vnd))}</td><td style="white-space:nowrap"><span class="pill ${kind}">${esc(label)}</span></td>
       <td><div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap"><button class="btn" data-edit-sch="${esc(sc.schedule_id)}">Sửa</button><button class="btn" data-toggle-sch="${esc(sc.schedule_id)}" data-run="${willRun ? '1' : '0'}">${willRun ? 'Ngừng' : 'Chạy lại'}</button>${cancellable ? `<button class="btn danger" data-cancel-sch="${esc(sc.schedule_id)}">Hủy thay đổi</button>` : ''}</div></td></tr>`;
-  }).join('')}</tbody></table>` : '<p class="muted" style="padding:16px;margin:0">Nhà xe chưa có lịch chạy.</p>';
+  }).join('')}</tbody></table>` : '<p class="muted" style="padding:16px;margin:0">Không có giờ chạy phù hợp.</p>';
   const box = $('#schedulesBox');
-  box.querySelectorAll('button[data-edit-sch]').forEach(b => b.addEventListener('click', () => editSchedule(b.dataset.editSch)));
+  box.querySelectorAll('button[data-edit-sch]').forEach(b => b.addEventListener('click', () => {
+    editSchedule(b.dataset.editSch);
+    openModal($('#scheduleFormTitle')?.textContent || 'Sửa giờ chạy', $('#scheduleForm'));
+  }));
   box.querySelectorAll('button[data-toggle-sch]').forEach(b => b.addEventListener('click', async () => {
     const r2 = await api(`/api/v1/ops/schedules/${encodeURIComponent(b.dataset.toggleSch)}`, { method: 'PATCH', body: { active: b.dataset.run !== '1' } });
     toast(r2.ok ? `${b.dataset.run === '1' ? 'Ngừng chạy' : 'Chạy lại'} từ ${ddmm(r2.data.effective_from)}` : r2.message);
@@ -4131,6 +4851,7 @@ async function loadSchedules() {
     if (r2.ok) loadSchedules();
   }));
 }
+
 function resetScheduleForm() {
   schedules.editing = null;
   const f = $('#scheduleForm');
@@ -4144,9 +4865,10 @@ function resetScheduleForm() {
   toggleExtra();
   $('#scheduleFormTitle').textContent = 'Thêm giờ chạy';
   $('#scheduleSave').textContent = 'Thêm giờ chạy';
-  $('#scheduleCancel').classList.add('hidden');
+  $('#scheduleCancel').classList.remove('hidden');
   $('#scheduleError').textContent = '';
 }
+
 function editSchedule(id) {
   const sc = schedules.list.find(x => x.schedule_id === id);
   if (!sc) return;
@@ -4173,7 +4895,8 @@ function editSchedule(id) {
   $('#scheduleError').textContent = '';
   document.querySelectorAll('#schedulesBox tr').forEach(tr => tr.classList.toggle('sel', !!tr.querySelector(`button[data-edit-sch="${CSS.escape(id)}"]`)));
 }
-$('#scheduleCancel').addEventListener('click', () => { resetScheduleForm(); loadSchedules(); });
+$('#scheduleCancel').addEventListener('click', () => { resetScheduleForm(); closeModal(); });
+$('#scheduleAddBtn')?.addEventListener('click', () => { resetScheduleForm(); openModal('Thêm giờ chạy', $('#scheduleForm')); });
 // An extra departure runs on one day inside the booking window: no weekdays, no validity (D134).
 function toggleExtra() {
   const on = $('#sExtra').checked;
@@ -4195,7 +4918,7 @@ $('#scheduleForm').addEventListener('submit', async (e) => {
     $('#scheduleError').textContent = r.ok ? '' : r.message;
     if (!r.ok) return;
     toast(`Đã thêm chuyến tăng cường ${extra.departure} ngày ${ddmm(extra.extra_date)}, đang mở bán`);
-    resetScheduleForm(); loadSchedules();
+    resetScheduleForm(); closeModal(); loadSchedules();
     return;
   }
   if (!days.length) { $('#scheduleError').textContent = 'Chọn ít nhất một ngày chạy'; return; }
@@ -4216,6 +4939,7 @@ $('#scheduleForm').addEventListener('submit', async (e) => {
   if (!r.ok) return;
   toast(`${editing ? 'Đã lưu' : 'Đã thêm giờ chạy'}, có hiệu lực từ ${ddmm(r.data.effective_from || r.data.valid_from)}`);
   resetScheduleForm();
+  closeModal();
   loadSchedules();
 });
 
@@ -4228,9 +4952,130 @@ async function loadStationPicker() {
   const r = await api('/api/v1/ops/stations');
   if (r.ok && Array.isArray(r.data)) {
     usableStationsList = r.data;
-    $('#rtStopPick').innerHTML = usableStationsList.map(st => `<option value="${esc(st.station_id)}">${esc(st.name)} (${esc(st.city)})${st.kind === 'ROADSIDE' ? ' · Dọc đường' : ''}</option>`).join('');
+    renderStopPickOptions();
+    updateRouteBuilderMap();
   }
 }
+
+const foldVi = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase();
+
+function renderStopPickOptions() {
+  const q = foldVi($('#rtStopSearch').value.trim());
+  const list = usableStationsList.filter(st => !q || foldVi(`${st.name} ${st.city} ${st.address || ''}`).includes(q));
+  $('#rtStopPick').innerHTML = list.length
+    ? list.map(st => `<option value="${esc(st.station_id)}">${esc(st.name)} (${esc(st.city)})${st.kind === 'ROADSIDE' ? ' · Dọc đường' : ''}</option>`).join('')
+    : '<option value="">Không có điểm nào khớp. Bấm lên bản đồ để tạo điểm mới.</option>';
+}
+$('#rtStopSearch').addEventListener('input', renderStopPickOptions);
+
+// Straight-line km between two points; enough to pick where a stop fits along the route.
+function kmBetween(a, b) {
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLng = (b.lng - a.lng) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(h));
+}
+
+// Where a new stop goes: between the two consecutive stops it lengthens the trip least, the first and last stop
+// staying the ends; at the end when chosen, or when the route has fewer than two stops.
+function insertIndexFor(st) {
+  const n = routeBuilderStops.length;
+  if ($('#rtInsertPos').value === 'end' || n < 2 || !Number.isFinite(Number(st.lat))) return n;
+  let best = n - 1;
+  let bestCost = Infinity;
+  for (let i = 1; i < n; i++) {
+    const a = routeBuilderStops[i - 1];
+    const b = routeBuilderStops[i];
+    if (!Number.isFinite(Number(a.lat)) || !Number.isFinite(Number(b.lat))) continue;
+    const cost = kmBetween(a, st) + kmBetween(st, b) - kmBetween(a, b);
+    if (cost < bestCost) { bestCost = cost; best = i; }
+  }
+  return best;
+}
+
+function addStopToRoute(st) {
+  if (routeBuilderStops.some(s => s.stop_id === st.station_id)) {
+    toast('Điểm dừng này đã có trong tuyến');
+    return;
+  }
+  const idx = insertIndexFor(st);
+  routeBuilderStops.splice(idx, 0, {
+    stop_id: st.station_id,
+    name: st.name,
+    city: st.city,
+    kind: st.kind || 'STATION',
+    lat: st.lat,
+    lng: st.lng,
+    pickup_allowed: true,
+    dropoff_allowed: true
+  });
+  renderRouteStops();
+  toast(`Đã thêm ${st.name} vào vị trí ${idx + 1}`);
+}
+
+let rtNewLatLng = null;
+function openNewStopDraft(latlng) {
+  const map = routesPanelState.routeBuilderMap;
+  rtNewLatLng = { lat: Number(latlng.lat.toFixed(5)), lng: Number(latlng.lng.toFixed(5)) };
+  if (routesPanelState.routeBuilderDraft) map.removeLayer(routesPanelState.routeBuilderDraft);
+  routesPanelState.routeBuilderDraft = L.marker([rtNewLatLng.lat, rtNewLatLng.lng]).addTo(map);
+  // Suggest the province of the nearest known stop; staff can change it.
+  const nearest = usableStationsList
+    .filter(st => Number.isFinite(Number(st.lat)))
+    .sort((a, b) => kmBetween(rtNewLatLng, a) - kmBetween(rtNewLatLng, b))[0];
+  $('#rtNewStopCoords').textContent = `${rtNewLatLng.lat}, ${rtNewLatLng.lng}`;
+  $('#rtNewName').value = '';
+  $('#rtNewAddress').value = '';
+  $('#rtNewCity').value = nearest?.city || '';
+  $('#rtNewKind').value = 'ROADSIDE';
+  $('#rtNewError').textContent = '';
+  $('#rtNewStop').classList.remove('hidden');
+  $('#rtNewName').focus();
+}
+
+function closeNewStopDraft() {
+  $('#rtNewStop').classList.add('hidden');
+  rtNewLatLng = null;
+  const map = routesPanelState.routeBuilderMap;
+  if (map && routesPanelState.routeBuilderDraft) map.removeLayer(routesPanelState.routeBuilderDraft);
+  routesPanelState.routeBuilderDraft = null;
+}
+
+$('#rtNewCancel').addEventListener('click', closeNewStopDraft);
+// Enter inside the new-stop fields must not submit the whole route.
+$('#rtNewStop').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); $('#rtNewSave').click(); }
+});
+$('#rtNewSave').addEventListener('click', async () => {
+  if (!rtNewLatLng) return;
+  const name = $('#rtNewName').value.trim();
+  const city = $('#rtNewCity').value.trim();
+  if (name.length < 3) { $('#rtNewError').textContent = 'Tên điểm từ 3 ký tự trở lên'; return; }
+  if (!city) { $('#rtNewError').textContent = 'Cần tỉnh/thành phố'; return; }
+  $('#rtNewSave').disabled = true;
+  const r = await api('/api/v1/ops/stations', {
+    method: 'POST',
+    idempotent: true,
+    body: { name, city, address: $('#rtNewAddress').value.trim(), lat: rtNewLatLng.lat, lng: rtNewLatLng.lng, kind: $('#rtNewKind').value }
+  });
+  $('#rtNewSave').disabled = false;
+  if (!r.ok) {
+    const same = r.code === 'STATION_EXISTS' && usableStationsList.find(st => foldVi(st.name) === foldVi(name) && foldVi(st.city) === foldVi(city));
+    if (same) {
+      closeNewStopDraft();
+      addStopToRoute(same);
+      return;
+    }
+    $('#rtNewError').textContent = r.message;
+    return;
+  }
+  usableStationsList.push(r.data);
+  routesPanelState.stations = usableStationsList;
+  closeNewStopDraft();
+  renderStopPickOptions();
+  addStopToRoute(r.data);
+});
 
 async function loadVehicleTypes() {
   const r = await api('/api/v1/ops/seat-layouts');
@@ -4251,6 +5096,7 @@ $('#rtVehicleType').addEventListener('change', (e) => {
 function renderRouteStops() {
   if (!routeBuilderStops.length) {
     $('#rtStopsList').innerHTML = '<tr><td colspan="5" class="muted">Chưa có điểm dừng nào được chọn</td></tr>';
+    updateRouteBuilderMap();
     return;
   }
   $('#rtStopsList').innerHTML = routeBuilderStops.map((s, i) => `
@@ -4293,25 +5139,135 @@ function renderRouteStops() {
     routeBuilderStops.splice(Number(b.dataset.stopDel), 1);
     renderRouteStops();
   }));
+
+  updateRouteBuilderMap();
+}
+
+function updateRouteBuilderMap() {
+  const mapEl = $('#rtMap');
+  if (!mapEl) return;
+  if (!routesPanelState.routeBuilderMap) {
+    routesPanelState.routeBuilderMap = newMap(mapEl);
+    routesPanelState.routeBuilderMap.on('click', (e) => openNewStopDraft(e.latlng));
+  }
+  const map = routesPanelState.routeBuilderMap;
+  if (routesPanelState.routeBuilderMarkers) {
+    routesPanelState.routeBuilderMarkers.forEach(m => map.removeLayer(m));
+  }
+  routesPanelState.routeBuilderMarkers = [];
+  // Known stops not on the route yet: grey dots, a click adds one.
+  const inRoute = new Set(routeBuilderStops.map(s => s.stop_id));
+  usableStationsList.forEach(st => {
+    const lat = Number(st.lat);
+    const lng = Number(st.lng);
+    if (inRoute.has(st.station_id) || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const dot = L.circleMarker([lat, lng], { radius: 6, color: '#64748b', weight: 2, fillColor: '#cbd5e1', fillOpacity: 0.9 }).addTo(map);
+    dot.bindTooltip(`${st.name} (${st.city}) · bấm để thêm`);
+    dot.on('click', (e) => { L.DomEvent.stopPropagation(e); addStopToRoute(st); });
+    routesPanelState.routeBuilderMarkers.push(dot);
+  });
+  if (routesPanelState.routeBuilderPolyline) {
+    map.removeLayer(routesPanelState.routeBuilderPolyline);
+    routesPanelState.routeBuilderPolyline = null;
+  }
+
+  const bounds = [];
+  const coords = [];
+  routeBuilderStops.forEach((s, i) => {
+    const lat = Number(s.lat);
+    const lng = Number(s.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const isStation = s.kind === 'STATION';
+    const icon = L.divIcon({
+      className: '',
+      html: `<div class="route-stop-marker ${isStation ? 'station' : 'roadside'}" style="width:20px;height:20px;font-size:10px">${i + 1}</div>`,
+      iconSize: [20, 20],
+      iconAnchor: [10, 10]
+    });
+    const marker = L.marker([lat, lng], { icon }).addTo(map);
+    marker.bindTooltip(`${i + 1}. ${s.name} (${s.city})`);
+    routesPanelState.routeBuilderMarkers.push(marker);
+    bounds.push([lat, lng]);
+    coords.push([lat, lng]);
+  });
+
+  if (coords.length >= 2) {
+    const road = routesPanelState.routeBuilderRoad;
+    const sameStops = road && road.key === coords.map(c => c.join(',')).join(';');
+    routesPanelState.routeBuilderPolyline = sameStops && road.shape
+      ? L.polyline(road.shape, { color: '#2563eb', weight: 4 }).addTo(map)
+      : L.polyline(coords, { color: '#2563eb', weight: 3, dashArray: '6 6' }).addTo(map);
+    if (!sameStops) scheduleRoadPreview(coords);
+  } else {
+    routesPanelState.routeBuilderRoad = null;
+    $('#rtRoadInfo').textContent = '';
+  }
+  // Fit the route once it has two stops; before that show every known stop.
+  routesPanelState.routeBuilderBounds = bounds.length >= 2 ? bounds
+    : usableStationsList.filter(st => Number.isFinite(Number(st.lat))).map(st => [Number(st.lat), Number(st.lng)]);
+  fitRouteBuilderMap();
+}
+
+// D201: ask the server for the road through the stops (400 ms after the last change), then redraw on the road
+// and suggest distance and driving time unless staff typed their own.
+let roadPreviewTimer = null;
+function scheduleRoadPreview(coords) {
+  clearTimeout(roadPreviewTimer);
+  const key = coords.map(c => c.join(',')).join(';');
+  $('#rtRoadInfo').textContent = 'Đang tìm đường bộ…';
+  roadPreviewTimer = setTimeout(async () => {
+    const r = await api('/api/v1/ops/routes/road-preview', { method: 'POST', idempotent: true, body: { points: coords } });
+    const now = routeBuilderStops.filter(s => Number.isFinite(Number(s.lat))).map(s => [Number(s.lat), Number(s.lng)].join(',')).join(';');
+    if (now !== key) return;
+    const d = r.ok ? r.data : null;
+    routesPanelState.routeBuilderRoad = { key, shape: d?.shape || null };
+    if (d?.shape) {
+      const hours = Math.floor((d.duration_minutes || 0) / 60);
+      const mins = (d.duration_minutes || 0) % 60;
+      $('#rtRoadInfo').textContent = `Theo đường bộ: ${d.distance_km} km · xe con chạy khoảng ${hours ? `${hours} giờ ` : ''}${mins} phút (xe khách thường lâu hơn)`;
+      if (!$('#rtDistance').dataset.touched && d.distance_km) $('#rtDistance').value = d.distance_km;
+      // Coaches run slower than the router's car time: suggest 25% more, rounded to 5 minutes.
+      if (!$('#rtDuration').dataset.touched && d.duration_minutes) $('#rtDuration').value = Math.max(15, Math.round(d.duration_minutes * 1.25 / 5) * 5);
+    } else {
+      $('#rtRoadInfo').textContent = 'Chưa lấy được đường bộ, đang nối thẳng giữa các điểm (nét đứt). Tuyến vẫn tạo được.';
+    }
+    updateRouteBuilderMap();
+  }, 400);
+}
+['#rtDistance', '#rtDuration'].forEach(sel => $(sel).addEventListener('input', (e) => { e.target.dataset.touched = '1'; }));
+
+function fitRouteBuilderMap() {
+  const map = routesPanelState.routeBuilderMap;
+  if (!map) return;
+  map.invalidateSize();
+  const b = routesPanelState.routeBuilderBounds;
+  if (b?.length) map.fitBounds(b, { padding: [20, 20], maxZoom: 13 });
 }
 
 $('#rtAddStop').addEventListener('click', () => {
-  const stopId = $('#rtStopPick').value;
-  if (!stopId) return;
-  if (routeBuilderStops.some(s => s.stop_id === stopId)) {
-    toast('Điểm dừng này đã có trong tuyến');
-    return;
-  }
-  const st = usableStationsList.find(s => s.station_id === stopId);
-  if (!st) return;
-  routeBuilderStops.push({
-    stop_id: st.station_id,
-    name: st.name,
-    city: st.city,
-    pickup_allowed: true,
-    dropoff_allowed: true
-  });
+  const st = usableStationsList.find(s => s.station_id === $('#rtStopPick').value);
+  if (st) addStopToRoute(st);
+});
+
+$('#routesNewBtn')?.addEventListener('click', () => {
+  loadStationPicker();
+  loadVehicleTypes();
+  $('#routeForm').reset();
+  routeBuilderStops = [];
+  routesPanelState.routeBuilderRoad = null;
+  delete $('#rtDistance').dataset.touched;
+  delete $('#rtDuration').dataset.touched;
+  $('#rtStopSearch').value = '';
+  closeNewStopDraft();
+  $('#rtDays').querySelectorAll('input[name="rt_day"]').forEach(c => { c.checked = true; });
+  $('#routeError').textContent = '';
+  openModal('Tạo tuyến mới', $('#routeForm'));
   renderRouteStops();
+  setTimeout(fitRouteBuilderMap, 80);
+});
+
+$('#routeCancelBtn')?.addEventListener('click', () => {
+  closeModal();
 });
 
 $('#stationForm').addEventListener('submit', async (e) => {
@@ -4341,7 +5297,16 @@ $('#stationForm').addEventListener('submit', async (e) => {
   if (!r.ok) return;
   toast(`Đã thêm ${kind === 'STATION' ? 'bến xe' : 'điểm đón'} ${name} (${city})`);
   f.reset();
+  if (routesPanelState.draftStationMarker && routesPanelState.stationsMap) {
+    routesPanelState.stationsMap.removeLayer(routesPanelState.draftStationMarker);
+    routesPanelState.draftStationMarker = null;
+  }
   loadStationPicker();
+  const stRes = await api('/api/v1/ops/stations');
+  if (stRes.ok && Array.isArray(stRes.data)) {
+    routesPanelState.stations = stRes.data;
+    renderStationsSection();
+  }
 });
 
 $('#routeForm').addEventListener('submit', async (e) => {
@@ -4390,12 +5355,642 @@ $('#routeForm').addEventListener('submit', async (e) => {
   if (!r.ok) return;
 
   toast(`Đã tạo tuyến ${name} với giờ chạy đầu tiên ${body.schedule.departure}`);
+  closeModal();
   f.reset();
   routeBuilderStops = [];
   renderRouteStops();
   $('#rtDays').querySelectorAll('input[name="rt_day"]').forEach(c => { c.checked = true; });
-  loadSchedules();
+  if (r.data?.route_id) {
+    routesPanelState.selectedRouteId = r.data.route_id;
+  }
+  loadRoutesPanel();
 });
+
+// ---------- Routes & Stops Panel Logic ----------
+const routesPanelState = {
+  routes: [],
+  schedules: [],
+  stations: [],
+  companyConfig: null,
+  selectedRouteId: null,
+  departureTime: '07:00',
+  map: null,
+  mapMarkers: [],
+  mapPolyline: null,
+  stationsMap: null,
+  stationsMapMarkers: [],
+  draftStationMarker: null,
+  routeBuilderMap: null,
+  routeBuilderMarkers: [],
+  routeBuilderPolyline: null,
+  routeBuilderDraft: null,
+  routeBuilderRoad: null,
+  routeBuilderBounds: null
+};
+
+async function loadRoutesPanel() {
+  const [routesRes, schedRes, stationsRes, configRes] = await Promise.all([
+    api('/api/v1/ops/service-config/routes'),
+    api('/api/v1/ops/schedules'),
+    api('/api/v1/ops/stations'),
+    api('/api/v1/ops/service-config')
+  ]);
+
+  if (!routesRes.ok) {
+    const errBox = $('#routesListError');
+    if (errBox) errBox.textContent = routesRes.message || 'Không thể tải danh sách tuyến';
+    return;
+  }
+  const errBox = $('#routesListError');
+  if (errBox) errBox.textContent = '';
+
+  routesPanelState.routes = routesRes.data.routes || [];
+  routesPanelState.schedules = schedRes.ok ? (schedRes.data.schedules || []) : [];
+  routesPanelState.stations = stationsRes.ok ? (stationsRes.data || []) : [];
+  if (configRes.ok && configRes.data) {
+    companyStopStyle = configRes.data.stop_style || 'STATIONS';
+    routesPanelState.companyConfig = configRes.data;
+  }
+
+  if (!routesPanelState.selectedRouteId || !routesPanelState.routes.some(r => r.route_id === routesPanelState.selectedRouteId)) {
+    routesPanelState.selectedRouteId = routesPanelState.routes[0]?.route_id || null;
+  }
+
+  renderRoutesList();
+  renderSelectedRoute();
+  renderStationsSection();
+}
+
+function renderRoutesList() {
+  const box = $('#routesListBox');
+  const countEl = $('#routesCount');
+  if (countEl) countEl.textContent = `${routesPanelState.routes.length} tuyến`;
+  if (!box) return;
+
+  if (!routesPanelState.routes.length) {
+    box.innerHTML = '<p class="muted" style="padding:12px;margin:0">Chưa có tuyến xe nào.</p>';
+    return;
+  }
+
+  box.innerHTML = routesPanelState.routes.map(rt => {
+    const isSelected = rt.route_id === routesPanelState.selectedRouteId;
+    const depCount = routesPanelState.schedules.filter(s => s.route_id === rt.route_id).length;
+    const stopCount = rt.stops?.length || 0;
+    return `
+      <div class="route-item ${isSelected ? 'active' : ''}" data-route-id="${esc(rt.route_id)}">
+        <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">
+          <b>${esc(rt.name)}</b>
+          ${rt.own?.sales_suspended ? '<span class="pill warn" style="white-space:nowrap">Tạm ngừng bán</span>' : ''}
+        </div>
+        <div class="row muted" style="font-size:12px;margin-top:4px;gap:10px">
+          <span>${stopCount} điểm dừng</span>
+          <span>·</span>
+          <span>${depCount} chuyến</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  box.querySelectorAll('.route-item[data-route-id]').forEach(el => {
+    el.addEventListener('click', () => {
+      routesPanelState.selectedRouteId = el.dataset.routeId;
+      renderRoutesList();
+      renderSelectedRoute();
+    });
+  });
+}
+
+function computeClockTime(depStr, offset) {
+  if (!depStr || typeof offset !== 'number' || isNaN(offset)) return '—';
+  const parts = depStr.split(':').map(Number);
+  const depMins = (parts[0] || 0) * 60 + (parts[1] || 0);
+  const totalMins = (depMins + offset) % (24 * 60);
+  const h = String(Math.floor(totalMins / 60)).padStart(2, '0');
+  const m = String(totalMins % 60).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+function validateStops(route) {
+  const tbody = $('#routeStopsTbody');
+  if (!tbody) return true;
+  const rows = [...tbody.querySelectorAll('tr[data-stop]')];
+  let previous = 0;
+  let hasError = false;
+  let errorMsg = '';
+
+  rows.forEach((row, i) => {
+    const input = row.querySelector('input[name="offset"]');
+    const clockCell = row.querySelector('.computed-clock');
+    const st = route.stops[i];
+    if (i === 0) {
+      if (clockCell) {
+        clockCell.innerHTML = `<span class="mono" style="font-weight:600">${esc(computeClockTime(routesPanelState.departureTime, 0))}</span>`;
+      }
+      return;
+    }
+    const raw = input.value.trim();
+    let current;
+    let isEstimated = false;
+    if (raw === '') {
+      current = st.offset_minutes;
+      isEstimated = true;
+    } else if (!/^\d+$/.test(raw)) {
+      current = NaN;
+      hasError = true;
+      if (!errorMsg) errorMsg = 'Giờ đến là số phút từ 0 đến 1440 sau giờ xuất bến';
+      input.classList.add('input-error');
+    } else {
+      current = Number(raw);
+      if (current < 0 || current > 1440) {
+        hasError = true;
+        if (!errorMsg) errorMsg = 'Giờ đến là số phút từ 0 đến 1440 sau giờ xuất bến';
+        input.classList.add('input-error');
+      }
+    }
+
+    if (!isNaN(current)) {
+      if (current < previous) {
+        hasError = true;
+        if (!errorMsg) errorMsg = 'Giờ đến các điểm phải tăng dần theo thứ tự tuyến';
+        input.classList.add('input-error');
+      } else {
+        input.classList.remove('input-error');
+        previous = current;
+      }
+      if (clockCell) {
+        const timeStr = computeClockTime(routesPanelState.departureTime, current);
+        clockCell.innerHTML = `<span class="mono" style="font-weight:600">${esc(timeStr)}</span>${isEstimated ? ' <span class="muted" style="font-size:12px">ước tính</span>' : ''}`;
+      }
+    } else {
+      if (clockCell) clockCell.innerHTML = '—';
+    }
+  });
+
+  const errEl = $('#stopsValidationError');
+  if (errEl) errEl.textContent = errorMsg;
+  const saveBtn = $('#saveStopsBtn');
+  if (saveBtn) saveBtn.disabled = hasError;
+  return !hasError;
+}
+
+function initRouteMap(route) {
+  if (routesPanelState.map) {
+    routesPanelState.map.remove();
+    routesPanelState.map = null;
+  }
+  const el = $('#routeMap');
+  if (!el) return;
+  const map = newMap(el);
+  routesPanelState.map = map;
+  routesPanelState.mapMarkers = [];
+  routesPanelState.mapPolyline = null;
+
+  const bounds = [];
+  const polylineCoords = [];
+
+  route.stops.forEach((st, i) => {
+    const lat = Number(st.lat);
+    const lng = Number(st.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const isStation = st.kind === 'STATION';
+    const isHidden = Boolean(st.hidden);
+    const markerClass = `route-stop-marker ${isStation ? 'station' : 'roadside'} ${isHidden ? 'hidden-stop' : ''}`;
+    const size = isStation ? 24 : 20;
+    const icon = L.divIcon({
+      className: '',
+      html: `<div class="${markerClass}" style="width:${size}px;height:${size}px">${i + 1}</div>`,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2]
+    });
+    const marker = L.marker([lat, lng], { icon }).addTo(map);
+    marker.bindPopup(`<b>${i + 1}. ${esc(st.name)}</b><br><span class="muted">${esc(st.city || '')} · ${isStation ? 'Bến xe' : 'Dọc đường'}</span>${isHidden ? '<br><span class="pill warn">Ẩn với khách</span>' : ''}`);
+    marker.on('click', () => {
+      highlightStopRow(i);
+    });
+    routesPanelState.mapMarkers.push({ index: i, marker, stopId: st.stop_id, lat, lng });
+    bounds.push([lat, lng]);
+    if (!isHidden) {
+      polylineCoords.push([lat, lng]);
+    }
+  });
+
+  // D201: the road the buses follow; as many points as stops means it is still straight lines between them.
+  const onRoad = Array.isArray(route.shape) && route.shape.length > route.stops.length;
+  if (onRoad) {
+    routesPanelState.mapPolyline = L.polyline(route.shape, { color: '#2563eb', weight: 4, opacity: 0.85 }).addTo(map);
+  } else if (polylineCoords.length >= 2) {
+    routesPanelState.mapPolyline = L.polyline(polylineCoords, { color: '#2563eb', weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(map);
+  }
+  const note = $('#routeRoadNote');
+  if (note) {
+    note.innerHTML = onRoad
+      ? '<span class="muted">Đường xanh là đường bộ xe chạy qua các điểm theo thứ tự.</span>'
+      : (route.stops.length >= 2 && can('SCHEDULES')
+        ? '<span class="muted">Đang nối thẳng giữa các điểm (nét đứt).</span><button class="btn" type="button" id="routeRoadBtn">Vẽ theo đường bộ</button>'
+        : '');
+    $('#routeRoadBtn')?.addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      e.target.textContent = 'Đang tìm đường…';
+      const r = await api(`/api/v1/ops/routes/${encodeURIComponent(route.route_id)}/road-shape`, { method: 'POST' });
+      if (!r.ok) {
+        e.target.disabled = false;
+        e.target.textContent = 'Vẽ theo đường bộ';
+        toast(r.message);
+        return;
+      }
+      toast(`Đã vẽ theo đường bộ${r.data.distance_km ? `: ${r.data.distance_km} km` : ''}`);
+      loadRoutesPanel();
+    });
+  }
+  routesPanelState.mapBounds = bounds.length ? bounds : null;
+  fitRouteMap();
+  setTimeout(fitRouteMap, 60);
+}
+
+function fitRouteMap() {
+  const map = routesPanelState.map;
+  if (!map) return;
+  map.invalidateSize();
+  if (routesPanelState.mapBounds) map.fitBounds(routesPanelState.mapBounds, { padding: [14, 14] });
+}
+
+function highlightStopMarker(index) {
+  const item = routesPanelState.mapMarkers.find(m => m.index === index);
+  if (item && routesPanelState.map) {
+    item.marker.openPopup();
+    routesPanelState.map.panTo([item.lat, item.lng]);
+  }
+}
+
+function highlightStopRow(index) {
+  const tbody = $('#routeStopsTbody');
+  if (!tbody) return;
+  tbody.querySelectorAll('tr[data-stop]').forEach((tr) => {
+    const isTarget = Number(tr.dataset.index) === index;
+    tr.classList.toggle('sel', isTarget);
+    if (isTarget) {
+      tr.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  });
+}
+
+function renderSelectedRoute() {
+  const container = $('#routeDetailContent');
+  if (!container) return;
+  const route = routesPanelState.routes.find(r => r.route_id === routesPanelState.selectedRouteId);
+  if (!route) {
+    container.innerHTML = '<p class="muted" style="padding:16px;margin:0">Chọn một tuyến để xem lộ trình và cấu hình điểm dừng.</p>';
+    return;
+  }
+
+  const routeSchedules = routesPanelState.schedules.filter(s => s.route_id === route.route_id);
+  const departureTimes = [...new Set(routeSchedules.map(s => s.departure))].sort();
+  if (!departureTimes.includes(routesPanelState.departureTime)) {
+    routesPanelState.departureTime = departureTimes[0] || '07:00';
+  }
+
+  container.innerHTML = `
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <h3 style="margin:0">${esc(route.name)}</h3>
+      <span class="mono muted" style="font-size:13px">${esc(route.route_id)}</span>
+    </div>
+
+    <!-- Map (~300 px high) -->
+    <div id="routeMap" class="map" style="height:340px;margin-bottom:6px"></div>
+    <div class="row" id="routeRoadNote" style="margin-bottom:16px;gap:8px;align-items:center;flex-wrap:wrap;font-size:12.5px"></div>
+
+    <!-- Stops table card -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div class="section-title" style="margin:0">Điểm dừng (${route.stops.length})</div>
+        <div class="row" style="gap:6px;align-items:center">
+          <label for="routeDepTimeSelect" style="font-size:13px;font-weight:600">Tính giờ theo chuyến:</label>
+          <select id="routeDepTimeSelect" style="border:1px solid var(--line-strong);border-radius:6px;padding:4px 8px;background:#fff;font-family:ui-monospace,monospace">
+            ${departureTimes.length ? departureTimes.map(t => `<option value="${esc(t)}" ${t === routesPanelState.departureTime ? 'selected' : ''}>${esc(t)}</option>`).join('') : '<option value="07:00" selected>07:00</option>'}
+          </select>
+        </div>
+      </div>
+
+      <div class="scroll" style="max-height:360px;margin-bottom:10px">
+        <table style="width:100%;font-size:13px" id="routeStopsTable">
+          <thead>
+            <tr>
+              <th style="width:36px">#</th>
+              <th>Điểm</th>
+              <th>Loại</th>
+              <th style="min-width:130px">Đến sau (phút)</th>
+              <th style="min-width:130px">Giờ đến</th>
+              <th>Đón</th>
+              <th>Trả</th>
+              <th>Hiện với khách</th>
+            </tr>
+          </thead>
+          <tbody id="routeStopsTbody">
+            ${route.stops.map((st, i) => {
+              const ownOffset = route.own?.stops?.[st.stop_id]?.offset_minutes;
+              const hasCustomOffset = Number.isInteger(ownOffset);
+              const val = i === 0 ? '' : (hasCustomOffset ? ownOffset : '');
+              const placeholder = i === 0 ? '0' : esc(st.offset_minutes);
+              const isEstimated = i !== 0 && !hasCustomOffset;
+              const effectiveOff = i === 0 ? 0 : (hasCustomOffset ? ownOffset : st.offset_minutes);
+              const clockTime = computeClockTime(routesPanelState.departureTime, effectiveOff);
+              return `
+                <tr data-stop="${esc(st.stop_id)}" data-route-id="${esc(route.route_id)}" data-index="${i}" class="click">
+                  <td class="mono font-semibold" style="text-align:center">${i + 1}</td>
+                  <td>
+                    <b>${esc(st.name)}</b>
+                    ${st.city ? `<div class="muted" style="font-size:11.5px">${esc(st.city)}</div>` : ''}
+                  </td>
+                  <td>${st.kind === 'ROADSIDE' ? '<span class="pill">Dọc đường</span>' : '<span class="pill info">Bến xe</span>'}</td>
+                  <td>
+                    <input name="offset" inputmode="numeric" style="width:85px;border:1px solid var(--line-strong);border-radius:6px;padding:4px 6px" value="${val}" placeholder="${placeholder}" ${i === 0 ? 'disabled title="Điểm xuất phát fixed 0"' : ''}>
+                  </td>
+                  <td class="computed-clock">
+                    <span class="mono" style="font-weight:600">${esc(clockTime)}</span>
+                    ${isEstimated ? ' <span class="muted" style="font-size:12px">ước tính</span>' : ''}
+                  </td>
+                  <td><input type="checkbox" name="pickup" ${(route.own?.stops?.[st.stop_id]?.pickup ?? st.base_pickup) ? 'checked' : ''}></td>
+                  <td><input type="checkbox" name="dropoff" ${(route.own?.stops?.[st.stop_id]?.dropoff ?? st.base_dropoff) ? 'checked' : ''}></td>
+                  <td><input type="checkbox" name="visible" ${st.hidden ? '' : 'checked'} ${i === 0 ? 'disabled' : ''}></td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="error" id="stopsValidationError" style="margin-bottom:8px"></div>
+
+      <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <button class="btn primary" id="saveStopsBtn" data-save-stops="${esc(route.route_id)}">Lưu điểm dừng</button>
+      </div>
+      <p class="muted" style="margin:10px 0 0;font-size:12.5px">Muốn đổi thứ tự hay thêm điểm vào tuyến đang bán: tạo tuyến mới. Vé đã bán giữ nguyên điểm đón trả.</p>
+    </div>
+
+    <!-- Card: Cách đón trả của tuyến -->
+    <form class="card" id="routeSettingsCard" style="margin-bottom:16px">
+      <div class="section-title" style="margin-top:0">Cách đón trả của tuyến</div>
+      
+      <div class="field">
+        <label for="routeStopStyleSelect">Kiểu điểm đón trả</label>
+        <select id="routeStopStyleSelect" name="stop_style">
+          <option value="">Theo nhà xe (${esc(STOP_STYLE_LABEL[companyStopStyle] || 'Chỉ tại bến')})</option>
+          ${Object.entries(STOP_STYLE_LABEL).map(([v, l]) => `<option value="${v}" ${route.own.stop_style === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Chế độ đón khách</label>
+        <label class="row" style="gap:6px;margin-bottom:6px"><input type="checkbox" data-inherit="pickup_modes" ${route.own.pickup_modes ? '' : 'checked'}> Theo nhà xe</label>
+        <div style="padding-left:18px">
+          <label class="row" style="gap:6px;margin-bottom:4px"><input type="checkbox" name="pickup_modes" value="FIXED_STOP" ${route.pickup_modes.includes('FIXED_STOP') ? 'checked' : ''} ${route.own.pickup_modes ? '' : 'disabled'}> ${esc(MODE_LABEL.FIXED_STOP)}</label>
+          <label class="row" style="gap:6px"><input type="checkbox" name="pickup_modes" value="HOME_PICKUP" ${route.pickup_modes.includes('HOME_PICKUP') ? 'checked' : ''} ${route.own.pickup_modes ? '' : 'disabled'}> ${esc(MODE_LABEL.HOME_PICKUP)}</label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Chế độ trả khách</label>
+        <label class="row" style="gap:6px;margin-bottom:6px"><input type="checkbox" data-inherit="dropoff_modes" ${route.own.dropoff_modes ? '' : 'checked'}> Theo nhà xe</label>
+        <div style="padding-left:18px">
+          <label class="row" style="gap:6px;margin-bottom:4px"><input type="checkbox" name="dropoff_modes" value="FIXED_LOCATION" ${route.dropoff_modes.includes('FIXED_LOCATION') ? 'checked' : ''} ${route.own.dropoff_modes ? '' : 'disabled'}> ${esc(MODE_LABEL.FIXED_LOCATION)}</label>
+          <label class="row" style="gap:6px"><input type="checkbox" name="dropoff_modes" value="HOME_DROPOFF" ${route.dropoff_modes.includes('HOME_DROPOFF') ? 'checked' : ''} ${route.own.dropoff_modes ? '' : 'disabled'}> ${esc(MODE_LABEL.HOME_DROPOFF)}</label>
+        </div>
+      </div>
+
+      <div class="field" style="margin-top:12px">
+        <label class="row" style="gap:6px" title="Vé đã bán giữ nguyên; muốn hủy chuyến của ngày nào thì hủy trên bảng điều độ">
+          <input type="checkbox" name="sales_suspended" ${route.own.sales_suspended ? 'checked' : ''}> Tạm ngừng bán
+        </label>
+      </div>
+
+      <div class="error" id="routeSettingsError" style="margin-top:8px"></div>
+      <button class="btn primary" type="submit" id="saveRouteSettingsBtn" style="margin-top:8px">Lưu cách đón trả</button>
+    </form>
+
+    <!-- Card: Giờ chạy của tuyến -->
+    <div class="card" id="routeSchedulesCard">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div class="section-title" style="margin:0">Giờ chạy của tuyến (${routeSchedules.length})</div>
+        <button class="btn" type="button" id="routeGotoSchedulesBtn">Sửa ở Lịch chạy</button>
+      </div>
+      ${routeSchedules.length ? `
+        <div class="scroll" style="padding:0">
+          <table style="width:100%;font-size:13px">
+            <thead>
+              <tr>
+                <th>Giờ xuất bến</th>
+                <th>Thời gian</th>
+                <th>Ngày chạy</th>
+                <th>Giá vé</th>
+                <th>Trạng thái</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${routeSchedules.map(sc => {
+                const [label, kind] = SCHEDULE_STATUS[sc.status] || [sc.status, ''];
+                return `
+                  <tr>
+                    <td class="mono font-semibold" style="font-size:15px">${esc(sc.departure)}</td>
+                    <td class="muted">${esc(sc.duration_minutes)} phút</td>
+                    <td>${sc.extra ? `<span class="pill info">Tăng cường ${esc(ddmm(sc.valid_from))}</span>` : dayChips(sc.days_of_week)}</td>
+                    <td class="mono">${esc(vnd(sc.base_fare_vnd))}</td>
+                    <td><span class="pill ${kind}">${esc(label)}</span></td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : '<p class="muted" style="margin:0">Tuyến chưa có lịch chạy nào.</p>'}
+    </div>
+  `;
+
+  initRouteMap(route);
+
+  const depSel = $('#routeDepTimeSelect');
+  if (depSel) {
+    depSel.addEventListener('change', () => {
+      routesPanelState.departureTime = depSel.value;
+      validateStops(route);
+    });
+  }
+
+  const tbody = $('#routeStopsTbody');
+  if (tbody) {
+    tbody.querySelectorAll('input[name="offset"]').forEach(input => {
+      input.addEventListener('input', () => validateStops(route));
+    });
+    tbody.querySelectorAll('tr[data-stop]').forEach(tr => {
+      tr.addEventListener('click', (e) => {
+        if (['INPUT', 'SELECT', 'BUTTON', 'LABEL'].includes(e.target.tagName)) return;
+        const idx = Number(tr.dataset.index);
+        highlightStopMarker(idx);
+        tbody.querySelectorAll('tr').forEach(r => r.classList.toggle('sel', r === tr));
+      });
+    });
+  }
+
+  $('#saveStopsBtn')?.addEventListener('click', async () => {
+    if (!validateStops(route)) return;
+    const rows = [...tbody.querySelectorAll('tr[data-stop]')];
+    const stops = {};
+    for (const row of rows) {
+      const raw = row.querySelector('input[name="offset"]').value.trim();
+      stops[row.dataset.stop] = {
+        offset_minutes: raw === '' ? null : Number(raw),
+        pickup: row.querySelector('input[name="pickup"]').checked,
+        dropoff: row.querySelector('input[name="dropoff"]').checked,
+        hidden: !row.querySelector('input[name="visible"]').checked
+      };
+    }
+    $('#saveStopsBtn').disabled = true;
+    const r2 = await api(`/api/v1/ops/service-config/routes/${encodeURIComponent(route.route_id)}`, { method: 'PUT', body: { stops } });
+    $('#saveStopsBtn').disabled = false;
+    toast(r2.ok ? 'Đã lưu điểm dừng' : r2.message);
+    if (r2.ok) {
+      const routesRes = await api('/api/v1/ops/service-config/routes');
+      if (routesRes.ok) {
+        routesPanelState.routes = routesRes.data.routes || [];
+        renderRoutesList();
+        renderSelectedRoute();
+      }
+    }
+  });
+
+  const settingsForm = $('#routeSettingsCard');
+  if (settingsForm) {
+    settingsForm.querySelectorAll('input[data-inherit]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const wrap = cb.closest('.field');
+        wrap.querySelectorAll(`input[name="${cb.dataset.inherit}"]`).forEach(i => { i.disabled = cb.checked; });
+      });
+    });
+    settingsForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const inheritP = settingsForm.querySelector('input[data-inherit="pickup_modes"]').checked;
+      const inheritD = settingsForm.querySelector('input[data-inherit="dropoff_modes"]').checked;
+      const pickModes = (name) => [...settingsForm.querySelectorAll(`input[name="${name}"]:checked`)].map(i => i.value);
+      const body = {
+        stop_style: settingsForm.stop_style.value || null,
+        pickup_modes: inheritP ? null : pickModes('pickup_modes'),
+        dropoff_modes: inheritD ? null : pickModes('dropoff_modes'),
+        sales_suspended: settingsForm.sales_suspended.checked || null
+      };
+      $('#saveRouteSettingsBtn').disabled = true;
+      const r = await api(`/api/v1/ops/service-config/routes/${encodeURIComponent(route.route_id)}`, { method: 'PUT', body });
+      $('#saveRouteSettingsBtn').disabled = false;
+      $('#routeSettingsError').textContent = r.ok ? '' : r.message;
+      if (r.ok) {
+        toast('Đã lưu cấu hình tuyến');
+        const routesRes = await api('/api/v1/ops/service-config/routes');
+        if (routesRes.ok) {
+          routesPanelState.routes = routesRes.data.routes || [];
+          renderRoutesList();
+          renderSelectedRoute();
+        }
+      }
+    });
+  }
+
+  $('#routeGotoSchedulesBtn')?.addEventListener('click', () => {
+    schedulesRouteFilterValue = route.route_id;
+    show('schedules');
+  });
+}
+
+function renderStationsSection() {
+  const stations = routesPanelState.stations;
+  const tbody = $('#stationsTableBody');
+  if (tbody) {
+    tbody.innerHTML = stations.length ? stations.map(st => `
+      <tr class="click" data-station-id="${esc(st.station_id)}" style="cursor:pointer">
+        <td><b>${esc(st.name)}</b><div class="muted" style="font-size:11px">${esc(st.address || '')}</div></td>
+        <td>${esc(st.city || '')}</td>
+        <td>${st.kind === 'ROADSIDE' ? '<span class="pill">Dọc đường</span>' : '<span class="pill info">Bến xe</span>'}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="3" class="muted">Chưa có bến/điểm đón nào.</td></tr>';
+  }
+
+  if (routesPanelState.stationsMap) {
+    routesPanelState.stationsMap.remove();
+    routesPanelState.stationsMap = null;
+  }
+  const el = $('#stationsMap');
+  if (!el) return;
+  const map = newMap(el);
+  routesPanelState.stationsMap = map;
+  routesPanelState.stationsMapMarkers = [];
+  routesPanelState.draftStationMarker = null;
+
+  const bounds = [];
+  stations.forEach(st => {
+    const lat = Number(st.lat);
+    const lng = Number(st.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const isStation = st.kind === 'STATION';
+    const marker = L.circleMarker([lat, lng], {
+      radius: isStation ? 8 : 6,
+      fillColor: isStation ? '#2563eb' : '#64748b',
+      color: '#fff',
+      weight: 2,
+      fillOpacity: 0.9
+    }).addTo(map);
+    marker.bindPopup(`<b>${esc(st.name)}</b><br><span class="muted">${esc(st.city || '')} · ${isStation ? 'Bến xe' : 'Dọc đường'}</span>${st.address ? `<br>${esc(st.address)}` : ''}`);
+    routesPanelState.stationsMapMarkers.push({ stationId: st.station_id, marker, lat, lng });
+    bounds.push([lat, lng]);
+  });
+
+  if (bounds.length) {
+    map.fitBounds(bounds, { padding: [25, 25] });
+  }
+
+  tbody?.querySelectorAll('tr[data-station-id]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const item = routesPanelState.stationsMapMarkers.find(m => m.stationId === tr.dataset.stationId);
+      if (item) {
+        item.marker.openPopup();
+        map.panTo([item.lat, item.lng]);
+      }
+    });
+  });
+
+  map.on('click', (e) => {
+    const lat = Number(e.latlng.lat.toFixed(5));
+    const lng = Number(e.latlng.lng.toFixed(5));
+    $('#stLat').value = lat.toFixed(5);
+    $('#stLng').value = lng.toFixed(5);
+    if (routesPanelState.draftStationMarker) {
+      routesPanelState.draftStationMarker.setLatLng([lat, lng]);
+    } else {
+      routesPanelState.draftStationMarker = L.marker([lat, lng], {
+        draggable: true,
+        title: 'Điểm đang tạo'
+      }).addTo(map);
+      routesPanelState.draftStationMarker.on('dragend', (ev) => {
+        const pos = ev.target.getLatLng();
+        $('#stLat').value = pos.lat.toFixed(5);
+        $('#stLng').value = pos.lng.toFixed(5);
+      });
+    }
+  });
+
+  const onLatLngInput = () => {
+    const lat = Number($('#stLat').value);
+    const lng = Number($('#stLng').value);
+    if (Number.isFinite(lat) && Number.isFinite(lng) && lat >= 8 && lat <= 23.5 && lng >= 102 && lng <= 110) {
+      if (routesPanelState.draftStationMarker) {
+        routesPanelState.draftStationMarker.setLatLng([lat, lng]);
+      } else {
+        routesPanelState.draftStationMarker = L.marker([lat, lng], { draggable: true }).addTo(map);
+      }
+      map.panTo([lat, lng]);
+    }
+  };
+  $('#stLat').oninput = onLatLngInput;
+  $('#stLng').oninput = onLatLngInput;
+
+  setTimeout(() => map.invalidateSize(), 60);
+}
 
 // ---------- promotion banners (MGR-031) ----------
 const BANNER_STATUS = { LIVE: ['Đang chạy', 'ok'], SCHEDULED: ['Chưa bắt đầu', 'info'], ENDED: ['Đã kết thúc', ''], OFF: ['Đang tắt', 'warn'] };

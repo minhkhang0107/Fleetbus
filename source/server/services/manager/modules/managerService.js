@@ -5,7 +5,7 @@
 
 import crypto from 'crypto';
 import { createShareToken } from '../../passenger/core/cryptoEngine.js';
-import { DEMO_DATE, vnDate, parseServiceDate } from '../../../core/serviceDate.js';
+import { DEMO_DATE, vnDate, parseServiceDate, addDays, parseRunId } from '../../../core/serviceDate.js';
 import { validateVietnamPhone, validatePersonName } from '../../passenger/core/formatters.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { PLATFORM_SCOPE } from '../../../core/tenantDb.js';
@@ -13,8 +13,16 @@ import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js
 import { verifyTotp, generateSecret } from '../../../core/totp.js';
 import { getStaffTotpSecret } from '../../../config.js';
 import { DEFAULT_OPERATOR_ID, OPERATOR_INACTIVE, findOperatorById, publicOperatorProfile, generateTemporaryPassword } from '../../../core/operators.js';
-import { DEFAULT_LAYOUT_ID, findLayout } from '../../../core/seatLayouts.js';
+import { DEFAULT_LAYOUT_ID, BUILTIN_LAYOUTS, findLayout } from '../../../core/seatLayouts.js';
 import { MOCK_DRIVERS_DB } from '../../driver/modules/driverService.js';
+
+const DAY_MS = 24 * 3600000;
+const TURNAROUND_MS = 30 * 60000;
+const DRIVING_LIMIT_MS = 10 * 3600000;
+const vnDayStart = ms => Date.parse(`${vnDate(ms)}T00:00:00+07:00`);
+const hoursText = min => `${Math.floor(min / 60)} giờ${min % 60 ? ` ${min % 60} phút` : ''}`;
+const drivingLimitText = ({ day, driven_minutes, trip_minutes }) =>
+  `Quá 10 giờ lái ngày ${day.slice(8, 10)}/${day.slice(5, 7)}: đã lái ${hoursText(driven_minutes)}, chuyến này ${hoursText(trip_minutes)}`;
 
 const POS_PAYMENT_METHODS = ['CASH_POS', 'CARD_POS', 'BANK_TRANSFER'];
 // BR-MGR-AUTH-001: these roles need a TOTP code on every login (ROLE_OPS_ADMIN and ROLE_FINANCE of the spec)
@@ -1041,6 +1049,7 @@ export class ManagerOperationsService {
           const vehicle = this.vehicles.find(v => v.vehicle_id === t.vehicle_id);
           return {
             ...t,
+            arrival_time: new Date(this._tripWindow(t).end).toISOString(),
             route_name: t.route_name || this._scheduleName(t.schedule_id) || (route ? route.name : t.route_id),
             driver_name: this.drivers.find(d => d.driver_id === t.driver_id)?.full_name || 'Chưa gán',
             booked_seats: t.booked_seats || 0,
@@ -1050,6 +1059,48 @@ export class ManagerOperationsService {
           };
         })
       }
+    };
+  }
+
+  /**
+   * Multi-day summary of dispatch status for an operator.
+   * Days defaults to 7, max 14. Excludes cancelled trips from missing vehicle/driver counts.
+   * Does not include DEMO_DATE trips.
+   */
+  getDispatchSummary(from = null, days = 7, operatorId = DEFAULT_OPERATOR_ID) {
+    if (from && !parseServiceDate(from)) {
+      return { success: false, error: 'Ngày không hợp lệ (định dạng YYYY-MM-DD)', code: 'INVALID_DATE' };
+    }
+    this.releaseExpiredHotlineHolds();
+    const startDay = from || vnDate();
+    const count = Math.min(Math.max(1, parseInt(days, 10) || 7), 14);
+    const resultDays = [];
+
+    for (let i = 0; i < count; i++) {
+      const day = addDays(startDay, i);
+      this.runsForDate?.(day, operatorId);
+      const dayTrips = this.trips.filter(t =>
+        t.operator_id === operatorId &&
+        vnDate(Date.parse(t.departure_time)) === day &&
+        vnDate(Date.parse(t.departure_time)) !== DEMO_DATE
+      );
+      const total = dayTrips.length;
+      const cancelled = dayTrips.filter(t => t.status === 'CANCELLED').length;
+      const activeTrips = dayTrips.filter(t => t.status !== 'CANCELLED');
+      const no_vehicle = activeTrips.filter(t => !t.vehicle_id).length;
+      const no_driver = activeTrips.filter(t => !t.driver_id).length;
+      resultDays.push({
+        date: day,
+        total,
+        no_vehicle,
+        no_driver,
+        cancelled
+      });
+    }
+
+    return {
+      success: true,
+      data: { days: resultDays }
     };
   }
 
@@ -1089,12 +1140,107 @@ export class ManagerOperationsService {
     };
   }
 
-  /** Start and end (ms) of a trip, from the passenger catalog when it is there, else 3 h from departure. */
-  _tripWindow(trip) {
+  /**
+   * Start and end (ms) of a trip, from the passenger catalog when it is there, else 3 h from departure (D199).
+   * A reported delay makes the trip end later. A bus still on the road after its arrival time stays busy until
+   * now; a trip left open 12 h after arrival is a record nobody closed, not a bus on the road.
+   */
+  _tripWindow(trip, now = Date.now()) {
     const start = Date.parse(trip.departure_time);
     const detail = this.eventBridge?.services?.searchService?.getTripDetail?.(trip.trip_id);
-    const end = Date.parse(detail?.data?.arrival_time) || start + 3 * 3600000;
+    let end = (Date.parse(detail?.data?.arrival_time) || start + 3 * 3600000) + Math.max(0, Number(trip.delay_minutes) || 0) * 60000;
+    if (trip.status === 'IN_TRANSIT' && now > end && now - end < 12 * 3600000) end = now;
     return { start, end: Math.max(end, start) };
+  }
+
+  /** The operator's trip that keeps this bus or driver (field) busy during trip, 30 min turnaround included (D199). */
+  _busyTrip(trip, field, id, operatorId) {
+    if (!id) return null;
+    const own = this._tripWindow(trip);
+    return this.trips.find(t => {
+      if (t.trip_id === trip.trip_id || t.operator_id !== operatorId || t[field] !== id) return false;
+      if (['COMPLETED', 'CANCELLED'].includes(t.status)) return false;
+      const w = this._tripWindow(t);
+      return w.start < own.end + TURNAROUND_MS && own.start < w.end + TURNAROUND_MS;
+    }) || null;
+  }
+
+  /**
+   * D199: a driver drives at most 10 hours in a Vietnam calendar day. Counts every trip of the driver that is not
+   * cancelled (finished ones too), the part of each trip that falls on the day. Returns the first day trip would
+   * push over the limit, or null.
+   */
+  _drivingOverLimit(trip, driverId, operatorId) {
+    const own = this._tripWindow(trip);
+    const others = this.trips
+      .filter(t => t.trip_id !== trip.trip_id && t.operator_id === operatorId && t.driver_id === driverId && t.status !== 'CANCELLED')
+      .map(t => this._tripWindow(t));
+    for (let dayStart = vnDayStart(own.start); dayStart < own.end; dayStart += DAY_MS) {
+      const dayEnd = dayStart + DAY_MS;
+      const onDay = w => Math.max(0, Math.min(w.end, dayEnd) - Math.max(w.start, dayStart));
+      const before = others.reduce((sum, w) => sum + onDay(w), 0);
+      if (before + onDay(own) > DRIVING_LIMIT_MS) return { day: vnDate(dayStart), driven_minutes: Math.round(before / 60000), trip_minutes: Math.round(onDay(own) / 60000) };
+    }
+    return null;
+  }
+
+  /** Minutes the driver drives on trip's departure day, trip itself left out. */
+  _drivenMinutesOnDay(trip, driverId, operatorId) {
+    const dayStart = vnDayStart(this._tripWindow(trip).start);
+    const dayEnd = dayStart + DAY_MS;
+    return Math.round(this.trips
+      .filter(t => t.trip_id !== trip.trip_id && t.operator_id === operatorId && t.driver_id === driverId && t.status !== 'CANCELLED')
+      .map(t => this._tripWindow(t))
+      .reduce((sum, w) => sum + Math.max(0, Math.min(w.end, dayEnd) - Math.max(w.start, dayStart)), 0) / 60000);
+  }
+
+  _resolveExpectedLayout(trip) {
+    if (!trip) return null;
+    if (trip.vehicle_id) {
+      const v = this.vehicles.find(veh => veh.vehicle_id === trip.vehicle_id);
+      if (v) {
+        const layout = this.layoutOfVehicle(v.vehicle_id);
+        if (layout) return layout;
+      }
+    }
+    const inventory = this._inventory();
+    const invLayout = inventory?.tripLayouts?.get(trip.trip_id);
+    if (invLayout?.layout_id) {
+      const layout = findLayout(invLayout.layout_id, this.seatLayouts);
+      if (layout) return layout;
+    }
+    const searchService = this.eventBridge?.services?.searchService;
+    const catalogTrip = searchService?.getTripDetail?.(trip.trip_id)?.data
+      || searchService?._findTrip?.(trip.trip_id)
+      || (trip.schedule_id ? searchService?._findTrip?.(trip.schedule_id) : null);
+    const vehicleType = trip.vehicle_type
+      || catalogTrip?.vehicle_type
+      || (trip.schedule_id ? this.trips.find(t => t.trip_id === trip.schedule_id)?.vehicle_type : null);
+    const totalSeats = trip.total_seats || catalogTrip?.total_seats;
+
+    if (vehicleType) {
+      const direct = findLayout(vehicleType, this.seatLayouts);
+      if (direct) return direct;
+      const allLayouts = [...BUILTIN_LAYOUTS, ...(this.seatLayouts || [])];
+      const matchingTypes = allLayouts.filter(l => l.vehicle_type === vehicleType);
+      if (matchingTypes.length === 1) return matchingTypes[0];
+      if (matchingTypes.length > 1 && totalSeats) {
+        const bySeats = matchingTypes.find(l => l.seats?.length === totalSeats);
+        if (bySeats) return bySeats;
+      }
+    }
+    if (trip.layout_id) {
+      const layout = findLayout(trip.layout_id, this.seatLayouts);
+      if (layout) return layout;
+    }
+    if (trip.schedule_id) {
+      const schedTrip = this.trips.find(t => t.trip_id === trip.schedule_id);
+      if (schedTrip?.vehicle_id) {
+        const layout = this.layoutOfVehicle(schedTrip.vehicle_id);
+        if (layout) return layout;
+      }
+    }
+    return null;
   }
 
   /**
@@ -1105,18 +1251,25 @@ export class ManagerOperationsService {
   getAssignOptions(tripId, operatorId = DEFAULT_OPERATOR_ID) {
     const trip = this.findTrip(tripId);
     if (!trip || trip.operator_id !== operatorId) return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
-    const TURNAROUND = 30 * 60000;
     const own = this._tripWindow(trip);
     const sold = (trip.booked_seats || 0) + (trip.held_seats || 0);
-    const others = this.trips.filter(t => t.trip_id !== tripId && t.operator_id === operatorId && !['COMPLETED', 'CANCELLED'].includes(t.status));
-    const clash = (field, id) => others.find(t => {
-      if (t[field] !== id) return false;
-      const w = this._tripWindow(t);
-      return w.start < own.end + TURNAROUND && own.start < w.end + TURNAROUND;
-    });
+    const clash = (field, id) => this._busyTrip(trip, field, id, operatorId);
     const day = vnDate(own.start);
     const inventory = this._inventory();
     const occupiedCodes = inventory?.getOccupiedSeatCodes?.(tripId) || [];
+
+    const expectedLayout = this._resolveExpectedLayout(trip);
+    const expected_layout_name = expectedLayout?.name || null;
+    const expected_seats = expectedLayout?.seats?.length ?? trip.total_seats ?? null;
+
+    const mapDayTrip = t => ({
+      trip_id: t.trip_id,
+      departure_time: t.departure_time,
+      arrival_time: new Date(this._tripWindow(t).end).toISOString(),
+      route_name: t.route_name || this._scheduleName(t.schedule_id) || this.routes.find(r => r.route_id === t.route_id)?.name || t.route_id,
+      status: t.status
+    });
+
     const vehicles = this.vehicles.filter(v => v.operator_id === operatorId).map(v => {
       const busy = clash('vehicle_id', v.vehicle_id);
       const vTemplate = this.layoutOfVehicle(v.vehicle_id);
@@ -1127,17 +1280,76 @@ export class ManagerOperationsService {
         : seatCount < sold ? `Xe ${seatCount} chỗ, chuyến đã bán ${sold} ghế`
           : missing.length > 0 ? `Xe thiếu ghế đã bán: ${missing.join(', ')}`
             : busy ? `Đang chạy chuyến ${busy.trip_id} trùng giờ` : null;
-      return { vehicle_id: v.vehicle_id, plate_number: v.plate_number, model: v.model, total_seats: seatCount, capacity: seatCount + 1, assigned: v.vehicle_id === trip.vehicle_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
+
+      const day_trips = this.trips
+        .filter(t => t.operator_id === operatorId && t.trip_id !== tripId && t.vehicle_id === v.vehicle_id && vnDate(Date.parse(t.departure_time)) === day && t.status !== 'CANCELLED')
+        .sort((a, b) => (Date.parse(a.departure_time) || 0) - (Date.parse(b.departure_time) || 0))
+        .map(mapDayTrip);
+
+      const layout_name = vTemplate?.name || null;
+      const layout_match = expectedLayout ? (vTemplate?.layout_id === expectedLayout.layout_id) : null;
+
+      return {
+        vehicle_id: v.vehicle_id,
+        plate_number: v.plate_number,
+        model: v.model,
+        total_seats: seatCount,
+        capacity: seatCount + 1,
+        assigned: v.vehicle_id === trip.vehicle_id,
+        available: !reason,
+        reason,
+        conflict_trip_id: busy?.trip_id || null,
+        layout_name,
+        layout_match,
+        day_trips
+      };
     });
+
     const drivers = this.drivers.filter(d => d.operator_id === operatorId).map(d => {
       const busy = clash('driver_id', d.driver_id);
+      const overLimit = this._drivingOverLimit(trip, d.driver_id, operatorId);
       const reason = d.status === 'LOCKED' ? 'Tài xế đã bị khóa'
         : d.status === 'LICENSE_EXPIRED' || (d.license_expiry && d.license_expiry < day) ? 'Bằng lái hết hạn vào ngày chạy'
         : d.status === 'OFF_DUTY' || d.status === 'SUSPENDED' ? 'Tài xế không làm việc'
-          : busy ? `Đang chạy chuyến ${busy.trip_id} trùng giờ` : null;
-      return { driver_id: d.driver_id, staff_id: d.staff_id, full_name: d.full_name, license_class: d.license_class, license_expiry: d.license_expiry, max_capacity: LICENSE_MAX_CAPACITY[d.license_class] !== undefined ? LICENSE_MAX_CAPACITY[d.license_class] : null, assigned: d.driver_id === trip.driver_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
+          : busy ? `Đang chạy chuyến ${busy.trip_id} trùng giờ`
+            : overLimit ? drivingLimitText(overLimit) : null;
+
+      const day_trips = this.trips
+        .filter(t => t.operator_id === operatorId && t.trip_id !== tripId && t.driver_id === d.driver_id && vnDate(Date.parse(t.departure_time)) === day && t.status !== 'CANCELLED')
+        .sort((a, b) => (Date.parse(a.departure_time) || 0) - (Date.parse(b.departure_time) || 0))
+        .map(mapDayTrip);
+
+      return {
+        driver_id: d.driver_id,
+        staff_id: d.staff_id,
+        full_name: d.full_name,
+        license_class: d.license_class,
+        license_expiry: d.license_expiry,
+        max_capacity: LICENSE_MAX_CAPACITY[d.license_class] !== undefined ? LICENSE_MAX_CAPACITY[d.license_class] : null,
+        assigned: d.driver_id === trip.driver_id,
+        available: !reason,
+        reason,
+        conflict_trip_id: busy?.trip_id || null,
+        driven_minutes: this._drivenMinutesOnDay(trip, d.driver_id, operatorId),
+        day_trips
+      };
     });
-    return { success: true, data: { trip_id: tripId, departure_time: trip.departure_time, status: trip.status, sold_seats: sold, vehicle_id: trip.vehicle_id || null, driver_id: trip.driver_id || null, vehicles, drivers } };
+
+    return {
+      success: true,
+      data: {
+        trip_id: tripId,
+        departure_time: trip.departure_time,
+        status: trip.status,
+        sold_seats: sold,
+        vehicle_id: trip.vehicle_id || null,
+        driver_id: trip.driver_id || null,
+        expected_layout_name,
+        expected_seats,
+        vehicles,
+        drivers
+      }
+    };
   }
 
   /**
@@ -1201,10 +1413,74 @@ export class ManagerOperationsService {
     const layout = this.layoutOfVehicle(vehicle.vehicle_id);
     trip.total_seats = layout?.seats?.length || vehicle.total_seats;
     trip.driver_id = driver.driver_id;
+
+    let applied_runs = 0;
+    const skipped_runs = [];
+
     if (scope === 'SCHEDULE') {
       if (!this.scheduleAssignments) this.scheduleAssignments = {};
-      this.scheduleAssignments[trip.schedule_id || trip.trip_id] = { vehicle_id: vehicle.vehicle_id, driver_id: driver.driver_id };
+      const scheduleId = trip.schedule_id || trip.trip_id;
+      this.scheduleAssignments[scheduleId] = { vehicle_id: vehicle.vehicle_id, driver_id: driver.driver_id };
+
+      const tripDepartureMs = Date.parse(trip.departure_time);
+      const candidateRuns = this.trips.filter(t =>
+        t.trip_id !== trip.trip_id &&
+        t.operator_id === operatorId &&
+        (t.schedule_id === scheduleId || (!t.schedule_id && parseRunId(t.trip_id)?.templateId === scheduleId) || (!t.schedule_id && t.trip_id === scheduleId)) &&
+        Date.parse(t.departure_time) > tripDepartureMs &&
+        !['IN_TRANSIT', 'COMPLETED', 'CANCELLED'].includes(t.status) &&
+        !t.vehicle_id &&
+        !t.driver_id
+      ).sort((a, b) => Date.parse(a.departure_time) - Date.parse(b.departure_time));
+
+      for (const cand of candidateRuns) {
+        const candOpts = this.getAssignOptions(cand.trip_id, operatorId);
+        const candVeh = candOpts.success ? candOpts.data.vehicles.find(v => v.vehicle_id === vehicle.vehicle_id) : null;
+        const candDrv = candOpts.success ? candOpts.data.drivers.find(d => d.driver_id === driver.driver_id) : null;
+
+        const candOwn = this._tripWindow(cand);
+        const candDay = vnDate(candOwn.start);
+        const candFullDriver = this.drivers.find(d => d.driver_id === driver.driver_id) || driver;
+        const isDriverExpired = candFullDriver.status === 'LICENSE_EXPIRED' || (candFullDriver.license_expiry && candFullDriver.license_expiry < candDay);
+        const candVTemplate = this.layoutOfVehicle(vehicle.vehicle_id);
+        const candPassengerSeats = candVTemplate?.seats?.length || vehicle.total_seats || 0;
+        const candCapacity = candPassengerSeats + 1;
+        const candLicReason = driverLicenseCapacityReason(candFullDriver.license_class, candCapacity, vehicle.plate_number);
+
+        const isFree = candVeh?.available && candDrv?.available && !candLicReason && !isDriverExpired;
+
+        if (!isFree) {
+          const reason = (!candVeh?.available ? candVeh?.reason : null)
+            || (!candDrv?.available ? candDrv?.reason : null)
+            || (isDriverExpired ? 'Bằng lái hết hạn vào ngày chạy' : null)
+            || candLicReason
+            || 'Không khả dụng';
+          skipped_runs.push({ trip_id: cand.trip_id, reason });
+        } else {
+          const prev = {
+            vehicle_id: cand.vehicle_id || null,
+            vehicle_plate: cand.vehicle_plate || null,
+            driver_id: cand.driver_id || null
+          };
+          cand.vehicle_id = vehicle.vehicle_id;
+          cand.vehicle_plate = vehicle.plate_number;
+          const candLayout = this.layoutOfVehicle(vehicle.vehicle_id);
+          cand.total_seats = candLayout?.seats?.length || vehicle.total_seats;
+          cand.driver_id = driver.driver_id;
+          applied_runs++;
+          this.eventBridge?.emit?.('TRIP_ASSIGNED', {
+            tripId: cand.trip_id,
+            vehiclePlate: vehicle.plate_number,
+            vehicleModel: vehicle.model,
+            capacity: cand.total_seats,
+            driverId: driver.driver_id,
+            driverName: driver.full_name,
+            previous: prev
+          });
+        }
+      }
     }
+
     this.eventBridge?.emit?.('TRIP_ASSIGNED', {
       tripId,
       vehiclePlate: vehicle.plate_number,
@@ -1214,7 +1490,20 @@ export class ManagerOperationsService {
       driverName: driver.full_name,
       previous
     });
-    return { success: true, data: { trip_id: tripId, vehicle_id: vehicle.vehicle_id, vehicle_plate: vehicle.plate_number, driver_id: driver.driver_id, driver_name: driver.full_name, scope, previous } };
+    return {
+      success: true,
+      data: {
+        trip_id: tripId,
+        vehicle_id: vehicle.vehicle_id,
+        vehicle_plate: vehicle.plate_number,
+        driver_id: driver.driver_id,
+        driver_name: driver.full_name,
+        scope,
+        previous,
+        applied_runs,
+        skipped_runs
+      }
+    };
   }
 
   /** The plate a schedule's runs get by default (the office's default for the schedule, else the seed trip's). */
@@ -1258,6 +1547,16 @@ export class ManagerOperationsService {
       delay_minutes: 0,
       operator_id: trip.operator_id
     };
+    // D199: a bus or driver the run inherits from its schedule is dropped when already busy then (or the driver
+    // would pass 10 hours that day); the run then shows as not assigned so the office picks someone.
+    const opId = run.operator_id || DEFAULT_OPERATOR_ID;
+    if (run.vehicle_id && this._busyTrip(run, 'vehicle_id', run.vehicle_id, opId)) {
+      run.vehicle_id = null;
+      run.vehicle_plate = null;
+    }
+    if (run.driver_id && (this._busyTrip(run, 'driver_id', run.driver_id, opId) || this._drivingOverLimit(run, run.driver_id, opId))) {
+      run.driver_id = null;
+    }
     this.trips.push(run);
     return run;
   }
@@ -1727,6 +2026,18 @@ export class ManagerOperationsService {
     // DRI-001 refuses a driver whose licence has expired; a replacement must be someone who can sign in
     if (newDriver && (newDriver.status === 'LOCKED' || (newDriver.status !== 'ON_DUTY' && newDriver.status !== 'ACTIVE') || new Date(`${newDriver.license_expiry}T23:59:59+07:00`).getTime() < Date.now())) {
       return { success: false, error: `Tài xế ${newDriver.full_name} không đủ điều kiện nhận chuyến (giấy phép lái xe hoặc trạng thái ca)`, code: 'DRIVER_UNAVAILABLE' };
+    }
+
+    // D199: the replacement bus and driver must not be on another trip at that time.
+    const busyVehicle = targetVehicle.vehicle_id !== trip.vehicle_id ? this._busyTrip(trip, 'vehicle_id', targetVehicle.vehicle_id, operatorId) : null;
+    if (busyVehicle) {
+      return { success: false, error: `Xe ${targetVehicle.plate_number} đang chạy chuyến ${busyVehicle.trip_id} trùng giờ`, code: 'VEHICLE_UNAVAILABLE', conflict_trip_id: busyVehicle.trip_id };
+    }
+    if (newDriver && newDriver.driver_id !== trip.driver_id) {
+      const busyDriver = this._busyTrip(trip, 'driver_id', newDriver.driver_id, operatorId);
+      if (busyDriver) return { success: false, error: `Tài xế ${newDriver.full_name} đang chạy chuyến ${busyDriver.trip_id} trùng giờ`, code: 'DRIVER_UNAVAILABLE', conflict_trip_id: busyDriver.trip_id };
+      const overLimit = this._drivingOverLimit(trip, newDriver.driver_id, operatorId);
+      if (overLimit) return { success: false, error: `Tài xế ${newDriver.full_name}: ${drivingLimitText(overLimit)}`, code: 'DRIVER_HOURS_LIMIT' };
     }
 
     const oldPlate = trip.vehicle_plate;

@@ -213,8 +213,10 @@ export function reloadScheduleTemplates() {
     if (t.schedule_id) continue;
     SCHEDULE_TEMPLATES.set(t.trip_id, t);
     aliasShape(t.trip_id, t.shape_id);
-    // A route a company drew itself has no surveyed road: a line through its stops, as when it was created.
-    if (!routeShape(t.trip_id)) {
+    // The road found when the company drew the route (D201), else a line through its stops.
+    if (Array.isArray(t.road_shape) && t.road_shape.length >= 2) {
+      setRouteShape(t.shape_id || t.trip_id, t.road_shape);
+    } else if (!routeShape(t.trip_id)) {
       const line = (t.stops || []).filter(st => Number.isFinite(st.lat) && Number.isFinite(st.lng)).map(st => [st.lat, st.lng]);
       if (line.length >= 2) setRouteShape(t.shape_id || t.trip_id, line);
     }
@@ -565,8 +567,7 @@ export class PassengerSearchService {
       return invalid('Điểm dừng không được trùng lặp');
     }
 
-    const usableStations = STATIONS_DATABASE.filter(s => s.operator_ids && s.operator_ids.includes(operatorId));
-    const stationMap = new Map(usableStations.map(s => [s.station_id, s]));
+    const stationMap = new Map(this.operatorStops(operatorId).map(s => [s.station_id, s]));
 
     for (const s of input.stops) {
       if (!s?.stop_id || !stationMap.has(s.stop_id)) {
@@ -810,6 +811,45 @@ export class PassengerSearchService {
   /** Ids of a company's schedules. */
   schedulesOf(operatorId) {
     return [...SCHEDULE_TEMPLATES.values()].filter(t => !operatorId || t.operator_id === operatorId).map(t => t.trip_id);
+  }
+
+  /**
+   * D200: every stop a company can put on a route: its stations, plus the roadside stops its routes already use
+   * (they live only in the route's schedules, so a new route could not pick them before).
+   */
+  operatorStops(operatorId) {
+    const stops = STATIONS_DATABASE.filter(s => s.operator_ids && s.operator_ids.includes(operatorId));
+    const known = new Set(stops.map(s => s.station_id));
+    for (const t of SCHEDULE_TEMPLATES.values()) {
+      if (t.operator_id !== operatorId) continue;
+      for (const st of t.stops || []) {
+        if (known.has(st.stop_id)) continue;
+        const coords = stopCoords(st.stop_id);
+        if (!coords) continue;
+        known.add(st.stop_id);
+        stops.push({ station_id: st.stop_id, name: st.name, city: st.city || '', address: '', lat: coords.lat, lng: coords.lng, kind: st.kind || 'ROADSIDE', popular: false, operator_ids: [operatorId], from_route: true });
+      }
+    }
+    return stops;
+  }
+
+  /**
+   * D201: keep the road found for a route on all its schedules (so it survives a restart) and use it from now on.
+   */
+  setRouteRoad(routeId, operatorId, shape) {
+    const templates = [...SCHEDULE_TEMPLATES.values()].filter(t => t.route_id === routeId && t.operator_id === operatorId);
+    if (!templates.length || !Array.isArray(shape) || shape.length < 2) return false;
+    for (const t of templates) {
+      t.road_shape = shape;
+      setRouteShape(t.shape_id || t.trip_id, shape);
+    }
+    return true;
+  }
+
+  /** The road (or straight line) a route's buses follow, as [[lat, lng]], or null. */
+  routeLine(routeId, operatorId) {
+    const t = this.templateForRoute(routeId, operatorId);
+    return t ? routeShape(t.trip_id) : null;
   }
 
   /** A schedule of the route (its stops are the route's stops), or null. */

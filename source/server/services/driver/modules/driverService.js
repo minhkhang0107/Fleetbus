@@ -4,7 +4,7 @@
  */
 
 import { homeConfirmed } from '../../../core/serviceAreas.js';
-import { doorKey, doorPositions, homeAppointments, homeOrder, homeQueue, homeRunOutlook, homeWaitMinutes, isWaitingHome, missableAt } from '../../../core/homeRun.js';
+import { doorKey, doorPositions, homeAppointments, homeOrder, homeQueue, homeRunOutlook, homeWaitMinutes, isWaitingHome, missableAt, homeRunMap, homeRoadStale, refreshHomeRoad } from '../../../core/homeRun.js';
 import crypto from 'crypto';
 import {
   generateBoardingQR,
@@ -523,7 +523,10 @@ export class DriverCockpitService {
             if (stop?.name) return { ...ev, stop_name: stop.name };
           }
           return ev;
-        })
+        }),
+        // D202: the home run on a map for the office (doors numbered, road to the first stop) and whether it fits.
+        home_run_map: pub.home_run?.map || null,
+        home_run_outlook: pub.home_run?.outlook || null
       }
     };
   }
@@ -1518,6 +1521,7 @@ export class DriverCockpitService {
   _homeRunView(trip) {
     const order = homeOrder(trip);
     if (order.length === 0) return null;
+    this._kickHomeRoad(trip);
     const config = this._configOf(trip);
     const appointments = homeAppointments(trip);
     const positions = doorPositions(order);
@@ -1526,6 +1530,8 @@ export class DriverCockpitService {
       wait_minutes: homeWaitMinutes(config),
       // Whether the run still fits the departure: the driver may reorder it or tell the office.
       outlook: homeRunOutlook(trip),
+      // D202: the doors still to collect, numbered, and the road through them to the first stop.
+      map: homeRunMap(trip),
       stops: order.map(p => ({
         ticket_id: p.ticket_id,
         position: positions[p.ticket_id],
@@ -1537,6 +1543,17 @@ export class DriverCockpitService {
         waiting: isWaitingHome(p)
       }))
     };
+  }
+
+  /**
+   * D202: asks the road of the home run in the background when the doors changed; the next poll shows it. One
+   * request per trip at a time.
+   */
+  _kickHomeRoad(trip) {
+    if (!trip?.trip_id || this._homeRoadPending?.has(trip.trip_id) || !homeRoadStale(trip)) return;
+    this._homeRoadPending = this._homeRoadPending || new Set();
+    this._homeRoadPending.add(trip.trip_id);
+    refreshHomeRoad(trip).catch(() => {}).finally(() => this._homeRoadPending.delete(trip.trip_id));
   }
 
   _homePassenger(tripId, ticketId) {

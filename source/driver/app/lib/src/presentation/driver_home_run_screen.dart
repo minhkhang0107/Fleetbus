@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'driver_cod_dialog.dart';
+import 'driver_home_run_map.dart';
 import 'driver_manifest_screen.dart';
 import 'driver_route_map.dart';
 import 'driver_store.dart';
@@ -103,7 +104,10 @@ class _DriverHomeRunScreenState extends State<DriverHomeRunScreen> {
           ),
         ],
         const SizedBox(height: 12),
-        DriverRouteMap(store: store, height: 200),
+        if (store.homeRunMap != null)
+          DriverHomeRunMap(store: store, height: 260)
+        else
+          DriverRouteMap(store: store, height: 200),
         const SizedBox(height: 12),
         for (var i = 0; i < homes.length; i++) ...[
           _HomeCard(

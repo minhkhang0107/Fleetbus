@@ -287,6 +287,16 @@ class ManagerApiService {
     );
   }
 
+  // MGR-011: Road through stops in order, distance and driving time (D201)
+  Future<Map<String, dynamic>> previewRouteRoad(List<List<double>> points) {
+    return _post('/ops/routes/road-preview', idempotent: true, body: {'points': points});
+  }
+
+  // MGR-011: Find the road again for a route drawn as straight lines (D201)
+  Future<Map<String, dynamic>> refreshRouteRoad(String routeId) {
+    return _post('/ops/routes/${Uri.encodeComponent(routeId)}/road-shape');
+  }
+
   // MGR-011: Rename or close a route
   Future<Map<String, dynamic>> updateRoute(
     String routeId,
@@ -316,6 +326,11 @@ class ManagerApiService {
   // MGR-014: Dispatch Board
   Future<Map<String, dynamic>> getDispatchBoard() {
     return _get('/ops/dispatch/matrix');
+  }
+
+  // MGR-014: Trips missing a bus or driver, day by day (D198)
+  Future<Map<String, dynamic>> getDispatchSummary({String? from, int days = 7}) {
+    return _get('/ops/dispatch/summary', query: {if (from != null) 'from': from, 'days': '$days'});
   }
 
   // MGR-014: Holds of a trip kept through the hotline

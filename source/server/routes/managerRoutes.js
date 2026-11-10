@@ -15,7 +15,8 @@ import { isProduction } from '../config.js';
 import { resolveHomeBooking, routeServiceConfig } from '../core/serviceAreas.js';
 import { BUILTIN_LAYOUTS, validateLayout, findLayout } from '../core/seatLayouts.js';
 import { STATIONS_DATABASE, MOCK_TRIPS_DATABASE, scheduleView } from '../services/passenger/modules/search.js';
-import { setStopCoords } from '../core/geo.js';
+import { setStopCoords, stopCoords } from '../core/geo.js';
+import { roadPath, roadRoutingEnabled } from '../core/roadRouting.js';
 import { MOCK_MANAGERS_DB } from '../services/manager/modules/managerService.js';
 import { normalizeStaffAccount, ALLOWED_PERMISSIONS } from '../services/manager/modules/staffAccounts.js';
 
@@ -571,8 +572,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   // GET /api/v1/ops/stations (MGR-011)
   if (pathname === '/api/v1/ops/stations' && req.method === 'GET') {
     const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
-    const stations = STATIONS_DATABASE.filter(s => s.operator_ids && s.operator_ids.includes(operatorId));
-    sendSuccess(res, stations);
+    sendSuccess(res, services.searchService.operatorStops(operatorId));
     return true;
   }
 
@@ -644,9 +644,48 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // POST /api/v1/ops/routes/road-preview (MGR-011, D201): the road through stops in order, for the route builder map
+  if (pathname === '/api/v1/ops/routes/road-preview' && req.method === 'POST') {
+    parseJsonBody(req).then(async body => {
+      const points = Array.isArray(body?.points) ? body.points.map(p => [Number(p?.[0]), Number(p?.[1])]) : [];
+      if (points.length < 2 || points.length > 25 || points.some(([lat, lng]) => !Number.isFinite(lat) || !Number.isFinite(lng))) {
+        sendError(res, 'Cần từ 2 đến 25 điểm có tọa độ', 'VALIDATION_ERROR', 400);
+        return;
+      }
+      const road = await roadPath(points);
+      sendSuccess(res, road ? { ...road, source: 'ROAD' } : { shape: null, distance_km: null, duration_minutes: null, source: roadRoutingEnabled() ? 'UNAVAILABLE' : 'OFF' });
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/ops/routes/:routeId/road-shape (MGR-011, D201): find the road again for a route drawn as straight lines
+  const roadShapeMatch = pathname.match(/^\/api\/v1\/ops\/routes\/([^/]+)\/road-shape$/);
+  if (roadShapeMatch && req.method === 'POST') {
+    const routeId = decodeURIComponent(roadShapeMatch[1]);
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const route = managerService.routes.find(r => r.route_id === routeId && r.operator_id === operatorId);
+    const stops = route ? services.searchService.routeStops(routeId, operatorId) : [];
+    if (!route || stops.length < 2) {
+      sendError(res, 'Không tìm thấy tuyến đường', 'ROUTE_NOT_FOUND', 404);
+      return true;
+    }
+    const points = stops.map(st => stopCoords(st.stop_id)).filter(Boolean).map(c => [c.lat, c.lng]);
+    roadPath(points).then(road => {
+      if (!road) {
+        sendError(res, 'Chưa lấy được đường bộ cho tuyến này, thử lại sau', 'ROAD_UNAVAILABLE', 503);
+        return;
+      }
+      const before = services.searchService.routeLine(routeId, operatorId);
+      services.searchService.setRouteRoad(routeId, operatorId, road.shape);
+      audit(req, managerService, { action: 'ROUTE_ROAD_UPDATE', resource: routeId, before: { points: before?.length || 0 }, after: { points: road.shape.length, distance_km: road.distance_km } });
+      sendSuccess(res, { route_id: routeId, ...road });
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 500));
+    return true;
+  }
+
   // POST /api/v1/ops/routes (MGR-011)
   if (pathname === '/api/v1/ops/routes' && req.method === 'POST') {
-    parseJsonBody(req).then(body => {
+    parseJsonBody(req).then(async body => {
       const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
       const when = { today: vnDate(), changeFrom: scheduleChangeFrom() };
       const customLayouts = (managerService.seatLayouts || []).filter(l => (l.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
@@ -670,8 +709,12 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         active: true
       };
       managerService.routes.push(routeEntry);
+      // D201: follow the road between the stops when a router answers; else the straight line stays.
+      const road = await roadPath(result.stops.filter(st => Number.isFinite(st.lat) && Number.isFinite(st.lng)).map(st => [st.lat, st.lng]));
+      if (road) services.searchService.setRouteRoad(result.route_id, operatorId, road.shape);
       const after = {
         ...routeEntry,
+        road_shape: Boolean(road),
         schedule_id: result.schedule_id,
         schedule: scheduleView(result.template, when)
       };
@@ -721,6 +764,25 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       audit(req, managerService, { action: 'ROUTE_UPDATE', resource: routeId, before, after: route });
       sendSuccess(res, route);
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/ops/dispatch/summary
+  if (pathname === '/api/v1/ops/dispatch/summary' && req.method === 'GET') {
+    const from = parsedUrl.searchParams.get('from');
+    if (from && !parseServiceDate(from)) {
+      sendError(res, 'Ngày không hợp lệ (định dạng YYYY-MM-DD)', 'INVALID_DATE', 400);
+      return true;
+    }
+    const daysRaw = parsedUrl.searchParams.get('days');
+    const parsedDays = daysRaw !== null ? parseInt(daysRaw, 10) : 7;
+    const days = Math.min(Math.max(1, isNaN(parsedDays) ? 7 : parsedDays), 14);
+    const summary = managerService.getDispatchSummary(from || null, days, req.operatorId);
+    if (!summary.success) {
+      sendError(res, summary.error, summary.code, 400);
+      return true;
+    }
+    sendSuccess(res, summary.data || summary);
     return true;
   }
 

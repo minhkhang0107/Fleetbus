@@ -343,6 +343,43 @@ describe('Phase Manager Web: Flutter Web Platform & Dashboard Integrity Test Sui
       'Dispatch board URL must always include ?date='
     );
 
+    // 2b. Dispatch summary endpoint call with from=
+    assert.ok(
+      content.includes('/api/v1/ops/dispatch/summary?from=') ||
+      /\/api\/v1\/ops\/dispatch\/summary\?from=/.test(content),
+      'Dispatch panel must call dispatch summary endpoint with from='
+    );
+
+    // 2c. Delegated board click listener
+    assert.ok(
+      content.includes("closest('tr[data-trip]')") ||
+      content.includes('closest("tr[data-trip]")'),
+      'Board must use delegated click listener closest("tr[data-trip]")'
+    );
+    assert.ok(
+      !content.includes("tr.addEventListener('click', () => openTrip"),
+      'Board must not attach per-row click listeners to board trips'
+    );
+
+    // 2d. "Danh sách" | "Theo xe" view toggle
+    assert.ok(
+      content.includes('Danh sách') && content.includes('Theo xe'),
+      'Dispatch panel must include "Danh sách" and "Theo xe" view toggle buttons'
+    );
+
+    // 2e. Two scope radios in assign block
+    assert.ok(
+      content.includes('name="scope"') &&
+      content.includes('value="TRIP"') &&
+      content.includes('value="SCHEDULE"'),
+      'Assign form must include scope radio buttons'
+    );
+    assert.ok(
+      content.includes('Chỉ chuyến này') &&
+      content.includes('Chuyến này và các ngày sau của giờ'),
+      'Scope radios must have Vietnamese labels for TRIP and SCHEDULE'
+    );
+
     // 3. Extract and evaluate helper functions in vm
     const scriptMatch = content.match(/<script>([\s\S]*?)<\/script>/);
     assert.ok(scriptMatch, 'index.html must have an inline script');
@@ -648,6 +685,7 @@ describe('Phase Manager Web: Flutter Web Platform & Dashboard Integrity Test Sui
     assert.strictEqual(ctx.canView('bookings'), true);
     assert.strictEqual(ctx.canView('payments'), true);
     assert.strictEqual(ctx.canView('schedules'), true);
+    assert.strictEqual(ctx.canView('routes'), true);
     assert.strictEqual(ctx.canView('staff'), true);
     assert.strictEqual(ctx.canView('audit'), true);
 
@@ -662,6 +700,7 @@ describe('Phase Manager Web: Flutter Web Platform & Dashboard Integrity Test Sui
     assert.strictEqual(ctx.canView('live'), true); // public
     assert.strictEqual(ctx.canView('bookings'), true); // BOOKINGS_VIEW
     assert.strictEqual(ctx.canView('schedules'), true); // SCHEDULES
+    assert.strictEqual(ctx.canView('routes'), true); // SCHEDULES
     assert.strictEqual(ctx.canView('fleet'), true); // FLEET
     assert.strictEqual(ctx.canView('drivers'), true); // DRIVERS
     assert.strictEqual(ctx.canView('homereq'), true); // DISPATCH
@@ -678,6 +717,7 @@ describe('Phase Manager Web: Flutter Web Platform & Dashboard Integrity Test Sui
     assert.strictEqual(ctx.canView('bookings'), true); // BOOKINGS_VIEW
     assert.strictEqual(ctx.canView('payments'), true); // PAYMENTS
     assert.strictEqual(ctx.canView('schedules'), false);
+    assert.strictEqual(ctx.canView('routes'), false);
     assert.strictEqual(ctx.canView('fleet'), false);
     assert.strictEqual(ctx.canView('staff'), false);
 
@@ -690,6 +730,7 @@ describe('Phase Manager Web: Flutter Web Platform & Dashboard Integrity Test Sui
     assert.strictEqual(ctx.canView('payments'), true); // PAYMENTS, REFUNDS
     assert.strictEqual(ctx.canView('audit'), true); // AUDIT_VIEW
     assert.strictEqual(ctx.canView('schedules'), false);
+    assert.strictEqual(ctx.canView('routes'), false);
     assert.strictEqual(ctx.canView('drivers'), false);
     assert.strictEqual(ctx.canView('staff'), false);
 
@@ -839,5 +880,50 @@ describe('Phase Manager Web: Flutter Web Platform & Dashboard Integrity Test Sui
     assert.ok(content.includes('minlength="10"'), 'Note must require minlength 10');
     assert.ok(content.includes('confirmModalLimitWarn'), 'Must have limit warning element');
     assert.ok(content.includes('MANUAL_CONFIRM_LIMIT'), 'Must handle MANUAL_CONFIRM_LIMIT error');
+  });
+
+  it('TC-MGR-WEB-24: Manager Web Routes & Stops management panel and modal workflows', () => {
+    const webDistPath = path.join(managerDir, 'web_dist/index.html');
+    assert.ok(fs.existsSync(webDistPath), 'source/manager/web_dist/index.html must exist');
+    const content = fs.readFileSync(webDistPath, 'utf8');
+
+    // 1. Routes nav item and panel
+    assert.ok(content.includes('data-view="routes"'), 'Must have routes nav button');
+    assert.ok(content.includes('data-panel="routes"'), 'Must have routes panel');
+    assert.ok(/routes:\s*\[[^\]]*'SCHEDULES'[^\]]*\]/.test(content), 'NAV_PERMISSIONS.routes must require SCHEDULES');
+
+    // 2. Stops validation message
+    assert.ok(
+      content.includes('Giờ đến các điểm phải tăng dần theo thứ tự tuyến'),
+      'Must contain stops validation error message'
+    );
+
+    // 3. Station map click filling lat/lng code path
+    assert.ok(content.includes('stLat') && content.includes('stLng'), 'Station form must have lat/lng fields');
+    assert.ok(
+      content.includes('.toFixed(5)') && (content.includes('stLat') || content.includes('#stLat')),
+      'Station map click must fill lat/lng with 5 decimals'
+    );
+
+    // 4. Schedules modal button
+    assert.ok(content.includes('id="scheduleAddBtn"'), 'Must have "+ Thêm giờ chạy" modal button');
+    assert.ok(content.includes('Thêm giờ chạy'), 'Button or title must contain "Thêm giờ chạy"');
+  });
+
+  it('TC-MGR-WEB-25: Route builder adds known stops from the map and creates new stops in place (D200)', () => {
+    const content = fs.readFileSync(path.join(managerDir, 'web_dist/index.html'), 'utf8');
+    assert.ok(content.includes('id="rtStopSearch"'), 'Stop search box');
+    assert.ok(content.includes('id="rtInsertPos"'), 'Insert position choice');
+    assert.ok(/routeBuilderMap\.on\('click', \(e\) => openNewStopDraft\(e\.latlng\)\)/.test(content), 'Map click opens the new stop draft');
+    assert.ok(content.includes('id="rtNewSave"') && /\$\('#rtNewSave'\)[\s\S]{0,800}\/api\/v1\/ops\/stations/.test(content), 'New stop is created through POST /ops/stations');
+    assert.ok(content.includes('function insertIndexFor'), 'Auto insert position along the route');
+  });
+
+  it('TC-MGR-WEB-26: Trip detail shows the home pickup run on its own map (D202)', () => {
+    const content = fs.readFileSync(path.join(managerDir, 'web_dist/index.html'), 'utf8');
+    assert.ok(content.includes('opsData?.home_run_map ? homeRunMapBlock(opsData.home_run_map, opsData.home_run_outlook)'), 'Route tab renders the home run block from /operations');
+    assert.ok(content.includes('id="homeRunMap"') && content.includes('function drawHomeRunMap'), 'Home run map');
+    assert.ok(content.includes('slower_than_best_minutes'), 'Says when the driver order is slower than suggested');
+    assert.ok(content.includes('late_departure_minutes'), 'Warns when the run makes the departure late');
   });
 });

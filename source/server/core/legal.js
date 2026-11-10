@@ -196,7 +196,7 @@ const MODEL_NOTICE = [
   },
   {
     heading: 'Dữ liệu bản đồ',
-    body: 'Dữ liệu bản đồ © những người đóng góp OpenStreetMap, cấp phép theo Open Database License (ODbL) 1.0. Ảnh bản đồ do OpenStreetMap France cung cấp. Hình dạng tuyến đường được lấy một lần từ bộ định tuyến OSRM trên dữ liệu OpenStreetMap và lưu sẵn trên máy chủ.',
+    body: 'Dữ liệu bản đồ © những người đóng góp OpenStreetMap, cấp phép theo Open Database License (ODbL) 1.0. Ảnh bản đồ do OpenStreetMap France cung cấp. Hình dạng tuyến đường được lấy từ bộ định tuyến OSRM trên dữ liệu OpenStreetMap một lần khi tuyến được tạo, rồi lưu sẵn trên máy chủ.',
     links: [
       { label: 'OpenStreetMap — bản quyền', url: 'https://www.openstreetmap.org/copyright' },
       { label: 'Open Database License 1.0', url: 'https://opendatacommons.org/licenses/odbl/1-0/' }

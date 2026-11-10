@@ -22,6 +22,7 @@ import { ManagerOperationsService } from './services/manager/modules/managerServ
 import { setCorsHeaders, sendError, readRawBody, clientIp } from './middleware/httpUtils.js';
 import { createAuthRateLimiters } from './core/rateLimit.js';
 import { backupConfig, startBackups } from './core/backup.js';
+import { setRoadRouter, osrmRouter, setRoadTable, osrmTable } from './core/roadRouting.js';
 import { handlePassengerRoutes, trackingFor } from './routes/passengerRoutes.js';
 import { handleDriverRoutes } from './routes/driverRoutes.js';
 import { handleManagerRoutes } from './routes/managerRoutes.js';
@@ -486,6 +487,11 @@ if (process.env.NODE_ENV !== 'test' && IS_MAIN) {
   // Copies of every database on a timer (H-08); FLEETBUS_BACKUP=off turns it off.
   const backups = backupConfig(services.tenantDbs.dataDir);
   if (backups) startBackups(services.tenantDbs, { ...backups, beforeRun: () => services.store?.flushIfDirty() });
+  // D201: road geometry for routes companies draw (ROUTING_URL, an OSRM server; unset or "off" keeps straight lines).
+  if (process.env.ROUTING_URL && process.env.ROUTING_URL !== 'off') {
+    setRoadRouter(osrmRouter(process.env.ROUTING_URL));
+    setRoadTable(osrmTable(process.env.ROUTING_URL));
+  }
   server.listen(PORT, () => {
     printDevSecurityWarning(services.config);
     console.log(`

@@ -103,6 +103,14 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
       unawaited(openNotice(context, store, tapped));
     }
 
+    // On the notices tab a new notice already shows at the top of the list: no heads-up over the title and that
+    // same notice, and it counts as read at once (no red dot on the tab being looked at).
+    if (_index == 2) {
+      store.pendingAlert = null;
+      if (store.unread) store.markRead();
+      return;
+    }
+
     final alert = store.pendingAlert;
     if (alert == null) return;
     store.pendingAlert = null;

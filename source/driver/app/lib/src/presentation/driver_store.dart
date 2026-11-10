@@ -70,6 +70,105 @@ class HomeRunStop {
           : null;
 }
 
+/// Door in the home run pickup route.
+class HomeRunDoor {
+  const HomeRunDoor({
+    required this.position,
+    required this.lat,
+    required this.lng,
+    required this.address,
+    this.ticketIds = const [],
+    this.seats = const [],
+    this.next = false,
+  });
+
+  /// The door's number in the run list (collected doors keep theirs, so the map and the list agree).
+  final int position;
+
+  /// The door the bus goes to now.
+  final bool next;
+  final double lat;
+  final double lng;
+  final String address;
+  final List<String> ticketIds;
+  final List<String> seats;
+
+  factory HomeRunDoor.fromJson(Map<String, dynamic> j) => HomeRunDoor(
+        position: (j['position'] as num?)?.toInt() ?? 0,
+        lat: (j['lat'] as num?)?.toDouble() ?? 0.0,
+        lng: (j['lng'] as num?)?.toDouble() ?? 0.0,
+        address: '${j['address'] ?? ''}',
+        ticketIds: [for (final id in (j['ticket_ids'] as List? ?? [])) '$id'],
+        seats: [for (final s in (j['seats'] as List? ?? [])) '$s'],
+        next: j['next'] == true,
+      );
+}
+
+/// Trip first stop where the home run finishes.
+class HomeRunEnd {
+  const HomeRunEnd({
+    required this.stopId,
+    required this.name,
+    this.lat,
+    this.lng,
+  });
+
+  final String stopId;
+  final String name;
+  final double? lat;
+  final double? lng;
+
+  factory HomeRunEnd.fromJson(Map<String, dynamic> j) => HomeRunEnd(
+        stopId: '${j['stop_id'] ?? ''}',
+        name: '${j['name'] ?? ''}',
+        lat: (j['lat'] as num?)?.toDouble(),
+        lng: (j['lng'] as num?)?.toDouble(),
+      );
+}
+
+/// Map geometry and metrics for the home pickup run.
+class HomeRunMap {
+  const HomeRunMap({
+    this.doors = const [],
+    this.end,
+    this.line = const [],
+    this.lineOnRoad = false,
+    this.distanceKm = 0.0,
+    this.slowerThanBestMinutes = 0,
+    this.byRoad = false,
+  });
+
+  final List<HomeRunDoor> doors;
+  final HomeRunEnd? end;
+  final List<({double lat, double lng})> line;
+  final bool lineOnRoad;
+  final double distanceKm;
+  final int slowerThanBestMinutes;
+  final bool byRoad;
+
+  factory HomeRunMap.fromJson(Map<String, dynamic> j) {
+    final src = '${j['source'] ?? ''}';
+    final parsedLine = <({double lat, double lng})>[];
+    for (final p in (j['line'] as List? ?? [])) {
+      if (p is List && p.length >= 2 && p[0] is num && p[1] is num) {
+        parsedLine.add((lat: (p[0] as num).toDouble(), lng: (p[1] as num).toDouble()));
+      }
+    }
+    return HomeRunMap(
+      doors: [
+        for (final d in (j['doors'] as List? ?? []))
+          if (d is Map) HomeRunDoor.fromJson(d.cast<String, dynamic>()),
+      ],
+      end: j['end'] is Map ? HomeRunEnd.fromJson((j['end'] as Map).cast<String, dynamic>()) : null,
+      line: List.unmodifiable(parsedLine),
+      lineOnRoad: j['line_on_road'] == true,
+      distanceKm: (j['distance_km'] as num?)?.toDouble() ?? 0.0,
+      slowerThanBestMinutes: (j['slower_than_best_minutes'] as num?)?.toInt() ?? 0,
+      byRoad: src == 'ROAD',
+    );
+  }
+}
+
 class DriverStop {
   const DriverStop(this.id, this.name, this.time, {this.arrived = false, this.lat, this.lng});
   final String id;
@@ -932,6 +1031,9 @@ class DriverStore extends ChangeNotifier {
   List<HomeRunStop> homeRun = [];
   int homeWaitMinutes = 5;
 
+  /// Home pickup route map if available.
+  HomeRunMap? homeRunMap;
+
   /// Whether the home run still fits the departure (server outlook): back at the first stop at [homeBackAt],
   /// [homeLateMinutes] late, and how many passengers were given a time past their window.
   DateTime? homeBackAt;
@@ -1185,6 +1287,8 @@ class DriverStore extends ChangeNotifier {
     _pickedTripId = null;
     shift = [];
     manifest = [];
+    homeRun = [];
+    homeRunMap = null;
     _road = null;
     mustChangePin = false;
     temporaryPin = null;
@@ -1467,6 +1571,8 @@ class DriverStore extends ChangeNotifier {
     homeBackAt = DateTime.tryParse('${outlook?['back_at'] ?? ''}');
     homeLateMinutes = (outlook?['late_departure_minutes'] as num?)?.toInt() ?? 0;
     homePastWindow = (outlook?['past_window'] as List?)?.length ?? 0;
+    final mapData = run?['map'];
+    homeRunMap = mapData is Map ? HomeRunMap.fromJson(mapData.cast<String, dynamic>()) : null;
     trip = switch (t['status']) { 'IN_TRANSIT' => TripState.inTransit, 'COMPLETED' => TripState.completed, _ => TripState.readyCheck };
     if (trip == TripState.completed) {
       endedCash = (t['total_cash_to_handover_vnd'] as num?)?.toInt() ?? codCash + hailCash;

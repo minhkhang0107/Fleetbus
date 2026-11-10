@@ -14,6 +14,10 @@
 PORT ?= 3000
 TAILSCALE_IP := $(shell tailscale ip -4 2>/dev/null | head -n 1)
 SERVER_URL ?= http://$(TAILSCALE_IP):$(PORT)
+# Road geometry for routes companies draw (D201). The public OSRM demo is for trying things out only: production
+# should run its own OSRM (or set ROUTING_URL=off to keep straight lines).
+ROUTING_URL ?= https://router.project-osrm.org
+export ROUTING_URL
 # Flutter used to build the APKs (override e.g. FLUTTER=~/development/flutter/bin/flutter).
 FLUTTER ?= flutter
 # Google Drive upload: rclone remote name and the folder that receives the APKs.

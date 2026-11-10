@@ -8,6 +8,7 @@ import { defaultServiceConfig, updateOperatorContact } from '../core/operators.j
 import { STOP_STYLES, checkHomeService, publicServiceConfig, routeServiceConfig, validateArea, validateModes, validateRouteSettings } from '../core/serviceAreas.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { validateRouteStops } from '../core/routeStops.js';
+import { stopCoords } from '../core/geo.js';
 import { endpointChoices, publicFixedEndpoints, validateFixedEndpoints } from '../core/fixedEndpoints.js';
 import { isProduction } from '../config.js';
 import { DEFAULT_CANCELLATION_POLICY, cancellationPolicyOf, normalizeCancellationPolicy, publicCancellationPolicy, validateCancellationPolicy } from '../core/cancellationPolicy.js';
@@ -286,8 +287,28 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
         const effective = routeServiceConfig(config, r.route_id);
         const base = searchService.templateForRoute(r.route_id, req.operatorId)?.stops || [];
         // base_* are the route's own stop data, what a checkbox goes back to when the company clears its setting.
-        const stops = searchService.routeStops(r.route_id, req.operatorId).map(({ stop_id, name, kind, order, pickup_allowed, dropoff_allowed, hidden, offset_minutes, time_source }, i) => ({ stop_id, name, kind, order, pickup_allowed, dropoff_allowed, base_pickup: base[i]?.pickup_allowed !== false, base_dropoff: base[i]?.dropoff_allowed !== false, hidden, offset_minutes, time_source }));
-        return { route_id: r.route_id, name: r.name, own: snapshot(config.route_configs?.[r.route_id] || {}), stop_style: effective.stop_style, pickup_modes: effective.pickup_modes, dropoff_modes: effective.dropoff_modes, stops };
+        const stops = searchService.routeStops(r.route_id, req.operatorId).map((s, i) => {
+          const coords = stopCoords(s.stop_id) || s;
+          return {
+            stop_id: s.stop_id,
+            name: s.name,
+            kind: s.kind,
+            order: s.order,
+            city: s.city || '',
+            lat: Number.isFinite(coords.lat) ? coords.lat : null,
+            lng: Number.isFinite(coords.lng) ? coords.lng : null,
+            pickup_allowed: s.pickup_allowed,
+            dropoff_allowed: s.dropoff_allowed,
+            base_pickup: base[i]?.pickup_allowed !== false,
+            base_dropoff: base[i]?.dropoff_allowed !== false,
+            hidden: s.hidden,
+            offset_minutes: s.offset_minutes,
+            time_source: s.time_source
+          };
+        });
+        // shape: the road the buses follow (D201); as many points as stops means it is still straight lines.
+        const shape = searchService.routeLine(r.route_id, req.operatorId) || null;
+        return { route_id: r.route_id, name: r.name, own: snapshot(config.route_configs?.[r.route_id] || {}), stop_style: effective.stop_style, pickup_modes: effective.pickup_modes, dropoff_modes: effective.dropoff_modes, stops, shape };
       })
     });
     return true;

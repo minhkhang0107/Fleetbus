@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:app/src/presentation/passenger/passenger_heads_up.dart';
 import 'package:app/src/presentation/passenger/passenger_home_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_live_radar_screen.dart';
 import 'package:app/src/presentation/passenger/passenger_main_shell.dart';
@@ -276,6 +277,46 @@ void main() {
 
     expect(find.byKey(const Key('heads_up')), findsNothing);
 
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('TC-HEADSUP-SLIDE: the card comes out from under the status bar, never behind the clock', (tester) async {
+    late BuildContext ctx;
+    await tester.pumpWidget(MaterialApp(
+      builder: (c, child) => MediaQuery(data: MediaQuery.of(c).copyWith(padding: const EdgeInsets.only(top: 44)), child: child!),
+      home: Builder(builder: (c) {
+        ctx = c;
+        return const Scaffold(body: SizedBox());
+      }),
+    ));
+    showHeadsUp(ctx, notice: AppNotice('Giờ hẹn đón đã đổi', 'Bạn là điểm đón thứ 4, giờ hẹn mới khoảng 19:25.', 'now', type: 'HOME_APPOINTMENT_CHANGED'), onTap: () {});
+    await tester.pump();
+    expect(tester.getRect(find.byKey(const Key('heads_up'))).bottom, lessThanOrEqualTo(44), reason: 'wholly above the status bar edge at the start');
+    final clip = tester.getRect(find.ancestor(of: find.byKey(const Key('heads_up')), matching: find.byType(ClipRect)).first);
+    expect(clip.top, 44, reason: 'nothing of the card is drawn under the status bar');
+    await tester.pumpAndSettle(const Duration(milliseconds: 50));
+    expect(tester.getRect(find.byKey(const Key('heads_up'))).top, 52, reason: 'under the status bar once in');
+    hideHeadsUp();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(tester.getRect(find.byKey(const Key('heads_up'))).bottom, greaterThan(44));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('heads_up')), findsNothing);
+  });
+
+  testWidgets('TC-HEADSUP-NOTICES-TAB: on the notices tab a new notice shows in the list only, and is read', (tester) async {
+    final store = await createTestStore();
+    await tester.pumpWidget(PassengerScope(store: store, child: const MaterialApp(home: PassengerMainShell(initialTab: 2))));
+    await tester.pumpAndSettle();
+    store.unread = true;
+    store.pendingAlert = AppNotice('Giờ hẹn đón đã đổi', 'Bạn là điểm đón thứ 3.', 'Vừa xong', id: 'n_tab_1', type: 'HOME_APPOINTMENT_CHANGED', isRead: false);
+    store.notifyListeners();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('heads_up')), findsNothing, reason: 'no card over the title and the same notice');
+    expect(store.pendingAlert, isNull);
+    expect(store.unread, isFalse, reason: 'no red dot on the tab being looked at');
     await tester.pumpWidget(const SizedBox());
     await tester.pumpAndSettle();
   });

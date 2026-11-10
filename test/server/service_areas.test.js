@@ -191,6 +191,7 @@ describe('Pickup / drop-off modes and service areas', () => {
       assert.strictEqual(route.stops[0].offset_minutes, 0);
       assert.ok(route.stops.every((s, i) => i === 0 || s.offset_minutes >= route.stops[i - 1].offset_minutes), 'estimated times follow the road');
       assert.strictEqual(route.stops[3].time_source, 'ESTIMATED');
+      assert.ok(route.stops.every(s => typeof s.lat === 'number' && Number.isFinite(s.lat) && typeof s.lng === 'number' && Number.isFinite(s.lng) && typeof s.city === 'string' && s.city.length > 0), 'stops have numeric lat/lng and city');
 
       const put = await request('/api/v1/ops/service-config/routes/rt_hn_th', { method: 'PUT', token: saomaiDispatcher, body: { stops: { stp_rs_phap_van: { hidden: true }, stp_nb: { offset_minutes: 75 }, stp_rs_phu_ly: { dropoff: false } } } });
       assert.strictEqual(put.status, 200, JSON.stringify(put.body));

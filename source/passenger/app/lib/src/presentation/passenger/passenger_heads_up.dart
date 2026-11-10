@@ -56,14 +56,15 @@ void showHeadsUp(
       top: 0,
       left: 0,
       right: 0,
+      // Clipped at the bottom of the status bar: the card comes out from under it and never passes behind the
+      // clock and the battery, which the phone draws over the app.
       child: SafeArea(
         bottom: false,
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+        child: ClipRect(
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
               // The overlay sits above the page's Scaffold: a Material gives the text its style (no debug underline).
               child: Material(
                 type: MaterialType.transparency,
@@ -107,7 +108,8 @@ class _HeadsUpCard extends StatefulWidget {
   State<_HeadsUpCard> createState() => _HeadsUpCardState();
 }
 
-class _HeadsUpCardState extends State<_HeadsUpCard> with SingleTickerProviderStateMixin {
+class _HeadsUpCardState extends State<_HeadsUpCard>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<Offset> _offsetAnimation;
   late final Animation<double> _fadeAnimation;
@@ -193,84 +195,92 @@ class _HeadsUpCardState extends State<_HeadsUpCard> with SingleTickerProviderSta
 
   @override
   Widget build(BuildContext context) {
+    // The gap above the card slides with it, so at the start and the end of the slide nothing shows under the
+    // status bar; the room below keeps the shadow inside the clip.
     return SlideTransition(
       position: _offsetAnimation,
-      child: FadeTransition(
-        opacity: _fadeAnimation,
-        child: Semantics(
-          liveRegion: true,
-          button: widget.onTap != null,
-          label: '${widget.notice.title}, ${widget.notice.body}',
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _handleTap,
-            onVerticalDragUpdate: (details) {
-              if (details.primaryDelta != null && details.primaryDelta! < -4) {
-                dismiss();
-              }
-            },
-            onVerticalDragEnd: (details) {
-              if ((details.primaryVelocity ?? 0) < -50) {
-                dismiss();
-              }
-            },
-            child: Container(
-              key: const Key('heads_up'),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x1F0F172A),
-                    blurRadius: 16,
-                    offset: Offset(0, 6),
-                  ),
-                ],
-              ),
-              clipBehavior: Clip.antiAlias,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 20,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          color: PTokens.primary,
-                          borderRadius: BorderRadius.circular(5),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
+        child: FadeTransition(
+          opacity: _fadeAnimation,
+          child: Semantics(
+            liveRegion: true,
+            button: widget.onTap != null,
+            label: '${widget.notice.title}, ${widget.notice.body}',
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _handleTap,
+              onVerticalDragUpdate: (details) {
+                if (details.primaryDelta != null &&
+                    details.primaryDelta! < -4) {
+                  dismiss();
+                }
+              },
+              onVerticalDragEnd: (details) {
+                if ((details.primaryVelocity ?? 0) < -50) {
+                  dismiss();
+                }
+              },
+              child: Container(
+                key: const Key('heads_up'),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x1F0F172A),
+                      blurRadius: 16,
+                      offset: Offset(0, 6),
+                    ),
+                  ],
+                ),
+                clipBehavior: Clip.antiAlias,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 20,
+                          height: 20,
+                          decoration: BoxDecoration(
+                            color: PTokens.primary,
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          alignment: Alignment.center,
+                          child: const Icon(Icons.directions_bus,
+                              size: 14, color: Colors.white),
                         ),
-                        alignment: Alignment.center,
-                        child: const Icon(Icons.directions_bus, size: 14, color: Colors.white),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '${widget.operatorName} · bây giờ',
-                          style: sans(size: 12, color: PTokens.muted),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${widget.operatorName} · bây giờ',
+                            style: sans(size: 12, color: PTokens.muted),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    widget.notice.title,
-                    style: sans(size: 15, weight: FontWeight.w700),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    widget.notice.body,
-                    style: sans(size: 13, color: PTokens.ink, height: 1.3),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      widget.notice.title,
+                      style: sans(size: 15, weight: FontWeight.w700),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.notice.body,
+                      style: sans(size: 13, color: PTokens.ink, height: 1.3),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
