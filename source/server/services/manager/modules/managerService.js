@@ -18,7 +18,7 @@ import { MOCK_DRIVERS_DB } from '../../driver/modules/driverService.js';
 
 const POS_PAYMENT_METHODS = ['CASH_POS', 'CARD_POS', 'BANK_TRANSFER'];
 // BR-MGR-AUTH-001: these roles need a TOTP code on every login (ROLE_OPS_ADMIN and ROLE_FINANCE of the spec)
-export const TOTP_ROLES = ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'PLATFORM_ADMIN'];
+export const TOTP_ROLES = ['FLEET_DIRECTOR', 'PLATFORM_ADMIN'];
 const HOLD_POLICIES = ['UNTIL_DEPARTURE_OFFSET', 'CUSTOM_EXPIRY_MINUTES'];
 // BR-POS-006: one phone number holds at most this many seats at once across all trips
 const HOTLINE_MAX_SEATS_PER_PHONE = 4;
@@ -70,9 +70,10 @@ export const MOCK_MANAGERS_DB = [
     username: 'admin@busgo.vn',
     password_hash: hashSecret('admin123'),
     full_name: 'Nguyễn Tiến Dũng',
-    role: 'FLEET_DIRECTOR', // FLEET_DIRECTOR | DISPATCHER | CASHIER | FINANCIAL_CONTROLLER
+    role: 'FLEET_DIRECTOR',
     permissions: ['ALL'],
     operator_id: 'op_saomai',
+    totp_required: false,
     active: true,
     token_version: 0,
     created_at: '2026-10-01T00:00:00.000Z',
@@ -83,9 +84,10 @@ export const MOCK_MANAGERS_DB = [
     username: 'dispatcher@busgo.vn',
     password_hash: hashSecret('disp123'),
     full_name: 'Phạm Hồng Quân',
-    role: 'DISPATCHER',
-    permissions: ['DISPATCH_MANAGE', 'TRIP_EDIT', 'INCIDENT_BROADCAST', 'RADAR_VIEW'],
+    role: 'STAFF',
+    permissions: ['DISPATCH', 'TRIP_CANCEL', 'BOOKINGS_VIEW', 'FLEET', 'DRIVERS', 'SCHEDULES', 'AUDIT_VIEW'],
     operator_id: 'op_saomai',
+    totp_required: false,
     active: true,
     token_version: 0,
     created_at: '2026-10-01T00:00:00.000Z',
@@ -96,9 +98,10 @@ export const MOCK_MANAGERS_DB = [
     username: 'cashier@busgo.vn',
     password_hash: hashSecret('cash123'),
     full_name: 'Đỗ Thu Hà',
-    role: 'CASHIER',
-    permissions: ['POS_ISSUE', 'BOOKING_SEARCH'],
+    role: 'STAFF',
+    permissions: ['TICKETING', 'BOOKINGS_VIEW', 'PAYMENTS'],
     operator_id: 'op_saomai',
+    totp_required: false,
     active: true,
     token_version: 0,
     created_at: '2026-10-01T00:00:00.000Z',
@@ -109,9 +112,10 @@ export const MOCK_MANAGERS_DB = [
     username: 'dispatcher@xuyenviet.vn',
     password_hash: hashSecret('xv123'),
     full_name: 'Vũ Thị Lan',
-    role: 'DISPATCHER',
-    permissions: ['DISPATCH_MANAGE', 'TRIP_EDIT', 'INCIDENT_BROADCAST', 'RADAR_VIEW'],
+    role: 'STAFF',
+    permissions: ['DISPATCH', 'TRIP_CANCEL', 'BOOKINGS_VIEW', 'FLEET', 'DRIVERS', 'SCHEDULES', 'AUDIT_VIEW'],
     operator_id: 'op_xuyenviet',
+    totp_required: false,
     active: true,
     token_version: 0,
     created_at: '2026-10-01T00:00:00.000Z',
@@ -122,9 +126,10 @@ export const MOCK_MANAGERS_DB = [
     username: 'cashier@xuyenviet.vn',
     password_hash: hashSecret('xv123'),
     full_name: 'Hoàng Văn Tú',
-    role: 'CASHIER',
-    permissions: ['POS_ISSUE', 'BOOKING_SEARCH'],
+    role: 'STAFF',
+    permissions: ['TICKETING', 'BOOKINGS_VIEW', 'PAYMENTS'],
     operator_id: 'op_xuyenviet',
+    totp_required: false,
     active: true,
     token_version: 0,
     created_at: '2026-10-01T00:00:00.000Z',
@@ -139,6 +144,7 @@ export const MOCK_MANAGERS_DB = [
     role: 'PLATFORM_ADMIN',
     permissions: ['PLATFORM_ALL'],
     operator_id: null,
+    totp_required: false,
     active: true,
     token_version: 0,
     created_at: '2026-10-01T00:00:00.000Z',
@@ -264,7 +270,8 @@ export class ManagerOperationsService {
 
     // Second factor: asked only after the password is right, so it never tells whether a password is valid.
     // An account not enrolled yet is let in with password alone because it can only reach the enrollment endpoints.
-    if (TOTP_ROLES.includes(user.role) && user.totp_enrolled !== false) {
+    const isTotpRequired = TOTP_ROLES.includes(user.role) || Boolean(user.totp_required);
+    if (isTotpRequired && user.totp_enrolled !== false) {
       if (totp === null || totp === undefined || totp === '') {
         return { success: false, error: 'Cần mã xác thực 2 bước (6 số) từ ứng dụng Authenticator', code: 'TOTP_REQUIRED' };
       }
@@ -302,9 +309,10 @@ export class ManagerOperationsService {
           username: user.username,
           full_name: user.full_name,
           role: user.role,
-          permissions: user.permissions,
+          permissions: user.permissions || [],
+          totp_required: Boolean(user.totp_required),
           must_change_password: Boolean(user.must_change_password),
-          must_enroll_totp: Boolean(TOTP_ROLES.includes(user.role) && user.totp_enrolled === false)
+          must_enroll_totp: Boolean(isTotpRequired && user.totp_enrolled === false)
         },
         operator: publicOperatorProfile(operator),
         token
@@ -488,8 +496,10 @@ export class ManagerOperationsService {
     return { gross_revenue_vnd: gross, refunded_vnd: refunded, net_revenue_vnd: gross - refunded };
   }
 
-  getDashboardKPIs(operatorId = DEFAULT_OPERATOR_ID) {
+  getDashboardKPIs(operatorId = DEFAULT_OPERATOR_ID, mockNow = Date.now()) {
     this.releaseExpiredHotlineHolds();
+    const today = vnDate(mockNow);
+    this.runsForDate?.(today, operatorId);
     const round1 = (n) => parseFloat(n.toFixed(1));
     const trips = this.trips.filter(t => t.operator_id === operatorId);
     const vehicles = this.vehicles.filter(v => v.operator_id === operatorId);
@@ -501,6 +511,14 @@ export class ManagerOperationsService {
     const activeVehicles = vehicles.filter(v => v.status === 'IN_TRANSIT').length;
     const totalBookedSeats = trips.reduce((acc, t) => acc + t.booked_seats, 0);
     const totalCapacity = trips.reduce((acc, t) => acc + t.total_seats, 0);
+
+    // Today's trips and their money, by the day the trips run (D195)
+    const todayTrips = trips.filter(t => vnDate(Date.parse(t.departure_time)) === today);
+    const todayTripCount = todayTrips.length;
+    const todayTripIds = new Set(todayTrips.map(t => t.trip_id));
+    const todayBookings = bookings.filter(b => todayTripIds.has(b.trip_id));
+    const todayMoney = this._moneyFigures(todayBookings);
+    const todayRevenueVnd = todayMoney.net_revenue_vnd;
 
     // A trip leaves on time when its delay is at most 15 minutes (MGR-002)
     const onTimeTrips = trips.filter(t => (t.delay_minutes || 0) <= 15).length;
@@ -524,12 +542,14 @@ export class ManagerOperationsService {
     return {
       success: true,
       data: {
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(mockNow).toISOString(),
         kpi_metrics: {
           active_vehicles_count: activeVehicles,
           total_fleet_count: totalVehicles,
           overall_load_factor_pct: totalCapacity > 0 ? round1((totalBookedSeats / totalCapacity) * 100) : 0,
           ...this._moneyFigures(bookings),
+          today_revenue_vnd: todayRevenueVnd,
+          today_trip_count: todayTripCount,
           on_time_departure_rate_pct: trips.length > 0 ? round1((onTimeTrips / trips.length) * 100) : 100,
           active_alerts_count: alerts.length,
           fleet_average_speed_kmh: moving.length > 0 ? round1(moving.reduce((acc, v) => acc + v.speed_kmh, 0) / moving.length) : 0
@@ -540,8 +560,8 @@ export class ManagerOperationsService {
     };
   }
 
-  getOperationsDashboardKPIs(operatorId = DEFAULT_OPERATOR_ID) {
-    return this.getDashboardKPIs(operatorId);
+  getOperationsDashboardKPIs(operatorId = DEFAULT_OPERATOR_ID, mockNow = Date.now()) {
+    return this.getDashboardKPIs(operatorId, mockNow);
   }
 
   /**

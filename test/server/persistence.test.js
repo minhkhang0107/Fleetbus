@@ -23,7 +23,7 @@ describe('TC-DB-PERSIST: data kept in sealed company databases', () => {
   let ticketId;
 
   const start = async (options = {}) => {
-    ({ server } = createFleetBusServer({ dataDir: dir, ...options }));
+    ({ server } = createFleetBusServer({ dataDir: dir, webhookSecret: 'off', ...options }));
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     baseUrl = `http://127.0.0.1:${server.address().port}`;
   };

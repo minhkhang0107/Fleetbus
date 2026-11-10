@@ -127,7 +127,7 @@ class _DriverRouteMapState extends State<DriverRouteMap> {
       initialZoom: 12,
       // More room on top for the label above the stop the bus is at.
       initialCameraFit: frame.length >= 2 ? CameraFit.bounds(bounds: LatLngBounds.fromPoints(frame), padding: const EdgeInsets.fromLTRB(32, 56, 32, 24), maxZoom: 14) : null,
-      interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
+      interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate, keyboardOptions: KeyboardOptions.disabled()),
       onMapReady: () {
         _ready = true;
         if (!_fitted && frame.length < 2) {

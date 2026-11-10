@@ -236,7 +236,7 @@ describe('SePay HTTP integration: settings, webhook, reconciliation & background
     fakeFetchHandler = async () => new Response(JSON.stringify({ status: 200, error: null, transactions: [] }), { status: 200 });
     ({ server, services } = createFleetBusServer({
       authMode: 'enforce',
-      webhookSecret: null,
+      webhookSecret: 'off',
       fetchImpl: (...args) => fakeFetchHandler(...args)
     }));
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));

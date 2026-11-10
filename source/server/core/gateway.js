@@ -8,6 +8,7 @@ import { DEFAULT_OPERATOR_ID, OPERATOR_INACTIVE, findOperatorByCode, findOperato
 import { MOCK_DRIVERS_DB } from '../services/driver/modules/driverService.js';
 import { MOCK_MANAGERS_DB, TOTP_ROLES } from '../services/manager/modules/managerService.js';
 import { isPassengerRevoked } from '../services/passenger/modules/auth.js';
+import { normalizeStaffAccount } from '../services/manager/modules/staffAccounts.js';
 
 const API = '/api/v1';
 
@@ -42,45 +43,70 @@ const IDEMPOTENT_RULES = {
   staff: /\/(platform\/operators(\/[^/]+\/(activate|deactivate|director\/reset-password))?|auth\/(change-password|totp\/(setup|confirm))|pos\/(orders|bookings|hotline-hold|hotline-holds\/[^/]+\/cancel)|orders\/[^/]+\/confirm-payment|bank-transactions\/[^/]+\/assign|refunds\/[^/]+\/process|service-areas(\/[^/]+\/(activate|deactivate))?|promo-banners(\/[^/]+\/(activate|deactivate))?|vouchers(\/[^/]+\/(activate|deactivate))?|schedules|trips\/[^/]+\/(assign|cancel|sales|end)|home-requests\/[^/]+\/[^/]+\/(confirm|reject)|replace-vehicle|swap-vehicle|delay|seats\/override-lock|debt-receipts\/[^/]+\/redeem|cash-handovers\/[^/]+\/confirm|seat-layouts(\/[^/]+)?|vehicles(\/[^/]+)?|drivers(\/[^/]+\/reset-pin)?|staff(\/[^/]+\/reset-password)?|stations|routes(\/[^/]+)?)$/
 };
 
-// Staff permissions by role (MGR-029). The first matching rule decides; no rule means any staff role.
-const STAFF_RULES = [
-  [/^\/api\/v1\/ops\/cash-handovers(\/.*)?$/, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']],
-  [/^\/api\/v1\/ops\/staff(\/.*)?$/, ['FLEET_DIRECTOR']],
-  [['PATCH'], /^\/api\/v1\/ops\/company$/, ['FLEET_DIRECTOR']],
-  [/^\/api\/v1\/ops\/(crew|drivers)(\/.*)?$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
-  [/^\/api\/v1\/ops\/seat-layouts/, ['FLEET_DIRECTOR', 'DISPATCHER']],
-  [['POST', 'PATCH'], /^\/api\/v1\/ops\/vehicles(\/[^/]+)?$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
-  [/^\/api\/v1\/ops\/stations(\/.*)?$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
-  [/^\/api\/v1\/ops\/routes(\/.*)?$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
-  [/^\/api\/v1\/ops\/(pos\/hotline-hold|trips\/[^/]+\/hotline-holds)/, ['FLEET_DIRECTOR', 'CASHIER', 'DISPATCHER']],
-  [/^\/api\/v1\/ops\/pos\//, ['FLEET_DIRECTOR', 'CASHIER']],
-  [/^\/api\/v1\/ops\/audit-logs/, ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'DISPATCHER']],
-  [/^\/api\/v1\/ops\/pending-payments$/, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']],
-  [/^\/api\/v1\/ops\/(refunds|reports|payments)/, ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER']],
-  [/^\/api\/v1\/ops\/bookings/, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']],
-  [/^\/api\/v1\/ops\/orders\/[^/]+\/confirm-payment$/, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']],
-  [/^\/api\/v1\/ops\/bank-transactions\/[^/]+\/assign$/, ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER']],
-  [/^\/api\/v1\/ops\/bank-transactions$/, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']],
-  [['GET'], /^\/api\/v1\/ops\/payment-settings$/, ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER']],
-  [['PUT'], /^\/api\/v1\/ops\/payment-settings$/, ['FLEET_DIRECTOR']],
-  [['POST'], /^\/api\/v1\/ops\/payment-settings\/test$/, ['FLEET_DIRECTOR']],
-  [/^\/api\/v1\/ops\/trips\/[^/]+\/(delay|replace-vehicle|swap-vehicle|seats\/override-lock)$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
+export const DIRECTOR_ONLY = 'DIRECTOR_ONLY';
+
+export const STAFF_AUTH_EXEMPT = [
+  '/api/v1/ops/auth/change-password',
+  '/api/v1/ops/auth/totp/setup',
+  '/api/v1/ops/auth/totp/confirm',
+  '/api/v1/ops/auth/logout'
+];
+
+// Staff permissions by capability. The first matching rule decides; no rule means:
+// GET -> allowed for any staff of this operator; non-GET -> DIRECTOR_ONLY.
+export const STAFF_RULES = [
+  [/^\/api\/v1\/ops\/cash-handovers(\/.*)?$/, ['PAYMENTS']],
+  [['GET'], /^\/api\/v1\/ops\/staff\/permissions-catalog$/, null],
+  [/^\/api\/v1\/ops\/staff(\/.*)?$/, DIRECTOR_ONLY],
+  [['PATCH'], /^\/api\/v1\/ops\/company$/, DIRECTOR_ONLY],
+  [/^\/api\/v1\/ops\/(crew|drivers)(\/.*)?$/, ['DRIVERS']],
+  [/^\/api\/v1\/ops\/seat-layouts/, ['FLEET']],
+  [['POST', 'PATCH'], /^\/api\/v1\/ops\/vehicles(\/[^/]+)?$/, ['FLEET']],
+  [/^\/api\/v1\/ops\/stations(\/.*)?$/, ['SCHEDULES']],
+  [/^\/api\/v1\/ops\/routes(\/.*)?$/, ['SCHEDULES']],
+  [/^\/api\/v1\/ops\/(pos\/hotline-hold|trips\/[^/]+\/hotline-holds)/, ['TICKETING', 'DISPATCH']],
+  [/^\/api\/v1\/ops\/pos\//, ['TICKETING']],
+  [/^\/api\/v1\/ops\/audit-logs/, ['AUDIT_VIEW']],
+  [/^\/api\/v1\/ops\/pending-payments$/, ['PAYMENTS']],
+  [/^\/api\/v1\/ops\/payments\/manual-confirmations$/, DIRECTOR_ONLY],
+  [/^\/api\/v1\/ops\/(refunds|reports|payments)/, ['REFUNDS']],
+  [['GET'], /^\/api\/v1\/ops\/bookings(\/.*)?$/, ['BOOKINGS_VIEW']],
+  [['GET'], /^\/api\/v1\/ops\/trips\/[^/]+\/manifest$/, ['BOOKINGS_VIEW', 'DISPATCH']],
+  [/^\/api\/v1\/ops\/orders\/[^/]+\/confirm-payment$/, ['PAYMENTS']],
+  [/^\/api\/v1\/ops\/bank-transactions\/[^/]+\/assign$/, ['REFUNDS']],
+  [/^\/api\/v1\/ops\/bank-transactions$/, ['PAYMENTS']],
+  [['POST'], /^\/api\/v1\/ops\/payment-settings\/bank-change\/cancel$/, DIRECTOR_ONLY],
+  [['GET'], /^\/api\/v1\/ops\/payment-settings$/, ['PAYMENTS', 'REFUNDS']],
+  [['PUT'], /^\/api\/v1\/ops\/payment-settings$/, DIRECTOR_ONLY],
+  [['POST'], /^\/api\/v1\/ops\/payment-settings\/test$/, DIRECTOR_ONLY],
+  [/^\/api\/v1\/ops\/trips\/[^/]+\/(delay|replace-vehicle|swap-vehicle|seats\/override-lock)$/, ['DISPATCH']],
   // Refund money: only the director sets the cancellation policy (D184).
-  [['PUT'], /^\/api\/v1\/ops\/service-config\/cancellation-policy$/, ['FLEET_DIRECTOR']],
-  [/^\/api\/v1\/ops\/service-(config|areas)/, ['FLEET_DIRECTOR', 'DISPATCHER']],
-  [/^\/api\/v1\/ops\/schedules/, ['FLEET_DIRECTOR', 'DISPATCHER']],
-  [/^\/api\/v1\/ops\/promo-banners/, ['FLEET_DIRECTOR']],
-  [/^\/api\/v1\/ops\/vouchers/, ['FLEET_DIRECTOR']],
-  [/^\/api\/v1\/ops\/trips\/[^/]+\/assign(-options)?$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
-  [/^\/api\/v1\/ops\/trips\/[^/]+\/(cancel|sales|end)$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
-  [/^\/api\/v1\/ops\/home-requests/, ['FLEET_DIRECTOR', 'DISPATCHER']],
-  [/^\/api\/v1\/ops\/debt-receipts\//, ['FLEET_DIRECTOR', 'CASHIER', 'FINANCIAL_CONTROLLER']]
+  [['PUT'], /^\/api\/v1\/ops\/service-config\/cancellation-policy$/, DIRECTOR_ONLY],
+  [/^\/api\/v1\/ops\/service-(config|areas)/, ['SCHEDULES']],
+  [/^\/api\/v1\/ops\/schedules/, ['SCHEDULES']],
+  [/^\/api\/v1\/ops\/promo-banners/, ['MARKETING']],
+  [/^\/api\/v1\/ops\/vouchers/, ['MARKETING']],
+  [/^\/api\/v1\/ops\/trips\/[^/]+\/assign(-options)?$/, ['DISPATCH']],
+  [/^\/api\/v1\/ops\/trips\/[^/]+\/cancel$/, ['TRIP_CANCEL']],
+  [/^\/api\/v1\/ops\/trips\/[^/]+\/(sales|end)$/, ['DISPATCH']],
+  [/^\/api\/v1\/ops\/home-requests/, ['DISPATCH']],
+  [/^\/api\/v1\/ops\/debt-receipts\//, ['PAYMENTS']]
 ];
 
 export const ADMIN_ROLE = 'FLEET_DIRECTOR';
 
 /** Runs the platform (all bus companies); acts in one company only when it names it (spec 2.3). */
 export const PLATFORM_ROLE = 'PLATFORM_ADMIN';
+
+/** The director of the company (or the platform admin acting in it), as the account stored on the server says. */
+export function isDirector(req) {
+  return Boolean(req?.staffAccess?.isDirector || req?.staffAccess?.isPlatform);
+}
+
+/** Whether the staff member may do this now: read from the account on every request, never from the token (D196). */
+export function hasStaffPermission(req, permission) {
+  return isDirector(req) || Boolean(req?.staffAccess?.permissions?.has(permission));
+}
 
 export function resolveAccess(method, pathname) {
   if (!pathname.startsWith(API) && pathname !== '/health' && pathname !== '/openapi.json') {
@@ -148,7 +174,10 @@ export function authenticate(req, access, pathname) {
   }
 
   if (access.kind === 'staff') {
-    const staff = MOCK_MANAGERS_DB.find(m => m.user_id === identity.sub);
+    let staff = MOCK_MANAGERS_DB.find(m => m.user_id === identity.sub);
+    if (staff) {
+      staff = normalizeStaffAccount(staff);
+    }
     if (revoked(staff, identity)) return REVOKED;
     // Platform endpoints are for the platform admin only; it may also use every ops endpoint of the company it names.
     if (pathname.startsWith(`${API}/platform/`) && identity.role !== PLATFORM_ROLE) {
@@ -157,11 +186,30 @@ export function authenticate(req, access, pathname) {
     if (staff?.must_change_password && pathname !== '/api/v1/ops/auth/change-password') {
       return { ok: false, status: 403, code: 'PASSWORD_CHANGE_REQUIRED', message: 'Đổi mật khẩu tạm trước khi tiếp tục' };
     }
-    const mustEnrollTotp = TOTP_ROLES.includes(staff?.role) && staff?.totp_enrolled === false;
+
+    const isPlatform = identity.role === PLATFORM_ROLE;
+    // An account the server does not hold gets no rights, whatever its token says.
+    const isDirectorUser = staff?.role === 'FLEET_DIRECTOR';
+    const userPermissions = new Set(Array.isArray(staff?.permissions) ? staff.permissions : []);
+
+    req.staffAccount = staff;
+    req.staffAccess = {
+      isDirector: Boolean(isDirectorUser),
+      isPlatform: Boolean(isPlatform),
+      permissions: userPermissions
+    };
+
+    const isTotpRequired = isDirectorUser || Boolean(staff?.totp_required) || isPlatform;
+    const mustEnrollTotp = isTotpRequired && staff?.totp_enrolled === false;
     const allowedDuringEnrollment = ['/api/v1/ops/auth/change-password', '/api/v1/ops/auth/totp/setup', '/api/v1/ops/auth/totp/confirm'];
     if (mustEnrollTotp && !allowedDuringEnrollment.includes(pathname)) {
       return { ok: false, status: 403, code: 'TOTP_ENROLLMENT_REQUIRED', message: 'Cài xác thực 2 bước trước khi tiếp tục' };
     }
+
+    if (isPlatform) {
+      return { ok: true, identity };
+    }
+
     const rule = STAFF_RULES.find((entry) => {
       if (entry.length === 3) {
         const [methods, re] = entry;
@@ -170,9 +218,27 @@ export function authenticate(req, access, pathname) {
       }
       return entry[0].test(pathname);
     });
-    const allowedRoles = rule ? (rule.length === 3 ? rule[2] : rule[1]) : null;
-    if (rule && identity.role !== PLATFORM_ROLE && !allowedRoles.includes(identity.role)) {
-      return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Vai trò của bạn không được phép thực hiện thao tác này' };
+
+    if (rule) {
+      const required = rule.length === 3 ? rule[2] : rule[1];
+      if (required === DIRECTOR_ONLY) {
+        if (!isDirectorUser) {
+          return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Chức năng này chỉ dành cho Giám đốc điều hành' };
+        }
+      } else if (Array.isArray(required)) {
+        if (!isDirectorUser && !required.some(p => userPermissions.has(p))) {
+          return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Bạn chưa được giám đốc giao quyền làm việc này', required_permissions: required };
+        }
+      }
+    } else if (pathname.startsWith(`${API}/ops/`)) {
+      // Default rule for ops endpoints:
+      // GET -> allowed for any staff of this operator
+      // Non-GET -> DIRECTOR_ONLY, unless in STAFF_AUTH_EXEMPT
+      if (req.method !== 'GET' && !STAFF_AUTH_EXEMPT.includes(pathname)) {
+        if (!isDirectorUser) {
+          return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Chức năng này chỉ dành cho Giám đốc điều hành' };
+        }
+      }
     }
   }
 

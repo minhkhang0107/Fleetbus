@@ -4,7 +4,7 @@ import { createFleetBusServer } from '../../source/server/apiServer.js';
 
 test('Multi-tenant Payments and Tickets (T2b)', async (t) => {
   try {
-    const { server } = createFleetBusServer({ authMode: 'enforce' });
+    const { server } = createFleetBusServer({ authMode: 'enforce', webhookSecret: 'off' });
     
     await new Promise((resolve) => server.listen(0, resolve));
     const port = server.address().port;

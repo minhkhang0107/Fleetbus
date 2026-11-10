@@ -232,7 +232,14 @@ Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
                     Navigator.of(ctx).pop(true);
                     if (!context.mounted) return;
                     PassengerMainShell.openTab(context, 1);
-                    showToast(context, (result.value ?? 0) > 0 ? 'Đã gửi yêu cầu hoàn ${vnd(result.value!)}' : 'Đã hủy vé, không hoàn tiền theo chính sách');
+                    showToast(
+                      context,
+                      (result.value ?? 0) > 0
+                          ? 'Đã gửi yêu cầu hoàn ${vnd(result.value!)}'
+                          : t.unpaidCash
+                              ? 'Đã hủy vé. Vé chưa thanh toán nên không có tiền hoàn'
+                              : 'Đã hủy vé, không hoàn tiền theo chính sách',
+                    );
                   },
           ),
           gap(8),

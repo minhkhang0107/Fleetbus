@@ -95,9 +95,38 @@ export function handleWebhookRoutes(req, res, pathname, parsedUrl, services) {
 
     readRawBody(req).then(raw => {
       const secret = services.config?.webhookSecret;
-      if (secret && !signatureMatches(secret, raw, req.headers['x-signature'])) {
-        sendError(res, 'Chữ ký webhook không hợp lệ', 'INVALID_SIGNATURE', 401);
+      if (!secret || secret === null) {
+        sendError(res, 'Nhà xe chưa cấu hình khóa webhook', 'WEBHOOK_NOT_CONFIGURED', 503);
         return;
+      }
+
+      if (secret === 'off' && !isProduction()) {
+        // Bỏ qua kiểm tra chữ ký khi cấu hình secret là 'off' ngoài production
+      } else {
+        const timestampHeader = req.headers['x-timestamp'];
+        let payloadToSign = raw;
+        if (timestampHeader !== undefined && timestampHeader !== null && String(timestampHeader).trim() !== '') {
+          const tsRaw = String(timestampHeader).trim();
+          const tsNum = Number(tsRaw);
+          const tsMs = (Number.isFinite(tsNum) && tsNum > 0)
+            ? (tsNum < 10000000000 ? tsNum * 1000 : tsNum)
+            : Date.parse(tsRaw);
+
+          const nowMs = Date.now();
+          if (!Number.isFinite(tsMs) || Math.abs(nowMs - tsMs) > 5 * 60 * 1000) {
+            sendError(res, 'Webhook đã hết hạn hoặc timestamp không hợp lệ', 'STALE_WEBHOOK', 401);
+            return;
+          }
+          payloadToSign = `${tsRaw}.${raw}`;
+        } else {
+          // Không có x-timestamp: giữ cách ký trực tiếp trên rawBody để tương thích ngược với webhook cũ
+        }
+
+        const providedSig = req.headers['x-signature'];
+        if (!signatureMatches(secret, payloadToSign, providedSig)) {
+          sendError(res, 'Chữ ký webhook không hợp lệ', 'INVALID_SIGNATURE', 401);
+          return;
+        }
       }
 
       const body = parseJson(raw);

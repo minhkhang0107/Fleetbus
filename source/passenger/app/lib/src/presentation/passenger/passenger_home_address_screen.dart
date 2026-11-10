@@ -150,7 +150,7 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
               _mapReady = true;
               _fitAreas(points);
             },
-            interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
+            interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate, keyboardOptions: KeyboardOptions.disabled()),
             onTap: (_, point) {
               setState(() {
                 _pin = point;

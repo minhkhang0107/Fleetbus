@@ -70,7 +70,14 @@ lint:
 	npm run lint
 
 start_server:
-	node source/server/apiServer.js
+	@if [ -z "$$FLEETBUS_WEBHOOK_SECRET" ]; then \
+		export FLEETBUS_WEBHOOK_SECRET=$$(node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"); \
+		echo "Tự sinh FLEETBUS_WEBHOOK_SECRET: $$FLEETBUS_WEBHOOK_SECRET"; \
+		echo "Hướng dẫn ký thử: HMAC-SHA256($$FLEETBUS_WEBHOOK_SECRET, [x-timestamp.]rawBody) gửi qua header x-signature (và x-timestamp)"; \
+		node source/server/apiServer.js; \
+	else \
+		node source/server/apiServer.js; \
+	fi
 
 tailscale_check:
 	@test -n "$(TAILSCALE_IP)" || (echo "Tailscale chưa chạy trên máy này (tailscale ip -4 không trả về địa chỉ)."; exit 1)
@@ -80,7 +87,14 @@ tailscale_url: tailscale_check
 
 # Links sent to passengers (bus tracking for relatives) use this address instead of localhost.
 tailscale_server: tailscale_check
-	FLEETBUS_PUBLIC_URL=$(SERVER_URL) PORT=$(PORT) node source/server/apiServer.js
+	@if [ -z "$$FLEETBUS_WEBHOOK_SECRET" ]; then \
+		export FLEETBUS_WEBHOOK_SECRET=$$(node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"); \
+		echo "Tự sinh FLEETBUS_WEBHOOK_SECRET: $$FLEETBUS_WEBHOOK_SECRET"; \
+		echo "Hướng dẫn ký thử: HMAC-SHA256($$FLEETBUS_WEBHOOK_SECRET, [x-timestamp.]rawBody) gửi qua header x-signature (và x-timestamp)"; \
+		FLEETBUS_PUBLIC_URL=$(SERVER_URL) PORT=$(PORT) node source/server/apiServer.js; \
+	else \
+		FLEETBUS_PUBLIC_URL=$(SERVER_URL) PORT=$(PORT) node source/server/apiServer.js; \
+	fi
 
 # Debug APKs (flavor develop) whose API address is the tailnet one; copied to dist/tailscale/.
 tailscale_apk: tailscale_check

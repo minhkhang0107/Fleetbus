@@ -4,10 +4,10 @@
  */
 
 import crypto from 'crypto';
-import { DEFAULT_OPERATOR_ID } from '../core/operators.js';
+import { DEFAULT_OPERATOR_ID, findOperatorById, publicOperatorProfile, operatorPaymentConfig } from '../core/operators.js';
 import { sendSuccess, sendError, parseJsonBody, clientNow, clientIp } from '../middleware/httpUtils.js';
 import { maskPhone, normalizePlate } from '../services/passenger/core/formatters.js';
-import { ADMIN_ROLE } from '../core/gateway.js';
+import { ADMIN_ROLE, isDirector, hasStaffPermission } from '../core/gateway.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { parseServiceDate, scheduleChangeFrom, vnDate } from '../core/serviceDate.js';
 import { missedDepartureAlerts } from '../core/missedDepartures.js';
@@ -17,6 +17,7 @@ import { BUILTIN_LAYOUTS, validateLayout, findLayout } from '../core/seatLayouts
 import { STATIONS_DATABASE, MOCK_TRIPS_DATABASE, scheduleView } from '../services/passenger/modules/search.js';
 import { setStopCoords } from '../core/geo.js';
 import { MOCK_MANAGERS_DB } from '../services/manager/modules/managerService.js';
+import { normalizeStaffAccount, ALLOWED_PERMISSIONS } from '../services/manager/modules/staffAccounts.js';
 
 // Seat conflicts and reservation mismatches are conflicts (409); a missing trip or reservation is 404.
 function inventoryErrorStatus(code) {
@@ -26,10 +27,80 @@ function inventoryErrorStatus(code) {
   return 400;
 }
 
-// OQ-007: only the admin role sees full phone numbers of passengers.
+// OQ-007: director, dispatchers, and ticket agents see full phone numbers of passengers.
 function visibleBooking(req, booking) {
-  if (!req.identity || req.identity.role === ADMIN_ROLE) return booking;
+  if (!req.identity || isDirector(req) || hasStaffPermission(req, 'DISPATCH') || hasStaffPermission(req, 'TICKETING')) return booking;
   return { ...booking, phone: booking.phone ? maskPhone(booking.phone) : booking.phone };
+}
+
+/** The trip a booking belongs to, named as the dispatch board names it (schedule name, else route name). */
+function bookingTrip(managerService, tripId) {
+  const trip = managerService.findTrip(tripId);
+  if (!trip) return null;
+  const routeName = trip.route_name || managerService._scheduleName?.(trip.schedule_id) || managerService.routes?.find(r => r.route_id === trip.route_id)?.name;
+  return { ...trip, route_name: routeName || trip.route_id };
+}
+
+export function enrichBookingForOps(booking, trip, tickets = []) {
+  if (!booking) return null;
+  const cancelledSet = new Set(Array.isArray(booking.cancelled_seat_codes) ? booking.cancelled_seat_codes : []);
+  for (const t of tickets) {
+    if (t.pnr === booking.pnr && t.status === 'CANCELLED' && t.seat_code) {
+      cancelledSet.add(t.seat_code);
+    }
+  }
+  const cancelled_seat_codes = Array.from(cancelledSet);
+  const seatCodes = Array.isArray(booking.seat_codes) ? booking.seat_codes : [];
+  const totalSeats = seatCodes.length || 1;
+  const activeSeats = seatCodes.filter(s => !cancelledSet.has(s));
+  const activeCount = activeSeats.length;
+
+  let status = booking.status || 'CONFIRMED';
+  if (seatCodes.length > 0) {
+    if (activeCount === 0) {
+      status = 'CANCELLED';
+    } else if (cancelled_seat_codes.length > 0) {
+      status = 'PARTIALLY_CANCELLED';
+    }
+  }
+
+  let cod_amount_vnd = booking.cod_amount_vnd;
+  const isCodUnpaid = (booking.payment_method === 'CASH' && booking.payment_status !== 'PAID') || booking.payment_status === 'UNPAID_COD';
+  if (isCodUnpaid && cancelled_seat_codes.length > 0) {
+    const totalFare = Number(booking.total_fare_vnd) || 0;
+    const perSeat = totalFare / totalSeats;
+    cod_amount_vnd = Math.round(perSeat * activeCount);
+  }
+
+  const tripInfo = trip ? {
+    route_name: trip.route_name || trip.route_id || '',
+    departure_time: trip.departure_time || null,
+    vehicle_plate: trip.vehicle_plate || null
+  } : null;
+
+  return {
+    ...booking,
+    status,
+    cancelled_seat_codes,
+    ...(cod_amount_vnd !== undefined ? { cod_amount_vnd } : {}),
+    trip: tripInfo
+  };
+}
+
+function getTicketsForPnr(pnr, paymentService) {
+  if (!paymentService?.tickets) return [];
+  const tickets = paymentService.tickets;
+  const list = [];
+  if (tickets instanceof Map) {
+    for (const t of tickets.values()) {
+      if (t && t.pnr === pnr) list.push(t);
+    }
+  } else if (Array.isArray(tickets)) {
+    for (const t of tickets) {
+      if (t && t.pnr === pnr) list.push(t);
+    }
+  }
+  return list;
 }
 
 function audit(req, managerService, entry) {
@@ -135,11 +206,43 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/ops/auth/me (Current staff profile and permissions)
+  if (pathname === '/api/v1/ops/auth/me' && req.method === 'GET') {
+    const userId = req.identity?.sub;
+    const isPlatform = req.identity?.role === 'PLATFORM_ADMIN';
+    let staff = MOCK_MANAGERS_DB.find(u => u.user_id === userId);
+    if (!staff && !isPlatform) {
+      sendError(res, 'Không tìm thấy tài khoản', 'USER_NOT_FOUND', 404);
+      return true;
+    }
+    if (staff) {
+      staff = normalizeStaffAccount(staff);
+    }
+    const isDirectorUser = staff?.role === 'FLEET_DIRECTOR';
+    const role = isPlatform ? 'PLATFORM_ADMIN' : (isDirectorUser ? 'FLEET_DIRECTOR' : 'STAFF');
+    const permissions = (isDirectorUser || isPlatform)
+      ? [...ALLOWED_PERMISSIONS]
+      : (Array.isArray(staff?.permissions) ? [...staff.permissions] : []);
+    const totp_required = Boolean(isDirectorUser || staff?.totp_required || isPlatform);
+    const op = staff?.operator_id ? findOperatorById(staff.operator_id) : (req.operatorId ? findOperatorById(req.operatorId) : null);
+    const operator = op ? publicOperatorProfile(op) : null;
+
+    sendSuccess(res, {
+      user_id: staff?.user_id || userId,
+      full_name: staff?.full_name || (isPlatform ? 'Platform Admin' : ''),
+      role,
+      permissions,
+      totp_required,
+      operator
+    });
+    return true;
+  }
+
   // GET /api/v1/ops/dashboard/kpis (MGR-002)
   if (pathname === '/api/v1/ops/dashboard/kpis' && req.method === 'GET') {
     const now = clientNow(parsedUrl.searchParams);
     const derived = missedDepartureAlerts(managerService, req.operatorId, now);
-    const kpis = managerService.getOperationsDashboardKPIs(req.operatorId);
+    const kpis = managerService.getOperationsDashboardKPIs(req.operatorId, now);
     const data = kpis.data || kpis;
     if (data?.kpi_metrics) {
       data.kpi_metrics.active_alerts_count = (data.kpi_metrics.active_alerts_count || 0) + derived.length;
@@ -889,9 +992,15 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
 
   // GET /api/v1/ops/bookings (MGR-017)
   if (pathname === '/api/v1/ops/bookings' && req.method === 'GET') {
+    const filtered = managerService.bookings.filter(b => !req.operatorId || managerService.findTrip(b.trip_id)?.operator_id === req.operatorId);
     sendSuccess(res, {
-      total: managerService.bookings.filter(b => !req.operatorId || managerService.findTrip(b.trip_id)?.operator_id === req.operatorId).length,
-      bookings: managerService.bookings.filter(b => !req.operatorId || managerService.findTrip(b.trip_id)?.operator_id === req.operatorId).map(b => visibleBooking(req, b))
+      total: filtered.length,
+      bookings: filtered.map(b => {
+        const trip = bookingTrip(managerService, b.trip_id);
+        const pnrTickets = getTicketsForPnr(b.pnr, services.paymentService);
+        const enriched = enrichBookingForOps(b, trip, pnrTickets);
+        return visibleBooking(req, enriched);
+      })
     });
     return true;
   }
@@ -901,11 +1010,14 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     const bookingId = pathname.split('/')[5];
     const booking = managerService.bookings.find(b => b.pnr === bookingId && (!req.operatorId || managerService.findTrip(b.trip_id)?.operator_id === req.operatorId));
     if (booking) {
+      const trip = bookingTrip(managerService, booking.trip_id);
+      const pnrTickets = getTicketsForPnr(booking.pnr, services.paymentService);
+      const enriched = enrichBookingForOps(booking, trip, pnrTickets);
       // What was paid stays total_fare_vnd; what goes back (a refused home fee, a cancellation) is listed beside it.
       const refunds = managerService.refundRequests.filter(r => r.pnr === booking.pnr)
         .map(({ refund_id, amount_vnd, status, reason, source, requested_at, processed_at }) => ({ refund_id, amount_vnd, status, reason, source, requested_at, processed_at: processed_at || null }));
       const sum = (status) => refunds.filter(r => r.status === status).reduce((n, r) => n + (r.amount_vnd || 0), 0);
-      sendSuccess(res, { ...visibleBooking(req, booking), refunds, refund_pending_vnd: sum('REFUND_REQUESTED'), refunded_vnd: sum('REFUNDED') });
+      sendSuccess(res, { ...visibleBooking(req, enriched), refunds, refund_pending_vnd: sum('REFUND_REQUESTED'), refunded_vnd: sum('REFUNDED') });
     } else {
       sendError(res, 'Không tìm thấy thông tin đơn đặt vé', 'BOOKING_NOT_FOUND', 404);
     }
@@ -1099,6 +1211,57 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/ops/trips/:tripId/manifest (D195): who rides, for the office answering a passenger's call
+  const tripManifestMatch = pathname.match(/^\/api\/v1\/ops\/trips\/([^/]+)\/manifest$/);
+  if (tripManifestMatch && req.method === 'GET') {
+    const tripId = decodeURIComponent(tripManifestMatch[1]);
+    if (!tripVisibleTo(services, tripId, req.operatorId)) {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+      return true;
+    }
+    let driverTrip = services.driverService?.activeTrips?.get(tripId);
+    if (!driverTrip) {
+      services.eventBridge?.ensureRunOperations?.(tripId);
+      driverTrip = services.driverService?.activeTrips?.get(tripId);
+    }
+    const stops = driverTrip?.stops || services.searchService?.getTripDetail?.(tripId, req.operatorId)?.data?.stops || [];
+    const stopsMap = Object.fromEntries(stops.map(s => [s.stop_id, s.name]));
+
+    const manifestItems = (driverTrip?.manifest || []).map(m => {
+      const pickupName = m.pickup_stop || stopsMap[m.pickup_stop_id] || (m.pickup_stop_id ? `Trạm ${m.pickup_stop_id}` : null);
+      const dropoffName = m.dropoff_stop || stopsMap[m.dropoff_stop_id] || (m.dropoff_stop_id ? `Trạm ${m.dropoff_stop_id}` : null);
+      const rawPhone = m.passenger_phone || m.phone || null;
+      const phone = visibleBooking(req, { phone: rawPhone }).phone;
+
+      return {
+        ticket_id: m.ticket_id,
+        seat_code: m.seat_code,
+        passenger_name: m.passenger_name,
+        phone,
+        pnr: m.pnr,
+        pickup_stop_id: m.pickup_stop_id || null,
+        pickup_stop_name: pickupName,
+        dropoff_stop_id: m.dropoff_stop_id || null,
+        dropoff_stop_name: dropoffName,
+        home_pickup: m.home_pickup ? { address: m.home_pickup.address } : null,
+        home_pickup_address: m.home_pickup?.address || null,
+        home_dropoff: m.home_dropoff ? { address: m.home_dropoff.address } : null,
+        home_dropoff_address: m.home_dropoff?.address || null,
+        payment_method: m.payment_method || 'CASH',
+        cod_amount_vnd: m.cod_amount_vnd ?? 0,
+        cod_collected: m.cod_collected ?? (m.payment_method === 'COD' && m.boarding_status === 'BOARDED'),
+        boarding_status: m.boarding_status || 'NOT_BOARDED'
+      };
+    });
+
+    sendSuccess(res, {
+      trip_id: tripId,
+      total_passengers: manifestItems.length,
+      manifest: manifestItems
+    });
+    return true;
+  }
+
   if (TRIP_DETAIL_RE.test(pathname) && req.method === 'GET') {
     const tripId = pathname.match(TRIP_DETAIL_RE)[1];
     const trip = managerService.findTrip(tripId);
@@ -1110,12 +1273,43 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+function formatVnDateTime(isoStr) {
+  const ms = Date.parse(isoStr);
+  if (!Number.isFinite(ms)) return isoStr;
+  const vn = new Date(ms + 7 * 3600000);
+  const hh = String(vn.getUTCHours()).padStart(2, '0');
+  const mm = String(vn.getUTCMinutes()).padStart(2, '0');
+  const dd = String(vn.getUTCDate()).padStart(2, '0');
+  const MM = String(vn.getUTCMonth() + 1).padStart(2, '0');
+  const yyyy = vn.getUTCFullYear();
+  return `${hh}:${mm} ${dd}/${MM}/${yyyy}`;
+}
+
   // GET /api/v1/ops/alerts (MGR-025)
   if (pathname === '/api/v1/ops/alerts' && req.method === 'GET') {
     const now = clientNow(parsedUrl.searchParams);
     const derived = missedDepartureAlerts(managerService, req.operatorId, now);
     const stored = req.operatorId ? managerService.alerts.filter(a => (a.operator_id || DEFAULT_OPERATOR_ID) === req.operatorId) : managerService.alerts;
     const alerts = [...derived, ...stored];
+
+    // S5: Giám đốc nhà xe nhận cảnh báo đỏ về đổi tài khoản nhận tiền
+    if (isDirector(req)) {
+      const op = req.operator || findOperatorById(req.operatorId, now);
+      if (op?.bank_pending) {
+        const bp = op.bank_pending;
+        const last4 = (bp.account_number || '').slice(-4);
+        const timeStr = formatVnDateTime(bp.effective_at);
+        alerts.unshift({
+          alert_id: `alt_bank_change_${req.operatorId}`,
+          type: 'BANK_CHANGE_PENDING',
+          severity: 'RED',
+          message: `Tài khoản nhận tiền sẽ đổi sang ${bp.bank_name || ''} ****${last4} lúc ${timeStr}. Nếu không phải bạn yêu cầu, gọi BusGo ngay.`,
+          created_at: bp.requested_at,
+          operator_id: req.operatorId
+        });
+      }
+    }
+
     sendSuccess(res, { total: alerts.length, alerts });
     return true;
   }
@@ -1180,6 +1374,17 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     const orderId = decodeURIComponent(confirmPaymentMatch[1]);
     parseJsonBody(req).then(body => {
       const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+      const op = req.operator || findOperatorById(operatorId);
+      const paymentCfg = operatorPaymentConfig(op);
+      const amount = Number(body?.amount_vnd ?? body?.amountVnd);
+
+      // S4: Ngưỡng xác nhận tay: số tiền > manual_confirm_limit_vnd thì chỉ giám đốc làm được
+      if (!isDirector(req) && Number.isFinite(amount) && amount > paymentCfg.manual_confirm_limit_vnd) {
+        const formatted = paymentCfg.manual_confirm_limit_vnd.toLocaleString('vi-VN');
+        sendError(res, `Số tiền trên ${formatted} đ cần giám đốc xác nhận`, 'MANUAL_CONFIRM_LIMIT', 403);
+        return;
+      }
+
       const now = clientNow(body);
       const result = services.paymentService.confirmPaymentManually(orderId, {
         operatorId,
@@ -1194,7 +1399,10 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       audit(req, managerService, {
         action: 'PAYMENT_MANUAL_CONFIRM',
         resource: result.order_id || orderId,
+        operator_id: operatorId,
+        staff: req.identity?.sub || null,
         after: {
+          staff: req.identity?.sub || null,
           order_id: result.order_id,
           pnr: result.pnr,
           outcome: result.outcome,
@@ -1204,6 +1412,22 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       });
       sendSuccess(res, result);
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/ops/payments/manual-confirmations?date=YYYY-MM-DD (S4 / DIRECTOR_ONLY)
+  if (pathname === '/api/v1/ops/payments/manual-confirmations' && req.method === 'GET') {
+    if (req.identity && !isDirector(req)) {
+      sendError(res, 'Chức năng này chỉ dành cho Giám đốc điều hành', 'FORBIDDEN', 403);
+      return true;
+    }
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const date = parsedUrl.searchParams.get('date');
+    const result = services.paymentService.listManualConfirmations({
+      operatorId,
+      date
+    });
+    sendSuccess(res, result);
     return true;
   }
 

@@ -24,7 +24,30 @@ export function missedDepartureAlerts(managerService, operatorId, now = Date.now
     if (operatorId && trip.operator_id !== operatorId) continue;
     if (trip.status !== 'SCHEDULED' && trip.status !== 'DISPATCHED') continue;
     const depMs = Date.parse(trip.departure_time);
-    if (!Number.isFinite(depMs) || vnDate(depMs) !== today || today === DEMO_DATE || now - depMs <= GRACE_MS) continue;
+    if (!Number.isFinite(depMs) || vnDate(depMs) !== today || today === DEMO_DATE) continue;
+
+    const diffMinutes = Math.floor((depMs - now) / 60000);
+    const missingVehicle = !trip.vehicle_id;
+    const missingDriver = !trip.driver_id;
+
+    // Early warning: trip starts within 120 minutes but lacks vehicle or driver
+    if (depMs > now && diffMinutes <= 120 && (missingVehicle || missingDriver)) {
+      const hhmm = new Date(depMs + 7 * 3600000).toISOString().slice(11, 16);
+      const routeLabel = trip.route_name ? ` ${trip.route_name}` : '';
+      const missingReason = missingVehicle && missingDriver ? 'chưa gán xe và tài xế' : (missingVehicle ? 'chưa gán xe' : 'chưa gán tài xế');
+      alerts.push({
+        alert_id: `alt_unassigned_${trip.trip_id}`,
+        type: 'UNASSIGNED_DEPARTURE_UPCOMING',
+        severity: diffMinutes < 60 ? 'RED' : 'AMBER',
+        message: `Chuyến ${hhmm}${routeLabel} còn ${overdueText(diffMinutes)} nữa chạy, ${missingReason}.`,
+        vehicle_plate: trip.vehicle_plate || null,
+        trip_id: trip.trip_id,
+        created_at: new Date(now).toISOString(),
+        operator_id: trip.operator_id
+      });
+    }
+
+    if (now - depMs <= GRACE_MS) continue;
     const booked = trip.booked_seats || 0;
     const hhmm = new Date(depMs + 7 * 3600000).toISOString().slice(11, 16);
     alerts.push({

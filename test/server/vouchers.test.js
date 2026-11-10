@@ -51,7 +51,7 @@ test('TC-MGR-035-01: limits, window and uses of a discount code, per company', (
 });
 
 test('TC-MGR-035-02: the director creates a code, the passenger uses it, the order is priced with it', async (t) => {
-  const { server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: null });
+  const { server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: 'off' });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const call = async (path, { method = 'GET', body, token } = {}) => {

@@ -81,7 +81,8 @@ describe('B-10 & H-06: Staff accounts management and token revocation', () => {
         username: 'thu_ngan_01@saomai.vn',
         full_name: 'Nguyễn Thị Thu Ngân',
         phone: '0988112233',
-        role: 'CASHIER'
+        role: 'STAFF',
+        permissions: ['TICKETING', 'BOOKINGS_VIEW', 'PAYMENTS']
       }
     });
 
@@ -96,7 +97,8 @@ describe('B-10 & H-06: Staff accounts management and token revocation', () => {
 
     assert.strictEqual(createdCashier.username, 'thu_ngan_01@saomai.vn');
     assert.strictEqual(createdCashier.full_name, 'Nguyễn Thị Thu Ngân');
-    assert.strictEqual(createdCashier.role, 'CASHIER');
+    assert.strictEqual(createdCashier.role, 'STAFF');
+    assert.deepStrictEqual(createdCashier.permissions, ['TICKETING', 'BOOKINGS_VIEW', 'PAYMENTS']);
     assert.strictEqual(createdCashier.active, true);
     assert.strictEqual(createdCashier.must_change_password, true);
 
@@ -149,7 +151,7 @@ describe('B-10 & H-06: Staff accounts management and token revocation', () => {
     const cashierPost = await api('/api/v1/ops/staff', {
       method: 'POST',
       token: cashierToken,
-      body: { username: 'sub_cashier@saomai.vn', full_name: 'Phụ Ngân', role: 'CASHIER' }
+      body: { username: 'sub_cashier@saomai.vn', full_name: 'Phụ Ngân', role: 'STAFF', permissions: ['TICKETING'] }
     });
     assert.strictEqual(cashierPost.status, 403);
 
@@ -162,7 +164,7 @@ describe('B-10 & H-06: Staff accounts management and token revocation', () => {
     const dispPost = await api('/api/v1/ops/staff', {
       method: 'POST',
       token: dispatcherToken,
-      body: { username: 'sub_disp@saomai.vn', full_name: 'Phụ Điều', role: 'DISPATCHER' }
+      body: { username: 'sub_disp@saomai.vn', full_name: 'Phụ Điều', role: 'STAFF', permissions: ['DISPATCH'] }
     });
     assert.strictEqual(dispPost.status, 403);
 
@@ -242,7 +244,7 @@ describe('B-10 & H-06: Staff accounts management and token revocation', () => {
     const dupRes1 = await api('/api/v1/ops/staff', {
       method: 'POST',
       token: directorToken,
-      body: { username: 'thu_ngan_01@saomai.vn', full_name: 'Trùng Tên', role: 'CASHIER' }
+      body: { username: 'thu_ngan_01@saomai.vn', full_name: 'Trùng Tên', role: 'STAFF' }
     });
     assert.strictEqual(dupRes1.status, 409);
     assert.strictEqual(dupRes1.body.code, 'STAFF_EXISTS');
@@ -251,7 +253,7 @@ describe('B-10 & H-06: Staff accounts management and token revocation', () => {
     const dupRes2 = await api('/api/v1/ops/staff', {
       method: 'POST',
       token: directorToken,
-      body: { username: 'director@hoanglong.vn', full_name: 'Trùng Khác Công Ty', role: 'DISPATCHER' }
+      body: { username: 'director@hoanglong.vn', full_name: 'Trùng Khác Công Ty', role: 'STAFF' }
     });
     assert.strictEqual(dupRes2.status, 409);
     assert.strictEqual(dupRes2.body.code, 'STAFF_EXISTS');
@@ -260,7 +262,7 @@ describe('B-10 & H-06: Staff accounts management and token revocation', () => {
     const invalidEmail = await api('/api/v1/ops/staff', {
       method: 'POST',
       token: directorToken,
-      body: { username: 'notanemail', full_name: 'Email Sai', role: 'CASHIER' }
+      body: { username: 'notanemail', full_name: 'Email Sai', role: 'STAFF' }
     });
     assert.strictEqual(invalidEmail.status, 400);
     assert.strictEqual(invalidEmail.body.code, 'VALIDATION_ERROR');

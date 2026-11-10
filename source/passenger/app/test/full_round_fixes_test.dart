@@ -123,7 +123,8 @@ void main() {
       // Does not say "Chưa nhận được tiền"
       expect(find.textContaining('Chưa nhận được tiền'), findsNothing);
 
-      // Amount row uses 100.000 đ and not 500.000 đ
+      // Amount row uses 100.000 đ and not 500.000 đ (below the account holder and the scam warning, so scroll to it)
+      await tester.scrollUntilVisible(find.text('100.000 đ'), 200, scrollable: find.byType(Scrollable).first);
       expect(find.text('100.000 đ'), findsWidgets);
 
       // Test save QR saves with remaining amount (100.000 đ)

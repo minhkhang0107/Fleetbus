@@ -97,7 +97,7 @@ describe('Money flows & passenger account lifecycle (H-01, H-02, H-03, B-12)', (
   }
 
   before(async () => {
-    ({ server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: null }));
+    ({ server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: 'off' }));
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     baseUrl = `http://127.0.0.1:${server.address().port}`;
 

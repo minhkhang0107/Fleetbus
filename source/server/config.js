@@ -35,11 +35,16 @@ export function getTicketSecret() {
 
 export function getWebhookSecret() {
   const fromEnv = process.env.FLEETBUS_WEBHOOK_SECRET;
-  if (fromEnv) return fromEnv;
   if (isProduction()) {
-    throw new Error('FLEETBUS_WEBHOOK_SECRET must be set in production');
+    if (fromEnv === 'off') {
+      throw new Error('FLEETBUS_WEBHOOK_SECRET cannot be "off" in production');
+    }
+    if (!fromEnv) {
+      throw new Error('FLEETBUS_WEBHOOK_SECRET must be set in production');
+    }
+    return fromEnv;
   }
-  return null;
+  return fromEnv || null;
 }
 
 const DEV_TOKEN_SECRET = 'fleetbus_dev_only_token_secret';

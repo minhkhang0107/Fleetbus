@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:app/src/presentation/driver_end_trip_screen.dart';
 import 'package:app/src/presentation/driver_permissions.dart';
 import 'package:app/src/presentation/driver_qr_scanner_screen.dart';
@@ -78,6 +79,12 @@ void main() {
           'payment_method': 'VIETQR',
           'cod_amount_vnd': 0,
           'pnr': 'BG-000001',
+          'boarding_check': {
+            'qr_version': 1,
+            'qr_digest': 'sig',
+            'pin_digest': sha256.convert(utf8.encode('t_a01|482107')).toString(),
+            'group_digest': 'grp_sig',
+          },
         },
         {
           'ticket_id': 't_a02',
@@ -90,6 +97,12 @@ void main() {
           'payment_method': 'COD',
           'cod_amount_vnd': 220000,
           'pnr': 'BG-000002',
+          'boarding_check': {
+            'qr_version': 1,
+            'qr_digest': 'sig',
+            'pin_digest': sha256.convert(utf8.encode('t_a02|482107')).toString(),
+            'group_digest': 'grp_sig',
+          },
         },
       ],
     };
@@ -158,7 +171,7 @@ void main() {
     final r = await store.boardWithQr('BUSGO|BG-UNKNOWN|t_unknown|v1|sig');
 
     expect(r.code, 'TICKET_NOT_FOUND');
-    expect(r.error, contains('Mất mạng và vé không có trong danh sách chuyến này. Gọi nhà xe để kiểm tra.'));
+    expect(r.error, contains('Vé không có trong danh sách chuyến này (có thể đã hủy hoặc của chuyến khác). Gọi nhà xe.'));
     expect(store.queue, isEmpty);
 
     store.dispose();

@@ -12,7 +12,7 @@ describe('Tenant Home Feed, Checkout Payee Check, Onboarding & Webhooks', () => 
   let passengerToken;
 
   before(async () => {
-    const instance = createFleetBusServer({ authMode: 'enforce' });
+    const instance = createFleetBusServer({ authMode: 'enforce', webhookSecret: 'off' });
     server = instance.server;
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = server.address().port;

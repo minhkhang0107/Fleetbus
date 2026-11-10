@@ -100,10 +100,10 @@ Các tài khoản mẫu cấu hình sẵn trên môi trường phát triển (ng
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | Nền tảng (Platform) | Quản trị nền tảng (`PLATFORM_ADMIN`) | `root@busgo.vn` | `root123` | Bắt buộc (dev secret) | Toàn quyền quản trị hệ thống, tạo nhà xe |
 | Sao Mai (`SAOMAI`) | Giám đốc điều hành (`FLEET_DIRECTOR`) | `admin@busgo.vn` | `admin123` | Bắt buộc (dev secret) | Toàn quyền quản trị nhà xe Sao Mai |
-| Sao Mai (`SAOMAI`) | Điều độ viên (`DISPATCHER`) | `dispatcher@busgo.vn` | `disp123` | Không | Điều phối xe, tài xế, chuyến |
-| Sao Mai (`SAOMAI`) | Thu ngân / Phòng vé (`CASHIER`) | `cashier@busgo.vn` | `cash123` | Không | Bán vé quầy POS, hotline |
-| Xuyên Việt (`XUYENVIET`) | Điều độ viên (`DISPATCHER`) | `dispatcher@xuyenviet.vn` | `xv123` | Không | Điều phối xe, tài xế, chuyến |
-| Xuyên Việt (`XUYENVIET`) | Thu ngân / Phòng vé (`CASHIER`) | `cashier@xuyenviet.vn` | `xv123` | Không | Bán vé quầy POS, hotline |
+| Sao Mai (`SAOMAI`) | Nhân viên (`STAFF`), mẫu quyền Điều độ | `dispatcher@busgo.vn` | `disp123` | Không | Điều độ, hủy chuyến, xem đặt chỗ, đội xe, tài xế, lịch chạy, nhật ký |
+| Sao Mai (`SAOMAI`) | Nhân viên (`STAFF`), mẫu quyền Thu ngân | `cashier@busgo.vn` | `cash123` | Không | Bán vé quầy, giữ chỗ tổng đài, xem đặt chỗ, thu tiền |
+| Xuyên Việt (`XUYENVIET`) | Nhân viên (`STAFF`), mẫu quyền Điều độ | `dispatcher@xuyenviet.vn` | `xv123` | Không | Như điều độ Sao Mai |
+| Xuyên Việt (`XUYENVIET`) | Nhân viên (`STAFF`), mẫu quyền Thu ngân | `cashier@xuyenviet.vn` | `xv123` | Không | Như thu ngân Sao Mai |
 | Nhà xe tạo mới | Giám đốc điều hành (`FLEET_DIRECTOR`) | Email khi tạo | Mật khẩu tạm | Bắt buộc đổi MK & cài 2FA | Trả về khi gọi `POST /api/v1/platform/operators` |
 
 #### Buồng Lái Tài Xế (Driver App)
@@ -133,7 +133,7 @@ Máy chạy server và máy (hoặc điện thoại) dùng thử cùng đăng nh
 
 Đẩy APK lên Google Drive: `make drive_apk FLUTTER=~/development/flutter/bin/flutter` build 2 APK như trên rồi upload vào thư mục Drive của nhóm (ghi đè `busgo-driver.apk`, `busgo-passenger.apk` để link chia sẻ luôn trỏ bản mới nhất, kèm bản có ngày giờ trong `builds/`). Lần đầu cần kết nối Drive: `brew install rclone` rồi `rclone config create gdrive drive scope=drive` (mở trình duyệt để đăng nhập tài khoản Google có quyền sửa thư mục). Đổi thư mục: `DRIVE_FOLDER_ID=<id>`.
 
-Đổi địa chỉ (ví dụ tên MagicDNS): `make tailscale_apk SERVER_URL=http://<tên-máy>:3000`. Server nghe trên mọi địa chỉ nên không cần cấu hình thêm; nếu máy có tường lửa thì cho phép cổng 3000 trên giao diện `tailscale0`. Đây là server dev (tài khoản mẫu, khóa dev): chỉ chia sẻ trong tailnet, không mở ra Internet.
+Đổi địa chỉ (ví dụ tên MagicDNS): `make tailscale_apk SERVER_URL=http://<tên-máy>:3000`. Server nghe trên mọi địa chỉ nên không cần cấu hình thêm; nếu máy có tường lửa thì cho phép cổng 3000 trên giao diện `tailscale0`. Đây là server dev (tài khoản mẫu, khóa dev): chỉ chia sẻ trong tailnet, không mở ra Internet. Chạy iOS bản debug qua Tailscale cần dùng địa chỉ MagicDNS có HTTPS hoặc thêm ngoại lệ tạm khi dev; Android debug không ảnh hưởng.
 
 ### Lưu trữ và bảo mật dữ liệu (D126, D127)
 

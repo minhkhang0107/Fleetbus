@@ -32,6 +32,9 @@ function clearAmountAlerts(managerService, order) {
   }
 }
 
+/** Counts manifest items that are not cancelled. */
+const activeBookedCount = (manifest) => (manifest || []).filter(m => m.boarding_status !== 'CANCELLED').length;
+
 /** Puts a phone hold on the driver's manifest (paid in cash on board), once per seat; a home address rides with it. */
 function addHotlineToManifest(driverTrip, reservation, farePerSeat) {
   const feeEach = Math.round((reservation.home_fee_vnd || 0) / reservation.seat_codes.length);
@@ -57,7 +60,7 @@ function addHotlineToManifest(driverTrip, reservation, farePerSeat) {
       boarded_at: null
     });
   }
-  driverTrip.booked_passengers_count = driverTrip.manifest.length;
+  driverTrip.booked_passengers_count = activeBookedCount(driverTrip.manifest);
 }
 
 /** Puts issued tickets on the driver's manifest, once each. */
@@ -89,7 +92,7 @@ function addToManifest(driverTrip, tickets) {
       boarded_at: tkt.boarded_at || null
     });
   }
-  driverTrip.booked_passengers_count = driverTrip.manifest.length;
+  driverTrip.booked_passengers_count = activeBookedCount(driverTrip.manifest);
 }
 
 export class FleetBusEventBridge extends EventEmitter {
@@ -131,6 +134,7 @@ export class FleetBusEventBridge extends EventEmitter {
     if (seatMapService) seatMapService.eventBridge = this;
     if (paymentService && seatMapService) paymentService.seatMapService = seatMapService;
     if (paymentService && services.searchService) paymentService.searchService = services.searchService;
+    if (driverService && paymentService) driverService.paymentService = paymentService;
     if (paymentService) {
       paymentService.plateProvider = (tripId) => {
         const ops = managerService?.trips?.find(t => t.trip_id === tripId);
@@ -503,7 +507,7 @@ export class FleetBusEventBridge extends EventEmitter {
               boarded_at: null
             });
           }
-          driverTrip.booked_passengers_count = driverTrip.manifest.length;
+          driverTrip.booked_passengers_count = activeBookedCount(driverTrip.manifest);
         }
       }
 
@@ -560,7 +564,7 @@ export class FleetBusEventBridge extends EventEmitter {
         const driverTrip = driverService.activeTrips.get(tripId);
         if (driverTrip) {
           driverTrip.manifest = driverTrip.manifest.filter(m => m.reservation_id !== reservationId || m.boarding_status === 'BOARDED');
-          driverTrip.booked_passengers_count = driverTrip.manifest.length;
+          driverTrip.booked_passengers_count = activeBookedCount(driverTrip.manifest);
         }
       }
     });
@@ -918,7 +922,7 @@ export class FleetBusEventBridge extends EventEmitter {
     // -------------------------------------------------------------------------
     // 8. TICKET_CANCELLED: Passenger Cancel & Refund -> SeatMap, Driver & Manager
     // -------------------------------------------------------------------------
-    this.on('TICKET_CANCELLED', ({ ticketId, pnr, tripId, seatCode }) => {
+    this.on('TICKET_CANCELLED', ({ ticketId, pnr, tripId, seatCode, refundAmountVnd }) => {
       let resolvedTripId = tripId;
       let resolvedSeatCode = seatCode;
       let resolvedPnr = pnr;
@@ -954,6 +958,38 @@ export class FleetBusEventBridge extends EventEmitter {
           const item = trip.manifest.find(m => m.ticket_id === ticketId || (m.pnr === resolvedPnr && m.seat_code === resolvedSeatCode));
           if (item) {
             item.boarding_status = 'CANCELLED';
+          }
+          trip.booked_passengers_count = activeBookedCount(trip.manifest);
+        }
+      }
+
+      // D. Manager Bookings: Update booking records (partially or fully cancelled)
+      if (managerService && Array.isArray(managerService.bookings)) {
+        const booking = managerService.bookings.find(b =>
+          (resolvedPnr && b.pnr === resolvedPnr) ||
+          (resolvedTripId && b.trip_id === resolvedTripId && Array.isArray(b.seat_codes) && b.seat_codes.includes(resolvedSeatCode))
+        );
+        // The same seat cancelled twice (a retried event) must not refund or reduce the cash due twice.
+        const alreadyCancelled = booking?.cancelled_seat_codes?.includes(resolvedSeatCode);
+        if (booking && resolvedSeatCode && !alreadyCancelled) {
+          booking.cancelled_seat_codes = [...(booking.cancelled_seat_codes || []), resolvedSeatCode];
+
+          const refund = Number(refundAmountVnd) || 0;
+          booking.refunded_vnd = (Number(booking.refunded_vnd) || 0) + refund;
+
+          const totalSeats = Array.isArray(booking.seat_codes) && booking.seat_codes.length > 0 ? booking.seat_codes.length : 1;
+          const remainingCount = totalSeats - booking.cancelled_seat_codes.length;
+          booking.status = remainingCount <= 0 ? 'CANCELLED' : 'PARTIALLY_CANCELLED';
+
+          const isCashCod = (booking.payment_method === 'CASH' || booking.payment_status === 'UNPAID_COD') && booking.payment_status !== 'PAID';
+          if (isCashCod) {
+            const farePerSeat = Math.round((Number(booking.total_fare_vnd) || 0) / totalSeats);
+            if (remainingCount <= 0) {
+              booking.cod_amount_vnd = 0;
+            } else {
+              const currentCod = booking.cod_amount_vnd !== undefined ? Number(booking.cod_amount_vnd) : Number(booking.total_fare_vnd) || 0;
+              booking.cod_amount_vnd = Math.max(0, currentCod - farePerSeat);
+            }
           }
         }
       }

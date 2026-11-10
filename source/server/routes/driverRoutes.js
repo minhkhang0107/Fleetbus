@@ -6,6 +6,7 @@
 import { sendSuccess, sendError, parseJsonBody, clientNow } from '../middleware/httpUtils.js';
 import { isProduction } from '../config.js';
 import { refundEarlyEnd } from '../core/tripSales.js';
+import { vnDate, addDays } from '../core/serviceDate.js';
 
 
 // An unpaid COD ticket is a 409 that tells the app which fare to collect (DRI-010, DRI-012).
@@ -83,6 +84,12 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
 
   // GET /api/v1/driver/trips/today (DRI-002)
   if (pathname === '/api/v1/driver/trips/today' && req.method === 'GET') {
+    // Materialize today and tomorrow runs so the driver sees scheduled trips before dispatch opens
+    try {
+      const today = vnDate();
+      services.eventBridge?.runsForDate?.(today, req.operatorId);
+      services.eventBridge?.runsForDate?.(addDays(today, 1), req.operatorId);
+    } catch (_) {}
     // The token decides who the driver is; the header is only a development fallback
     const driverId = req.identity?.sub || req.headers['x-driver-id'] || 'drv_8821a';
     const result = driverService.getTodayTrips(driverId);

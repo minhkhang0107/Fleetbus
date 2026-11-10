@@ -2,7 +2,7 @@
  * Platform administration (spec 2.3): the platform admin creates, edits and (de)activates bus companies.
  * The gateway lets only PLATFORM_ADMIN tokens through and requires an Idempotency-Key on POSTs.
  */
-import { sendSuccess, sendError, parseJsonBody, clientIp } from '../middleware/httpUtils.js';
+import { sendSuccess, sendError, parseJsonBody, clientIp, clientNow } from '../middleware/httpUtils.js';
 import { createOperator, findOperatorByCode, findOperatorById, listOperators, setOperatorActive, updateOperator } from '../core/operators.js';
 import { MOCK_MANAGERS_DB } from '../services/manager/modules/managerService.js';
 import { isProduction } from '../config.js';
@@ -87,12 +87,41 @@ export function handlePlatformRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  const cancelPendingBankMatch = pathname.match(/^\/api\/v1\/platform\/operators\/([^/]+)\/bank-change\/cancel$/);
+  if (cancelPendingBankMatch && req.method === 'POST') {
+    const op = findOperatorById(cancelPendingBankMatch[1]);
+    if (!op) {
+      sendError(res, 'Không tìm thấy nhà xe', 'OPERATOR_NOT_FOUND', 404);
+      return true;
+    }
+    if (!op.bank_pending) {
+      sendError(res, 'Không có yêu cầu đổi tài khoản ngân hàng đang chờ', 'NO_PENDING_BANK_CHANGE', 400);
+      return true;
+    }
+    const before = { ...op.bank_pending };
+    delete op.bank_pending;
+    audit(req, managerService, {
+      action: 'BANK_CHANGE_CANCELLED',
+      resource: op.code,
+      operator_id: op.operator_id,
+      before,
+      after: null
+    });
+    sendSuccess(res, { success: true, message: 'Đã hủy yêu cầu đổi tài khoản nhận tiền' });
+    return true;
+  }
+
   const one = pathname.match(OPERATOR_RE);
   if (one && req.method === 'PATCH') {
     parseJsonBody(req).then(body => {
-      const before = findOperatorById(one[1]);
-      const snapshot = before ? { ...before, bank: { ...before.bank } } : null;
-      const result = updateOperator(one[1], body);
+      const now = clientNow(body);
+      const before = findOperatorById(one[1], now);
+      const snapshot = before ? {
+        ...before,
+        bank: { ...before.bank },
+        bank_pending: before.bank_pending ? { ...before.bank_pending } : null
+      } : null;
+      const result = updateOperator(one[1], body, { now, requested_by: req.identity?.sub || 'PLATFORM_ADMIN' });
       if (result.ok) audit(req, managerService, { action: 'OPERATOR_UPDATE', resource: result.operator.code, before: snapshot, after: result.operator, operator_id: result.operator.operator_id });
       reply(res, result);
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));

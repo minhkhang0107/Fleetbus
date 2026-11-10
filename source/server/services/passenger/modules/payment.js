@@ -393,7 +393,11 @@ export class PassengerPaymentService {
     }
 
     // b. Deduplicate when providerTxId or bankRef is present.
-    const dedupeId = providerTxId || bankRef || null;
+    const hasProviderTxId = providerTxId !== null && providerTxId !== undefined && String(providerTxId).trim() !== '';
+    const hasBankRef = bankRef !== null && bankRef !== undefined && String(bankRef).trim() !== '';
+    const dedupeId = (hasProviderTxId ? String(providerTxId).trim() : null)
+      || (hasBankRef ? String(bankRef).trim() : null);
+
     if (dedupeId) {
       const existingKey = `${operatorId}:${provider}:${dedupeId}`;
       const existing = this.bankTransactions.get(existingKey);
@@ -430,14 +434,43 @@ export class PassengerPaymentService {
     };
 
     // c. Wrong account number (compare digits only).
+    // Khớp tài khoản đang nhận tiền của nhà xe, HOẶC tài khoản cũ trong 7 ngày sau khi đổi (S3, S5).
     if (accountNumber !== null && accountNumber !== undefined && String(accountNumber).trim() !== '') {
-      const operator = findOperatorById(operatorId);
+      const operator = findOperatorById(operatorId, now);
       const expectedDigits = String(operator?.bank?.account_number || '').replace(/\D/g, '');
       const receivedDigits = String(accountNumber).replace(/\D/g, '');
-      if (expectedDigits && receivedDigits !== expectedDigits) {
+
+      let matched = false;
+      if (expectedDigits && receivedDigits === expectedDigits) {
+        matched = true;
+      } else if (operator?.bank_previous?.account_number) {
+        const prevDigits = String(operator.bank_previous.account_number).replace(/\D/g, '');
+        const untilMs = Date.parse(operator.bank_previous.until);
+        if (prevDigits && receivedDigits === prevDigits && Number.isFinite(untilMs) && now <= untilMs) {
+          matched = true;
+        }
+      }
+
+      if (!matched && expectedDigits) {
         storeTx('WRONG_ACCOUNT');
         return { success: true, outcome: 'WRONG_ACCOUNT' };
       }
+    }
+
+    // S2: Giao dịch ngân hàng không có mã tham chiếu (bankRef và providerTxId đều trống) KHÔNG được cộng tiền vào đơn:
+    // lưu với outcome 'NEEDS_REVIEW' (hiện ở "Giao dịch chưa khớp" cho người có quyền PAYMENTS/REFUNDS xử lý tay), phát sự kiện như UNMATCHED.
+    // Trừ trường hợp gán thủ công từ office (có tx.orderId).
+    if (!dedupeId && !tx.orderId) {
+      storeTx('NEEDS_REVIEW');
+      if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+        this.eventBridge.emit('PAYMENT_UNMATCHED', {
+          operatorId,
+          amountVnd: amount,
+          memo,
+          bankRef: txKey
+        });
+      }
+      return { success: true, outcome: 'NEEDS_REVIEW' };
     }
 
     // d. Match order directly by orderId or by scanning normalized memo for BG(\d{6}) candidates of this operator.
@@ -637,8 +670,8 @@ export class PassengerPaymentService {
       return { success: false, error: 'Không tìm thấy đơn hàng', code: 'ORDER_NOT_FOUND', status: 404 };
     }
     const cleanNote = typeof note === 'string' ? note.trim() : '';
-    if (cleanNote.length < 3 || cleanNote.length > 200) {
-      return { success: false, error: 'Ghi chú xác nhận cần từ 3 đến 200 ký tự', code: 'VALIDATION_ERROR', status: 400 };
+    if (cleanNote.length < 10 || cleanNote.length > 200) {
+      return { success: false, error: 'Ghi chú xác nhận cần từ 10 đến 200 ký tự', code: 'VALIDATION_ERROR', status: 400 };
     }
     const amount = Number(amountVnd);
     if (!Number.isInteger(amount) || amount <= 0) {
@@ -667,7 +700,12 @@ export class PassengerPaymentService {
   listBankTransactions({ operatorId = DEFAULT_OPERATOR_ID, outcome = null } = {}) {
     const entries = [...this.bankTransactions.values()].filter(r => {
       if ((r.operator_id || DEFAULT_OPERATOR_ID) !== operatorId) return false;
-      if (outcome && outcome !== 'ALL' && r.outcome !== outcome) return false;
+      if (outcome && outcome !== 'ALL') {
+        if (outcome === 'UNMATCHED') {
+          return r.outcome === 'UNMATCHED' || r.outcome === 'NEEDS_REVIEW';
+        }
+        if (r.outcome !== outcome) return false;
+      }
       return true;
     });
     return entries.reverse().sort((a, b) => {
@@ -678,6 +716,49 @@ export class PassengerPaymentService {
   }
 
   /**
+   * MGR-037 / S4: List manual payment confirmations for director.
+   */
+  listManualConfirmations({ operatorId = DEFAULT_OPERATOR_ID, date = null } = {}) {
+    const list = [...this.bankTransactions.values()].filter(tx => {
+      if ((tx.operator_id || DEFAULT_OPERATOR_ID) !== operatorId) return false;
+      if (tx.provider !== 'MANUAL') return false;
+      if (date) {
+        const txTime = tx.occurred_at || tx.received_at;
+        if (!txTime) return false;
+        const ms = Date.parse(txTime);
+        if (!Number.isFinite(ms)) return false;
+        const vnDateStr = new Date(ms + 7 * 3600000).toISOString().slice(0, 10);
+        if (vnDateStr !== date && !txTime.startsWith(date)) return false;
+      }
+      return true;
+    });
+
+    list.sort((a, b) => {
+      const ta = Date.parse(a.occurred_at || a.received_at || 0) || 0;
+      const tb = Date.parse(b.occurred_at || b.received_at || 0) || 0;
+      return tb - ta;
+    });
+
+    const totalAmount = list.reduce((sum, tx) => sum + (Number(tx.amount_vnd) || 0), 0);
+
+    const items = list.map(tx => ({
+      time: tx.occurred_at || tx.received_at,
+      staff: tx.staff || null,
+      pnr: tx.pnr || null,
+      order_id: tx.order_id || null,
+      amount_vnd: tx.amount_vnd,
+      note: tx.note || tx.memo || ''
+    }));
+
+    return {
+      date: date || null,
+      total_count: items.length,
+      total_amount_vnd: totalAmount,
+      items
+    };
+  }
+
+  /**
    * MGR-037: Re-apply a stored UNMATCHED bank transaction to the order with the given PNR (same company only).
    */
   assignBankTransaction(txId, pnr, { operatorId = DEFAULT_OPERATOR_ID, staff = null } = {}, now = Date.now()) {
@@ -685,8 +766,8 @@ export class PassengerPaymentService {
     if (!record || (operatorId && (record.operator_id || DEFAULT_OPERATOR_ID) !== operatorId)) {
       return { success: false, error: 'Không tìm thấy giao dịch ngân hàng', code: 'BANK_TX_NOT_FOUND', status: 404 };
     }
-    if (record.outcome !== 'UNMATCHED') {
-      return { success: false, error: 'Chỉ gán được giao dịch đang ở trạng thái UNMATCHED', code: 'BANK_TX_NOT_UNMATCHED', status: 409 };
+    if (record.outcome !== 'UNMATCHED' && record.outcome !== 'NEEDS_REVIEW') {
+      return { success: false, error: 'Chỉ gán được giao dịch đang ở trạng thái UNMATCHED hoặc NEEDS_REVIEW', code: 'BANK_TX_NOT_UNMATCHED', status: 409 };
     }
     const cleanPnr = typeof pnr === 'string' ? pnr.trim().toUpperCase() : '';
     if (!cleanPnr) {

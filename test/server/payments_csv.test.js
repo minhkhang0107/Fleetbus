@@ -14,7 +14,7 @@ describe('MGR-025: money in and out as CSV for the accountant', () => {
   const csv = (token, query) => fetch(`${base}/api/v1/ops/reports/payments.csv?${query}`, { headers: { Authorization: `Bearer ${token}` } });
 
   before(async () => {
-    ({ server, services } = createFleetBusServer({ webhookSecret: null }));
+    ({ server, services } = createFleetBusServer({ webhookSecret: 'off' }));
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     base = `http://127.0.0.1:${server.address().port}`;
     directorToken = await login('admin@busgo.vn', 'admin123', generateTotp(DEV_TOTP_SECRET, Date.now()));

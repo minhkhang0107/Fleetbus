@@ -531,7 +531,7 @@ class PassengerRouteMapState extends State<PassengerRouteMap> with TickerProvide
             initialCenter: const LatLng(20.5, 105.9),
             initialZoom: 8,
             // North stays up: a rotated map only confuses someone checking where the bus is.
-            interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
+            interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate, keyboardOptions: KeyboardOptions.disabled()),
           ),
           children: [
             if (passengerMapTiles)

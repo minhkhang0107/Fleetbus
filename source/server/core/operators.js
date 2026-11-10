@@ -72,15 +72,32 @@ export function normalizeOperatorCode(raw) {
   return raw.trim().toUpperCase();
 }
 
-export function findOperatorByCode(code) {
-  const normalized = normalizeOperatorCode(code);
-  if (!normalized) return null;
-  return OPERATORS.find(op => op.code === normalized) || null;
+export function applyPendingBankChangeIfDue(op, now = Date.now()) {
+  if (!op?.bank_pending) return;
+  const effMs = Date.parse(op.bank_pending.effective_at);
+  if (Number.isFinite(effMs) && now >= effMs) {
+    const oldBank = op.bank;
+    const until = new Date(effMs + 7 * 24 * 3600000).toISOString();
+    op.bank_previous = { ...oldBank, until };
+    const { requested_at, effective_at, requested_by, ...newBank } = op.bank_pending;
+    op.bank = newBank;
+    delete op.bank_pending;
+  }
 }
 
-export function findOperatorById(id) {
+export function findOperatorByCode(code, now = Date.now()) {
+  const normalized = normalizeOperatorCode(code);
+  if (!normalized) return null;
+  const op = OPERATORS.find(o => o.code === normalized) || null;
+  if (op) applyPendingBankChangeIfDue(op, now);
+  return op;
+}
+
+export function findOperatorById(id, now = Date.now()) {
   if (!id) return null;
-  return OPERATORS.find(op => op.operator_id === id) || null;
+  const op = OPERATORS.find(o => o.operator_id === id) || null;
+  if (op) applyPendingBankChangeIfDue(op, now);
+  return op;
 }
 
 export function operatorPaymentConfig(op) {
@@ -94,7 +111,11 @@ export function operatorPaymentConfig(op) {
   const transfer_provider = typeof cfg?.payment?.transfer_provider === 'string' && cfg.payment.transfer_provider
     ? cfg.payment.transfer_provider.toUpperCase()
     : 'MANUAL';
-  return { methods, transfer_provider };
+  const rawLimit = cfg?.payment?.manual_confirm_limit_vnd;
+  const manual_confirm_limit_vnd = Number.isInteger(rawLimit) && rawLimit >= 0
+    ? rawLimit
+    : 2000000;
+  return { methods, transfer_provider, manual_confirm_limit_vnd };
 }
 
 export function publicOperatorProfile(op) {
@@ -249,8 +270,8 @@ export function createOperator(input = {}, now = Date.now()) {
 }
 
 /** Updates an operator; the code and id never change (they are in tokens, links and memos). */
-export function updateOperator(id, patch = {}) {
-  const op = findOperatorById(id);
+export function updateOperator(id, patch = {}, options = {}) {
+  const op = findOperatorById(id, options.now);
   if (!op) return { ok: false, status: 404, code: 'OPERATOR_NOT_FOUND', message: 'Không tìm thấy nhà xe' };
   if (patch.code !== undefined && normalizeOperatorCode(patch.code) !== op.code) return invalid('Không đổi được mã nhà xe');
   const next = {
@@ -261,18 +282,39 @@ export function updateOperator(id, patch = {}) {
     address: patch.address === undefined ? op.address : patch.address,
     primary_color: patch.primary_color ?? op.primary_color,
     memo_prefix: patch.memo_prefix === undefined ? op.memo_prefix : normalizeOperatorCode(patch.memo_prefix),
-    bank: { ...op.bank, ...(patch.bank || {}) }
+    bank: patch.bank ? { ...op.bank, ...patch.bank } : op.bank
   };
   const error = validateFields(next);
   if (error) return error;
+
+  // S5: Đổi bank không áp dụng ngay: lưu op.bank_pending = { ...bank mới, requested_at, effective_at = requested_at + 24h, requested_by }.
+  // Mã QR tiếp tục dùng tài khoản cũ đến effective_at.
+  if (patch.bank) {
+    const cleanedNewBank = cleanBank(next.bank);
+    const isChanged = ['bin', 'bank_name', 'account_number', 'account_name'].some(
+      k => cleanedNewBank[k] !== op.bank?.[k]
+    );
+    if (isChanged) {
+      const now = options.now || Date.now();
+      const reqAt = new Date(now).toISOString();
+      const effAt = new Date(now + 24 * 3600000).toISOString();
+      op.bank_pending = {
+        ...cleanedNewBank,
+        requested_at: reqAt,
+        effective_at: effAt,
+        requested_by: options.requested_by || 'PLATFORM_ADMIN'
+      };
+    }
+  }
+
   Object.assign(op, {
-    ...next,
     name: text(next.name),
     short_name: text(next.short_name) || text(next.name),
     hotline: text(next.hotline) || null,
     support_email: text(next.support_email) || null,
     address: text(next.address) || null,
-    bank: cleanBank(next.bank)
+    primary_color: next.primary_color,
+    memo_prefix: next.memo_prefix
   });
   return { ok: true, operator: op };
 }
