@@ -57,7 +57,9 @@ export function renderTripSharePage(token, tripId, operatorCode, initialData = n
       const tripId = ${safeTripId};
       const operatorCode = ${safeOperatorCode};
       const initialData = ${safeInitialData};
-      
+      // Leaflet tooltips render their text as HTML: names typed by office staff are escaped first (D198).
+      const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
       const hasInitialBusPos = initialData && initialData.has_position && initialData.bus_position && Number.isFinite(initialData.bus_position.lat) && Number.isFinite(initialData.bus_position.lng) && !initialData.position_hidden;
       const initialCenter = hasInitialBusPos ? [initialData.bus_position.lat, initialData.bus_position.lng] : [21.0285, 105.8542];
       const map = L.map('map').setView(initialCenter, hasInitialBusPos ? 14 : 12);
@@ -132,7 +134,7 @@ export function renderTripSharePage(token, tripId, operatorCode, initialData = n
               fillOpacity: 1
             }).addTo(map);
             if (stop.name) {
-              marker.bindTooltip(stop.name);
+              marker.bindTooltip(esc(stop.name));
             }
             stopMarkers.push(marker);
           });
@@ -178,7 +180,7 @@ export function renderTripSharePage(token, tripId, operatorCode, initialData = n
             opacity: 1,
             fillOpacity: 1
           }).addTo(map);
-          pickupMarker.bindTooltip(data.target_stop.name ? 'Điểm đón: ' + data.target_stop.name : 'Điểm đón', { permanent: true, direction: 'top' });
+          pickupMarker.bindTooltip(data.target_stop.name ? 'Điểm đón: ' + esc(data.target_stop.name) : 'Điểm đón', { permanent: true, direction: 'top' });
         }
 
         if (!framed && routeLine) {

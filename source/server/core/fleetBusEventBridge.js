@@ -189,6 +189,13 @@ export class FleetBusEventBridge extends EventEmitter {
     if (paymentService && managerService) {
       paymentService.getTripDelayMinutes = (tripId) => managerService.findTrip(tripId)?.delay_minutes || 0;
     }
+    // D198: once the bus has left, a ticket can no longer be cancelled (a boarding the driver has not synced yet
+    // must not turn into a free ride or a delay refund).
+    if (paymentService) {
+      const departed = (status) => status === 'IN_TRANSIT' || status === 'COMPLETED';
+      paymentService.tripDeparted = (tripId) =>
+        departed(driverService?.activeTrips?.get(tripId)?.status) || departed(managerService?.findTrip?.(tripId)?.status);
+    }
 
     // PAX-017 reissue (D104): the driver manifest follows the QR version the passenger holds,
     // so a revoked QR or PIN no longer boards.

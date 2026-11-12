@@ -1154,6 +1154,9 @@ export class PassengerPaymentService {
     if (ticket.status !== 'ACTIVE') {
       return { success: false, error: `Không thể hủy vé đang ở trạng thái ${ticket.status}`, code: 'TICKET_NOT_ACTIVE' };
     }
+    if (this.tripDeparted?.(ticket.trip_id)) {
+      return { success: false, error: 'Xe đã xuất bến, không hủy vé được nữa. Liên hệ nhà xe nếu cần hỗ trợ.', code: 'TRIP_ALREADY_DEPARTED' };
+    }
 
     if (ticket.payment_method === 'CASH' && ticket.cod_collected !== true) {
       const cancelledAt = new Date(now).toISOString();

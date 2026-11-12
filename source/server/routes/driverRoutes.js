@@ -40,6 +40,12 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   if (req.identity && pathname.startsWith('/api/v1/driver/trips/')) {
     const tripId = pathname.split('/')[5];
     const trip = driverService.activeTrips.get(tripId);
+    // Fail closed: a trip the driver has not been given (unknown, another company's) is refused here, not left
+    // to each handler to notice.
+    if (!trip && tripId !== 'today') {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+      return true;
+    }
     if (trip && trip.driver_id !== req.identity.sub) {
       sendError(res, 'Chuyến xe không thuộc ca làm việc của bạn', 'FORBIDDEN', 403);
       return true;

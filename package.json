@@ -5,12 +5,13 @@
   "main": "source/server/index.js",
   "type": "module",
   "scripts": {
-    "test": "node --test test/**/*.test.js",
+    "test": "NODE_ENV=test node --test test/**/*.test.js",
     "lint": "node tools/lint.js",
     "build": "node tools/build_system.js",
     "e2e": "node test/e2e_live_flow.js",
     "render:diagrams": "node tools/render_flow_diagrams.cjs",
-    "start": "node source/server/apiServer.js"
+    "start": "node source/server/apiServer.js",
+    "dev": "NODE_ENV=development node source/server/apiServer.js"
   },
   "keywords": ["fleetbus", "passenger", "driver", "manager", "operations", "telemetry", "realtime", "vietqr", "nodejs", "api-gateway"],
   "author": "FleetBus Engineering",

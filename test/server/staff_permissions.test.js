@@ -19,6 +19,7 @@ import {
   normalizeStaffAccount,
   getPermissionsCatalog
 } from '../../source/server/services/manager/modules/staffAccounts.js';
+import { MOCK_MANAGERS_DB } from '../../source/server/services/manager/modules/managerService.js';
 
 describe('Staff RBAC & Granular Permissions Engine', () => {
   let server;
@@ -109,11 +110,15 @@ describe('Staff RBAC & Granular Permissions Engine', () => {
         );
       }
 
-      // Assert default GET endpoints are read-only office resources
-      assert.ok(defaultGet.length > 0, 'Expected default GET endpoints');
-      for (const g of defaultGet) {
-        assert.strictEqual(g.method, 'GET');
-      }
+      // Default deny: every catalogued ops read has its own rule, none relies on the fallback
+      assert.deepStrictEqual(defaultGet.map(g => g.path), [], 'GET endpoints without a rule fall to DIRECTOR_ONLY');
+    });
+
+    it('an ops endpoint without a rule is director only, reads included (default deny)', async () => {
+      const unknown = await api('/api/v1/ops/some-new-screen', { token: dispatcherToken });
+      assert.strictEqual(unknown.status, 403);
+      const board = await api('/api/v1/ops/dispatch/board', { token: dispatcherToken });
+      assert.strictEqual(board.status, 200);
     });
 
     it('GET /api/v1/ops/staff/permissions-catalog returns catalog of 11 permissions and 3 templates', async () => {
@@ -453,8 +458,25 @@ describe('Staff RBAC & Granular Permissions Engine', () => {
       { prefix: TOKEN_PREFIXES.staff, ttlSeconds: 3600 }
     );
     const write = await api('/api/v1/ops/vouchers', { method: 'POST', token: forged, body: { code: 'GHOST10' } });
-    assert.strictEqual(write.status, 403);
+    assert.strictEqual(write.status, 401);
     const read = await api('/api/v1/ops/bookings', { token: forged });
-    assert.strictEqual(read.status, 403);
+    assert.strictEqual(read.status, 401);
+  });
+
+  it('role and company come from the stored account, not the token', async () => {
+    // A real dispatcher account (op_saomai) whose token claims to be a director of another company.
+    const dispatcher = MOCK_MANAGERS_DB.find(m => m.username === 'dispatcher@busgo.vn');
+    const lying = signToken(
+      { kind: 'staff', sub: dispatcher.user_id, role: 'FLEET_DIRECTOR', permissions: ['ALL'], operator_id: 'op_xuyenviet', tv: dispatcher.token_version || 0 },
+      { prefix: TOKEN_PREFIXES.staff, ttlSeconds: 3600 }
+    );
+    const write = await api('/api/v1/ops/vouchers', { method: 'POST', token: lying, body: { code: 'LIAR10' } });
+    assert.strictEqual(write.status, 403);
+    const asPlatform = signToken(
+      { kind: 'staff', sub: dispatcher.user_id, role: 'PLATFORM_ADMIN', operator_id: null, tv: dispatcher.token_version || 0 },
+      { prefix: TOKEN_PREFIXES.staff, ttlSeconds: 3600 }
+    );
+    const platform = await api('/api/v1/platform/operators', { token: asPlatform });
+    assert.strictEqual(platform.status, 403);
   });
 });

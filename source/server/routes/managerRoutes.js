@@ -992,7 +992,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
 
   // GET /api/v1/ops/bookings (MGR-017)
   if (pathname === '/api/v1/ops/bookings' && req.method === 'GET') {
-    const filtered = managerService.bookings.filter(b => !req.operatorId || managerService.findTrip(b.trip_id)?.operator_id === req.operatorId);
+    const filtered = managerService.bookings.filter(b => managerService.findTrip(b.trip_id)?.operator_id === req.operatorId);
     sendSuccess(res, {
       total: filtered.length,
       bookings: filtered.map(b => {
@@ -1008,7 +1008,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   // GET /api/v1/ops/bookings/:bookingId (MGR-018)
   if (/^\/api\/v1\/ops\/bookings\/[^/]+$/.test(pathname) && req.method === 'GET') {
     const bookingId = pathname.split('/')[5];
-    const booking = managerService.bookings.find(b => b.pnr === bookingId && (!req.operatorId || managerService.findTrip(b.trip_id)?.operator_id === req.operatorId));
+    const booking = managerService.bookings.find(b => b.pnr === bookingId && (managerService.findTrip(b.trip_id)?.operator_id === req.operatorId));
     if (booking) {
       const trip = bookingTrip(managerService, booking.trip_id);
       const pnrTickets = getTicketsForPnr(booking.pnr, services.paymentService);
@@ -1189,7 +1189,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     const detail = services.searchService?.getTripDetail?.(tripId, req.operatorId);
     const tripStops = trip?.stops || detail?.data?.stops || [];
     const holds = managerService.hotlineReservations
-      .filter(r => r.trip_id === tripId && (!req.operatorId || r.operator_id === req.operatorId))
+      .filter(r => r.trip_id === tripId && (r.operator_id === req.operatorId))
       .map(r => {
         const stop = tripStops.find(s => s.stop_id === r.pickup_stop_id);
         const stopName = stop?.name || r.pickup_stop || (r.pickup_stop_id ? `Trạm ${r.pickup_stop_id}` : 'Điểm đón');
@@ -1265,7 +1265,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
   if (TRIP_DETAIL_RE.test(pathname) && req.method === 'GET') {
     const tripId = pathname.match(TRIP_DETAIL_RE)[1];
     const trip = managerService.findTrip(tripId);
-    if (trip && (!req.operatorId || trip.operator_id === req.operatorId)) {
+    if (trip && (trip.operator_id === req.operatorId)) {
       sendSuccess(res, trip);
     } else {
       sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);

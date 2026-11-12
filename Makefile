@@ -74,9 +74,9 @@ start_server:
 		export FLEETBUS_WEBHOOK_SECRET=$$(node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"); \
 		echo "Tự sinh FLEETBUS_WEBHOOK_SECRET: $$FLEETBUS_WEBHOOK_SECRET"; \
 		echo "Hướng dẫn ký thử: HMAC-SHA256($$FLEETBUS_WEBHOOK_SECRET, [x-timestamp.]rawBody) gửi qua header x-signature (và x-timestamp)"; \
-		node source/server/apiServer.js; \
+		NODE_ENV=$${NODE_ENV:-development} node source/server/apiServer.js; \
 	else \
-		node source/server/apiServer.js; \
+		NODE_ENV=$${NODE_ENV:-development} node source/server/apiServer.js; \
 	fi
 
 tailscale_check:
@@ -91,9 +91,9 @@ tailscale_server: tailscale_check
 		export FLEETBUS_WEBHOOK_SECRET=$$(node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"); \
 		echo "Tự sinh FLEETBUS_WEBHOOK_SECRET: $$FLEETBUS_WEBHOOK_SECRET"; \
 		echo "Hướng dẫn ký thử: HMAC-SHA256($$FLEETBUS_WEBHOOK_SECRET, [x-timestamp.]rawBody) gửi qua header x-signature (và x-timestamp)"; \
-		FLEETBUS_PUBLIC_URL=$(SERVER_URL) PORT=$(PORT) node source/server/apiServer.js; \
+		NODE_ENV=$${NODE_ENV:-development} FLEETBUS_PUBLIC_URL=$(SERVER_URL) PORT=$(PORT) node source/server/apiServer.js; \
 	else \
-		FLEETBUS_PUBLIC_URL=$(SERVER_URL) PORT=$(PORT) node source/server/apiServer.js; \
+		NODE_ENV=$${NODE_ENV:-development} FLEETBUS_PUBLIC_URL=$(SERVER_URL) PORT=$(PORT) node source/server/apiServer.js; \
 	fi
 
 # Debug APKs (flavor develop) whose API address is the tailnet one; copied to dist/tailscale/.

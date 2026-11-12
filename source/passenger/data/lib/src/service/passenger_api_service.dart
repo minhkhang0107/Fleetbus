@@ -213,6 +213,26 @@ class PassengerApiClientService {
   }
 
   /**
+   * D198: sign out on the server too, so the session token stops working if it was copied or the phone is lost.
+   * The session is read before the first await, so the caller may clear [authToken] right after calling. With
+   * [unregisterPlatform] the phone first stops getting this account's pushes (D192); that must reach the server
+   * before the sign-out ends the session, hence one after the other.
+   */
+  Future<Map<String, dynamic>> logout({String? unregisterPlatform}) async {
+    if (!isSecure) return _insecureError;
+    final headers = _headers();
+    if (unregisterPlatform != null) {
+      await _client.post(
+        Uri.parse('$baseUrl/api/v1/passenger/devices'),
+        headers: headers,
+        body: jsonEncode({'platform': unregisterPlatform}),
+      ).timeout(timeout);
+    }
+    final response = await _client.post(Uri.parse('$baseUrl/api/v1/passenger/logout'), headers: headers).timeout(timeout);
+    return _decode(response);
+  }
+
+  /**
    * PAX-004: Home Feed Recommendations & Active Ticket
    */
   Future<Map<String, dynamic>> getHomeFeed() {

@@ -1858,7 +1858,7 @@ export class ManagerOperationsService {
    * MGR-022: Approve or reject an open refund request, exactly once.
    */
   processRefundApproval(refundId, approved, notes = '', operatorId = DEFAULT_OPERATOR_ID, staff = null) {
-    const request = this.refundRequests.find(r => r.refund_id === refundId && (!operatorId || r.operator_id === operatorId));
+    const request = this.refundRequests.find(r => r.refund_id === refundId && (r.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
     if (!request) {
       return { success: false, error: 'Không tìm thấy yêu cầu hoàn tiền', code: 'REFUND_NOT_FOUND' };
     }
