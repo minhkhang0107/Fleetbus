@@ -5,8 +5,25 @@
 
 const DEV_TICKET_SECRET = 'fleetbus_dev_only_ticket_secret';
 
-export function isProduction() {
-  return process.env.NODE_ENV === 'production';
+/**
+ * Dev-only behaviour (default secrets, FLEETBUS_AUTH=off, client clock, mock OTP, VIP phone) is on only when
+ * NODE_ENV is "development" or "test". Anything else, an unset NODE_ENV included, counts as production, so a
+ * deploy that forgets the variable fails closed instead of signing tokens with the secrets in this public repo.
+ */
+const NON_PRODUCTION_ENVS = new Set(['development', 'test']);
+
+export function isProduction(env = process.env) {
+  return !NON_PRODUCTION_ENVS.has(env?.NODE_ENV);
+}
+
+/** Secrets a production server cannot start without; checked once at start so every gap is named together. */
+export function missingProductionSecrets(env = process.env) {
+  const missing = ['FLEETBUS_TOKEN_SECRET', 'FLEETBUS_TICKET_SECRET', 'FLEETBUS_WEBHOOK_SECRET', 'FLEETBUS_DB_KEY'].filter(k => !env[k]);
+  if (env.FLEETBUS_WEBHOOK_SECRET === 'off') missing.push('FLEETBUS_WEBHOOK_SECRET (không được là "off")');
+  for (const k of ['FLEETBUS_TOKEN_SECRET', 'FLEETBUS_TICKET_SECRET']) {
+    if (env[k] && env[k].length < 32) missing.push(`${k} (cần ít nhất 32 ký tự)`);
+  }
+  return missing;
 }
 
 /**

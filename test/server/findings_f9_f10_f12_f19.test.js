@@ -128,9 +128,9 @@ describe('E2E Findings: F9, F10, F12, F19', () => {
       assert.ok(item.hold_until);
       assert.strictEqual(item.status, 'HELD_HOTLINE');
 
-      // 3. Unauthorized role (financial controller) gets 403
+      // 3. A token whose account the server does not hold (mgr_ctrl) is refused outright
       const ctrlRes = await request(`/api/v1/ops/trips/${tripId}/hotline-holds`, { token: controllerToken });
-      assert.strictEqual(ctrlRes.status, 403);
+      assert.strictEqual(ctrlRes.status, 401);
 
       // 4. Cancel hotline hold
       const cancelRes = await request(`/api/v1/ops/pos/hotline-holds/${createdRsv.reservation_id}/cancel`, {

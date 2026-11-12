@@ -52,8 +52,8 @@ export const STAFF_AUTH_EXEMPT = [
   '/api/v1/ops/auth/logout'
 ];
 
-// Staff permissions by capability. The first matching rule decides; no rule means:
-// GET -> allowed for any staff of this operator; non-GET -> DIRECTOR_ONLY.
+// Staff permissions by capability. The first matching rule decides; `null` means any staff of this operator.
+// No rule means DIRECTOR_ONLY, for reads too (default deny).
 export const STAFF_RULES = [
   [/^\/api\/v1\/ops\/cash-handovers(\/.*)?$/, ['PAYMENTS']],
   [['GET'], /^\/api\/v1\/ops\/staff\/permissions-catalog$/, null],
@@ -90,7 +90,9 @@ export const STAFF_RULES = [
   [/^\/api\/v1\/ops\/trips\/[^/]+\/cancel$/, ['TRIP_CANCEL']],
   [/^\/api\/v1\/ops\/trips\/[^/]+\/(sales|end)$/, ['DISPATCH']],
   [/^\/api\/v1\/ops\/home-requests/, ['DISPATCH']],
-  [/^\/api\/v1\/ops\/debt-receipts\//, ['PAYMENTS']]
+  [/^\/api\/v1\/ops\/debt-receipts\//, ['PAYMENTS']],
+  // Reads every office user needs to work (board, fleet, alerts). Listed last so the rules above win.
+  [['GET'], /^\/api\/v1\/ops\/(auth\/me|dashboard\/kpis|messages|alerts|company|radar|fleet(\/(vehicles|live-positions))?|vehicles(\/[^/]+)?|dispatch\/(board|matrix)|trips|trips\/[^/]+(\/(master|seat-matrix|seat-inventory|operations))?)$/, null]
 ];
 
 export const ADMIN_ROLE = 'FLEET_DIRECTOR';
@@ -133,8 +135,16 @@ const REVOKED = { ok: false, status: 401, code: 'TOKEN_REVOKED', message: 'Phiê
  * role changed). Tokens signed before versions existed carry none and count as version 0 (H-06).
  */
 function revoked(account, identity) {
-  if (!account) return identity.tv !== undefined;
+  if (!account) return true;
   return account.active === false || (identity.tv ?? 0) !== (account.token_version ?? 0);
+}
+
+/**
+ * Role and company come from the account the server holds, never from the token: a token signed for one
+ * company or role (an old token, a leaked secret) cannot act as another.
+ */
+function bindToAccount(identity, { role, operatorId }) {
+  return { ...identity, role, operator_id: operatorId ?? null };
 }
 
 /**
@@ -153,7 +163,7 @@ export function authenticate(req, access, pathname) {
     return { ok: false, status: 401, code: result.code, message };
   }
 
-  const identity = result.payload;
+  let identity = result.payload;
   if (identity.kind !== access.kind) {
     return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Tài khoản không có quyền truy cập chức năng này' };
   }
@@ -171,6 +181,7 @@ export function authenticate(req, access, pathname) {
     if (driver?.must_change_pin && pathname !== '/api/v1/driver/auth/change-pin') {
       return { ok: false, status: 403, code: 'PIN_CHANGE_REQUIRED', message: 'Đổi mã PIN tạm trước khi dùng app' };
     }
+    identity = bindToAccount(identity, { role: identity.role, operatorId: driver.operator_id || DEFAULT_OPERATOR_ID });
   }
 
   if (access.kind === 'staff') {
@@ -179,6 +190,7 @@ export function authenticate(req, access, pathname) {
       staff = normalizeStaffAccount(staff);
     }
     if (revoked(staff, identity)) return REVOKED;
+    identity = bindToAccount(identity, { role: staff.role, operatorId: staff.operator_id });
     // Platform endpoints are for the platform admin only; it may also use every ops endpoint of the company it names.
     if (pathname.startsWith(`${API}/platform/`) && identity.role !== PLATFORM_ROLE) {
       return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Vai trò của bạn không được phép thực hiện thao tác này' };
@@ -187,9 +199,8 @@ export function authenticate(req, access, pathname) {
       return { ok: false, status: 403, code: 'PASSWORD_CHANGE_REQUIRED', message: 'Đổi mật khẩu tạm trước khi tiếp tục' };
     }
 
-    const isPlatform = identity.role === PLATFORM_ROLE;
-    // An account the server does not hold gets no rights, whatever its token says.
-    const isDirectorUser = staff?.role === 'FLEET_DIRECTOR';
+    const isPlatform = staff.role === PLATFORM_ROLE;
+    const isDirectorUser = staff.role === 'FLEET_DIRECTOR';
     const userPermissions = new Set(Array.isArray(staff?.permissions) ? staff.permissions : []);
 
     req.staffAccount = staff;
@@ -208,6 +219,10 @@ export function authenticate(req, access, pathname) {
 
     if (isPlatform) {
       return { ok: true, identity };
+    }
+    // A company user with no company on the account has no rights anywhere.
+    if (!identity.operator_id) {
+      return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Tài khoản không có quyền truy cập chức năng này' };
     }
 
     const rule = STAFF_RULES.find((entry) => {
@@ -230,14 +245,11 @@ export function authenticate(req, access, pathname) {
           return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Bạn chưa được giám đốc giao quyền làm việc này', required_permissions: required };
         }
       }
-    } else if (pathname.startsWith(`${API}/ops/`)) {
-      // Default rule for ops endpoints:
-      // GET -> allowed for any staff of this operator
-      // Non-GET -> DIRECTOR_ONLY, unless in STAFF_AUTH_EXEMPT
-      if (req.method !== 'GET' && !STAFF_AUTH_EXEMPT.includes(pathname)) {
-        if (!isDirectorUser) {
-          return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Chức năng này chỉ dành cho Giám đốc điều hành' };
-        }
+    } else if (pathname.startsWith(`${API}/ops/`) && !STAFF_AUTH_EXEMPT.includes(pathname)) {
+      // Default deny: an ops endpoint without a rule (a new screen someone forgot to list) is director only,
+      // reads included, so it never opens to every office user by accident.
+      if (!isDirectorUser) {
+        return { ok: false, status: 403, code: 'FORBIDDEN', message: 'Chức năng này chỉ dành cho Giám đốc điều hành' };
       }
     }
   }

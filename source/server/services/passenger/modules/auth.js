@@ -3,6 +3,7 @@
  * Implements PAX-001 (Splash & App Init), PAX-002 (Phone Login), PAX-003 (OTP Verification), and PAX-022 (Profile & Session).
  */
 
+import crypto from 'crypto';
 import { validateVietnamPhone } from '../core/formatters.js';
 import { isProduction, VIP_PASSENGER_OTP, isVipPassengerPhone } from '../../../config.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
@@ -47,12 +48,20 @@ export class PassengerAuthService {
 
   /** Ends every session of a phone with one company and refuses the tokens already handed out. */
   revokePhone(operatorId, phone, now = Date.now()) {
+    this.revokeSessions(operatorId, phone, now);
+    this.otpStore.delete(`${operatorId}:${phone}`);
+    this.profiles.delete(`${operatorId}:${phone}`);
+  }
+
+  /**
+   * Sign out (D198): every token of the phone with this company handed out until now stops working, so a token
+   * left on a lost or shared phone cannot be used for the rest of its 12 hours. The profile is kept.
+   */
+  revokeSessions(operatorId, phone, now = Date.now()) {
     PASSENGER_REVOCATIONS.set(`${operatorId}:${phone}`, now);
     for (const [token, session] of this.sessions) {
       if (session.phone === phone && (session.operator_id || DEFAULT_OPERATOR_ID) === operatorId) this.sessions.delete(token);
     }
-    this.otpStore.delete(`${operatorId}:${phone}`);
-    this.profiles.delete(`${operatorId}:${phone}`);
   }
 
   /**
@@ -156,12 +165,13 @@ export class PassengerAuthService {
       };
     }
 
-    // Generate 6-digit OTP (Deterministic mock for 0912345678 is 882199, VIP is 888777 outside production)
+    // Generate 6-digit OTP (Deterministic mock for 0912345678 is 882199, VIP is 888777 outside production).
+    // A real code comes from the crypto RNG, never Math.random (D198).
     const otp = isVipPassengerPhone(normalized)
       ? VIP_PASSENGER_OTP
-      : normalized === '0912345678'
+      : !isProduction() && normalized === '0912345678'
       ? '882199'
-      : Math.floor(100000 + Math.random() * 900000).toString();
+      : String(crypto.randomInt(100000, 1000000));
     const expiresAt = mockNow + this.otpTtlSeconds * 1000;
 
     this.otpStore.set(cacheKey, {
@@ -214,10 +224,11 @@ export class PassengerAuthService {
       return { success: false, error: 'Bạn đã nhập sai quá 5 lần. Vui lòng yêu cầu mã mới', code: 'MAX_ATTEMPTS_EXCEEDED' };
     }
 
-    // "The fixed test OTP 882199 for 0912345678 applies to every operator."
+    // "The fixed test OTP 882199 for 0912345678 applies to every operator." Outside production only (D198):
+    // the code is in a public repo, so in production it would sign anyone in as that phone.
     if (
       record.otp !== inputOtp &&
-      !(normalized === '0912345678' && inputOtp === '882199') &&
+      !(!isProduction() && normalized === '0912345678' && inputOtp === '882199') &&
       !(isVipPassengerPhone(normalized) && inputOtp === VIP_PASSENGER_OTP)
     ) {
       record.attempts += 1;

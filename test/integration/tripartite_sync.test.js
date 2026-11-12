@@ -352,8 +352,6 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
       }
     });
     assert.strictEqual(ipnRes.statusCode, 200);
-    if (opsTrip && prevOpsStatus) opsTrip.status = prevOpsStatus;
-    if (drvTrip && prevDrvStatus) drvTrip.status = prevDrvStatus;
     const cancelTicketId = ipnRes.body.data.issued_tickets[0].ticket_id;
 
     const cancelRes = await api(`/api/v1/passenger/tickets/${cancelTicketId}/cancel`, {
@@ -372,6 +370,10 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
     assert.strictEqual(cancelRes.body.data.status, 'REFUND_REQUESTED');
     assert.strictEqual(cancelRes.body.data.refund_amount_vnd, 220000);
     assert.ok(cancelRes.body.data.refund_id, 'Refund request must be opened for the manager (MGR-022)');
+
+    // D198: once the bus is on the road again, a ticket can no longer be cancelled
+    if (opsTrip && prevOpsStatus) opsTrip.status = prevOpsStatus;
+    if (drvTrip && prevDrvStatus) drvTrip.status = prevDrvStatus;
 
     // Verification A: Seat B04 is released back to AVAILABLE in seat map
     const seatMap = await api(`/api/v1/passenger/trips/${driverTripId}/seat-map`);

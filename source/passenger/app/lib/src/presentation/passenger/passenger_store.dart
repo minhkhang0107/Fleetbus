@@ -1543,8 +1543,12 @@ class PassengerStore extends ChangeNotifier {
 
   Future<void> logout() async {
     final cacheKey = _walletCacheKey();
-    // D192: this phone stops getting the account's pushes; the request leaves before the session is cleared.
-    if (pushToken != null && loggedIn) unawaited(_call(() => api.registerDevice(platform: defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android')));
+    // D192: this phone stops getting the account's pushes; D198: then the server ends the session's tokens.
+    // Both requests read the session before it is cleared below.
+    if (loggedIn) {
+      final platform = defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android';
+      unawaited(_call(() => api.logout(unregisterPlatform: pushToken != null ? platform : null)));
+    }
     api.authToken = null;
     userPhone = null;
     userName = null;

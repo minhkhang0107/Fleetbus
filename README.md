@@ -83,7 +83,11 @@ make manager_build_prod   # Build web phân phối Production
 
 ## 5. Cổng Web Trực Tiếp Khi Server Đang Chạy
 
-Khởi động máy chủ bằng `make start_server` hoặc `npm start`:
+Khởi động máy chủ khi phát triển bằng `make start_server` hoặc `npm run dev` (đặt `NODE_ENV=development`).
+
+> **Mặc định là production (D198).** Chế độ dev (khóa ký mặc định, `FLEETBUS_AUTH=off`, `mock_otp`, nhận `now` từ client, tài khoản mẫu) chỉ bật khi `NODE_ENV` là `development` hoặc `test`. Thiếu hoặc gõ sai `NODE_ENV` đều tính là production, và `npm start` sẽ từ chối khởi động nếu thiếu `FLEETBUS_TOKEN_SECRET`, `FLEETBUS_TICKET_SECRET` (≥ 32 ký tự), `FLEETBUS_WEBHOOK_SECRET`, `FLEETBUS_DB_KEY`. Ở production, tài khoản mẫu bên dưới còn dùng mật khẩu/PIN công khai sẽ bị khóa (nhân viên, tài xế) hoặc buộc đổi mật khẩu (giám đốc, quản trị nền tảng, vốn cần TOTP).
+
+Các cổng web:
 - 📱 Web Hành khách: [http://localhost:3000/passenger](http://localhost:3000/passenger)
 - 🚌 Buồng lái Tài xế: [http://localhost:3000/driver](http://localhost:3000/driver)
 - 🖥️ Trung tâm Điều hành: [http://localhost:3000/manager](http://localhost:3000/manager)
@@ -154,7 +158,8 @@ data/                         (0700, đã bỏ khỏi git)
 - **Ghi:** thay đổi của một request được ghi (mỗi DB một transaction) trước khi trả lời; ghi lỗi thì client không nhận trả lời và server trả `503 STORAGE_UNAVAILABLE` tới khi khởi động lại.
 - **Nhật ký thao tác:** mỗi nhà xe một chuỗi hash; dòng bị xóa hoặc sửa thì trang "Nhật ký thao tác" báo "Chuỗi nhật ký bị đứt".
 - **Giới hạn:** một tiến trình server cho một thư mục dữ liệu (dữ liệu làm việc nằm trong bộ nhớ, khóa `.lock` chặn server thứ hai). Chạy nhiều máy cần chuyển lớp lưu sang Postgres.
-- **Sao lưu:** dừng server rồi chép thư mục `data/` (hoặc `sqlite3 <file> ".backup ..."` khi đang chạy); sao lưu một nhà xe = chép file của nhà xe đó.
+- **Sao lưu:** server tự sao lưu mỗi 6 giờ (`FLEETBUS_BACKUP_INTERVAL_MINUTES`, giữ `FLEETBUS_BACKUP_KEEP` bản) vào `FLEETBUS_BACKUP_DIR` (mặc định `data/backups`). Production nên đặt thư mục này sang ổ hoặc máy khác; server cảnh báo khi bản sao nằm trong thư mục dữ liệu. Bản sao không chứa khóa gốc: cất `FLEETBUS_DB_KEY` riêng (secret manager), không để cạnh bản sao.
+- **Tách nhà xe trong bộ nhớ:** dữ liệu làm việc của các nhà xe dùng chung bộ nhớ, mỗi API của web điều hành tự lọc theo nhà xe của tài khoản. `test/server/cross_tenant_isolation.test.js` gọi mọi API đọc của web điều hành bằng giám đốc nhà xe khác và kiểm tra không lộ dữ liệu; thêm API đọc mới thì thêm vào `apiCatalog.js` để được kiểm.
 
 ---
 

@@ -1402,12 +1402,20 @@ export class DriverCockpitService {
         ? trip.manifest.filter(m => m.pnr === pnr)
         : [passenger];
 
+      // D198: a 6-digit PIN cannot be guessed by trying: 5 wrong PINs lock it until the passenger reissues the QR.
+      this.ticketPinFailures ??= new Map();
+      const failKey = pnr || ticketId;
+      if ((this.ticketPinFailures.get(failKey) || 0) >= 5) {
+        return { success: false, error: 'Nhập sai PIN quá 5 lần. Đề nghị khách mở vé trong app để quét QR.', code: 'PIN_LOCKED' };
+      }
       const isPinValid = groupPassengers.some(t =>
         verifyTicketPin(t.ticket_id, pin, this.secretKey, versionOf(t)).isValid
       );
       if (!isPinValid) {
+        this.ticketPinFailures.set(failKey, (this.ticketPinFailures.get(failKey) || 0) + 1);
         return { success: false, error: 'Mã PIN vé không chính xác', code: 'INVALID_PIN' };
       }
+      this.ticketPinFailures.delete(failKey);
 
       const riding = groupPassengers.filter(p => p.boarding_status !== 'CANCELLED');
       if (riding.length === 0) {
@@ -1502,6 +1510,8 @@ export class DriverCockpitService {
   setTicketQrVersion(tripId, ticketId, version) {
     const passenger = this.activeTrips.get(tripId)?.manifest.find(m => m.ticket_id === ticketId);
     if (passenger) passenger.qr_version = version;
+    // A new QR and PIN: the wrong-PIN count of the old one no longer applies.
+    this.ticketPinFailures?.delete(passenger?.pnr || ticketId);
   }
 
   /** Confirmed home pickups of the trip still to collect (not boarded, not refused, address reachable). */

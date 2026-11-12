@@ -130,6 +130,13 @@ export function handleWebhookRoutes(req, res, pathname, parsedUrl, services) {
       }
 
       const body = parseJson(raw);
+      // D198: without a transaction id a signed notice cannot be told apart from its replay, and each copy would
+      // credit the order again. Production refuses it (the bank retries with the id or the office matches it).
+      const txId = body.providerTxId ?? body.provider_tx_id ?? body.bankRef ?? body.bank_ref;
+      if (isProduction() && (txId === undefined || txId === null || String(txId).trim() === '')) {
+        sendError(res, 'Webhook thiếu mã giao dịch (bankRef/providerTxId)', 'TX_ID_REQUIRED', 400);
+        return;
+      }
       const now = clientNow(body);
       const result = paymentService.handleVietQrCallback({
         transferMemo: body.transferMemo ?? body.memo,

@@ -16,8 +16,9 @@ import { PassengerPaymentService } from './services/passenger/modules/payment.js
 import { PassengerTrackingService } from './services/passenger/modules/tracking.js';
 import { Messenger } from './core/messaging.js';
 import { findShareHolder } from './core/homeTracking.js';
-import { DriverCockpitService } from './services/driver/modules/driverService.js';
-import { ManagerOperationsService } from './services/manager/modules/managerService.js';
+import { DriverCockpitService, MOCK_DRIVERS_DB } from './services/driver/modules/driverService.js';
+import { ManagerOperationsService, MOCK_MANAGERS_DB } from './services/manager/modules/managerService.js';
+import { secureDemoAccounts } from './core/demoAccounts.js';
 
 import { setCorsHeaders, sendError, readRawBody, clientIp } from './middleware/httpUtils.js';
 import { createAuthRateLimiters } from './core/rateLimit.js';
@@ -44,7 +45,7 @@ import { renderLegalPage, renderLegalNotFound, renderAccountDeletionPage } from 
 import { findOperatorByCode, findOperatorById } from './core/operators.js';
 import { reconcileSweep } from './core/payments/reconcile.js';
 import { FleetBusEventBridge } from './core/fleetBusEventBridge.js';
-import { getWebhookSecret, getAuthMode, isProduction } from './config.js';
+import { getWebhookSecret, getAuthMode, isProduction, missingProductionSecrets } from './config.js';
 import { resolveAccess, authenticate, IdempotencyStore, resolveOperator } from './core/gateway.js';
 import { TenantDatabases } from './core/tenantDb.js';
 import { seedPromoBanners } from './core/promoBanners.js';
@@ -143,6 +144,10 @@ export function createFleetBusServer(customServices = {}) {
   } catch (err) {
     services.tenantDbs.close();
     throw err;
+  }
+  // A production data folder never keeps a demo account usable with its public password or PIN.
+  if (isProduction() && services.tenantDbs.dataDir) {
+    if (secureDemoAccounts({ staff: MOCK_MANAGERS_DB, drivers: MOCK_DRIVERS_DB }).length) store.flush();
   }
   // A mutation cut short by a stop never finished: its key is free again.
   for (const [key, entry] of idempotency.entries) if (!entry.done) idempotency.entries.delete(key);
@@ -329,7 +334,13 @@ export function createFleetBusServer(customServices = {}) {
       const shareUrl = new URL(`http://localhost/api/v1/trips/${ticketFound.trip_id}/tracking?share=${encodeURIComponent(token)}`);
       const initialData = trackingFor({ operatorId: op.operator_id, headers: req.headers }, services, ticketFound.trip_id, shareUrl);
 
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Referrer-Policy': 'no-referrer',
+        // Only the page's own script, Leaflet from unpkg and the map tiles; no other origin can run or be called.
+        'Content-Security-Policy': "default-src 'none'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.fr https://unpkg.com; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+      });
       res.end(renderTripSharePage(token, ticketFound.trip_id, op.code, initialData));
       return;
     }
@@ -431,6 +442,15 @@ export function createFleetBusServer(customServices = {}) {
   return { server, services };
 }
 
+if (IS_MAIN && isProduction()) {
+  const missing = missingProductionSecrets();
+  if (missing.length) {
+    console.error(`[config] Production (NODE_ENV=${process.env.NODE_ENV ?? 'chưa đặt'}) thiếu: ${missing.join(', ')}.\n`
+      + '         Đặt các biến này, hoặc chạy NODE_ENV=development (npm run dev) khi phát triển.');
+    process.exit(1);
+  }
+}
+
 const defaultReconcileMs = IS_MAIN
   ? (process.env.FLEETBUS_RECONCILE_MS !== undefined ? Number(process.env.FLEETBUS_RECONCILE_MS) : 60000)
   : 0;
@@ -448,7 +468,7 @@ if (IS_MAIN) {
 }
 
 export function listDevBehaviors({ webhookSecret = null, env = process.env } = {}) {
-  if (env.NODE_ENV === 'production') return [];
+  if (isProduction(env)) return [];
   const behaviors = [
     'OTP trả trong response (mock_otp khi yêu cầu OTP)',
     'Khách VIP 0 đ (số điện thoại 0999888777 được đặt vé miễn phí)',
@@ -486,6 +506,9 @@ if (process.env.NODE_ENV !== 'test' && IS_MAIN) {
   // Copies of every database on a timer (H-08); FLEETBUS_BACKUP=off turns it off.
   const backups = backupConfig(services.tenantDbs.dataDir);
   if (backups) startBackups(services.tenantDbs, { ...backups, beforeRun: () => services.store?.flushIfDirty() });
+  if (isProduction() && (!backups || !path.relative(services.tenantDbs.dataDir, backups.backupDir).startsWith('..'))) {
+    console.warn('[backup] Cảnh báo: bản sao lưu đang tắt hoặc nằm trong thư mục dữ liệu. Đặt FLEETBUS_BACKUP_DIR sang ổ/máy khác để hỏng ổ không mất cả dữ liệu lẫn bản sao.');
+  }
   server.listen(PORT, () => {
     printDevSecurityWarning(services.config);
     console.log(`

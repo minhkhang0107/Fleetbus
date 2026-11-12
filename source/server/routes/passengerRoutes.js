@@ -10,6 +10,7 @@ import { getProvider } from '../core/payments/providers.js';
 import { reconcileOperator } from '../core/payments/reconcile.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { verifyToken } from '../core/tokens.js';
+import { authenticate } from '../core/gateway.js';
 import { applyHomeRun, findShareHolder, homeTarget } from '../core/homeTracking.js';
 import { homeConfirmed, publicRouteService, resolveHomeBooking, routeServiceConfig } from '../core/serviceAreas.js';
 import { isProduction, isVipPassengerPhone } from '../config.js';
@@ -116,7 +117,32 @@ const STREAM_REFRESH_MS = 20000;
  * and every 20 s without one. Ends when the trip has ended or is no longer visible; the client then reconnects
  * or falls back to asking every 10 s.
  */
+// D198: a public stream holds a socket and timers, so their number and life are bounded. A closed stream is
+// reopened by the browser (retry), so the time limit costs a viewer nothing.
+const STREAM_MAX_PER_IP = 20;
+const STREAM_MAX_TOTAL = 5000;
+const STREAM_MAX_LIFE_MS = 30 * 60 * 1000;
+const openStreams = new Map(); // ip -> count
+let openStreamsTotal = 0;
+
 function streamTracking(req, res, services, tripId, build) {
+  const ip = clientIp(req, services.env) || 'unknown';
+  if ((openStreams.get(ip) || 0) >= STREAM_MAX_PER_IP || openStreamsTotal >= STREAM_MAX_TOTAL) {
+    res.setHeader('Retry-After', '30');
+    sendError(res, 'Quá nhiều kết nối theo dõi, vui lòng thử lại sau', 'RATE_LIMITED', 429);
+    return;
+  }
+  openStreams.set(ip, (openStreams.get(ip) || 0) + 1);
+  openStreamsTotal += 1;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    openStreamsTotal -= 1;
+    const left = (openStreams.get(ip) || 1) - 1;
+    if (left > 0) openStreams.set(ip, left); else openStreams.delete(ip);
+  };
+  res.on('close', release);
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -152,7 +178,9 @@ function streamTracking(req, res, services, tripId, build) {
     if (!pending) pending = setTimeout(push, STREAM_COALESCE_MS);
   });
   refresh = setInterval(push, STREAM_REFRESH_MS);
-  req.on('close', close);
+  const lifetime = setTimeout(() => { close(); res.end(); }, STREAM_MAX_LIFE_MS);
+  lifetime.unref?.();
+  req.on('close', () => { clearTimeout(lifetime); close(); });
 }
 
 /**
@@ -176,15 +204,19 @@ export function trackingFor(req, services, tripId, url) {
   let callerPhone = null;
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    const tokenResult = verifyToken(authHeader.slice(7));
-    if (tokenResult.valid) {
-      if (tokenResult.payload.kind === 'staff' && (tokenResult.payload.operator_id === req.operatorId || tokenResult.payload.role === 'PLATFORM_ADMIN')) {
+    // A public endpoint: an optional token only widens the view, and goes through the same checks as any
+    // signed-in request (revoked, locked, role and company from the account).
+    const kind = verifyToken(authHeader.slice(7)).payload?.kind;
+    const auth = kind ? authenticate(req, { kind }, '') : { ok: false };
+    if (auth.ok) {
+      const identity = auth.identity;
+      if (identity.kind === 'staff' && (identity.operator_id === req.operatorId || identity.role === 'PLATFORM_ADMIN')) {
         isStaff = true;
         canSeeBus = true;
         view = 'STAFF';
       }
-      if (tokenResult.payload.kind === 'passenger') {
-        callerPhone = tokenResult.payload.phone;
+      if (identity.kind === 'passenger') {
+        callerPhone = identity.phone;
       }
     }
   }
@@ -287,6 +319,19 @@ export function handlePassengerRoutes(req, res, pathname, parsedUrl, services) {
         sendError(res, result.error, result.code, result.status || (result.code === 'COOLDOWN_ACTIVE' ? 429 : 400), result);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/passenger/logout (D198): signing out ends the tokens of this phone with this company.
+  // Not under /passenger/auth/, which is public: this one needs the session it ends.
+  if (pathname === '/api/v1/passenger/logout' && req.method === 'POST') {
+    const phone = req.identity?.phone;
+    if (!phone) {
+      sendError(res, 'Cần đăng nhập để thực hiện thao tác này', 'UNAUTHORIZED', 401);
+      return true;
+    }
+    authService.revokeSessions(req.operatorId, phone, Date.now());
+    sendSuccess(res, { signed_out: true });
     return true;
   }
 
