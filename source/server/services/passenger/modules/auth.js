@@ -16,6 +16,20 @@ export function isPassengerRevoked(identity) {
   return revokedAt !== undefined && (identity.iat || 0) <= revokedAt;
 }
 
+export const MAX_AVATAR_BYTES = 256 * 1024;
+
+/** A profile photo: a JPEG, PNG or WebP data URL the app already shrank, at most 256 KB. */
+function checkAvatar(value) {
+  const match = typeof value === 'string' && /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(value);
+  if (!match) return { ok: false, message: 'Ảnh đại diện phải là ảnh JPEG, PNG hoặc WebP' };
+  const bytes = Buffer.from(match[2], 'base64');
+  if (bytes.length > MAX_AVATAR_BYTES) return { ok: false, message: 'Ảnh đại diện tối đa 256 KB' };
+  // The bytes must be the image the type says, not anything with an image label.
+  const magic = { jpeg: [0xff, 0xd8, 0xff], png: [0x89, 0x50, 0x4e, 0x47], webp: [0x52, 0x49, 0x46, 0x46] }[match[1]];
+  if (!magic.every((b, i) => bytes[i] === b)) return { ok: false, message: 'Ảnh đại diện phải là ảnh JPEG, PNG hoặc WebP' };
+  return { ok: true };
+}
+
 export class PassengerAuthService {
   constructor(options = {}) {
     this.minSupportedVersion = options.minSupportedVersion || '3.0.0';
@@ -25,6 +39,7 @@ export class PassengerAuthService {
     this.messenger = options.messenger || null;
 
     this.sessions = new Map(); // token -> session
+    this.profiles = new Map(); // operatorId:phone -> { operator_id, phone, full_name, avatar, updated_at } (D186)
     this.otpStore = new Map(); // operatorId:phone -> { otp, expiresAt, attempts, lastSentAt }
     this.otpCooldownSeconds = 60;
     this.otpTtlSeconds = 180; // 3 minutes
@@ -37,6 +52,43 @@ export class PassengerAuthService {
       if (session.phone === phone && (session.operator_id || DEFAULT_OPERATOR_ID) === operatorId) this.sessions.delete(token);
     }
     this.otpStore.delete(`${operatorId}:${phone}`);
+    this.profiles.delete(`${operatorId}:${phone}`);
+  }
+
+  /**
+   * PAX-022 (D186): the name and photo the passenger chose. The phone is the login and never changes here; a
+   * passenger who wants another number logs in with it. Every open session of that phone shows the new name.
+   */
+  updateProfile(operatorId, phone, body = {}, now = Date.now()) {
+    if (body.phone !== undefined) return { ok: false, status: 400, code: 'PHONE_NOT_EDITABLE', message: 'Không đổi được số điện thoại. Đăng nhập bằng số mới nếu bạn muốn dùng số khác.' };
+    const key = `${operatorId}:${phone}`;
+    const next = { ...(this.profiles.get(key) || { operator_id: operatorId, phone }) };
+    if (body.full_name !== undefined) {
+      const name = String(body.full_name ?? '').trim().replace(/\s+/g, ' ');
+      if (!/^\p{L}[\p{L}\p{M} .'-]{1,59}$/u.test(name)) return { ok: false, status: 400, code: 'VALIDATION_ERROR', message: 'Tên gồm 2-60 chữ cái, có thể có dấu cách' };
+      next.full_name = name;
+    }
+    if (body.avatar !== undefined) {
+      if (body.avatar === null) {
+        delete next.avatar;
+      } else {
+        const avatar = checkAvatar(body.avatar);
+        if (!avatar.ok) return { ok: false, status: 400, code: 'VALIDATION_ERROR', message: avatar.message };
+        next.avatar = body.avatar;
+      }
+    }
+    next.updated_at = new Date(now).toISOString();
+    this.profiles.set(key, next);
+    for (const session of this.sessions.values()) {
+      if (session.phone === phone && (session.operator_id || DEFAULT_OPERATOR_ID) === operatorId && next.full_name) session.full_name = next.full_name;
+    }
+    return { ok: true, profile: this.profileView(operatorId, phone) };
+  }
+
+  /** Name and photo of a passenger, with the defaults when they never set them. */
+  profileView(operatorId, phone) {
+    const stored = this.profiles.get(`${operatorId}:${phone}`);
+    return { phone, full_name: stored?.full_name ?? null, avatar: stored?.avatar ?? null, updated_at: stored?.updated_at ?? null };
   }
 
   /**
@@ -192,7 +244,7 @@ export class PassengerAuthService {
     const user = {
       user_id: userId,
       phone: normalized,
-      full_name: vip ? 'Khách VIP BusGo' : normalized === '0912345678' ? 'Nguyễn Văn An' : 'Hành khách BusGo',
+      full_name: this.profiles.get(`${operatorId}:${normalized}`)?.full_name || (vip ? 'Khách VIP BusGo' : normalized === '0912345678' ? 'Nguyễn Văn An' : 'Hành khách BusGo'),
       email: `${normalized}@passenger.busgo.vn`,
       role: 'ROLE_PASSENGER',
       is_vip: vip,

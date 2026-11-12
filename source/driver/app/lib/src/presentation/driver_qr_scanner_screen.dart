@@ -42,6 +42,8 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
       _camera = ok;
       if (ok) _scanner ??= MobileScannerController(detectionSpeed: DetectionSpeed.noDuplicates, formats: const [BarcodeFormat.qrCode]);
     });
+    // No camera: the PIN is the only way left, so open it straight away (D188).
+    if (!ok) await _pinEntry(context);
   }
 
   /// DRI-009: a QR read by the camera goes to the server; the answer shows on a sheet.
@@ -185,6 +187,8 @@ class _DriverQrScannerScreenState extends State<DriverQrScannerScreen> {
       title,
       '${result.passenger.name} · ${result.passenger.phone}\nXuống tại ${store.stopById(result.passenger.to).name}',
     );
+    // Everyone at this stop is on board: back to the stop screen instead of an empty scanner.
+    if (context.mounted && store.atStopPassengers.every((p) => p.status != PaxStatus.waiting)) Navigator.of(context).maybePop();
   }
 
   Future<void> _result(BuildContext context, bool ok, String title, String body, {bool warn = false}) => showDriverSheet<void>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

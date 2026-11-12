@@ -61,6 +61,7 @@ export function stateCollections(services, { idempotency } = {}) {
     mapCollection('passenger_sessions', () => authService.sessions, (u) => u.operator_id || u.operator?.operator_id || DEFAULT_OPERATOR_ID),
     mapCollection('passenger_otp', () => authService.otpStore, (_, key) => registered(key.split(':')[0])),
     mapCollection('passenger_revocations', () => PASSENGER_REVOCATIONS, (_, key) => registered(key.split(':')[0])),
+    mapCollection('passenger_profiles', () => authService.profiles, (p) => p.operator_id || DEFAULT_OPERATOR_ID),
     mapCollection('seat_holds', () => seatMapService.seatHolds, (h) => tripOwner(h.tripId)),
     mapCollection('seat_layouts', () => seatMapService.tripLayouts, (_, tripId) => tripOwner(tripId)),
     mapCollection('orders', () => paymentService.orders, own),

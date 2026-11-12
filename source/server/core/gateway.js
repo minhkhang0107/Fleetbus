@@ -18,6 +18,7 @@ const PUBLIC_RULES = [
   ['GET', /^\/api\/v1\/service-config$/],
   ['GET', /^\/api\/v1\/legal$/],
   ['POST', /^\/api\/v1\/service-areas\/check$/],
+  ['GET', /^\/api\/v1\/geocode\/reverse$/],
   ['GET', /^\/api\/v1\/passenger\/home-feed$/],
   ['GET', /^\/api\/v1\/passenger\/promo-banners(\/[^/]+)?$/],
   ['POST', /^\/api\/v1\/(auth\/(passenger|driver|staff)\/|passenger\/auth\/|driver\/auth\/(?!change-pin)|ops\/auth\/(?!change-password|totp\/))/],
@@ -64,6 +65,8 @@ const STAFF_RULES = [
   [['PUT'], /^\/api\/v1\/ops\/payment-settings$/, ['FLEET_DIRECTOR']],
   [['POST'], /^\/api\/v1\/ops\/payment-settings\/test$/, ['FLEET_DIRECTOR']],
   [/^\/api\/v1\/ops\/trips\/[^/]+\/(delay|replace-vehicle|swap-vehicle|seats\/override-lock)$/, ['FLEET_DIRECTOR', 'DISPATCHER']],
+  // Refund money: only the director sets the cancellation policy (D184).
+  [['PUT'], /^\/api\/v1\/ops\/service-config\/cancellation-policy$/, ['FLEET_DIRECTOR']],
   [/^\/api\/v1\/ops\/service-(config|areas)/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/schedules/, ['FLEET_DIRECTOR', 'DISPATCHER']],
   [/^\/api\/v1\/ops\/promo-banners/, ['FLEET_DIRECTOR']],

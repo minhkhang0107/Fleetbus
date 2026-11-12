@@ -15,10 +15,11 @@ import { validateVietnamPhone, calculateRefundAmount } from '../core/formatters.
 import { getTicketSecret, isProduction } from '../../../config.js';
 import { findOperatorById, DEFAULT_OPERATOR_ID } from '../../../core/operators.js';
 import { publicBaseUrl } from '../../../core/messaging.js';
+import { cancellationPolicyOf } from '../../../core/cancellationPolicy.js';
+import { effectiveDepartureMs, isDemoDeparture, tripStarted } from '../../../core/tripSales.js';
 import { validateRefundAccount, maskRefundAccount } from '../../../core/bankAccounts.js';
 
 // PAX-025: a delay longer than this waives the cancellation fee
-const DELAY_WAIVER_AFTER_MINUTES = 30;
 
 function resolveStopTime(trip, pickupStopId, searchService) {
   if (searchService && trip?.trip_id && pickupStopId) {
@@ -98,7 +99,8 @@ export class PassengerPaymentService {
   /**
    * PAX-013: Create Payment Order & VietQR Transfer Details
    */
-  createPaymentOrder({ holdId, trip, seatCodes, payer, passengers, amountVnd, pickupStop, dropoffStop, pickupStopId = null, dropoffStopId = null, homePickup = null, homeDropoff = null, mockNow = Date.now(), voucherCode = null, discountVnd = 0, paymentMethod = 'VIETQR_NAPAS247' }) {
+  createPaymentOrder({ holdId, trip, seatCodes, payer, passengers, amountVnd, pickupStop, dropoffStop, pickupStopId = null, dropoffStopId = null, homePickup = null, homeDropoff = null, mockNow = Date.now(), now = mockNow, voucherCode = null, discountVnd = 0, paymentMethod = 'VIETQR_NAPAS247', production = isProduction() }) {
+    const effectiveNow = now ?? mockNow ?? Date.now();
     const orderId = `ord_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
     const operatorId = trip.operator_id || DEFAULT_OPERATOR_ID;
     const operator = findOperatorById(operatorId);
@@ -134,10 +136,15 @@ export class PassengerPaymentService {
     }
 
     const timeInfo = resolveStopTime(trip, pickupStopId, this.searchService);
-    const departureMs = trip?.departure_time ? Date.parse(trip.departure_time) : NaN;
-    const expiresAt = isCash && Number.isFinite(departureMs)
-      ? new Date(departureMs).toISOString()
-      : new Date(mockNow + 600000).toISOString();
+    // D185: the transfer window never outlasts the bus; a cash order stays open until it leaves.
+    const leaves = effectiveDepartureMs(this.eventBridge?.services, trip);
+    let expireMs = effectiveNow + 600000;
+    if (isCash && Number.isFinite(leaves)) {
+      expireMs = leaves;
+    } else if (!isDemoDeparture(trip?.departure_time, production) && Number.isFinite(leaves)) {
+      expireMs = Math.min(expireMs, leaves);
+    }
+    const expiresAt = new Date(expireMs).toISOString();
 
     const order = {
       order_id: orderId,
@@ -164,7 +171,7 @@ export class PassengerPaymentService {
       payment_method: isCash ? 'CASH' : 'VIETQR_NAPAS247',
       payment_status: 'PENDING_PAYMENT',
       payment_details: paymentDetails,
-      created_at: new Date(mockNow).toISOString(),
+      created_at: new Date(effectiveNow).toISOString(),
       expires_at: expiresAt, // 10 min payment window; a cash order stays until departure
       ticket_ids: []
     };
@@ -214,6 +221,14 @@ export class PassengerPaymentService {
     }
   }
 
+  /** D185: the bus of this order is on the road or its departure has passed; money arriving now is refunded. */
+  _isTripStartedOrDeparted(order, now = Date.now()) {
+    const services = this.eventBridge?.services;
+    if (tripStarted(services, order.trip_id)) return true;
+    if (isDemoDeparture(order.departure_time, isProduction())) return false;
+    return now >= effectiveDepartureMs(services, order);
+  }
+
   /** Whether a late transfer on an expired order can still settle (trip on sale and seats still free). */
   _isLateOrderSellable(order, now = Date.now()) {
     if (order.closed_reason === 'TRIP_CANCELLED') return false;
@@ -227,6 +242,7 @@ export class PassengerPaymentService {
     if (drvTrip && (drvTrip.status === 'CANCELLED' || drvTrip.status === 'COMPLETED')) {
       return false;
     }
+    if (this._isTripStartedOrDeparted(order, now)) return false;
     if (this.seatMapService && typeof this.seatMapService.checkSellable === 'function') {
       if (order.hold_id && this.seatMapService.seatHolds) {
         for (const [k, h] of this.seatMapService.seatHolds.entries()) {
@@ -502,14 +518,15 @@ export class PassengerPaymentService {
       at: new Date(now).toISOString()
     });
 
-    // g. Late transfer: if seats are still free on a sellable trip, continue to settle; else refund paid_amount_vnd.
+    // g. Late transfer or trip started/departed: refund paid_amount_vnd if trip started/departed or late and unsellable.
     const expiresAtMs = new Date(matchedOrder.expires_at).getTime();
     const isLate = (Number.isFinite(expiresAtMs) && now > expiresAtMs)
       || matchedOrder.payment_status === 'EXPIRED'
       || matchedOrder.payment_status === 'UNMATCHED_OVERDUE';
+    const tripStartedOrDeparted = this._isTripStartedOrDeparted(matchedOrder, now);
 
-    if (isLate) {
-      if (!this._isLateOrderSellable(matchedOrder, now)) {
+    if (tripStartedOrDeparted || isLate) {
+      if (tripStartedOrDeparted || !this._isLateOrderSellable(matchedOrder, now)) {
         matchedOrder.payment_status = 'UNMATCHED_OVERDUE';
         const refundAmount = matchedOrder.paid_amount_vnd;
         matchedOrder.refunded_vnd = (matchedOrder.refunded_vnd || 0) + refundAmount;
@@ -529,7 +546,9 @@ export class PassengerPaymentService {
           ? refunds.at(-1)
           : this._requestOrderRefund(matchedOrder, {
             amount_vnd: refundAmount,
-            reason: 'Thanh toán đến sau khi hết hạn giữ chỗ (UNMATCHED_OVERDUE)',
+            reason: tripStartedOrDeparted
+              ? 'Chuyến xe đã xuất bến hoặc đã chạy (UNMATCHED_OVERDUE)'
+              : 'Thanh toán đến sau khi hết hạn giữ chỗ (UNMATCHED_OVERDUE)',
             source: 'UNMATCHED_OVERDUE'
           });
         storeTx('LATE_REFUND', { order: matchedOrder, refundId: refund.refund_id });
@@ -1085,6 +1104,9 @@ export class PassengerPaymentService {
 
     // PAX-025 (BR-DELAY-001): when the manager declared a delay over 30 minutes the cancellation fee is waived
     const delayMinutes = typeof this.getTripDelayMinutes === 'function' ? this.getTripDelayMinutes(ticket.trip_id) : 0;
+    // D184: tiers and the delay waiver come from the company's cancellation policy.
+    const policy = cancellationPolicyOf(findOperatorById(ticket.operator_id || this.orders.get(ticket.order_id)?.operator_id || DEFAULT_OPERATOR_ID)?.service_config);
+    const waiverAfter = policy.delay_waiver_minutes;
     // D130: the company refused the home pickup / drop-off the passenger booked; leaving is free.
     const homeRefused = [ticket.home_pickup, ticket.home_dropoff].some(h => h?.status === 'REJECTED');
     const refundCalc = homeRefused
@@ -1096,16 +1118,16 @@ export class PassengerPaymentService {
         tier: 'HOME_SERVICE_REFUSED',
         message: 'Nhà xe không nhận đón/trả tận nhà: Hoàn 100%, không thu phí hủy'
       }
-      : delayMinutes > DELAY_WAIVER_AFTER_MINUTES
+      : waiverAfter != null && delayMinutes > waiverAfter
       ? {
         percentage: 100,
         feePercentage: 0,
         refundAmount: ticket.fare_vnd,
         feeAmount: 0,
         tier: 'DELAY_WAIVER',
-        message: `Chuyến chậm ${delayMinutes} phút (trên ${DELAY_WAIVER_AFTER_MINUTES} phút): Hoàn tiền 100%, không thu phí hủy`
+        message: `Chuyến chậm ${delayMinutes} phút (trên ${waiverAfter} phút): Hoàn tiền 100%, không thu phí hủy`
       }
-      : calculateRefundAmount(ticket.fare_vnd, ticket.departure_time, now);
+      : calculateRefundAmount(ticket.fare_vnd, ticket.departure_time, now, policy);
 
     let cleanRefundAccount = null;
     const order = ticket.order_id ? this.orders.get(ticket.order_id) : null;

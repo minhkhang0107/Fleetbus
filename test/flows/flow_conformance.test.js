@@ -2,7 +2,7 @@
  * Phase C: cross-app flows FLOW-01 to FLOW-07 played over HTTP with real logins.
  * Each test follows one flow across the passenger, driver and manager sides and checks what every side sees.
  */
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert';
 import crypto from 'node:crypto';
 import http from 'node:http';
@@ -45,6 +45,13 @@ describe('Cross-app flows (FLOW-01 to FLOW-07)', () => {
   });
 
   after(() => new Promise((resolve) => server.close(resolve)));
+
+  beforeEach(() => {
+    const mgr = services.managerService?.findTrip(TRIP);
+    if (mgr) mgr.status = 'SCHEDULED';
+    const drv = services.driverService?.activeTrips?.get(TRIP);
+    if (drv) drv.status = 'SCHEDULED';
+  });
 
   function api(path, { method = 'GET', body, token } = {}) {
     return new Promise((resolve, reject) => {
@@ -220,6 +227,8 @@ describe('Cross-app flows (FLOW-01 to FLOW-07)', () => {
       assert.strictEqual((await api('/api/v1/passenger/tickets?tab=UPCOMING', { token: pax.token })).body.data.length, 0);
       const history = (await api('/api/v1/passenger/tickets?tab=HISTORY', { token: pax.token })).body.data;
       assert.deepStrictEqual(history.map((t) => t.ticket_id), [ticketId]);
+      services.managerService.findTrip(TRIP).status = 'SCHEDULED';
+      services.driverService.activeTrips.get(TRIP).status = 'SCHEDULED';
     });
 
     it('TC-FLOW-C05: a no-show reaches the passenger ticket, the wallet history and the manager count (DRI-011, FLOW-02 mode 3)', async () => {
@@ -239,6 +248,8 @@ describe('Cross-app flows (FLOW-01 to FLOW-07)', () => {
       assert.strictEqual((await mgrTrip()).no_show_passengers, before + 1);
       const notes = (await api('/api/v1/passenger/notifications', { token: pax.token })).body.data;
       assert.ok(notes.some((n) => n.type === 'NO_SHOW'), 'the passenger is told');
+      services.managerService.findTrip(TRIP).status = 'SCHEDULED';
+      services.driverService.activeTrips.get(TRIP).status = 'SCHEDULED';
     });
   });
 

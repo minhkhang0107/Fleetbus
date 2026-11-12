@@ -51,6 +51,10 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
     if (!mounted) return;
     setState(() => _holding = false);
     if (error != null) {
+      if (bookingClosedCodes.contains(store.lastErrorCode)) {
+        await showBookingClosedDialog(context, store, error);
+        return;
+      }
       showToast(context, error);
       return;
     }
@@ -101,6 +105,7 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
     return Scaffold(
       appBar: TopBar(title: 'Chọn ghế', subtitle: '${p.short} → ${d.short} · tối đa ${PassengerStore.maxSeats} ghế'),
       body: Column(children: [
+        if (store.trip != null && !store.trip!.bookableNow) TripBlockedBanner(trip: store.trip!),
         Container(
           width: double.infinity,
           color: PTokens.surface,
@@ -177,7 +182,10 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
             TextChange(vnd(store.baseFare), style: mono(size: 17, weight: FontWeight.w700)),
           ]),
         ),
-        PrimaryButton(label: _holding ? 'Đang giữ ghế…' : (store.seats.isEmpty ? 'Chọn ít nhất 1 ghế' : 'Giữ ghế 10 phút'), onPressed: store.seats.isEmpty || _holding ? null : _hold),
+        PrimaryButton(
+          label: _holding ? 'Đang giữ ghế…' : (store.seats.isEmpty ? 'Chọn ít nhất 1 ghế' : 'Giữ ghế 10 phút'),
+          onPressed: (store.trip != null && !store.trip!.bookableNow) || store.seats.isEmpty || _holding ? null : _hold,
+        ),
       ]),
     );
   }

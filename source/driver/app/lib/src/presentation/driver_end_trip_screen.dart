@@ -22,6 +22,20 @@ class DriverEndTripScreen extends StatelessWidget {
       subtitle: open.isEmpty ? null : 'Khách chưa xử lý chuyển cho bến theo dõi',
       height: 72,
       onPressed: () async {
+        final yes = await showDriverSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('Kết thúc chuyến?', style: dsans(size: 18, weight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Text(
+                cash > 0 ? 'Đếm lại tiền mặt: phải nộp ${vnd(cash)} tại quầy bến. Kết thúc rồi thì không sửa được chuyến này nữa.' : 'Kết thúc rồi thì không sửa được chuyến này nữa.',
+                style: dsans(size: 15, color: DTokens.sub, height: 1.5),
+              ),
+              const SizedBox(height: 14),
+              SheetActions(
+                primary: BigButton(label: 'Kết thúc chuyến', onPressed: () => Navigator.of(ctx).pop(true)),
+                secondary: BigButton(label: 'Chưa', outline: true, color: const Color(0xFFE2E8F0), onPressed: () => Navigator.of(ctx).pop(false)),
+              ),
+            ]));
+        if (yes != true || !context.mounted) return;
         final error = await store.endTrip();
         if (!context.mounted) return;
         if (error != null) {
@@ -66,7 +80,7 @@ class DriverEndTripScreen extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('Tiền mặt nộp về bến', style: dsans(size: 13, color: DTokens.muted)),
           const SizedBox(height: 8),
-          _line('Vé COD ($codTickets vé)', vnd(store.codCash)),
+          _line('Tiền vé thu khi lên ($codTickets vé)', vnd(store.codCash)),
           _line('Khách vẫy (${store.hailCount} vé)', vnd(store.hailCash)),
           const Divider(color: DTokens.line, height: 16),
           Row(children: [Text('Tổng phải nộp', style: dsans(size: 15, weight: FontWeight.w600)), const Spacer(), Text(vnd(cash), style: dmono(size: 22, color: DTokens.okInk))]),
