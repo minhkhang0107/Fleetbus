@@ -3,13 +3,14 @@
  * passenger app, editing for the company's office under /api/v1/ops. Always the request's company only.
  */
 import crypto from 'crypto';
-import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
-import { defaultServiceConfig } from '../core/operators.js';
+import { sendSuccess, sendError, parseJsonBody, clientIp } from '../middleware/httpUtils.js';
+import { defaultServiceConfig, updateOperatorContact } from '../core/operators.js';
 import { STOP_STYLES, checkHomeService, publicServiceConfig, routeServiceConfig, validateArea, validateModes, validateRouteSettings } from '../core/serviceAreas.js';
 import { tripVisibleTo } from '../core/tenancy.js';
 import { validateRouteStops } from '../core/routeStops.js';
 import { endpointChoices, publicFixedEndpoints, validateFixedEndpoints } from '../core/fixedEndpoints.js';
 import { isProduction } from '../config.js';
+import { DEFAULT_CANCELLATION_POLICY, cancellationPolicyOf, normalizeCancellationPolicy, publicCancellationPolicy, validateCancellationPolicy } from '../core/cancellationPolicy.js';
 
 const AREA_RE = /^\/api\/v1\/ops\/service-areas\/([^/]+)$/;
 const AREA_ACTIVE_RE = /^\/api\/v1\/ops\/service-areas\/([^/]+)\/(activate|deactivate)$/;
@@ -19,11 +20,34 @@ function configOf(req) {
   return req.operator.service_config;
 }
 
+function companyProfile(op) {
+  return {
+    operator: {
+      operator_id: op.operator_id,
+      code: op.code,
+      name: op.name,
+      short_name: op.short_name,
+      hotline: op.hotline ?? null,
+      support_email: op.support_email ?? null,
+      address: op.address ?? null,
+      primary_color: op.primary_color,
+      bank: {
+        bin: op.bank?.bin || '',
+        bank_name: op.bank?.bank_name || '',
+        account_number: op.bank?.account_number || '',
+        account_name: op.bank?.account_name || ''
+      },
+      memo_prefix: op.memo_prefix
+    },
+    editable: ['hotline', 'support_email', 'address']
+  };
+}
+
 function audit(req, managerService, entry) {
   managerService.recordAudit({
     actor: req.identity?.sub || 'anonymous',
     role: req.identity?.role || null,
-    ip: req.socket?.remoteAddress || null,
+    ip: clientIp(req),
     operator_id: req.operatorId,
     ...entry
   });
@@ -89,7 +113,42 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
     return true;
   }
 
-  if (!pathname.startsWith('/api/v1/ops/service-')) return false;
+  if (!pathname.startsWith('/api/v1/ops/service-') && pathname !== '/api/v1/ops/company') return false;
+
+  // GET /api/v1/ops/company: view company profile and contact info
+  if (pathname === '/api/v1/ops/company' && req.method === 'GET') {
+    sendSuccess(res, companyProfile(req.operator));
+    return true;
+  }
+
+  // PATCH /api/v1/ops/company: update hotline, support_email, address
+  if (pathname === '/api/v1/ops/company' && req.method === 'PATCH') {
+    parseJsonBody(req).then(body => {
+      const before = {
+        hotline: req.operator.hotline ?? null,
+        support_email: req.operator.support_email ?? null,
+        address: req.operator.address ?? null
+      };
+      const result = updateOperatorContact(req.operator.operator_id, body);
+      if (!result.ok) {
+        sendError(res, result.message, result.code, result.status);
+        return;
+      }
+      const after = {
+        hotline: result.operator.hotline ?? null,
+        support_email: result.operator.support_email ?? null,
+        address: result.operator.address ?? null
+      };
+      audit(req, managerService, {
+        action: 'OPERATOR_CONTACT_UPDATE',
+        resource: req.operator.code,
+        before,
+        after
+      });
+      sendSuccess(res, companyProfile(result.operator));
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
 
   if (pathname === '/api/v1/ops/service-config' && req.method === 'GET') {
     sendSuccess(res, snapshot(configOf(req)));
@@ -127,6 +186,33 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
     return true;
   }
 
+  // GET / PUT /api/v1/ops/service-config/cancellation-policy: refund tiers the passenger agrees to before cancelling (D184).
+  if (pathname === '/api/v1/ops/service-config/cancellation-policy' && (req.method === 'GET' || req.method === 'PUT')) {
+    const view = () => ({ cancellation_policy: snapshot(cancellationPolicyOf(configOf(req))), is_default: !configOf(req).cancellation_policy, preview: publicCancellationPolicy(configOf(req)).rules });
+    if (req.method === 'GET') {
+      sendSuccess(res, view());
+      return true;
+    }
+    parseJsonBody(req).then(body => {
+      const config = configOf(req);
+      const before = snapshot(cancellationPolicyOf(config));
+      // null goes back to the default policy.
+      if (body.cancellation_policy === null) {
+        delete config.cancellation_policy;
+      } else {
+        const error = validateCancellationPolicy(body.cancellation_policy);
+        if (error) {
+          sendError(res, error, 'VALIDATION_ERROR', 400);
+          return;
+        }
+        config.cancellation_policy = normalizeCancellationPolicy(body.cancellation_policy);
+      }
+      audit(req, managerService, { action: 'CANCELLATION_POLICY_UPDATE', resource: req.operator.code, before, after: snapshot(config.cancellation_policy || DEFAULT_CANCELLATION_POLICY) });
+      sendSuccess(res, view());
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
   if (pathname === '/api/v1/ops/service-config' && req.method === 'PUT') {
     parseJsonBody(req).then(body => {
       const config = configOf(req);
@@ -136,7 +222,9 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
         allow_home_to_home: body.allow_home_to_home ?? config.allow_home_to_home,
         approaching_threshold_minutes: body.approaching_threshold_minutes ?? config.approaching_threshold_minutes,
         home_wait_minutes: body.home_wait_minutes ?? config.home_wait_minutes ?? 5,
-        stop_style: body.stop_style ?? config.stop_style ?? 'STATIONS'
+        stop_style: body.stop_style ?? config.stop_style ?? 'STATIONS',
+        insurance_enabled: body.insurance_enabled !== undefined ? Boolean(body.insurance_enabled) : (config.insurance_enabled ?? false),
+        wallet_enabled: body.wallet_enabled !== undefined ? Boolean(body.wallet_enabled) : (config.wallet_enabled ?? false)
       };
       if (!STOP_STYLES.includes(next.stop_style)) {
         sendError(res, 'Kiểu điểm đón phải là ROUTE_LINE hoặc STATIONS', 'VALIDATION_ERROR', 400);
@@ -154,6 +242,16 @@ export function handleServiceConfigRoutes(req, res, pathname, parsedUrl, service
       if (!Number.isInteger(next.home_wait_minutes) || next.home_wait_minutes < 1 || next.home_wait_minutes > 30) {
         sendError(res, 'Thời gian xe chờ khách tại nhà là 1-30 phút', 'VALIDATION_ERROR', 400);
         return;
+      }
+      if (body.online_sales_cutoff_minutes !== undefined) {
+        const val = body.online_sales_cutoff_minutes;
+        if (!Number.isInteger(val) || val < 0 || val > 240) {
+          sendError(res, 'Giờ ngừng bán trực tuyến là số phút 0-240', 'VALIDATION_ERROR', 400);
+          return;
+        }
+        next.online_sales_cutoff_minutes = val;
+      } else if (config.online_sales_cutoff_minutes !== undefined) {
+        next.online_sales_cutoff_minutes = config.online_sales_cutoff_minutes;
       }
       const before = snapshot(config);
       Object.assign(config, { ...next, pickup_modes: [...new Set(next.pickup_modes)], dropoff_modes: [...new Set(next.dropoff_modes)], allow_home_to_home: Boolean(next.allow_home_to_home) });

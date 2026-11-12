@@ -3,7 +3,7 @@
  * route at a set time on set weekdays. Passengers book two weeks ahead; a new schedule or a change starts on the
  * first day not yet on sale, so no ticket sold ever changes time, fare or day.
  */
-import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { sendSuccess, sendError, parseJsonBody, clientIp } from '../middleware/httpUtils.js';
 import { MOCK_TRIPS_DATABASE, scheduleView } from '../services/passenger/modules/search.js';
 import { parseRunId, scheduleChangeFrom, vnDate } from '../core/serviceDate.js';
 
@@ -52,7 +52,7 @@ export function handleScheduleRoutes(req, res, pathname, parsedUrl, services) {
   const audit = (action, resource, before, after) => managerService.recordAudit({
     actor: req.identity?.sub || 'anonymous',
     role: req.identity?.role || null,
-    ip: req.socket?.remoteAddress || null,
+    ip: clientIp(req),
     operator_id: req.operatorId,
     action,
     resource,
@@ -75,6 +75,9 @@ export function handleScheduleRoutes(req, res, pathname, parsedUrl, services) {
     const schedules = searchService.listSchedules(req.operatorId, when);
     // The routes a new schedule may run on: those the company already has a schedule for (stops, bus, road).
     const routes = new Map();
+    for (const r of (managerService.routes || []).filter(r => r.operator_id === req.operatorId && r.active !== false)) {
+      routes.set(r.route_id, r.name);
+    }
     for (const s of schedules) if (!routes.has(s.route_id)) routes.set(s.route_id, s.route_name);
     sendSuccess(res, {
       today: when.today,
@@ -86,8 +89,14 @@ export function handleScheduleRoutes(req, res, pathname, parsedUrl, services) {
   }
 
   if (pathname === '/api/v1/ops/schedules' && req.method === 'POST') {
-    parseJsonBody(req).then(body => reply(searchService.createSchedule(req.operatorId, body, when), 'SCHEDULE_CREATE', 201))
-      .catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    parseJsonBody(req).then(body => {
+      const route = managerService.routes.find(r => r.route_id === body.route_id && r.operator_id === req.operatorId);
+      if (route && route.active === false) {
+        sendError(res, 'Tuyến đường đã đóng hoặc tạm ngừng hoạt động', 'ROUTE_CLOSED', 409);
+        return;
+      }
+      reply(searchService.createSchedule(req.operatorId, body, when), 'SCHEDULE_CREATE', 201);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 

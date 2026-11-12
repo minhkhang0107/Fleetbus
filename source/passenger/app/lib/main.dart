@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'src/presentation/passenger/passenger_about_screen.dart';
 import 'src/presentation/passenger/passenger_onboarding_screen.dart';
 import 'src/presentation/passenger/passenger_push.dart';
 import 'src/presentation/passenger/passenger_store.dart';
@@ -9,6 +10,7 @@ import 'src/presentation/passenger/passenger_widgets.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  registerPassengerFontLicenses();
   runApp(BusGoPassengerApp(store: PassengerStore()));
 }
 
@@ -85,6 +87,7 @@ class _BusGoPassengerAppState extends State<BusGoPassengerApp> {
         title: 'BusGo',
         debugShowCheckedModeBanner: false,
         theme: passengerTheme(),
+        scrollBehavior: const IosScrollBehavior(),
         builder: phoneColumnBuilder,
         home: PassengerLaunchScreen(restore: widget.store.restoreOperator),
       ),

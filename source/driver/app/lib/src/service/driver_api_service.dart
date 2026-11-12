@@ -7,27 +7,57 @@
  * driver from it, so the app sends no driver id.
  */
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+const insecureConnectionErrorMessage =
+    'Kết nối tới máy chủ không an toàn. Cập nhật ứng dụng hoặc liên hệ nhà xe.';
+
+class InsecureConnectionException implements Exception {
+  final String message;
+  const InsecureConnectionException([this.message = insecureConnectionErrorMessage]);
+  @override
+  String toString() => message;
+}
+
+/// Helper function to check if a backend URL is permitted.
+/// In release mode, URLs not starting with https:// are rejected.
+/// In debug/profile mode, http:// URLs are permitted.
+bool isSecureApiUrl(String url, {bool releaseMode = kReleaseMode}) {
+  if (releaseMode) {
+    return url.startsWith('https://');
+  }
+  return true;
+}
+
+bool isBaseUrlAllowed(String url, {bool releaseMode = kReleaseMode}) =>
+    isSecureApiUrl(url, releaseMode: releaseMode);
+
 /// Helper function to resolve the target backend URL adaptively across Android & iOS
-String resolveDriverBaseUrl([String? customUrl]) {
+String resolveDriverBaseUrl([String? customUrl, bool releaseMode = kReleaseMode]) {
+  String url;
   if (customUrl != null && customUrl.isNotEmpty) {
-    return customUrl;
+    url = customUrl;
+  } else {
+    // Physical device on the LAN: --dart-define=FLEETBUS_API_URL=http://<host-ip>:3000
+    const fromDefine = String.fromEnvironment('FLEETBUS_API_URL');
+    if (fromDefine.isNotEmpty) {
+      url = fromDefine;
+    } else if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      // Android emulator loopback alias to host machine
+      url = 'http://10.0.2.2:3000';
+    } else {
+      // iOS Simulator, macOS/Web, desktop, or default host
+      url = 'http://localhost:3000';
+    }
   }
-  // Physical device on the LAN: --dart-define=FLEETBUS_API_URL=http://<host-ip>:3000
-  const fromDefine = String.fromEnvironment('FLEETBUS_API_URL');
-  if (fromDefine.isNotEmpty) {
-    return fromDefine;
+  if (!isSecureApiUrl(url, releaseMode: releaseMode)) {
+    return '';
   }
-  // Android emulator loopback alias to host machine
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    return 'http://10.0.2.2:3000';
-  }
-  // iOS Simulator, macOS/Web, desktop, or default host
-  return 'http://localhost:3000';
+  return url;
 }
 
 /// A new random key for one logical mutation. Reuse the same key when retrying that mutation.
@@ -41,6 +71,8 @@ String newDriverIdempotencyKey() {
 class DriverApiClientService {
   final String baseUrl;
   final http.Client _client;
+  final Duration timeout;
+  final bool releaseMode;
 
   /// Session token of the signed-in driver (set by [login]).
   String? authToken;
@@ -51,8 +83,18 @@ class DriverApiClientService {
     http.Client? client,
     this.authToken,
     this.operatorCode,
-  })  : baseUrl = resolveDriverBaseUrl(baseUrl),
+    this.timeout = const Duration(seconds: 20),
+    this.releaseMode = kReleaseMode,
+  })  : baseUrl = resolveDriverBaseUrl(baseUrl, releaseMode),
         _client = client ?? http.Client();
+
+  bool get isSecure => baseUrl.isNotEmpty && isSecureApiUrl(baseUrl, releaseMode: releaseMode);
+
+  static const _insecureError = <String, dynamic>{
+    'status': 'error',
+    'message': insecureConnectionErrorMessage,
+    'code': 'INSECURE_CONNECTION',
+  };
 
   Map<String, String> _headers({String? idempotencyKey}) => {
     'Content-Type': 'application/json',
@@ -65,8 +107,13 @@ class DriverApiClientService {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> _get(String path) async {
-    return _decode(await _client.get(Uri.parse('$baseUrl$path'), headers: _headers()));
+  Future<Map<String, dynamic>> _get(String path, {Map<String, String>? query}) async {
+    if (!isSecure) return _insecureError;
+    var uri = Uri.parse('$baseUrl$path');
+    if (query != null && query.isNotEmpty) {
+      uri = uri.replace(queryParameters: query);
+    }
+    return _decode(await _client.get(uri, headers: _headers()).timeout(timeout));
   }
 
   Future<Map<String, dynamic>> _post(
@@ -75,12 +122,31 @@ class DriverApiClientService {
     bool idempotent = false,
     String? idempotencyKey,
   }) async {
+    if (!isSecure) return _insecureError;
     final response = await _client.post(
       Uri.parse('$baseUrl$path'),
       headers: _headers(idempotencyKey: idempotent ? (idempotencyKey ?? newDriverIdempotencyKey()) : null),
       body: body == null ? null : jsonEncode(body),
-    );
+    ).timeout(timeout);
     return _decode(response);
+  }
+
+  /// Resends a stored request with a given [idempotencyKey].
+  Future<Map<String, dynamic>> replay(
+    String method,
+    String path,
+    Map<String, dynamic>? body,
+    String idempotencyKey,
+  ) {
+    if (method.toUpperCase() == 'GET') {
+      return _get(path);
+    }
+    return _post(
+      path,
+      body: body,
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
   }
 
   /**
@@ -94,6 +160,11 @@ class DriverApiClientService {
       authToken = token;
     }
     return json;
+  }
+
+  /// D192: the phone's push token, so the office's changes reach the driver; none when signing out.
+  Future<Map<String, dynamic>> registerDevice({String? token, required String platform}) {
+    return _post('/api/v1/driver/devices', body: {'platform': platform, if (token != null) 'token': token});
   }
 
   /// DRI-001: replaces the temporary PIN the company gave (D150).
@@ -118,6 +189,16 @@ class DriverApiClientService {
    */
   Future<Map<String, dynamic>> getTodayTrips() {
     return _get('/api/v1/driver/trips/today');
+  }
+
+  /// SH-006: Terms of use and the model and data notice of this app (D157)
+  Future<Map<String, dynamic>> getLegal() {
+    return _get('/api/v1/legal', query: {'app': 'driver'});
+  }
+
+  /// DRI-021: Driver's monthly trip schedule
+  Future<Map<String, dynamic>> getMonthlySchedule(String month) {
+    return _get('/api/v1/driver/schedule', query: month.isNotEmpty ? {'month': month} : null);
   }
 
   /**
@@ -161,16 +242,22 @@ class DriverApiClientService {
     int? seq,
     DateTime? recordedAt,
     double? accuracyM,
+    String? idempotencyKey,
   }) {
-    return _post('/api/v1/driver/trips/$tripId/telemetry', body: {
-      'lat': lat,
-      'lng': lng,
-      'speed_kmh': speedKmh,
-      'bearing_deg': bearingDeg,
-      if (seq != null) 'seq': seq,
-      if (recordedAt != null) 'recorded_at': recordedAt.toUtc().toIso8601String(),
-      if (accuracyM != null) 'accuracy_m': accuracyM,
-    });
+    return _post(
+      '/api/v1/driver/trips/$tripId/telemetry',
+      body: {
+        'lat': lat,
+        'lng': lng,
+        'speed_kmh': speedKmh,
+        'bearing_deg': bearingDeg,
+        if (seq != null) 'seq': seq,
+        if (recordedAt != null) 'recorded_at': recordedAt.toUtc().toIso8601String(),
+        if (accuracyM != null) 'accuracy_m': accuracyM,
+      },
+      idempotent: idempotencyKey != null,
+      idempotencyKey: idempotencyKey,
+    );
   }
 
   /**
@@ -219,6 +306,17 @@ class DriverApiClientService {
   }
 
   /**
+   * DRI-008: Confirm departure from a stop of the running trip
+   */
+  Future<Map<String, dynamic>> departStop(String tripId, String stopId, {String? idempotencyKey}) {
+    return _post(
+      '/api/v1/driver/trips/$tripId/stops/$stopId/depart',
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  /**
    * DRI-009: Board with a scanned QR (single, group or offline ticket). The server verifies the signature.
    */
   Future<Map<String, dynamic>> boardWithQr(String tripId, String qrPayload, {String? idempotencyKey}) {
@@ -256,23 +354,23 @@ class DriverApiClientService {
    */
   /// Spec A9: the bus cannot reach this home pickup address; the passenger and the office are told.
   /// DRI-020 (D143): set off to collect the home pickups; from then on the bus position goes to the server.
-  Future<Map<String, dynamic>> startHomeRun(String tripId) {
-    return _post('/api/v1/driver/trips/$tripId/home-run', idempotent: true);
+  Future<Map<String, dynamic>> startHomeRun(String tripId, {String? idempotencyKey}) {
+    return _post('/api/v1/driver/trips/$tripId/home-run', idempotent: true, idempotencyKey: idempotencyKey);
   }
 
   /// D144: the driver's order for the home pickups, first to last.
-  Future<Map<String, dynamic>> setHomeOrder(String tripId, List<String> ticketIds) {
-    return _post('/api/v1/driver/trips/$tripId/home-order', body: {'ticket_ids': ticketIds}, idempotent: true);
+  Future<Map<String, dynamic>> setHomeOrder(String tripId, List<String> ticketIds, {String? idempotencyKey}) {
+    return _post('/api/v1/driver/trips/$tripId/home-order', body: {'ticket_ids': ticketIds}, idempotent: true, idempotencyKey: idempotencyKey);
   }
 
   /// D144: the bus is at a home passenger's door; the wait starts.
-  Future<Map<String, dynamic>> homeArrived(String tripId, String ticketId) {
-    return _post('/api/v1/driver/trips/$tripId/tickets/$ticketId/home-arrived', idempotent: true);
+  Future<Map<String, dynamic>> homeArrived(String tripId, String ticketId, {String? idempotencyKey}) {
+    return _post('/api/v1/driver/trips/$tripId/tickets/$ticketId/home-arrived', idempotent: true, idempotencyKey: idempotencyKey);
   }
 
   /// D144: the passenger did not come out within the wait; the bus goes on.
-  Future<Map<String, dynamic>> homeMissed(String tripId, String ticketId) {
-    return _post('/api/v1/driver/trips/$tripId/tickets/$ticketId/home-missed', idempotent: true);
+  Future<Map<String, dynamic>> homeMissed(String tripId, String ticketId, {String? idempotencyKey}) {
+    return _post('/api/v1/driver/trips/$tripId/tickets/$ticketId/home-missed', idempotent: true, idempotencyKey: idempotencyKey);
   }
 
   /// D144: the passenger's number for a call (logged on the trip).
@@ -280,11 +378,12 @@ class DriverApiClientService {
     return _post('/api/v1/driver/trips/$tripId/tickets/$ticketId/contact');
   }
 
-  Future<Map<String, dynamic>> reportInaccessible(String tripId, String ticketId, {required String reason, String? meetingPoint}) {
+  Future<Map<String, dynamic>> reportInaccessible(String tripId, String ticketId, {required String reason, String? meetingPoint, String? idempotencyKey}) {
     return _post(
       '/api/v1/driver/trips/$tripId/tickets/$ticketId/inaccessible',
       body: {'reason': reason, if (meetingPoint != null && meetingPoint.isNotEmpty) 'meeting_point': meetingPoint},
       idempotent: true,
+      idempotencyKey: idempotencyKey,
     );
   }
 

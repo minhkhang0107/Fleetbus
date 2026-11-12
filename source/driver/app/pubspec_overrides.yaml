@@ -1,12 +1,4 @@
-# melos_managed_dependency_overrides: domain,init,resources,shared,data
+# melos_managed_dependency_overrides: resources
 dependency_overrides:
-  data:
-    path: ../data
-  domain:
-    path: ../domain
-  init:
-    path: ../init
   resources:
     path: ../resources
-  shared:
-    path: ../shared

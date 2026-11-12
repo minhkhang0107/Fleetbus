@@ -8,15 +8,10 @@ import { calculateHaversineDistance, calculateETA } from '../core/cryptoEngine.j
 import { REST_STOPS, REST_STOP_AFTER_MS, STILL_SPEED_KMH } from '../../../core/restStops.js';
 import { stopCoords, routeShape, distanceAlongRoute, signedDistanceAlongRoute } from '../../../core/geo.js';
 import { DEFAULT_OPERATOR_ID } from '../../../core/operators.js';
+import { HOME_ROAD_FACTOR, HOME_CITY_SPEED_KMH, HOME_NEAR_METERS, HOME_AT_DOOR_METERS, HOME_AT_DOOR_SPEED_KMH } from '../../../core/homeRun.js';
 
 /** Within this distance of a stop, a parked bus is waiting at that stop. */
 const AT_STOP_METERS = 150;
-/** Home pickups are off the route shape: the road is taken as this much longer than the straight line. */
-const HOME_ROAD_FACTOR = 1.3;
-/** City speed assumed for the ETA to a home address while the bus is slower (stopped at another door). */
-const HOME_MIN_SPEED_KMH = 20;
-/** Within this distance of the address, the bus is at the passenger's door. */
-const HOME_AT_DOOR_METERS = 300;
 /**
  * Speed for an ETA: over a long way the bus averages its road speed whatever it does this minute (parked at a stop,
  * slowed in a town), so the minutes do not jump between pings; close by, its own speed.
@@ -82,9 +77,19 @@ export class PassengerTrackingService {
   }
 
   _detectRestStop(tripId, lat, lng, speedKmh, now) {
-    const stop = Number.isFinite(lat) && Number.isFinite(lng)
-      ? REST_STOPS.find(s => calculateHaversineDistance(lat, lng, s.lat, s.lng) <= s.radius_m)
-      : null;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const stops = this.stopsProvider ? this.stopsProvider(tripId) : (this.eventBridge?.services?.driverService?.activeTrips?.get(tripId)?.stops || null);
+    if (Array.isArray(stops)) {
+      const isRouteStop = stops.some(s => {
+        const sc = stopCoords(s.stop_id) || (Number.isFinite(s.lat) && Number.isFinite(s.lng) ? s : null);
+        return sc && calculateHaversineDistance(lat, lng, sc.lat, sc.lng) <= 300;
+      });
+      if (isRouteStop) {
+        this.stillSince.delete(tripId);
+        return null;
+      }
+    }
+    const stop = REST_STOPS.find(s => calculateHaversineDistance(lat, lng, s.lat, s.lng) <= s.radius_m);
     if (!stop || speedKmh >= STILL_SPEED_KMH) {
       this.stillSince.delete(tripId);
       return null;
@@ -159,20 +164,20 @@ export class PassengerTrackingService {
     };
   }
 
-  _buildHudStatusText(busPos, distanceMeters, etaMinutes, isAtStation, isArrivingSoon, boarded = false, view = 'TICKET', targetName = null) {
-    if (busPos.is_at_rest_stop || busPos.status === 'REST_STOP') {
-      return `Xe đang dừng nghỉ tại ${busPos.rest_stop_name || 'Trạm dừng nghỉ'} (Dự kiến nghỉ ${busPos.estimated_rest_minutes || 15} phút)`;
-    }
-    if (view === 'PUBLIC') {
-      if (isAtStation) {
+  _buildHudStatusText(busPos, distanceMeters, etaMinutes, isAtStation, isArrivingSoon, boarded = false, view = 'TICKET', targetName = null, isAtRouteStop = false) {
+    if (isAtStation) {
+      if (view === 'PUBLIC') {
         return `Xe đã đến ${targetName || 'điểm đón'}!`;
       }
-      return `Xe đang đến ${targetName || 'điểm đón'} (Cách ${Math.round(distanceMeters / 1000)} km, ~${etaMinutes} phút)`;
-    }
-    if (isAtStation) {
       return boarded
         ? 'Xe đã đến điểm trả! Mời quý khách chuẩn bị xuống xe'
         : 'Xe đã cập bến! Mời quý khách chuẩn bị lên xe';
+    }
+    if (!isAtRouteStop && (busPos.is_at_rest_stop || busPos.status === 'REST_STOP')) {
+      return `Xe đang dừng nghỉ tại ${busPos.rest_stop_name || 'Trạm dừng nghỉ'} (Dự kiến nghỉ ${busPos.estimated_rest_minutes || 15} phút)`;
+    }
+    if (view === 'PUBLIC') {
+      return `Xe đang đến ${targetName || 'điểm đón'} (Cách ${Math.round(distanceMeters / 1000)} km, ~${etaMinutes} phút)`;
     }
     if (isArrivingSoon) {
       return boarded
@@ -208,6 +213,10 @@ export class PassengerTrackingService {
    * Route-aware Live Radar HUD with stop coordinates, road shape, and along-road ETA.
    */
   getTripRadar(tripId, { pickupStopId = null, dropoffStopId = null, boarded = false, stops = [], mockNow = Date.now(), view = null, canSeeBus = false, tripStatus = null, isStaff = false, homePickup = null } = {}) {
+    let effectiveStops = stops;
+    if ((!effectiveStops || effectiveStops.length === 0) && this.stopsProvider) {
+      effectiveStops = this.stopsProvider(tripId) || [];
+    }
     const effectiveView = view || (pickupStopId || dropoffStopId || boarded ? 'TICKET' : 'PUBLIC');
     // D143: a confirmed home pickup is collected at the passenger's address, so that is where the bus is heading.
     const home = !boarded && homePickup && Number.isFinite(homePickup.lat) && Number.isFinite(homePickup.lng) ? homePickup : null;
@@ -215,31 +224,31 @@ export class PassengerTrackingService {
     const shape = routeShape(tripId);
 
     let targetStopId = boarded ? dropoffStopId : pickupStopId;
-    if (!targetStopId && stops && stops.length > 0) {
+    if (!targetStopId && effectiveStops && effectiveStops.length > 0) {
       if (effectiveView === 'PUBLIC' && busPos && shape) {
-        const firstStop = stops[0];
+        const firstStop = effectiveStops[0];
         const firstCoords = stopCoords(firstStop.stop_id) || (Number.isFinite(firstStop.lat) && Number.isFinite(firstStop.lng) ? { lat: firstStop.lat, lng: firstStop.lng } : null);
         const firstSigned = firstCoords
           ? signedDistanceAlongRoute(shape, busPos.lat, busPos.lng, firstCoords.lat, firstCoords.lng)
           : null;
 
         if (firstSigned !== null && firstSigned < -200) {
-          const nextAhead = stops.find(s => {
+          const nextAhead = effectiveStops.find(s => {
             const sc = stopCoords(s.stop_id) || (Number.isFinite(s.lat) && Number.isFinite(s.lng) ? { lat: s.lat, lng: s.lng } : null);
             if (!sc) return false;
             const d = signedDistanceAlongRoute(shape, busPos.lat, busPos.lng, sc.lat, sc.lng);
             return d !== null && d > 200;
           });
-          targetStopId = nextAhead ? nextAhead.stop_id : stops[stops.length - 1].stop_id;
+          targetStopId = nextAhead ? nextAhead.stop_id : effectiveStops[effectiveStops.length - 1].stop_id;
         } else {
-          targetStopId = stops[0].stop_id;
+          targetStopId = effectiveStops[0].stop_id;
         }
       } else {
-        targetStopId = stops[0].stop_id;
+        targetStopId = effectiveStops[0].stop_id;
       }
     }
 
-    const targetStopObj = stops && targetStopId ? stops.find(s => s.stop_id === targetStopId) : null;
+    const targetStopObj = effectiveStops && targetStopId ? effectiveStops.find(s => s.stop_id === targetStopId) : null;
     const coords = targetStopId ? stopCoords(targetStopId) : null;
     const targetLat = coords ? coords.lat : (targetStopObj && Number.isFinite(targetStopObj.lat) ? targetStopObj.lat : 20.9806);
     const targetLng = coords ? coords.lng : (targetStopObj && Number.isFinite(targetStopObj.lng) ? targetStopObj.lng : 105.8413);
@@ -257,6 +266,21 @@ export class PassengerTrackingService {
     const hudRes = this.getLiveTrackingHUD(tripId, targetStop.lat, targetStop.lng, mockNow);
     const data = { ...hudRes.data };
 
+    const isAtRouteStop = data.has_position && data.bus_position && Array.isArray(effectiveStops) && effectiveStops.some(s => {
+      const sc = stopCoords(s.stop_id) || (Number.isFinite(s.lat) && Number.isFinite(s.lng) ? s : null);
+      return sc && calculateHaversineDistance(data.bus_position.lat, data.bus_position.lng, sc.lat, sc.lng) <= 300;
+    });
+
+    if (isAtRouteStop) {
+      data.is_at_rest_stop = false;
+      if (data.bus_position) {
+        data.bus_position.is_at_rest_stop = false;
+        if (data.bus_position.status === 'REST_STOP') {
+          data.bus_position.status = (data.bus_position.speed_kmh || 0) > STILL_SPEED_KMH ? 'IN_TRANSIT' : 'STOPPED';
+        }
+      }
+    }
+
     let distanceBasis = 'STRAIGHT_LINE';
     let hasPassedTarget = false;
 
@@ -266,14 +290,18 @@ export class PassengerTrackingService {
         const roadDist = Math.round(calculateHaversineDistance(pos.lat, pos.lng, home.lat, home.lng) * HOME_ROAD_FACTOR);
         distanceBasis = 'ESTIMATED_ROAD';
         data.distance_meters = roadDist;
-        data.eta_minutes = calculateETA(roadDist, Math.max(pos.speed_kmh || 0, HOME_MIN_SPEED_KMH));
-        data.is_at_station = roadDist <= HOME_AT_DOOR_METERS;
+        data.eta_minutes = calculateETA(roadDist, Math.max(pos.speed_kmh || 0, HOME_CITY_SPEED_KMH));
+        data.near_door = roadDist <= HOME_NEAR_METERS;
+        data.at_door = roadDist <= HOME_AT_DOOR_METERS && (pos.speed_kmh == null || pos.speed_kmh <= HOME_AT_DOOR_SPEED_KMH);
+        data.is_at_station = data.at_door;
         data.is_arriving_soon = roadDist <= 1000;
-        data.hud_status_text = data.is_at_station
-          ? 'Xe đã tới gần chỗ đón của bạn. Mời bạn ra xe'
-          : data.is_arriving_soon
-            ? `Xe sắp tới đón bạn, còn khoảng ${data.eta_minutes} phút. Bạn chuẩn bị ra xe nhé`
-            : `Xe đang trên đường đón bạn (Cách ~${(roadDist / 1000).toFixed(1)} km, ~${data.eta_minutes} phút)`;
+        data.hud_status_text = data.at_door
+          ? 'Xe đã tới chỗ đón của bạn. Mời bạn ra xe'
+          : data.near_door
+            ? 'Xe đã tới gần chỗ đón của bạn. Mời bạn ra xe'
+            : data.is_arriving_soon
+              ? `Xe sắp tới đón bạn, còn khoảng ${data.eta_minutes} phút. Bạn chuẩn bị ra xe nhé`
+              : `Xe đang trên đường đón bạn (Cách ~${(roadDist / 1000).toFixed(1)} km, ~${data.eta_minutes} phút)`;
       } else {
         data.hud_status_text = 'Tài xế chưa bắt đầu đi đón. Vị trí xe sẽ hiện khi tài xế lên đường đón bạn';
       }
@@ -313,7 +341,8 @@ export class PassengerTrackingService {
             data.is_arriving_soon,
             boarded,
             effectiveView,
-            targetStop.name
+            targetStop.name,
+            isAtRouteStop
           );
         }
       } else {
@@ -325,7 +354,8 @@ export class PassengerTrackingService {
           data.is_arriving_soon,
           boarded,
           effectiveView,
-          targetStop.name
+          targetStop.name,
+          isAtRouteStop
         );
       }
     } else if (data.has_position && data.bus_position) {
@@ -337,7 +367,8 @@ export class PassengerTrackingService {
         data.is_arriving_soon,
         boarded,
         effectiveView,
-        targetStop.name
+        targetStop.name,
+        isAtRouteStop
       );
     }
 
@@ -345,7 +376,7 @@ export class PassengerTrackingService {
     const pos = data.bus_position;
     if (!home && data.has_position && pos && !hasPassedTarget && !data.is_at_station && effectiveView === 'TICKET'
       && !pos.is_at_rest_stop && pos.status !== 'REST_STOP' && Number.isFinite(pos.speed_kmh) && pos.speed_kmh < STILL_SPEED_KMH) {
-      const here = (Array.isArray(stops) ? stops : []).find(s => {
+      const here = (Array.isArray(effectiveStops) ? effectiveStops : []).find(s => {
         const sc = stopCoords(s.stop_id) || (Number.isFinite(s.lat) && Number.isFinite(s.lng) ? s : null);
         return sc && calculateHaversineDistance(pos.lat, pos.lng, sc.lat, sc.lng) <= AT_STOP_METERS;
       });
@@ -355,7 +386,7 @@ export class PassengerTrackingService {
         : `Xe đang dừng (${boarded ? 'tới điểm trả' : 'tới điểm đón'}: ${left})`;
     }
 
-    const mappedStops = (Array.isArray(stops) ? stops : [])
+    const mappedStops = (Array.isArray(effectiveStops) ? effectiveStops : [])
       .map(s => {
         const sc = stopCoords(s.stop_id) || (Number.isFinite(s.lat) && Number.isFinite(s.lng) ? { lat: s.lat, lng: s.lng } : null);
         if (!sc) return null;
@@ -430,6 +461,15 @@ export class PassengerTrackingService {
       data.position_hidden = true;
       if (isEnded) {
         data.tracking_ended = true;
+        data.trip_status = tripStatus;
+        data.hud_status_text = tripStatus === 'COMPLETED' ? 'Chuyến đã kết thúc' : 'Chuyến xe đã bị hủy';
+      }
+    } else {
+      if (tripStatus) {
+        data.trip_status = tripStatus;
+      }
+      if (isEnded) {
+        data.tracking_ended = true;
       }
     }
 
@@ -459,8 +499,8 @@ export class PassengerTrackingService {
 
     userNotifs.unshift(notif);
     this.notifications.set(normalized, userNotifs);
-    // D144: the moments that make someone go out to the bus also leave by push or SMS.
-    this.messenger?.dispatch?.({ operatorId, phone: normalized, title, body, type, payload, link });
+    // D144, D192: by push when the phone has a token (every notice), else the moments that make someone go out by SMS.
+    this.messenger?.dispatch?.({ operatorId, phone: normalized, title, body, type, payload, link, noticeId: notif.id });
 
     return { success: true, data: notif };
   }

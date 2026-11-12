@@ -10,6 +10,15 @@
 **Realtime:** MQTT + WebSocket  
 **Maps:** Mapbox or Google Maps Platform  
 
+> [!NOTE]
+> **Implementation Baseline & Architectural Evolution (Decision Log D126–D157):**
+> Nhằm phục vụ kiểm thử khép kín siêu tốc, đa nền tảng độc lập không phụ thuộc hạ tầng ngoại vi nặng (zero external daemon dependency), hệ thống hiện tại được triển khai trên:
+> - **Backend Gateway:** Unified Node.js REST API Server & Gateway (ES Modules, `node:sqlite` database per tenant D126, In-memory StateStore with AES-256-GCM encryption at rest D127).
+> - **Manager Operations:** Lightweight Single-Page App (`source/manager/web_dist/index.html`) tích hợp Leaflet/OpenStreetMap kết nối trực tiếp API Server; đồng thời duy trì prototype Flutter Web Monorepo tại `source/manager/app/`.
+> - **Realtime & Telemetry:** EventBridge Pub/Sub + SSE (`text/event-stream`) kết hợp REST fallback.
+> - **Mobile:** Flutter (Passenger & Driver Cockpit) với `mobile_scanner`.
+> Ngăn xếp NestJS, PostgreSQL 16+ PostGIS, Redis 7 và MQTT được quy hoạch cho lộ trình scale-out multi-cluster sau này theo chuẩn phân lập `TenantDatabases`.  
+
 ---
 
 ## 1. Executive Summary

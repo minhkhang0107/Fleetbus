@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'driver_motion.dart';
+
+export 'driver_motion.dart';
 
 /// Dark tactical tokens of the driver app (design-system.md, D95, D101). Large targets: 56 to 72 dp.
 abstract class DTokens {
@@ -35,6 +38,10 @@ ThemeData driverTheme() {
   final base = ThemeData(useMaterial3: true, brightness: Brightness.dark, colorScheme: ColorScheme.fromSeed(seedColor: DTokens.primary, brightness: Brightness.dark, primary: DTokens.primary, surface: DTokens.panel));
   return base.copyWith(
     scaffoldBackgroundColor: DTokens.bg,
+    pageTransitionsTheme: Motion.pageTransitions,
+    // iOS has no ripple: a pressed row lightens a little and buttons shrink (Pressable).
+    splashFactory: NoSplash.splashFactory,
+    highlightColor: DTokens.ink.withValues(alpha: 0.06),
     textTheme: base.textTheme.apply(fontFamily: GoogleFonts.geist().fontFamily, bodyColor: DTokens.ink, displayColor: DTokens.ink),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
@@ -103,16 +110,21 @@ class BigButton extends StatelessWidget {
       if (subtitle != null) Text(subtitle!, textAlign: TextAlign.center, style: dsans(size: 13, weight: FontWeight.w500, color: onPressed == null ? DTokens.muted : (outline ? color : foreground))),
     ]);
     final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(height >= 72 ? 12 : 10));
-    return SizedBox(
-      height: height,
-      width: double.infinity,
-      child: outline
-          ? OutlinedButton(onPressed: onPressed, style: OutlinedButton.styleFrom(foregroundColor: color, side: BorderSide(color: onPressed == null ? DTokens.line : color, width: 1.5), shape: shape), child: child)
-          : FilledButton(
-              onPressed: onPressed,
-              style: FilledButton.styleFrom(backgroundColor: color, foregroundColor: foreground, disabledBackgroundColor: DTokens.panel, shape: shape.copyWith(side: onPressed == null ? const BorderSide(color: Color(0xFF475569)) : BorderSide.none)),
-              child: child,
-            ),
+    return Pressable(
+      enabled: onPressed != null,
+      child: SizedBox(
+        width: double.infinity,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: height),
+          child: outline
+              ? OutlinedButton(onPressed: onPressed, style: OutlinedButton.styleFrom(foregroundColor: color, side: BorderSide(color: onPressed == null ? DTokens.line : color, width: 1.5), shape: shape), child: child)
+              : FilledButton(
+                  onPressed: onPressed,
+                  style: FilledButton.styleFrom(backgroundColor: color, foregroundColor: foreground, disabledBackgroundColor: DTokens.panel, shape: shape.copyWith(side: onPressed == null ? const BorderSide(color: Color(0xFF475569)) : BorderSide.none)),
+                  child: child,
+                ),
+        ),
+      ),
     );
   }
 }
@@ -133,10 +145,16 @@ class StatusPill extends StatelessWidget {
       DPill.danger => (DTokens.dangerBg, DTokens.dangerInk),
       DPill.info => (const Color(0xFF172554), const Color(0xFFBFDBFE)),
     };
-    return Container(
+    // A status that changes (Chờ → Đã lên xe) cross-fades instead of jumping.
+    return AnimatedContainer(
+      duration: Motion.base,
+      curve: Motion.ease,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
-      child: Text(text, style: dsans(size: 12, weight: FontWeight.w600, color: fg)),
+      child: AnimatedSwitcher(
+        duration: Motion.fast,
+        child: Text(text, key: ValueKey(text), style: dsans(size: 12, weight: FontWeight.w600, color: fg)),
+      ),
     );
   }
 }
@@ -208,9 +226,12 @@ class DHeader extends StatelessWidget implements PreferredSizeWidget {
       );
 }
 
-Future<T?> showDriverSheet<T>(BuildContext context, {required Widget Function(BuildContext) builder}) => showModalBottomSheet<T>(
+/// [pinnedFooter]: the content lays out its own scrolling body and keeps its main button at the bottom,
+/// always in sight (a sheet built with [DriverSheetBody]).
+Future<T?> showDriverSheet<T>(BuildContext context, {required Widget Function(BuildContext) builder, bool pinnedFooter = false}) => showModalBottomSheet<T>(
       context: context,
       isScrollControlled: true,
+      sheetAnimationStyle: Motion.sheetStyle,
       backgroundColor: DTokens.panel,
       barrierColor: const Color(0xB8020617),
       constraints: const BoxConstraints(maxWidth: 640),
@@ -219,17 +240,40 @@ Future<T?> showDriverSheet<T>(BuildContext context, {required Widget Function(Bu
         padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
         child: SafeArea(
           top: false,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xFF475569), borderRadius: BorderRadius.circular(999)))),
-              const SizedBox(height: 14),
-              builder(ctx),
-            ]),
-          ),
+          child: pinnedFooter
+              ? Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                  child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xFF475569), borderRadius: BorderRadius.circular(999)))),
+                    const SizedBox(height: 14),
+                    Flexible(child: builder(ctx)),
+                  ]),
+                )
+              : SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                  child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xFF475569), borderRadius: BorderRadius.circular(999)))),
+                    const SizedBox(height: 14),
+                    builder(ctx),
+                  ]),
+                ),
         ),
       ),
     );
+
+/// Body of a sheet opened with `pinnedFooter: true`: [children] scroll, [footer] stays at the bottom.
+class DriverSheetBody extends StatelessWidget {
+  const DriverSheetBody({super.key, required this.children, required this.footer});
+  final List<Widget> children;
+  final Widget footer;
+
+  @override
+  Widget build(BuildContext context) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Flexible(child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children))),
+        const SizedBox(height: 12),
+        footer,
+      ]);
+}
 
 void dToast(BuildContext context, String message) {
   ScaffoldMessenger.of(context)
@@ -258,22 +302,27 @@ class ChoiceTile extends StatelessWidget {
         selected: selected,
         button: true,
         enabled: enabled,
-        child: InkWell(
-          onTap: enabled ? onTap : null,
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            constraints: BoxConstraints(minHeight: height),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            alignment: center ? Alignment.center : Alignment.centerLeft,
-            decoration: BoxDecoration(
-              color: selected ? (danger ? DTokens.dangerBg : const Color(0xFF172554)) : DTokens.bg,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: selected ? accent : DTokens.line, width: selected ? 2 : 1),
+        child: Pressable(
+          enabled: enabled,
+          child: InkWell(
+            onTap: enabled ? onTap : null,
+            borderRadius: BorderRadius.circular(8),
+            child: AnimatedContainer(
+              duration: Motion.fast,
+              curve: Motion.ease,
+              constraints: BoxConstraints(minHeight: height),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              alignment: center ? Alignment.center : Alignment.centerLeft,
+              decoration: BoxDecoration(
+                color: selected ? (danger ? DTokens.dangerBg : const Color(0xFF172554)) : DTokens.bg,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: selected ? accent : DTokens.line, width: selected ? 2 : 1),
+              ),
+              child: Column(crossAxisAlignment: center ? CrossAxisAlignment.center : CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                Text(label, style: center ? dmono(size: 15) : dsans(size: 15, weight: FontWeight.w600)),
+                if (hint != null) Text(hint!, style: dsans(size: 12, color: DTokens.sub)),
+              ]),
             ),
-            child: Column(crossAxisAlignment: center ? CrossAxisAlignment.center : CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-              Text(label, style: center ? dmono(size: 15) : dsans(size: 15, weight: FontWeight.w600)),
-              if (hint != null) Text(hint!, style: dsans(size: 12, color: DTokens.sub)),
-            ]),
           ),
         ),
       ),

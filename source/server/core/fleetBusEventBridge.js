@@ -4,17 +4,36 @@
  */
 
 import EventEmitter from 'events';
+import { confirmVoucherUse } from './vouchers.js';
 import { operatorOfTrip } from './tenancy.js';
 import { findOperatorById } from './operators.js';
 import { homeConfirmed } from './serviceAreas.js';
-import { homeEta } from './homeRun.js';
+import { homeEta, HOME_AREA_MINUTES, HOME_AREA_METERS } from './homeRun.js';
 import { publicBaseUrl } from './messaging.js';
 import { createShareToken } from '../services/passenger/core/cryptoEngine.js';
 
 /** "18:35" of an ISO instant, Vietnam time. */
 const vnClock = (iso) => new Date(Date.parse(iso) + 7 * 3600000).toISOString().slice(11, 16);
+const vnParts = (iso) => {
+  const s = new Date((Date.parse(iso) || Date.now()) + 7 * 3600000).toISOString();
+  return { time: s.slice(11, 16), day: `${s.slice(8, 10)}/${s.slice(5, 7)}` };
+};
 import { expireHomeRequests } from './homeReview.js';
 import { DEMO_DATE, addDays, parseRunId, serviceCalendar } from './serviceDate.js';
+
+/** Drops the open "amount mismatch" alerts of an order once it is paid in full (D189). */
+function clearAmountAlerts(managerService, order) {
+  if (!managerService?.alerts) return;
+  for (let i = managerService.alerts.length - 1; i >= 0; i--) {
+    const a = managerService.alerts[i];
+    if ((a.order_id === order.order_id || (order.pnr && a.message?.includes(order.pnr))) && a.type === 'PAYMENT_AMOUNT_MISMATCH') {
+      managerService.alerts.splice(i, 1);
+    }
+  }
+}
+
+/** Counts manifest items that are not cancelled. */
+const activeBookedCount = (manifest) => (manifest || []).filter(m => m.boarding_status !== 'CANCELLED').length;
 
 /** Puts a phone hold on the driver's manifest (paid in cash on board), once per seat; a home address rides with it. */
 function addHotlineToManifest(driverTrip, reservation, farePerSeat) {
@@ -35,13 +54,13 @@ function addHotlineToManifest(driverTrip, reservation, farePerSeat) {
       home_pickup: homeConfirmed(reservation.home_pickup) ? reservation.home_pickup : null,
       boarding_status: 'ISSUED',
       payment_method: 'COD',
-      cod_amount_vnd: farePerSeat + feeEach,
+      cod_amount_vnd: (typeof reservation.seat_fares?.[seatCode] === 'number' ? reservation.seat_fares[seatCode] : farePerSeat) + feeEach,
       source: 'HOTLINE',
       reservation_id: reservation.reservation_id,
       boarded_at: null
     });
   }
-  driverTrip.booked_passengers_count = driverTrip.manifest.length;
+  driverTrip.booked_passengers_count = activeBookedCount(driverTrip.manifest);
 }
 
 /** Puts issued tickets on the driver's manifest, once each. */
@@ -49,6 +68,8 @@ function addToManifest(driverTrip, tickets) {
   for (const tkt of tickets) {
     const exists = driverTrip.manifest.some(m => m.ticket_id === tkt.ticket_id || (m.pnr === tkt.pnr && m.seat_code === tkt.seat_code));
     if (exists) continue;
+    // A cash ticket is paid on board: put it on the manifest as COD so the driver collects the fare first.
+    const isCod = tkt.payment_status === 'UNPAID_COD' && tkt.cod_amount_vnd > 0;
     driverTrip.manifest.push({
       ticket_id: tkt.ticket_id,
       pnr: tkt.pnr,
@@ -65,12 +86,13 @@ function addToManifest(driverTrip, tickets) {
       home_pickup: homeConfirmed(tkt.home_pickup) ? tkt.home_pickup : null,
       home_dropoff: homeConfirmed(tkt.home_dropoff) ? tkt.home_dropoff : null,
       boarding_status: tkt.status === 'BOARDED' ? 'BOARDED' : 'NOT_BOARDED',
-      payment_method: 'PREPAID',
-      cod_amount_vnd: 0,
+      payment_method: isCod ? 'COD' : 'PREPAID',
+      cod_amount_vnd: isCod ? tkt.cod_amount_vnd : 0,
+      ...(isCod ? { cod_collected: false } : {}),
       boarded_at: tkt.boarded_at || null
     });
   }
-  driverTrip.booked_passengers_count = driverTrip.manifest.length;
+  driverTrip.booked_passengers_count = activeBookedCount(driverTrip.manifest);
 }
 
 export class FleetBusEventBridge extends EventEmitter {
@@ -111,6 +133,30 @@ export class FleetBusEventBridge extends EventEmitter {
     if (trackingService) trackingService.eventBridge = this;
     if (seatMapService) seatMapService.eventBridge = this;
     if (paymentService && seatMapService) paymentService.seatMapService = seatMapService;
+    if (paymentService && services.searchService) paymentService.searchService = services.searchService;
+    if (driverService && paymentService) driverService.paymentService = paymentService;
+    if (paymentService) {
+      paymentService.plateProvider = (tripId) => {
+        const ops = managerService?.trips?.find(t => t.trip_id === tripId);
+        if (ops?.vehicle_plate) return ops.vehicle_plate;
+        const drv = driverService?.activeTrips?.get(tripId);
+        if (drv?.vehicle_plate) return drv.vehicle_plate;
+        const run = parseRunId(tripId);
+        const scheduleId = ops?.schedule_id || run?.templateId || null;
+        if (scheduleId) {
+          const presetPlate = managerService?.defaultPlateFor?.(scheduleId);
+          if (presetPlate) return presetPlate;
+        }
+        const defaultPlate = managerService?.defaultPlateFor?.(tripId);
+        if (defaultPlate) return defaultPlate;
+        // A day's run with no bus yet has no plate, as search shows (D191): the catalog's sample plate is not its bus.
+        if (run) return null;
+        const detail = services.searchService?.getTripDetail?.(tripId)?.data;
+        const runPlate = detail?.plate_number || detail?.vehicle_plate || null;
+        if (runPlate) return runPlate;
+        return null;
+      };
+    }
     // The stops of a trip, in order: the passenger trip (PAX-008) is the authority, a driver-only trip uses its own
     if (seatMapService) {
       seatMapService.stopsProvider = (tripId) => {
@@ -119,6 +165,20 @@ export class FleetBusEventBridge extends EventEmitter {
         return driverService?.activeTrips?.get(tripId)?.stops || null;
       };
       seatMapService.layoutProvider = (tripId) => managerService?.layoutOfTrip?.(tripId) || null;
+      seatMapService.fareProvider = (tripId) => {
+        const passengerTrip = services.searchService?.getTripDetail?.(tripId);
+        if (passengerTrip?.success && typeof passengerTrip.data?.base_fare_vnd === 'number') {
+          return passengerTrip.data.base_fare_vnd;
+        }
+        return null;
+      };
+    }
+    if (trackingService) {
+      trackingService.stopsProvider = (tripId) => {
+        const passengerTrip = services.searchService?.getTripDetail?.(tripId);
+        if (passengerTrip?.success) return passengerTrip.data.stops;
+        return driverService?.activeTrips?.get(tripId)?.stops || null;
+      };
     }
     // A schedule's run on another day gets its ops and driver trips the first time the office or a sale needs it.
     if (managerService) {
@@ -146,6 +206,12 @@ export class FleetBusEventBridge extends EventEmitter {
       // A ticket of a day's run must reach a driver and the office: set the run up if nobody has yet.
       this.ensureRunOperations(tripId);
 
+      // The order's discount code use is kept for good (core/vouchers.js).
+      const tenantDbs = this.services?.tenantDbs;
+      if (tenantDbs && order.operator_id) {
+        confirmVoucherUse(tenantDbs.forOperator(order.operator_id), order.order_id);
+      }
+
       // A. Seat Map: Permanently lock seats as BOOKED
       if (seatMapService && typeof seatMapService.confirmBooking === 'function') {
         seatMapService.confirmBooking(tripId, order.seat_codes, order.pnr, { pickupStopId: order.pickup_stop_id, dropoffStopId: order.dropoff_stop_id });
@@ -172,6 +238,8 @@ export class FleetBusEventBridge extends EventEmitter {
         if (managerService.bookings) {
           const alreadyLogged = managerService.bookings.some(b => b.pnr === order.pnr);
           if (!alreadyLogged) {
+            // A cash order stays unpaid in the office ledger until the driver collects every seat on board.
+            const isCod = order.payment_status === 'UNPAID_COD';
             managerService.bookings.push({
               pnr: order.pnr,
               trip_id: tripId,
@@ -179,22 +247,31 @@ export class FleetBusEventBridge extends EventEmitter {
               phone: order.payer?.phone || tickets[0]?.passenger_phone,
               seat_codes: order.seat_codes,
               total_fare_vnd: order.amount_vnd,
-              payment_status: 'PAID',
+              payment_status: isCod ? 'UNPAID_COD' : 'PAID',
+              ...(isCod ? { payment_method: 'CASH', cod_amount_vnd: order.amount_vnd, cod_collected_vnd: 0 } : {}),
               issued_at: new Date().toISOString(),
               channel: 'PASSENGER_APP',
-              operator_id: operatorOfTrip(this.services, tripId)
+              operator_id: operatorOfTrip(this.services, tripId),
+              ...(order.voucher_code ? { voucher_code: order.voucher_code, discount_vnd: order.discount_vnd } : {})
             });
           }
         }
+
+        // The rest of an underpaid transfer arrived: the office's "amount mismatch" alert is settled too.
+        clearAmountAlerts(managerService, order);
       }
 
       // D. Passenger Notification: Confirm payment & issue ticket alert
       if (trackingService && typeof trackingService.sendNotification === 'function') {
         const phone = order.payer?.phone || tickets[0]?.passenger_phone;
         if (phone) {
+          // Cash bookings tell the passenger to pay the driver on boarding instead of confirming prior payment.
+          const isCod = order.payment_status === 'UNPAID_COD';
           trackingService.sendNotification(phone, { operatorId: operatorOfTrip(this.services, tripId),
-            title: 'Thanh toán thành công & Xuất vé điện tử',
-            body: `Mã vé ${order.pnr} cho chuyến xe ${order.route_name || tripId} đã sẵn sàng trong Ví vé!`,
+            title: isCod ? 'Đặt vé thành công' : 'Thanh toán thành công & Xuất vé điện tử',
+            body: isCod
+              ? `Mã vé ${order.pnr} cho chuyến xe ${order.route_name || tripId} đã sẵn sàng. Bạn thanh toán tiền mặt cho tài xế khi lên xe.`
+              : `Mã vé ${order.pnr} cho chuyến xe ${order.route_name || tripId} đã sẵn sàng trong Ví vé!`,
             type: 'PAYMENT_SUCCESS',
             payload: { pnr: order.pnr, trip_id: tripId, ticket_ids: tickets.map(t => t.ticket_id) }
           });
@@ -205,7 +282,7 @@ export class FleetBusEventBridge extends EventEmitter {
     // -------------------------------------------------------------------------
     // 2. PASSENGER_BOARDED: Driver QR Scan -> Passenger Ticket & Manager Boarded Count
     // -------------------------------------------------------------------------
-    this.on('PASSENGER_BOARDED', ({ tripId, passenger, ticketId, pnr, now = Date.now() }) => {
+    this.on('PASSENGER_BOARDED', ({ tripId, passenger, ticketId, pnr, now = Date.now(), seatCodes, skipNotification = false }) => {
       // Hoist ticket lookup so step B can use it
       let ticket = null;
       if (paymentService && paymentService.tickets) {
@@ -217,7 +294,7 @@ export class FleetBusEventBridge extends EventEmitter {
       }
 
       // B. Passenger Push Notification: Welcome aboard reminder
-      if (trackingService && typeof trackingService.sendNotification === 'function') {
+      if (!skipNotification && trackingService && typeof trackingService.sendNotification === 'function') {
         const phone = passenger?.passenger_phone || passenger?.phone;
         if (phone) {
           let tripDesc = 'chuyến của bạn';
@@ -233,13 +310,20 @@ export class FleetBusEventBridge extends EventEmitter {
               tripDesc = `chuyến ${route} khởi hành ${hh}:${mm} ngày ${dd}/${MM}`;
             }
           }
-          const seat = passenger?.seat_code || ticket?.seat_code || 'đã đặt';
+          const seat = Array.isArray(seatCodes) && seatCodes.length > 0
+            ? seatCodes.join(', ')
+            : (passenger?.seat_code || ticket?.seat_code || 'đã đặt');
 
           trackingService.sendNotification(phone, { operatorId: operatorOfTrip(this.services, tripId),
             title: 'Chào mừng quý khách lên xe!',
             body: `Bạn đã lên xe ${tripDesc} (Ghế ${seat}). Chúc bạn thượng lộ bình an!`,
             type: 'BOARDING_REMINDER',
-            payload: { trip_id: tripId, ticket_id: ticketId, seat_code: passenger?.seat_code }
+            payload: {
+              trip_id: tripId,
+              ticket_id: ticketId,
+              seat_code: passenger?.seat_code,
+              seat_codes: seatCodes || [passenger?.seat_code].filter(Boolean)
+            }
           });
         }
       }
@@ -367,8 +451,11 @@ export class FleetBusEventBridge extends EventEmitter {
         if (driverService && driverService.activeTrips) {
           const trip = driverService.activeTrips.get(tripId);
           if (trip && trip.manifest) {
+            // A passenger with several seats hears it once (D191).
+            const told = new Set();
             for (const p of trip.manifest) {
-              if (p.passenger_phone) {
+              if (p.passenger_phone && !told.has(p.passenger_phone)) {
+                told.add(p.passenger_phone);
                 trackingService.sendNotification(p.passenger_phone, { operatorId: operatorOfTrip(this.services, tripId),
                   title: 'Thông báo sự cố chuyến đi',
                   body: `Chuyến ${tripId} gặp sự cố: ${incident.description}. Dự kiến trễ khoảng ${incident.estimated_delay_minutes || 0} phút.`,
@@ -420,7 +507,7 @@ export class FleetBusEventBridge extends EventEmitter {
               boarded_at: null
             });
           }
-          driverTrip.booked_passengers_count = driverTrip.manifest.length;
+          driverTrip.booked_passengers_count = activeBookedCount(driverTrip.manifest);
         }
       }
 
@@ -429,6 +516,10 @@ export class FleetBusEventBridge extends EventEmitter {
       if (paymentService && paymentService.tickets) {
         const mgrTrip = managerService?.findTrip?.(tripId);
         const route = managerService?.routes?.find(r => r.route_id === mgrTrip?.route_id);
+        const stopTimes = this.services?.searchService?.stopTimes?.(tripId);
+        const pickupTimeInfo = stopTimes?.[booking.pickup_stop_id];
+        const pickupTime = pickupTimeInfo?.planned_time || mgrTrip?.departure_time || new Date().toISOString();
+        const pickupEstimated = pickupTimeInfo?.time_source === 'ESTIMATED';
         for (const seatCode of seatCodes) {
           const ticketId = `tkt_pos_${booking.pnr.replace('-', '')}_${seatCode}`;
           paymentService.tickets.set(ticketId, {
@@ -438,6 +529,8 @@ export class FleetBusEventBridge extends EventEmitter {
             trip_id: tripId,
             route_name: route?.name || tripId,
             departure_time: mgrTrip?.departure_time || new Date().toISOString(),
+            pickup_time: pickupTime,
+            pickup_time_estimated: pickupEstimated,
             fare_vnd: Math.round(booking.total_fare_vnd / seatCodes.length),
             owner_phone: booking.phone,
             seat_code: seatCode,
@@ -471,7 +564,7 @@ export class FleetBusEventBridge extends EventEmitter {
         const driverTrip = driverService.activeTrips.get(tripId);
         if (driverTrip) {
           driverTrip.manifest = driverTrip.manifest.filter(m => m.reservation_id !== reservationId || m.boarding_status === 'BOARDED');
-          driverTrip.booked_passengers_count = driverTrip.manifest.length;
+          driverTrip.booked_passengers_count = activeBookedCount(driverTrip.manifest);
         }
       }
     });
@@ -479,24 +572,30 @@ export class FleetBusEventBridge extends EventEmitter {
     this.on('HOTLINE_HOLD_CONVERTED', ({ tripId, reservationId, seatCode }) => {
       if (managerService && managerService.hotlineReservations) {
         const rsv = managerService.hotlineReservations.find(r => r.reservation_id === reservationId);
-        if (rsv && rsv.hold_status === 'HELD_HOTLINE') {
+        if (rsv && (rsv.hold_status === 'HELD_HOTLINE' || rsv.hold_status === 'CONVERTED')) {
           // Initialize tracking of converted seats
           if (!rsv.converted_seats) rsv.converted_seats = [];
-          if (!rsv.converted_seats.includes(seatCode)) rsv.converted_seats.push(seatCode);
-
-          if (rsv.converted_seats.length === rsv.seat_codes.length) {
-            rsv.hold_status = 'CONVERTED';
-            rsv.converted_at = new Date().toISOString();
+          if (!rsv.converted_seats.includes(seatCode)) {
+            rsv.converted_seats.push(seatCode);
             
             // Move from held to booked
             const trip = managerService.findTrip(tripId);
             if (trip) {
-              trip.held_seats = Math.max(0, (trip.held_seats || 0) - rsv.seat_codes.length);
-              trip.booked_seats = (trip.booked_seats || 0) + rsv.seat_codes.length;
+              trip.held_seats = Math.max(0, (trip.held_seats || 0) - 1);
+              trip.booked_seats = (trip.booked_seats || 0) + 1;
             }
+          }
+
+          if (rsv.converted_seats.length === rsv.seat_codes.length) {
+            rsv.hold_status = 'CONVERTED';
+            rsv.converted_at = new Date().toISOString();
           }
         }
       }
+    });
+
+    this.on('STOP_DEPARTED', () => {
+      managerService?.releaseExpiredHotlineHolds?.();
     });
 
     // A phone hold whose pickup stop the bus has left is released (the passenger did not board).
@@ -543,7 +642,8 @@ export class FleetBusEventBridge extends EventEmitter {
           title: 'Tài xế đã lên đường đón bạn',
           body: `Xe ${vehiclePlate} đang đi đón khách tận nhà. Bạn là điểm đón thứ ${p.position}${when} tại ${p.address}. Xem xe đang ở đâu và bấm "Tôi đã sẵn sàng" khi bạn xong.`,
           type: 'HOME_RUN_STARTED',
-          payload: { trip_id: tripId, ticket_id: p.ticket_id, at: new Date(now).toISOString(), appointment_at: p.appointment_at || null },
+          // D159 milestone M1: the bus set off, the passenger's place in the run.
+          payload: { trip_id: tripId, ticket_id: p.ticket_id, at: new Date(now).toISOString(), appointment_at: p.appointment_at || null, milestone: 'M1', position: p.position, total: passengers.length },
           link: this.trackingLink(p.ticket_id)
         });
       }
@@ -628,24 +728,43 @@ export class FleetBusEventBridge extends EventEmitter {
       if (driverTrip && paymentService?.tickets) {
         addToManifest(driverTrip, [...paymentService.tickets.values()].filter(t => t.trip_id === tripId && ['ACTIVE', 'BOARDED'].includes(t.status)));
       }
-      if (driverTrip) {
-        const fare = managerService?.routes?.find(r => r.route_id === managerService.findTrip?.(tripId)?.route_id)?.base_fare_vnd || 220000;
-        for (const r of managerService?.hotlineReservations || []) {
-          if (r.trip_id === tripId && r.hold_status === 'HELD_HOTLINE') addHotlineToManifest(driverTrip, r, fare);
+      if (paymentService?.tickets) {
+        for (const ticket of paymentService.tickets.values()) {
+          if (ticket.trip_id === tripId) ticket.vehicle_plate = vehiclePlate;
         }
       }
-      const changed = (previous?.vehicle_plate && previous.vehicle_plate !== vehiclePlate) || (previous?.driver_id && previous.driver_id !== driverId);
-      if (!changed || !paymentService?.tickets || !trackingService?.sendNotificationOnce) return;
+      if (driverTrip) {
+        for (const r of managerService?.hotlineReservations || []) {
+          if (r.trip_id === tripId && r.hold_status === 'HELD_HOTLINE') {
+            const fare = r.fare_per_seat_vnd
+              || managerService?._resolveFareForSeats?.(tripId, managerService.findTrip?.(tripId), r.seat_codes)?.farePerSeat
+              || managerService?.routes?.find(route => route.route_id === managerService.findTrip?.(tripId)?.route_id)?.base_fare_vnd
+              || 220000;
+            addHotlineToManifest(driverTrip, r, fare);
+          }
+        }
+      }
       const at = catalogTrip?.departure_time ? new Date(Date.parse(catalogTrip.departure_time) + 7 * 3600000).toISOString() : null;
       const when = at ? `${at.slice(11, 16)} ngày ${at.slice(8, 10)}/${at.slice(5, 7)}` : tripId;
+      this._pushAssignmentToDrivers({ tripId, when, route: catalogTrip?.route_name, vehiclePlate, driverId, previous, departure: catalogTrip?.departure_time });
+      const changed = (previous?.vehicle_plate && previous.vehicle_plate !== vehiclePlate) || (previous?.driver_id && previous.driver_id !== driverId);
+      if (!changed || !paymentService?.tickets || !trackingService?.sendNotificationOnce) return;
+      // One notice per passenger and booking, naming all their seats (D191), not one per seat.
+      const groups = new Map();
       for (const ticket of paymentService.tickets.values()) {
         if (ticket.trip_id !== tripId || !['ACTIVE', 'BOARDED'].includes(ticket.status)) continue;
-        trackingService.sendNotificationOnce(`${ticket.ticket_id}:ASSIGNED:${vehiclePlate}:${driverId}`, ticket.passenger_phone, {
+        const key = `${ticket.pnr || ticket.ticket_id}:${ticket.passenger_phone}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(ticket);
+      }
+      for (const [key, tickets] of groups) {
+        const seats = tickets.map(t => t.seat_code).join(', ');
+        trackingService.sendNotificationOnce(`${key}:ASSIGNED:${vehiclePlate}:${driverId}`, tickets[0].passenger_phone, {
           operatorId: operatorOfTrip(this.services, tripId),
           title: 'Nhà xe đổi xe hoặc tài xế',
-          body: `Chuyến ${when} của bạn chạy xe ${vehiclePlate}, tài xế ${driverName}. Vé và ghế ${ticket.seat_code} giữ nguyên.`,
+          body: `Chuyến ${when} của bạn chạy xe ${vehiclePlate}, tài xế ${driverName}. Vé và ghế ${seats} giữ nguyên.`,
           type: 'TRIP_REASSIGNED',
-          payload: { trip_id: tripId, ticket_id: ticket.ticket_id, vehicle_plate: vehiclePlate }
+          payload: { trip_id: tripId, ticket_id: tickets[0].ticket_id, pnr: tickets[0].pnr, vehicle_plate: vehiclePlate }
         });
       }
     });
@@ -657,6 +776,11 @@ export class FleetBusEventBridge extends EventEmitter {
       // A. Driver Cockpit: the trip moves to the new vehicle and, when named, to the new driver
       if (driverService && typeof driverService.reassignTrip === 'function') {
         driverService.reassignTrip(tripId, { vehiclePlate: newPlate, driverId: newDriverId });
+      }
+      if (paymentService?.tickets) {
+        for (const ticket of paymentService.tickets.values()) {
+          if (ticket.trip_id === tripId) ticket.vehicle_plate = newPlate;
+        }
       }
 
       // B. Passenger Radar: Register vehicle replacement disruption & notify passengers
@@ -673,8 +797,11 @@ export class FleetBusEventBridge extends EventEmitter {
         if (driverService && driverService.activeTrips) {
           const trip = driverService.activeTrips.get(tripId);
           if (trip && trip.manifest) {
+            // A passenger with several seats hears it once (D191).
+            const told = new Set();
             for (const p of trip.manifest) {
-              if (p.passenger_phone) {
+              if (p.passenger_phone && !told.has(p.passenger_phone)) {
+                told.add(p.passenger_phone);
                 trackingService.sendNotification(p.passenger_phone, { operatorId: operatorOfTrip(this.services, tripId),
                   title: 'Đổi xe khẩn cấp',
                   body: `Chuyến xe của bạn được chuyển sang xe biển số mới ${newPlate} do: ${reason}. Vị trí ghế của bạn được giữ nguyên!`,
@@ -692,10 +819,30 @@ export class FleetBusEventBridge extends EventEmitter {
     // 7. TRIP_DELAYED: Manager Delay Broadcast -> Driver & Passenger
     // -------------------------------------------------------------------------
     this.on('TRIP_DELAYED', ({ tripId, delayMinutes, reason }) => {
+      let routeName = null;
+      let plannedDeparture = null;
+
       if (driverService && driverService.activeTrips) {
         const trip = driverService.activeTrips.get(tripId);
         if (trip) {
           trip.delay_minutes = delayMinutes;
+          plannedDeparture = trip.planned_departure_time || trip.departure_time;
+          if (plannedDeparture && delayMinutes > 0) {
+            trip.estimated_departure_time = new Date(Date.parse(plannedDeparture) + delayMinutes * 60000).toISOString();
+          }
+          routeName = trip.route_name;
+        }
+      }
+
+      if (managerService) {
+        const mgrTrip = managerService.findTrip ? managerService.findTrip(tripId) : managerService.trips?.find(t => t.trip_id === tripId);
+        if (mgrTrip) {
+          mgrTrip.delay_minutes = delayMinutes;
+          if (!plannedDeparture) plannedDeparture = mgrTrip.departure_time || mgrTrip.planned_departure_time;
+          if (!routeName && mgrTrip.route_name) routeName = mgrTrip.route_name;
+          if (plannedDeparture && delayMinutes > 0) {
+            mgrTrip.estimated_departure_time = new Date(Date.parse(plannedDeparture) + delayMinutes * 60000).toISOString();
+          }
         }
       }
 
@@ -712,15 +859,60 @@ export class FleetBusEventBridge extends EventEmitter {
         if (driverService && driverService.activeTrips) {
           const trip = driverService.activeTrips.get(tripId);
           if (trip && trip.manifest) {
+            const byPhone = new Map();
             for (const p of trip.manifest) {
-              if (p.passenger_phone) {
-                trackingService.sendNotification(p.passenger_phone, { operatorId: operatorOfTrip(this.services, tripId),
-                  title: 'Thông báo trễ chuyến',
-                  body: `Chuyến đi bị hoãn ${delayMinutes} phút do ${reason}. Quý khách vui lòng theo dõi trên Radar trực tiếp.`,
-                  type: 'DELAY',
-                  payload: { trip_id: tripId, delay_minutes: delayMinutes }
-                });
+              const phone = p.passenger_phone || p.phone;
+              if (!phone) continue;
+              const list = byPhone.get(phone) || [];
+              list.push(p);
+              byPhone.set(phone, list);
+            }
+
+            let rawRoute = routeName || trip.route_name;
+            if (!rawRoute && this.services.paymentService?.tickets) {
+              for (const t of this.services.paymentService.tickets.values()) {
+                if (t.trip_id === tripId && t.route_name) { rawRoute = t.route_name; break; }
               }
+            }
+            let route = '';
+            if (rawRoute) {
+              const cleaned = rawRoute.replace(/\s*\([^)]*\)\s*$/, '').trim();
+              if (cleaned) route = cleaned.includes('—') ? cleaned.replace(/\s*—\s*/g, ' → ') : cleaned;
+            }
+
+            let depTimeStr = plannedDeparture;
+            if (!depTimeStr && this.services.paymentService?.tickets) {
+              for (const t of this.services.paymentService.tickets.values()) {
+                if (t.trip_id === tripId && t.departure_time) { depTimeStr = t.departure_time; break; }
+              }
+            }
+            const { time: origTime, day: depDay } = vnParts(depTimeStr);
+            const newDepIso = new Date((Date.parse(depTimeStr) || Date.now()) + delayMinutes * 60000).toISOString();
+            const newTime = vnClock(newDepIso);
+
+            const cleanReason = (reason || '').trim();
+            const routePart = route ? ` ${route}` : '';
+            const reasonPart = cleanReason ? ` Lý do: ${cleanReason}.` : '';
+
+            for (const [phone, passengers] of byPhone) {
+              const seatList = passengers.map(p => p.seat_code).filter(Boolean).join(', ');
+              const seatText = seatList ? ` (ghế ${seatList})` : '';
+              const body = `Chuyến ${origTime}${routePart} ngày ${depDay}${seatText} chạy trễ ${delayMinutes} phút, giờ chạy mới ${newTime}.${reasonPart}`;
+
+              trackingService.sendNotificationOnce?.(`${tripId}:${phone}:TRIP_DELAY:${delayMinutes}`, phone, {
+                operatorId: operatorOfTrip(this.services, tripId),
+                title: 'Thông báo trễ chuyến',
+                body,
+                type: 'TRIP_DELAY',
+                payload: {
+                  trip_id: tripId,
+                  delay_minutes: delayMinutes,
+                  new_departure_time: newTime,
+                  ticket_id: passengers[0].ticket_id,
+                  ticket_ids: passengers.map(p => p.ticket_id),
+                  seat_codes: passengers.map(p => p.seat_code).filter(Boolean)
+                }
+              });
             }
           }
         }
@@ -730,7 +922,7 @@ export class FleetBusEventBridge extends EventEmitter {
     // -------------------------------------------------------------------------
     // 8. TICKET_CANCELLED: Passenger Cancel & Refund -> SeatMap, Driver & Manager
     // -------------------------------------------------------------------------
-    this.on('TICKET_CANCELLED', ({ ticketId, pnr, tripId, seatCode }) => {
+    this.on('TICKET_CANCELLED', ({ ticketId, pnr, tripId, seatCode, refundAmountVnd }) => {
       let resolvedTripId = tripId;
       let resolvedSeatCode = seatCode;
       let resolvedPnr = pnr;
@@ -767,6 +959,38 @@ export class FleetBusEventBridge extends EventEmitter {
           if (item) {
             item.boarding_status = 'CANCELLED';
           }
+          trip.booked_passengers_count = activeBookedCount(trip.manifest);
+        }
+      }
+
+      // D. Manager Bookings: Update booking records (partially or fully cancelled)
+      if (managerService && Array.isArray(managerService.bookings)) {
+        const booking = managerService.bookings.find(b =>
+          (resolvedPnr && b.pnr === resolvedPnr) ||
+          (resolvedTripId && b.trip_id === resolvedTripId && Array.isArray(b.seat_codes) && b.seat_codes.includes(resolvedSeatCode))
+        );
+        // The same seat cancelled twice (a retried event) must not refund or reduce the cash due twice.
+        const alreadyCancelled = booking?.cancelled_seat_codes?.includes(resolvedSeatCode);
+        if (booking && resolvedSeatCode && !alreadyCancelled) {
+          booking.cancelled_seat_codes = [...(booking.cancelled_seat_codes || []), resolvedSeatCode];
+
+          const refund = Number(refundAmountVnd) || 0;
+          booking.refunded_vnd = (Number(booking.refunded_vnd) || 0) + refund;
+
+          const totalSeats = Array.isArray(booking.seat_codes) && booking.seat_codes.length > 0 ? booking.seat_codes.length : 1;
+          const remainingCount = totalSeats - booking.cancelled_seat_codes.length;
+          booking.status = remainingCount <= 0 ? 'CANCELLED' : 'PARTIALLY_CANCELLED';
+
+          const isCashCod = (booking.payment_method === 'CASH' || booking.payment_status === 'UNPAID_COD') && booking.payment_status !== 'PAID';
+          if (isCashCod) {
+            const farePerSeat = Math.round((Number(booking.total_fare_vnd) || 0) / totalSeats);
+            if (remainingCount <= 0) {
+              booking.cod_amount_vnd = 0;
+            } else {
+              const currentCod = booking.cod_amount_vnd !== undefined ? Number(booking.cod_amount_vnd) : Number(booking.total_fare_vnd) || 0;
+              booking.cod_amount_vnd = Math.max(0, currentCod - farePerSeat);
+            }
+          }
         }
       }
 
@@ -795,12 +1019,25 @@ export class FleetBusEventBridge extends EventEmitter {
           operator_id: operatorOfTrip(this.services, order.trip_id)
         });
       }
+      if (trackingService && typeof trackingService.sendNotification === 'function') {
+        const phone = order.payer?.phone;
+        if (phone) {
+          trackingService.sendNotification(phone, {
+            operatorId: operatorOfTrip(this.services, order.trip_id),
+            title: 'Chưa xuất được vé',
+            body: `Nhà xe nhận ${amountVnd.toLocaleString('vi-VN')} đ cho đơn ${order.pnr} khi đơn đã hết hạn và không còn xuất vé được (ghế đã có người đặt, hoặc chuyến đã chạy hay đã hủy). Nhà xe sẽ hoàn lại ${amountVnd.toLocaleString('vi-VN')} đ về tài khoản đã chuyển. Bạn có thể đặt chuyến khác trong ứng dụng.`,
+            type: 'PAYMENT_LATE_REFUND',
+            payload: { order_id: order.order_id, pnr: order.pnr, refund_amount_vnd: amountVnd }
+          });
+        }
+      }
     });
 
     this.on('PAYMENT_ANOMALY', ({ order, receivedVnd }) => {
       if (managerService && managerService.alerts) {
         managerService.alerts.unshift({
           alert_id: `alt_amount_${Date.now()}`,
+          order_id: order.order_id,
           vehicle_plate: null,
           type: 'PAYMENT_AMOUNT_MISMATCH',
           severity: 'AMBER',
@@ -811,14 +1048,74 @@ export class FleetBusEventBridge extends EventEmitter {
       }
     });
 
+    this.on('PAYMENT_UNMATCHED', ({ operatorId, amountVnd, memo, bankRef }) => {
+      if (managerService && managerService.alerts) {
+        managerService.alerts.unshift({
+          alert_id: `alt_unmatched_${Date.now()}`,
+          vehicle_plate: null,
+          type: 'PAYMENT_UNMATCHED',
+          severity: 'AMBER',
+          message: `Giao dịch ${bankRef || 'ngân hàng'} nhận ${amountVnd} đ không khớp mã đặt vé (${memo || 'trống'})`,
+          created_at: new Date().toISOString(),
+          operator_id: operatorId
+        });
+      }
+    });
+
     // -------------------------------------------------------------------------
     // 8c. COD_COLLECTED / HAIL_BOARDED / WALLET_CREDIT_REQUESTED: driver cash events -> Manager & Passenger wallet
     // -------------------------------------------------------------------------
-    this.on('COD_COLLECTED', ({ pnr, fareVnd }) => {
-      const booking = managerService?.bookings?.find(b => b.pnr === pnr);
-      if (booking) {
+    this.on('COD_COLLECTED', ({ tripId, ticketId, pnr, fareVnd, seatCode }) => {
+      // A passenger-app cash ticket settles on collection; the order becomes PAID once all its active seats are collected.
+      let orderFullyCollected = false;
+      const ticket = paymentService?.tickets?.get(ticketId);
+      if (ticket && ticket.payment_method === 'CASH') {
+        ticket.cod_collected = true;
+        ticket.payment_status = 'PAID';
+        const order = paymentService.orders?.get(ticket.order_id);
+        if (order && Array.isArray(order.ticket_ids) && order.ticket_ids.length > 0 && order.ticket_ids.every(id => {
+          const t = paymentService.tickets.get(id);
+          return t && (t.cod_collected === true || t.status === 'CANCELLED');
+        })) {
+          order.payment_status = 'PAID';
+          order.paid_at = new Date().toISOString();
+          orderFullyCollected = true;
+          clearAmountAlerts(managerService, order);
+        }
+      }
+
+      if (!managerService?.bookings) return;
+      let booking = managerService.bookings.find(b => b.pnr === pnr);
+      if (!booking) {
+        // A hotline hold paid on board becomes a booking here, so its cash reaches the revenue (G5).
+        const rsv = managerService.hotlineReservations?.find(r => r.pnr === pnr);
+        if (!rsv) return;
+        booking = {
+          pnr,
+          trip_id: tripId || rsv.trip_id,
+          passenger_name: rsv.passenger_name,
+          phone: rsv.phone || null,
+          seat_codes: [],
+          total_fare_vnd: 0,
+          payment_status: 'PAID',
+          issued_at: new Date().toISOString(),
+          channel: 'POS_HOTLINE',
+          operator_id: rsv.operator_id || operatorOfTrip(this.services, tripId || rsv.trip_id)
+        };
+        managerService.bookings.push(booking);
+      }
+      booking.collected_ticket_ids = booking.collected_ticket_ids || [];
+      if (ticketId && booking.collected_ticket_ids.includes(ticketId)) return;
+      if (ticketId) booking.collected_ticket_ids.push(ticketId);
+      if (booking.payment_method === 'CASH') {
+        if (orderFullyCollected) booking.payment_status = 'PAID';
+      } else {
         booking.payment_status = 'PAID';
-        booking.cod_collected_vnd = (booking.cod_collected_vnd || 0) + fareVnd;
+      }
+      booking.cod_collected_vnd = (booking.cod_collected_vnd || 0) + fareVnd;
+      if (booking.channel === 'POS_HOTLINE' && seatCode && !booking.seat_codes.includes(seatCode)) {
+        booking.seat_codes.push(seatCode);
+        booking.total_fare_vnd += fareVnd;
       }
     });
 
@@ -870,7 +1167,7 @@ export class FleetBusEventBridge extends EventEmitter {
     // -------------------------------------------------------------------------
     // 9. TRIP_COMPLETED: Driver End Trip -> Manager Status
     // -------------------------------------------------------------------------
-    this.on('TRIP_COMPLETED', ({ tripId, summary }) => {
+    this.on('TRIP_COMPLETED', ({ tripId, summary, driverId, operatorId }) => {
       // PAX-016: tickets of a finished trip belong to the history tab
       if (paymentService && paymentService.tickets) {
         for (const ticket of paymentService.tickets.values()) {
@@ -878,8 +1175,9 @@ export class FleetBusEventBridge extends EventEmitter {
         }
       }
       if (managerService) {
+        let trip = null;
         if (managerService.trips) {
-          const trip = managerService.findTrip(tripId);
+          trip = managerService.findTrip(tripId);
           if (trip) {
             trip.status = 'COMPLETED';
           }
@@ -891,6 +1189,19 @@ export class FleetBusEventBridge extends EventEmitter {
             veh.speed_kmh = 0;
           }
         }
+        managerService.recordAudit({
+          actor: driverId || trip?.driver_id || 'driver',
+          role: 'DRIVER',
+          action: 'TRIP_COMPLETE',
+          resource: tripId,
+          after: {
+            trip_id: tripId,
+            cash_handed_in_vnd: summary?.total_cash_to_handover_vnd ?? 0,
+            departure_time: trip?.departure_time,
+            route_name: trip?.route_name
+          },
+          operator_id: operatorId || trip?.operator_id || DEFAULT_OPERATOR_ID
+        });
       }
     });
   }
@@ -925,21 +1236,41 @@ export class FleetBusEventBridge extends EventEmitter {
       const radar = trackingService.getTripRadar(tripId, { pickupStopId: stopId, stops: trip.stops, canSeeBus: true, view: 'TICKET', mockNow: now }).data;
       if (!radar?.has_position || radar.has_passed_target || radar.freshness?.state !== 'LIVE') continue;
       if (!Number.isFinite(radar.eta_minutes) || radar.eta_minutes > threshold) continue;
+      const byPhone = new Map();
       for (const p of passengers) {
-        trackingService.sendNotificationOnce(`${p.ticket_id}:PICKUP_APPROACHING`, p.passenger_phone, {
+        const phone = p.passenger_phone || p.phone;
+        if (!phone) continue;
+        const list = byPhone.get(phone) || [];
+        list.push(p);
+        byPhone.set(phone, list);
+      }
+      for (const [phone, phonePax] of byPhone) {
+        const seatList = phonePax.map(p => p.seat_code).filter(Boolean).join(', ');
+        const seatText = seatList ? `, ghế ${seatList}` : '';
+        trackingService.sendNotificationOnce(`${tripId}:${stopId}:${phone}:PICKUP_APPROACHING`, phone, {
           operatorId,
           title: 'Xe sắp tới điểm đón',
-          body: `Xe ${trip.vehicle_plate} còn khoảng ${radar.eta_minutes} phút nữa tới ${stop.name}. Bạn chuẩn bị ra điểm đón nhé.`,
+          body: `Xe ${trip.vehicle_plate} còn khoảng ${radar.eta_minutes} phút nữa tới ${stop.name}. Bạn chuẩn bị ra điểm đón nhé${seatText}.`,
           type: 'PICKUP_APPROACHING',
-          payload: { trip_id: tripId, ticket_id: p.ticket_id, stop_id: stopId, eta_minutes: radar.eta_minutes }
+          payload: {
+            trip_id: tripId,
+            ticket_id: phonePax[0].ticket_id,
+            ticket_ids: phonePax.map(p => p.ticket_id),
+            seat_codes: phonePax.map(p => p.seat_code).filter(Boolean),
+            stop_id: stopId,
+            eta_minutes: radar.eta_minutes
+          }
         });
       }
     }
   }
 
   /**
-   * D143: each passenger waiting at home hears once when the bus is within the threshold of the address, and once
-   * when it is at the door, from a live position only.
+   * D143, D159: each passenger waiting at home hears the bus come in milestones, from a live position only and for
+   * the next door only: M2 in their area (HOME_AREA_MINUTES or HOME_AREA_METERS), M3 about to arrive (near the
+   * door or within the company threshold), M4 at the door. M1 is the run starting (HOME_RUN_STARTED). Each milestone
+   * goes out once, and never after a later one (a bus first seen in the lane skips M2; one that backs off after M3
+   * does not say M2 again).
    */
   _notifyHomeApproaching(trip, operatorId, threshold, now) {
     const { driverService, trackingService } = this.services;
@@ -950,24 +1281,39 @@ export class FleetBusEventBridge extends EventEmitter {
       // D144: only the next door hears "approaching"; the ones after it would go out too early.
       const q = homeEta(trip, p.ticket_id, pos, now);
       if (!q || q.ahead > 0) continue;
+      const level = q.at_door ? 4
+        : q.near_door || q.eta_minutes <= threshold ? 3
+          : q.eta_minutes <= HOME_AREA_MINUTES || q.road_meters <= HOME_AREA_METERS ? 2 : 0;
+      if (level <= (trip.home_milestones?.[p.ticket_id] || 0)) continue;
+      trip.home_milestones = { ...trip.home_milestones, [p.ticket_id]: level };
       const payload = { trip_id: trip.trip_id, ticket_id: p.ticket_id, eta_minutes: q.eta_minutes };
       const link = this.trackingLink(p.ticket_id);
-      if (q.at_door) {
+      if (level === 4) {
         trackingService.sendNotificationOnce(`${p.ticket_id}:HOME_PICKUP_ARRIVED`, p.passenger_phone, {
           operatorId,
-          title: 'Xe đã tới gần chỗ đón',
-          body: `Xe ${trip.vehicle_plate} đã tới gần ${p.home_pickup.address}. Mời bạn ra xe, ghế ${p.seat_code}.`,
+          title: 'Xe đã tới chỗ đón',
+          body: `Xe ${trip.vehicle_plate} đã tới ${p.home_pickup.address}. Mời bạn ra xe, ghế ${p.seat_code}.`,
           type: 'HOME_PICKUP_ARRIVED',
-          payload,
+          payload: { ...payload, milestone: 'M4' },
           link
         });
-      } else if (q.eta_minutes <= threshold) {
-        trackingService.sendNotificationOnce(`${p.ticket_id}:PICKUP_APPROACHING`, p.passenger_phone, {
+      } else if (level === 3) {
+        const stopId = p.pickup_stop_id || 'home';
+        trackingService.sendNotificationOnce(`${trip.trip_id}:${stopId}:${p.passenger_phone}:PICKUP_APPROACHING`, p.passenger_phone, {
           operatorId,
           title: 'Xe sắp tới đón bạn',
           body: `Bạn là điểm đón tiếp theo: xe ${trip.vehicle_plate} còn khoảng ${q.eta_minutes} phút nữa tới ${p.home_pickup.address}. Bạn chuẩn bị ra xe nhé.`,
           type: 'PICKUP_APPROACHING',
-          payload,
+          payload: { ...payload, milestone: 'M3' },
+          link
+        });
+      } else if (level === 2) {
+        trackingService.sendNotificationOnce(`${p.ticket_id}:HOME_MILESTONE_M2`, p.passenger_phone, {
+          operatorId,
+          title: 'Xe đang tới gần khu vực của bạn',
+          body: `Xe ${trip.vehicle_plate} đang đến gần khu vực của bạn (còn khoảng ${q.eta_minutes} phút, ~${(q.road_meters / 1000).toFixed(1)} km). Bạn vui lòng chuẩn bị sẵn sàng hành lý, ghế ${p.seat_code}.`,
+          type: 'HOME_PICKUP_NEAR_AREA',
+          payload: { ...payload, milestone: 'M2', road_meters: q.road_meters },
           link
         });
       }
@@ -1011,6 +1357,25 @@ export class FleetBusEventBridge extends EventEmitter {
    * Sets up the ops and driver trips of a schedule's run (`<schedule>_<YYYYMMDD>`) from the schedule: same route,
    * bus and driver, nothing sold. Returns { managerTrip, driverTrip } or null for anything else.
    */
+  /**
+   * D192: the drivers hear of a change on their phone: the new driver of a trip, the one it was taken from, or the
+   * same driver when only the bus changed. Nothing for a trip already gone.
+   */
+  _pushAssignmentToDrivers({ tripId, when, route, vehiclePlate, driverId, previous, departure }) {
+    const messenger = this.services?.messenger;
+    if (!messenger?.dispatchDriver || (departure && Date.parse(departure) < Date.now())) return;
+    const operatorId = operatorOfTrip(this.services, tripId);
+    const payload = { trip_id: tripId };
+    if (driverId && driverId !== previous?.driver_id) {
+      messenger.dispatchDriver({ operatorId, driverId, type: 'TRIP_ASSIGNED', title: 'Bạn có chuyến mới', body: `Chuyến ${when}${route ? `, ${route}` : ''}, xe ${vehiclePlate}. Mở app để xem khách và điểm đón.`, payload });
+      if (previous?.driver_id) {
+        messenger.dispatchDriver({ operatorId, driverId: previous.driver_id, type: 'TRIP_UNASSIGNED', title: 'Chuyến đã chuyển cho tài xế khác', body: `Chuyến ${when}${previous.vehicle_plate ? ` (xe ${previous.vehicle_plate})` : ''} không còn trong lịch của bạn.`, payload });
+      }
+    } else if (driverId && previous?.vehicle_plate && previous.vehicle_plate !== vehiclePlate) {
+      messenger.dispatchDriver({ operatorId, driverId, type: 'TRIP_VEHICLE_CHANGED', title: 'Chuyến đổi xe', body: `Chuyến ${when} chạy xe ${vehiclePlate} thay cho xe ${previous.vehicle_plate}.`, payload });
+    }
+  }
+
   ensureRunOperations(tripId) {
     const { searchService, managerService, driverService } = this.services || {};
     const run = parseRunId(tripId);

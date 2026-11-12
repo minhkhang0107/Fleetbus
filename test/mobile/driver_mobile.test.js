@@ -28,9 +28,14 @@ describe('Phase Driver Mobile: Android & iOS Platform Integrity Test Suite', () 
     assert.ok(content.includes('package="vn.busgo.driver"'), 'Package name must be vn.busgo.driver');
     assert.ok(content.includes('android.permission.FOREGROUND_SERVICE'), 'FOREGROUND_SERVICE permission required');
     assert.ok(content.includes('android.permission.ACCESS_FINE_LOCATION'), 'FINE_LOCATION required');
+    assert.ok(content.includes('android.permission.POST_NOTIFICATIONS'), 'POST_NOTIFICATIONS permission required');
     assert.ok(content.includes('android.permission.CAMERA'), 'CAMERA permission required');
+    assert.ok(content.includes('<uses-feature android:name="android.hardware.camera" android:required="false" />'), 'Camera feature must not be required');
     assert.ok(content.includes('android:label="BusGo Driver"'), 'Label must be BusGo Driver');
-    assert.ok(content.includes('android:usesCleartextTraffic="true"'), 'Cleartext traffic must be enabled for dev APIs');
+    // Release builds speak HTTPS only; debug builds may reach a dev server over plain HTTP (D197).
+    assert.ok(!content.includes('usesCleartextTraffic="true"'), 'Release manifest must not allow cleartext traffic');
+    const debugManifest = fs.readFileSync(path.join(path.dirname(driverManifestPath), '..', 'debug', 'AndroidManifest.xml'), 'utf8');
+    assert.ok(debugManifest.includes('android:usesCleartextTraffic="true"'), 'Debug manifest allows cleartext for dev APIs');
   });
 
   it('TC-DRV-MOB-02: Driver iOS Info.plist must have BusGo Driver bundle identity and privacy usage strings', () => {
@@ -171,8 +176,6 @@ describe('Phase Driver Mobile: Android & iOS Platform Integrity Test Suite', () 
 
   it('TC-DRV-MOB-11: Driver Pubspec dependencies and adaptive baseUrl cross-platform configuration', () => {
     assert.ok(fs.existsSync(driverPubspecPath), 'pubspec.yaml must exist');
-    const pubspecContent = fs.readFileSync(driverPubspecPath, 'utf8');
-    assert.ok(pubspecContent.includes('data:\n    path: ../data'), 'driver app pubspec must depend on data package');
 
     const serviceContent = fs.readFileSync(driverServicePath, 'utf8');
     assert.ok(serviceContent.includes('resolveDriverBaseUrl'), 'Must implement resolveDriverBaseUrl');

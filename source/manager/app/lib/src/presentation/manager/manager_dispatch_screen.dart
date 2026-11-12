@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../../resources/lib/src/theme/app_colors.dart';
+import 'package:resources/resources.dart';
 
 class ManagerDispatchScreen extends StatelessWidget {
   const ManagerDispatchScreen({super.key});
@@ -63,7 +63,7 @@ class ManagerDispatchScreen extends StatelessWidget {
         Expanded(flex: 2, child: Text(occupancy, style: const TextStyle(color: ManagerColors.textMuted, fontSize: 13))),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(color: statusColor.withOpacity(0.15), borderRadius: BorderRadius.circular(6)),
+          decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
           child: Text(status, style: TextStyle(color: statusColor, fontWeight: FontWeight.w700, fontSize: 11)),
         ),
       ],

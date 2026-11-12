@@ -14,18 +14,32 @@ class DriverReadinessScreen extends StatelessWidget {
   const DriverReadinessScreen({super.key});
 
   Future<void> _confirmStart(BuildContext context, DriverStore store) async {
+    // Too early: say from when, rather than asking and then being refused (D191).
+    final opens = store.startOpensAt;
+    if (opens != null) {
+      await showDriverSheet<void>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Chưa tới giờ xuất bến', style: dsans(size: 18, weight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            Text('Chuyến ${store.depTimeLabel} xuất bến được từ $opens. Kiểm tra xe đã lưu, tới giờ bấm Xuất bến.', style: dsans(size: 16, color: DTokens.sub, height: 1.5)),
+            const SizedBox(height: 14),
+            BigButton(label: 'Đã hiểu', height: 56, onPressed: () => Navigator.of(ctx).pop()),
+          ]));
+      return;
+    }
+    await driverPermissions.requestNotifications();
+    if (!context.mounted) return;
     if (!await ensureDriverLocation(context)) return;
     if (!context.mounted) return;
     // Passengers may have booked since the shift was loaded: count them from the server, not the login snapshot.
     await store.refreshTrip();
     if (!context.mounted) return;
     final yes = await showDriverSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('Xuất bến chuyến ${store.depTime}?', style: dsans(size: 18, weight: FontWeight.w700)),
+          Text('Xuất bến chuyến ${store.depTimeLabel}?', style: dsans(size: 18, weight: FontWeight.w700)),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(child: Stat('Khách đã đặt', '${store.manifest.length}', size: 28)),
             const SizedBox(width: 10),
-            Expanded(child: Stat('Giờ chạy', store.depTime, size: 28)),
+            Expanded(child: Stat('Giờ chạy', store.depTimeLabel, size: store.delayMinutes > 0 ? 18 : 28)),
           ]),
           const SizedBox(height: 12),
           Text('App sẽ gửi vị trí xe liên tục cho điều hành và khách đến khi kết thúc chuyến.', style: dsans(size: 15, color: DTokens.sub, height: 1.5)),
@@ -47,9 +61,13 @@ class DriverReadinessScreen extends StatelessWidget {
   }
 
   /// D143: home pickups are collected before the checks at the stop; setting off starts sending the bus position.
-  Future<void> _homeRun(BuildContext context, DriverStore store) async {
+  static Future<void> runDriverHome(BuildContext context, DriverStore store) async {
     // D145: the passengers follow the bus by its position, so the app needs location first.
-    if (!store.homeRunStarted && !await ensureDriverLocation(context)) return;
+    if (!store.homeRunStarted) {
+      await driverPermissions.requestNotifications();
+      if (!context.mounted) return;
+      if (!await ensureDriverLocation(context)) return;
+    }
     if (!context.mounted) return;
     if (!store.homeRunStarted) {
       final error = await store.startHomeRun();
@@ -74,7 +92,7 @@ class DriverReadinessScreen extends StatelessWidget {
             child: Panel(
               border: const Color(0xFFA16207),
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Text('Đón tận nhà · $homeWaiting/$homes khách chờ', style: dsans(size: 17, weight: FontWeight.w700, color: DTokens.warnInk)),
+                Text(homeWaiting == 0 ? 'Đón tận nhà · xong ($homes khách)' : 'Đón tận nhà · còn $homeWaiting/$homes khách chờ', style: dsans(size: 17, weight: FontWeight.w700, color: DTokens.warnInk)),
                 const SizedBox(height: 4),
                 Text(
                   store.homeRunStarted
@@ -88,7 +106,7 @@ class DriverReadinessScreen extends StatelessWidget {
                   icon: Icons.home_outlined,
                   color: DTokens.warn,
                   foreground: const Color(0xFF1C1917),
-                  onPressed: () => _homeRun(context, store),
+                  onPressed: () => runDriverHome(context, store),
                 ),
               ]),
             ),
@@ -111,8 +129,8 @@ class DriverReadinessScreen extends StatelessWidget {
           ),
         );
     final start = BigButton(
-      label: done < 6 ? 'Còn ${6 - done} mục chưa kiểm tra' : 'Xuất bến',
-      subtitle: done < 6 ? null : '${store.manifest.length} khách · ${store.stops.isEmpty ? '' : store.stops.first.short} ${store.depTime}',
+      label: done < 6 ? 'Còn ${6 - done} mục chưa kiểm tra' : (store.startOpensAt == null ? 'Xuất bến' : 'Xuất bến từ ${store.startOpensAt}'),
+      subtitle: done < 6 ? null : '${store.manifest.length} khách · ${store.stops.isEmpty ? '' : store.stops.first.short} ${store.depTimeLabel}',
       color: DTokens.ok,
       height: 72,
       onPressed: done < 6 ? null : () => _confirmStart(context, store),
@@ -123,7 +141,7 @@ class DriverReadinessScreen extends StatelessWidget {
       child: Text('Xe có vấn đề, báo điều hành', style: dsans(size: 15, weight: FontWeight.w600, color: DTokens.dangerInk)),
     );
     return Scaffold(
-      appBar: DHeader(title: 'Kiểm tra xe', subtitle: '${store.plate} · chuyến ${store.depTime}', trailing: Text('$done/6', style: dmono(size: 16, color: color))),
+      appBar: DHeader(title: 'Kiểm tra xe', subtitle: '${store.plate} · chuyến ${store.depTimeLabel}', trailing: Text('$done/6', style: dmono(size: 16, color: color))),
       body: Column(children: [
         LinearProgressIndicator(value: done / 6, minHeight: 4, color: color, backgroundColor: DTokens.panel),
         if (homePanel != null) homePanel,

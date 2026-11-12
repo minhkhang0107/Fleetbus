@@ -49,6 +49,7 @@ class _PassengerLocationPickerScreenState extends State<PassengerLocationPickerS
           color: PTokens.surface,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
           child: PMaxWidth(maxWidth: 720, child: TextField(
+            onTapOutside: dismissKeyboard,
             autofocus: true,
             onChanged: (v) => setState(() => _query = v),
             style: sans(size: 15),

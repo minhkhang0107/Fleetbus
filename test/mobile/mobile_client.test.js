@@ -29,10 +29,15 @@ describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
     assert.ok(content.includes('android.permission.INTERNET'), 'INTERNET permission required');
     assert.ok(content.includes('android.permission.ACCESS_FINE_LOCATION'), 'FINE_LOCATION required for GPS telemetry');
     assert.ok(content.includes('android.permission.ACCESS_COARSE_LOCATION'), 'COARSE_LOCATION required');
-    assert.ok(content.includes('android.permission.CAMERA'), 'CAMERA required for QR ticket scanning');
+    assert.ok(!content.includes('android.permission.CAMERA'), 'CAMERA must not be declared in passenger app');
+    assert.ok(!content.includes('android.permission.ACCESS_BACKGROUND_LOCATION'), 'ACCESS_BACKGROUND_LOCATION must not be declared');
+    assert.ok(!content.includes('android.permission.ACCESS_WIFI_STATE'), 'ACCESS_WIFI_STATE must not be declared');
     assert.ok(content.includes('android:label="BusGo"'), 'Label must be BusGo');
     assert.ok(content.includes('android:scheme="busgo"'), 'Deep link scheme busgo must be configured');
-    assert.ok(content.includes('android:usesCleartextTraffic="true"'), 'Cleartext traffic must be enabled for dev APIs');
+    // Release builds speak HTTPS only; debug builds may reach a dev server over plain HTTP (D197).
+    assert.ok(!content.includes('usesCleartextTraffic="true"'), 'Release manifest must not allow cleartext traffic');
+    const debugManifest = fs.readFileSync(path.join(path.dirname(androidManifestPath), '..', 'debug', 'AndroidManifest.xml'), 'utf8');
+    assert.ok(debugManifest.includes('android:usesCleartextTraffic="true"'), 'Debug manifest allows cleartext for dev APIs');
   });
 
   it('TC-MOB-02: iOS Info.plist must have BusGo bundle identity and privacy usage strings', () => {
@@ -42,8 +47,13 @@ describe('Phase Mobile: Android & iOS Platform Integrity Test Suite', () => {
     assert.ok(content.includes('<string>BusGo</string>'), 'CFBundleDisplayName must be BusGo');
     assert.ok(content.includes('<string>vn.busgo.passenger</string>'), 'CFBundleIdentifier must be vn.busgo.passenger');
     assert.ok(content.includes('NSLocationWhenInUseUsageDescription'), 'NSLocationWhenInUseUsageDescription must be set');
-    assert.ok(content.includes('NSCameraUsageDescription'), 'NSCameraUsageDescription must be set');
-    assert.ok(content.includes('NSPhotoLibraryUsageDescription'), 'NSPhotoLibraryUsageDescription must be set');
+    assert.ok(content.includes('BusGo dùng vị trí của bạn khi app đang mở để gợi ý điểm đón gần nhất và ghim địa chỉ đón tận nhà.'), 'NSLocationWhenInUseUsageDescription must match policy text');
+    // The profile photo is taken with the camera or picked from the library (D186).
+    assert.ok(content.includes('BusGo dùng camera khi bạn chụp ảnh đại diện cho tài khoản.'), 'NSCameraUsageDescription must explain the profile photo');
+    assert.ok(!content.includes('NSLocationAlwaysAndWhenInUseUsageDescription'), 'NSLocationAlwaysAndWhenInUseUsageDescription must not be set');
+    // The QR image is added to the photos; the library is read only to pick a profile photo (D186).
+    assert.ok(content.includes('NSPhotoLibraryAddUsageDescription'), 'NSPhotoLibraryAddUsageDescription must be set');
+    assert.ok(content.includes('BusGo mở thư viện ảnh khi bạn chọn ảnh đại diện cho tài khoản.'), 'NSPhotoLibraryUsageDescription must explain the profile photo');
   });
 
   it('TC-MOB-03: Flutter Dart App entry point must instantiate BusGoPassengerApp with Splash', () => {

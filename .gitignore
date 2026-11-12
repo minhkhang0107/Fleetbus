@@ -188,3 +188,8 @@ ehthumbs.db
 *.swp
 *.swo
 *~
+
+# D192: Firebase settings passed with --dart-define-from-file, and the server's service account key: never committed
+source/*/app/firebase.*.json
+*firebase-adminsdk*.json
+fcm-service-account*.json

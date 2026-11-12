@@ -28,6 +28,7 @@ export const searchService = new PassengerSearchService();
 export const seatMapService = new PassengerSeatMapService();
 export const checkoutService = new PassengerCheckoutService();
 export const paymentService = new PassengerPaymentService();
+paymentService.searchService = searchService;
 export const trackingService = new PassengerTrackingService();
 export const driverService = new DriverCockpitService();
 export const managerService = new ManagerOperationsService();

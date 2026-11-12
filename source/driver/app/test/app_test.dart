@@ -1,17 +1,22 @@
 import 'dart:convert';
 
+import 'package:app/src/presentation/driver_about_screen.dart';
 import 'package:app/src/presentation/driver_change_pin_screen.dart';
 import 'package:app/src/presentation/driver_cockpit_dashboard.dart';
+import 'package:app/src/presentation/driver_cod_dialog.dart';
 import 'package:app/src/presentation/driver_end_trip_screen.dart';
 import 'package:app/src/presentation/driver_home_run_screen.dart';
 import 'package:app/src/presentation/driver_incident_dialog.dart';
 import 'package:app/src/presentation/driver_login_screen.dart';
 import 'package:app/src/presentation/driver_manifest_screen.dart';
+import 'package:app/src/presentation/driver_passenger_list_screen.dart';
 import 'package:app/src/presentation/driver_permissions.dart';
 import 'package:app/src/presentation/driver_qr_scanner_screen.dart';
 import 'package:app/src/presentation/driver_readiness_screen.dart';
 import 'package:app/src/presentation/driver_route_map.dart';
+import 'package:app/src/presentation/driver_schedule_screen.dart';
 import 'package:app/src/presentation/driver_store.dart';
+import 'package:app/src/presentation/driver_today_trips_screen.dart';
 import 'package:app/src/presentation/driver_widgets.dart';
 import 'package:app/src/presentation/main_shell_screen.dart';
 import 'package:app/src/service/driver_api_service.dart';
@@ -28,11 +33,16 @@ void main() {
   driverMapTiles = false;
   late bool serverForcesPinChange;
   late bool tempDriverMustChangePin;
+  late http.Response? Function(http.Request req)? scheduleHandler;
+  // SH-006: the legal texts of the fake server; legalDown answers with a network failure.
+  late bool legalDown;
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     driverPermissions = FakePermissions(LocationAccess.always);
     serverForcesPinChange = false;
     tempDriverMustChangePin = true;
+    scheduleHandler = null;
+    legalDown = false;
   });
   late Map<String, dynamic> trip;
   late List<http.Request> sent;
@@ -70,6 +80,40 @@ void main() {
       sent.add(req);
       final path = req.url.path;
       final body = req.body.isEmpty ? <String, dynamic>{} : jsonDecode(req.body) as Map<String, dynamic>;
+      if (path == '/api/v1/legal') {
+        if (legalDown) throw http.ClientException('down');
+        return ok({
+          'app': req.url.queryParameters['app'],
+          'version': '1.0',
+          'effective_date': '2026-10-20',
+          'terms': {
+            'title': 'Điều khoản sử dụng',
+            'sections': [
+              {'heading': 'Đối tượng sử dụng', 'body': 'App dành cho tài xế và phụ xe được nhà xe cấp tài khoản.'},
+              {'heading': 'Vị trí trong ca', 'body': 'Vị trí chỉ được ghi từ lúc vào chuyến đến khi kết thúc chuyến.'},
+            ],
+          },
+          'model_notice': {
+            'title': 'Giấy phép mô hình và dữ liệu',
+            'sections': [
+              {'heading': 'Mô hình trí tuệ nhân tạo', 'body': 'BusGo không tích hợp, không gọi và không gửi dữ liệu tới mô hình trí tuệ nhân tạo hay học máy nào.'},
+              {'heading': 'Dữ liệu bản đồ', 'body': 'Dữ liệu bản đồ © những người đóng góp OpenStreetMap.', 'links': [{'label': 'OpenStreetMap — bản quyền', 'url': 'https://www.openstreetmap.org/copyright'}]},
+            ],
+          },
+          'privacy': {
+            'title': 'Chính sách quyền riêng tư',
+            'sections': [
+              {'heading': 'Ai chịu trách nhiệm về dữ liệu của bạn', 'body': 'Nhà xe nơi bạn làm việc là bên kiểm soát dữ liệu.'},
+              {'heading': 'Dữ liệu chúng tôi thu thập', 'body': 'Họ tên, mã nhân viên, vị trí trong ca.'},
+            ],
+          },
+          'urls': {
+            'terms': 'https://busgo.vn/driver-terms',
+            'privacy': 'https://busgo.vn/driver-privacy',
+            'account_deletion': null,
+          },
+        });
+      }
       if (serverForcesPinChange && !path.endsWith('/change-pin')) {
         return fail(403, 'PIN_CHANGE_REQUIRED', 'Đổi mã PIN tạm trước khi dùng app');
       }
@@ -121,6 +165,85 @@ void main() {
         }
         return ok({'trips': [trip]});
       }
+      if (path.endsWith('/driver/schedule')) {
+        if (scheduleHandler != null) {
+          final res = scheduleHandler!(req);
+          if (res != null) return res;
+        }
+        final monthQuery = req.url.queryParameters['month'];
+        final targetMonth = (monthQuery != null && monthQuery.isNotEmpty) ? monthQuery : '2026-10';
+        if (targetMonth == '2026-10') {
+          return ok({
+            'month': '2026-10',
+            'today': '2026-10-19',
+            'days': [
+              {
+                'date': '2026-10-19',
+                'trips': [
+                  {
+                    'trip_id': 'trp_hn_th_01_20261019',
+                    'departure_time': '2026-10-19T07:00:00+07:00',
+                    'departure': '07:00',
+                    'route_name': 'Hà Nội — Thanh Hóa (Cao tốc)',
+                    'vehicle_plate': '29B-882.19',
+                    'status': 'SCHEDULED',
+                    'source': 'SCHEDULE_DEFAULT',
+                    'passengers': 14,
+                    'delay_minutes': 0,
+                    'cash_handed_in_vnd': null,
+                  },
+                  {
+                    'trip_id': 'trp_th_hn_01_20261019',
+                    'departure_time': '2026-10-19T14:00:00+07:00',
+                    'departure': '14:00',
+                    'route_name': 'Thanh Hóa — Hà Nội',
+                    'vehicle_plate': '29B-123.45',
+                    'status': 'COMPLETED',
+                    'source': 'ASSIGNED',
+                    'passengers': 28,
+                    'delay_minutes': 0,
+                    'cash_handed_in_vnd': 440000,
+                  },
+                ],
+              },
+              {
+                'date': '2026-10-20',
+                'trips': [
+                  {
+                    'trip_id': 'trp_hn_th_01_20261020',
+                    'departure_time': '2026-10-20T07:00:00+07:00',
+                    'departure': '07:00',
+                    'route_name': 'Hà Nội — Thanh Hóa (Cao tốc)',
+                    'vehicle_plate': null,
+                    'status': 'SCHEDULED',
+                    'source': 'ASSIGNED',
+                    'passengers': null,
+                    'delay_minutes': 0,
+                    'cash_handed_in_vnd': null,
+                  },
+                ],
+              },
+            ],
+            'summary': {
+              'total': 3,
+              'completed': 1,
+              'upcoming': 2,
+              'cancelled': 0,
+            },
+          });
+        }
+        return ok({
+          'month': targetMonth,
+          'today': '2026-10-19',
+          'days': <Map<String, dynamic>>[],
+          'summary': {
+            'total': 0,
+            'completed': 0,
+            'upcoming': 0,
+            'cancelled': 0,
+          },
+        });
+      }
       if (path.endsWith('/inaccessible')) {
         final ticket = pax(path.split('/')[path.split('/').length - 2]);
         ticket['home_pickup'] = {...ticket['home_pickup'] as Map, 'inaccessible_at': '2026-08-28T00:10:00Z', 'meeting_point': body['meeting_point']};
@@ -163,6 +286,13 @@ void main() {
         trip['current_stop_index'] = stops.indexWhere((s) => s['stop_id'] == id);
         return ok({});
       }
+      if (path.contains('/stops/') && path.endsWith('/depart')) {
+        final id = path.split('/')[path.split('/').length - 2];
+        final stops = (trip['stops'] as List).cast<Map<String, dynamic>>();
+        final st = stops.firstWhere((s) => s['stop_id'] == id);
+        st['departed_at'] = DateTime.now().toIso8601String();
+        return ok(st);
+      }
       if (path.endsWith('/boarding/manual')) {
         final p = pax(body['ticket_id']);
         if (p['payment_method'] == 'COD' && p['cod_collected'] != true) return fail(409, 'COD_PAYMENT_REQUIRED', 'Vé COD chưa thu tiền');
@@ -171,9 +301,40 @@ void main() {
         return ok(p);
       }
       if (path.endsWith('/boarding')) {
-        final parts = '${body['qrPayload']}'.split(':');
-        if (parts[2] != '482107') return fail(422, 'INVALID_PIN', 'Mã PIN vé không chính xác');
-        pax(parts[1])['boarding_status'] = 'BOARDED';
+        final payload = '${body['qrPayload'] ?? body['qrString'] ?? ''}';
+        if (payload.startsWith('PIN:')) {
+          final parts = payload.split(':');
+          final tktId = parts[1];
+          final pin = parts.length > 2 ? parts[2] : '';
+          final manifestList = (trip['manifest'] as List).cast<Map<String, dynamic>>();
+          final p = manifestList.firstWhere((m) => m['ticket_id'] == tktId, orElse: () => <String, dynamic>{});
+          if (p.isEmpty) return fail(404, 'TICKET_WRONG_TRIP', 'Vé không thuộc chuyến xe này');
+          final pnr = p['pnr'];
+          final group = pnr != null
+              ? manifestList.where((m) => m['pnr'] == pnr).toList()
+              : [p];
+          if (pin != '482107') return fail(422, 'INVALID_PIN', 'Mã PIN vé không chính xác');
+          final boarded = <Map<String, dynamic>>[];
+          final codPending = <Map<String, dynamic>>[];
+          for (final item in group) {
+            if (item['boarding_status'] == 'BOARDED') continue;
+            if (item['payment_method'] == 'COD' && item['cod_collected'] != true) {
+              codPending.add(item);
+              continue;
+            }
+            item['boarding_status'] = 'BOARDED';
+            boarded.add(item);
+          }
+          final target = boarded.firstWhere((item) => item['ticket_id'] == tktId, orElse: () => p);
+          return ok({
+            ...target,
+            'pnr': pnr,
+            'boarded_passengers': boarded,
+            'cod_pending_passengers': codPending,
+            'revoked_passengers': <Map<String, dynamic>>[],
+          });
+        }
+        pax(payload)['boarding_status'] = 'BOARDED';
         return ok({});
       }
       if (path.endsWith('/payments/cod-collect')) {
@@ -182,7 +343,7 @@ void main() {
         p['cod_collected'] = true;
         p['boarding_status'] = 'BOARDED';
         trip['total_cod_collected_vnd'] = 220000;
-        if (change > 0 && body['change_settlement_method'] == 'DEBT') {
+        if (change > 0 && (body['change_settlement_method'] == 'REST_STOP_DEBT_RECEIPT' || body['change_settlement_method'] == 'DEBT')) {
           (trip['debts'] as List).add({'receipt_code': 'DR-t_a02-${change ~/ 1000}K', 'amount_vnd': change});
         }
         return ok(p);
@@ -194,6 +355,37 @@ void main() {
         }
         trip['status'] = 'COMPLETED';
         return ok({'total_cash_to_handover_vnd': trip['total_cod_collected_vnd'] + trip['total_hail_collected_vnd']});
+      }
+      if (path.contains('/seat-map')) {
+        return ok({
+          'seats': [
+            {'seat_code': 'A03', 'state': 'AVAILABLE'},
+            {'seat_code': 'A04', 'state': 'AVAILABLE'},
+            {'seat_code': 'A05', 'state': 'AVAILABLE'},
+            {'seat_code': 'A06', 'state': 'AVAILABLE'},
+            {'seat_code': 'A07', 'state': 'AVAILABLE'},
+            {'seat_code': 'A08', 'state': 'AVAILABLE'},
+            {'seat_code': 'A09', 'state': 'AVAILABLE'},
+            {'seat_code': 'A10', 'state': 'AVAILABLE'},
+          ]
+        });
+      }
+      if (path.endsWith('/onboard-hail')) {
+        final seat = body['seat_code'] as String;
+        final p = {
+          'ticket_id': 'tkt_hail_${DateTime.now().millisecondsSinceEpoch}_$seat',
+          'pnr': 'BG-HAIL-101',
+          'seat_code': seat,
+          'passenger_name': body['passenger_name'] ?? 'Khách vẫy dọc đường',
+          'pickup_stop_id': 'stp_hn_gb',
+          'dropoff_stop_id': body['dropoff_stop_id'] ?? 'stp_th_pb',
+          'boarding_status': 'BOARDED',
+          'payment_method': 'CASH',
+          'cod_amount_vnd': 0,
+        };
+        (trip['manifest'] as List).add(p);
+        trip['total_hail_collected_vnd'] = (trip['total_hail_collected_vnd'] as int) + 220000;
+        return ok(p);
       }
       if (path.contains('/driver/trips/')) return ok(trip);
       return ok({});
@@ -219,6 +411,17 @@ void main() {
     store.dispose();
   });
 
+  test('delayed departure shows delay and estimated time in depTimeLabel', () async {
+    final store = storeWithServer();
+    trip['planned_departure_time'] = '2026-08-28T14:00:00+07:00';
+    trip['delay_minutes'] = 15;
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    expect(store.depTime, '14:00');
+    expect(store.delayMinutes, 15);
+    expect(store.depTimeLabel, '14:00 → 14:15 (trễ 15 phút)');
+    store.dispose();
+  });
+
   test('login honours X-Operator-Code and updates operator fields', () async {
     final store = storeWithServer();
     expect(await store.login('', 'TX7701', '246810'), 'Nhập mã nhà xe.');
@@ -233,6 +436,55 @@ void main() {
     expect(store.operatorName, 'Xuyên Việt Lines');
     expect(store.operatorHotline, '1900 1234');
     expect(await DriverStore.savedOperatorCode(), 'XUYENVIET');
+    store.dispose();
+  });
+
+  String tokenExpiring(DateTime exp) =>
+      'drv_jwt_${base64Url.encode(utf8.encode(jsonEncode({'sub': 'drv_8821a', 'kind': 'driver', 'exp': exp.millisecondsSinceEpoch}))).replaceAll('=', '')}.sig';
+
+  test('the session survives closing the app until its token expires', () async {
+    expect(DriverStore.tokenStillValid(tokenExpiring(DateTime.now().add(const Duration(hours: 1)))), isTrue);
+    expect(DriverStore.tokenStillValid(tokenExpiring(DateTime.now().subtract(const Duration(minutes: 1)))), isFalse);
+    expect(DriverStore.tokenStillValid('tok'), isFalse);
+
+    final first = storeWithServer();
+    expect(await first.login('SAOMAI', 'TX8821', '123456'), isNull);
+    final prefs = await SharedPreferences.getInstance();
+    final saved = jsonDecode(prefs.getString('driver_session')!) as Map<String, dynamic>;
+    expect((saved['token'], saved['operator_code'], saved['driver_name']), ('tok', 'SAOMAI', 'Trần Văn Bình'));
+    first.dispose();
+
+    final token = tokenExpiring(DateTime.now().add(const Duration(hours: 1)));
+    await prefs.setString('driver_session', jsonEncode({...saved, 'token': token}));
+    final reopened = storeWithServer();
+    expect(await reopened.restoreSession(), isTrue);
+    expect((reopened.loggedIn, reopened.driverName, reopened.operatorName), (true, 'Trần Văn Bình', 'Sao Mai Bus'));
+    await pumpEventQueue();
+    final shiftCall = sent.lastWhere((r) => !r.url.path.endsWith('/login'));
+    expect((shiftCall.headers['authorization'], shiftCall.headers['x-operator-code']), ('Bearer $token', 'SAOMAI'));
+
+    reopened.logout();
+    await pumpEventQueue();
+    expect(prefs.getString('driver_session'), isNull, reason: 'signing out forgets the session');
+    reopened.dispose();
+
+    await prefs.setString('driver_session', jsonEncode({...saved, 'token': tokenExpiring(DateTime.now().subtract(const Duration(minutes: 1)))}));
+    final expired = storeWithServer();
+    expect(await expired.restoreSession(), isFalse);
+    expect(expired.loggedIn, isFalse);
+    expect(prefs.getString('driver_session'), isNull);
+    expired.dispose();
+  });
+
+  test('a temporary PIN is not remembered until it is changed', () async {
+    final store = storeWithServer();
+    tempDriverMustChangePin = true;
+    expect(await store.login('SAOMAI', 'TX_TEMP', '654321'), isNull);
+    expect(store.mustChangePin, isTrue);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('driver_session'), isNull);
+    expect(await store.changePin('654321', '135790'), isNull);
+    expect(prefs.getString('driver_session'), isNotNull);
     store.dispose();
   });
 
@@ -300,6 +552,102 @@ void main() {
     store.dispose();
   });
 
+  test('the backup PIN boards all seats of the same booking and refreshes manifest', () async {
+    final store = storeWithServer();
+    trip['manifest'] = <Map<String, dynamic>>[
+      {
+        'ticket_id': 't_a05',
+        'pnr': 'BG-829527',
+        'seat_code': 'A05',
+        'passenger_name': 'Trần Văn Hùng',
+        'phone_masked': '098***112',
+        'pickup_stop_id': 'stp_hn_gb',
+        'dropoff_stop_id': 'stp_th_pb',
+        'boarding_status': 'ISSUED',
+        'payment_method': 'VIETQR',
+        'cod_amount_vnd': 0
+      },
+      {
+        'ticket_id': 't_b04',
+        'pnr': 'BG-829527',
+        'seat_code': 'B04',
+        'passenger_name': 'Trần Văn Hùng',
+        'phone_masked': '098***112',
+        'pickup_stop_id': 'stp_hn_gb',
+        'dropoff_stop_id': 'stp_th_pb',
+        'boarding_status': 'ISSUED',
+        'payment_method': 'VIETQR',
+        'cod_amount_vnd': 0
+      },
+    ];
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    final pA05 = store.manifest.firstWhere((p) => p.seat == 'A05');
+    final pB04 = store.manifest.firstWhere((p) => p.seat == 'B04');
+    expect(pA05.status, PaxStatus.waiting);
+    expect(pB04.status, PaxStatus.waiting);
+
+    final res = await store.boardWithPin(pB04, '482107');
+    expect(res.error, isNull);
+    final boarded = (res.data?['boarded_passengers'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    expect(boarded.map((m) => m['seat_code']), containsAll(['A05', 'B04']));
+    expect(store.manifest.firstWhere((p) => p.seat == 'A05').status, PaxStatus.boarded);
+    expect(store.manifest.firstWhere((p) => p.seat == 'B04').status, PaxStatus.boarded);
+    store.dispose();
+  });
+
+  testWidgets('DriverQrScannerScreen PIN sheet displays all boarded seats for multi-seat booking', (tester) async {
+    driverPermissions = FakePermissions(LocationAccess.always, cameraOk: true);
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final store = storeWithServer();
+    trip['manifest'] = <Map<String, dynamic>>[
+      {
+        'ticket_id': 't_a05',
+        'pnr': 'BG-829527',
+        'seat_code': 'A05',
+        'passenger_name': 'Trần Văn Hùng',
+        'phone_masked': '098***112',
+        'pickup_stop_id': 'stp_hn_gb',
+        'dropoff_stop_id': 'stp_th_pb',
+        'boarding_status': 'ISSUED',
+        'payment_method': 'VIETQR',
+        'cod_amount_vnd': 0
+      },
+      {
+        'ticket_id': 't_b04',
+        'pnr': 'BG-829527',
+        'seat_code': 'B04',
+        'passenger_name': 'Trần Văn Hùng',
+        'phone_masked': '098***112',
+        'pickup_stop_id': 'stp_hn_gb',
+        'dropoff_stop_id': 'stp_th_pb',
+        'boarding_status': 'ISSUED',
+        'payment_method': 'VIETQR',
+        'cod_amount_vnd': 0
+      },
+    ];
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    await store.arrive();
+
+    await tester.pumpWidget(MaterialApp(
+      home: DriverScope(store: store, child: const DriverQrScannerScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Khách không có vé trên máy: nhập PIN'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Lên xe bằng mã PIN'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '482107');
+    await tester.tap(find.widgetWithText(BigButton, 'Kiểm tra'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Đã lên xe 2 ghế: A05, B04'), findsOneWidget);
+    store.dispose();
+  });
+
   test('the trip ends at the last stop; earlier it needs a reason (D108)', () async {
     final store = await started();
     expect(await store.endTrip(), contains('bến cuối'));
@@ -327,6 +675,10 @@ void main() {
     await tester.pumpWidget(DriverScope(store: store, child: const MaterialApp(home: DriverEndTripScreen())));
     expect(find.byType(TextField), findsNothing);
     await tester.tap(find.widgetWithText(BigButton, 'Kết thúc và nộp 0 đ'));
+    await tester.pumpAndSettle();
+    // D188: one question before an end that cannot be undone, nothing to type.
+    expect(store.trip, TripState.inTransit);
+    await tester.tap(find.widgetWithText(BigButton, 'Kết thúc chuyến'));
     await tester.pumpAndSettle();
     expect(store.trip, TripState.completed);
     final body = jsonDecode(sent.lastWhere((r) => r.url.path.endsWith('/end')).body) as Map<String, dynamic>;
@@ -410,7 +762,7 @@ void main() {
   });
 
   // The dashboard tablet is 1280x720 landscape; phones stay the reference design.
-  for (final (name, size) in const [('tablet 1280x720', Size(1280, 720)), ('phone 390x844', Size(390, 844))]) {
+  for (final (name, size, scale) in const [('tablet 1280x720', Size(1280, 720), 0.6), ('phone 390x844', Size(390, 844), 0.6), ('phone 360x640 with 130 % font', Size(360, 640), 0.78)]) {
     testWidgets('every driver screen lays out without overflow on a $name', (tester) async {
       addTearDown(() {
         tester.view.resetPhysicalSize();
@@ -419,13 +771,13 @@ void main() {
       });
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1.0;
-      // The test font draws every glyph 1 em wide; Geist averages about 0.6 em, so scale text to match it.
-      tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+      // The test font draws every glyph 1 em wide; Geist averages about 0.6 em, so scale text to match it (0.78 ≈ a 130 % system font).
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
       final store = storeWithServer();
       await tester.runAsync(() async {
         expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
       });
-      const screens = <Widget>[DriverLoginScreen(), DriverChangePinScreen(), MainShellScreen(), DriverReadinessScreen(), DriverHomeRunScreen(), DriverCockpitDashboard(), DriverManifestScreen(), DriverQrScannerScreen(), DriverEndTripScreen(), DriverIncidentScreen()];
+      const screens = <Widget>[DriverLoginScreen(), DriverChangePinScreen(), MainShellScreen(), DriverTodayTripsScreen(), DriverScheduleScreen(), DriverPassengerListScreen(), DriverReadinessScreen(), DriverHomeRunScreen(), DriverCockpitDashboard(), DriverManifestScreen(), DriverQrScannerScreen(), DriverEndTripScreen(), DriverIncidentScreen(), DriverAboutScreen()];
       for (final screen in screens) {
         await tester.pumpWidget(DriverScope(store: store, child: MaterialApp(home: screen)));
         await tester.pump();
@@ -442,6 +794,24 @@ void main() {
       store.dispose();
     });
   }
+
+  testWidgets('driver login lays out without overflow when keyboard is open', (tester) async {
+    addTearDown(() {
+      tester.view.reset();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    tester.view.physicalSize = const Size(360, 740);
+    tester.view.devicePixelRatio = 1.0;
+    // The test font draws every glyph 1 em wide; Geist averages about 0.6 em, so scale text to match it.
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+    tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+    final store = storeWithServer();
+    await tester.pumpWidget(DriverScope(store: store, child: const MaterialApp(home: DriverLoginScreen())));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
 
   testWidgets('the driver map lists the stops still ahead with passengers to pick up and drop off', (tester) async {
     addTearDown(() {
@@ -533,6 +903,7 @@ void main() {
     trip['manifest'] = <Map<String, dynamic>>[...(trip['manifest'] as List).cast<Map<String, dynamic>>(), home('t_h1', 'B01', 21.02), home('t_h2', 'B02', 21.03)];
     trip['home_run'] = {
       'wait_minutes': 5,
+      'outlook': {'back_at': '2026-08-28T00:13:00Z', 'late_departure_minutes': 13, 'past_window': ['t_h1']},
       'stops': [
         {'ticket_id': 't_h2', 'position': 1, 'appointment_at': '2026-08-27T22:45:00Z', 'waiting': true, 'ready': {'status': 'NEED_TIME', 'minutes': 5}},
         {'ticket_id': 't_h1', 'position': 2, 'appointment_at': '2026-08-27T22:55:00Z', 'waiting': true},
@@ -540,6 +911,7 @@ void main() {
     };
     expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
     expect(store.homePickupsWaiting.map((p) => p.seat), ['B02', 'B01'], reason: 'the server order, not the manifest order');
+    expect((store.homeLateMinutes, store.homePastWindow), (13, 1), reason: 'the run does not fit the departure');
     final first = store.homeStopOf(store.homePickupsWaiting.first)!;
     expect((first.appointment, first.readyLabel), ('05:45', 'Cần 5 phút'));
 
@@ -560,20 +932,66 @@ void main() {
     store.dispose();
   });
 
+  testWidgets('a home run that no longer fits the departure is shown to the driver', (tester) async {
+    final store = storeWithServer();
+    Map<String, dynamic> home(String id, String seat, double lat) => {'ticket_id': id, 'seat_code': seat, 'passenger_name': 'Khách $seat', 'phone_masked': '090***00$seat', 'pickup_stop_id': 'stp_hn_gb', 'dropoff_stop_id': 'stp_th_pb', 'boarding_status': 'ISSUED', 'payment_method': 'VIETQR', 'cod_amount_vnd': 0, 'home_pickup': {'address': 'Nhà $seat', 'lat': lat, 'lng': 105.85, 'window_from': '2026-08-27T22:45:00Z', 'window_to': '2026-08-27T23:30:00Z'}};
+    trip['manifest'] = <Map<String, dynamic>>[...(trip['manifest'] as List).cast<Map<String, dynamic>>(), home('t_h1', 'B01', 21.02)];
+    trip['home_run'] = {
+      'wait_minutes': 5,
+      'outlook': {'back_at': '2026-08-28T00:13:00Z', 'late_departure_minutes': 13, 'past_window': ['t_h1']},
+      'stops': [{'ticket_id': 't_h1', 'position': 1, 'appointment_at': '2026-08-27T23:35:00Z', 'waiting': true}],
+    };
+    await tester.runAsync(() async {
+      expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    });
+    await tester.pumpWidget(DriverScope(store: store, child: const MaterialApp(home: DriverHomeRunScreen())));
+    await tester.pump();
+    expect(find.textContaining('về bến khoảng 07:13, trễ giờ xuất bến 13 phút'), findsOneWidget);
+    expect(find.textContaining('1 khách được hẹn sau khung đón'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
   testWidgets('location is asked with a reason first, then "all the time"; a refusal keeps the bus from leaving (D145)', (tester) async {
-    final fake = FakePermissions(LocationAccess.denied, afterRequest: LocationAccess.whileInUse);
-    driverPermissions = fake;
     bool? allowed;
     await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => Scaffold(body: TextButton(onPressed: () async => allowed = await ensureDriverLocation(context), child: const Text('go'))))));
+
+    // 1. Declining disclosure does not call requestLocation and shows toast
+    final declineFake = FakePermissions(LocationAccess.denied);
+    driverPermissions = declineFake;
+    allowed = null;
     await tester.tap(find.text('go'));
     await tester.pumpAndSettle();
-    expect(find.text('Cho phép app biết vị trí xe'), findsOneWidget, reason: 'the reason comes before the system dialog');
+
+    expect(find.text('BusGo Driver dùng vị trí của bạn'), findsOneWidget);
+    expect(find.text('BusGo Driver thu thập vị trí của điện thoại trong ca chạy, kể cả khi ứng dụng đóng hoặc không được sử dụng, để gửi vị trí xe cho điều hành nhà xe và cho hành khách của chuyến biết xe đang ở đâu và khi nào tới. Ngoài ca chạy, ứng dụng không lấy vị trí.'), findsOneWidget);
+    expect(find.text('Đồng ý'), findsOneWidget);
+    expect(find.text('Không đồng ý'), findsOneWidget);
+
+    await tester.tap(find.text('Không đồng ý'));
+    await tester.pumpAndSettle();
+    expect(declineFake.asked, isEmpty, reason: 'declining disclosure must not request system location');
+    expect(allowed, isFalse);
+    expect(find.text('Chưa có quyền vị trí: khách sẽ không thấy xe'), findsOneWidget);
+
+    // 2. Accepting disclosure calls requestLocation, then shows background disclosure sheet
+    final fake = FakePermissions(LocationAccess.denied, afterRequest: LocationAccess.whileInUse);
+    driverPermissions = fake;
+    allowed = null;
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    expect(find.text('BusGo Driver dùng vị trí của bạn'), findsOneWidget, reason: 'the reason comes before the system dialog');
     expect(fake.asked, isEmpty);
-    await tester.tap(find.text('Tiếp tục'));
+    await tester.tap(find.text('Đồng ý'));
     await tester.pumpAndSettle();
     expect(fake.asked, ['location']);
-    expect(find.text('Chọn "Luôn cho phép"'), findsOneWidget);
-    await tester.tap(find.text('Tiếp tục'));
+
+    expect(find.text('Cho phép vị trí cả khi app chạy nền'), findsOneWidget);
+    expect(find.text('Để vị trí xe vẫn được gửi khi màn hình tắt, khi ứng dụng đóng hoặc không được sử dụng, ở màn tiếp theo hãy chọn "Luôn cho phép".'), findsOneWidget);
+    expect(find.text('Đồng ý'), findsOneWidget);
+    expect(find.text('Để sau'), findsOneWidget);
+
+    await tester.tap(find.text('Đồng ý'));
     await tester.pumpAndSettle();
     expect(fake.asked, ['location', 'background']);
     expect(allowed, isTrue, reason: 'while in use is enough to send the position');
@@ -606,6 +1024,7 @@ void main() {
 
     expect(find.byType(DriverChangePinScreen), findsOneWidget);
     expect(find.text('Đặt mã PIN mới'), findsOneWidget);
+    expect(tester.widget<TextField>(find.byType(TextField).first).controller?.text, '654321');
     expect(store.mustChangePin, isTrue);
     expect(store.shift, isEmpty, reason: 'did not load shift yet');
     store.dispose();
@@ -654,7 +1073,8 @@ void main() {
     ));
     await tester.pump();
 
-    await tester.enterText(find.byType(TextField).at(0), '654321');
+    // Temporary PIN is prefilled from login; driver does not retype it
+    expect(tester.widget<TextField>(find.byType(TextField).at(0)).controller?.text, '654321');
     await tester.enterText(find.byType(TextField).at(1), '284719');
     await tester.enterText(find.byType(TextField).at(2), '284719');
     await tester.tap(find.widgetWithText(BigButton, 'Đổi mã PIN'));
@@ -711,13 +1131,1051 @@ void main() {
     expect(store.mustChangePin, isTrue);
     store.dispose();
   });
+
+  test('codPresets derives exact fare first and round amounts above it without duplicates', () {
+    expect(codPresets(220000), [220000, 300000, 500000]);
+    expect(codPresets(180000), [180000, 200000, 500000]);
+    expect(codPresets(300000), [300000, 400000, 500000]);
+    expect(codPresets(500000), [500000, 600000, 1000000]);
+  });
+
+  testWidgets('COD sheet defaults to exact fare, no change, and supports custom amount typing', (tester) async {
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final store = await started();
+    final codPax = store.manifest.firstWhere((p) => p.codDue);
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (ctx) => ElevatedButton(
+              onPressed: () => showCodSheet(ctx, codPax),
+              child: const Text('Mở COD'),
+            ),
+          ),
+        ),
+      ),
+    ));
+
+    await tester.tap(find.text('Mở COD'));
+    await tester.pumpAndSettle();
+
+    // 1. Presets and exact fare defaults
+    expect(find.text('220k'), findsOneWidget);
+    expect(find.text('300k'), findsOneWidget);
+    expect(find.text('500k'), findsOneWidget);
+    expect(find.text('Đủ tiền, không có tiền thừa'), findsOneWidget);
+    expect(find.text('Đã nhận 220.000 đ · Cho lên xe'), findsOneWidget);
+    expect(find.text('Trả tiền mặt ngay'), findsNothing);
+
+    // 2. Select 500k preset -> change due
+    await tester.tap(find.text('500k'));
+    await tester.pumpAndSettle();
+    expect(find.text('Trả lại khách 280.000 đ'), findsOneWidget);
+    expect(find.text('Đã nhận 500.000 đ · Cho lên xe'), findsOneWidget);
+    expect(find.text('Trả tiền mặt ngay'), findsOneWidget);
+
+    // 3. Custom amount: typing amount less than fare shows error and disables submit
+    await tester.enterText(find.byType(TextField), '100000');
+    await tester.pumpAndSettle();
+    expect(find.text('Số tiền phải từ 220.000 đ trở lên'), findsOneWidget);
+    expect(tester.widget<BigButton>(find.byType(BigButton)).onPressed, isNull);
+
+    // 4. Custom amount: typing amount >= fare succeeds and updates button
+    await tester.enterText(find.byType(TextField), '300000');
+    await tester.pumpAndSettle();
+    expect(find.text('Số tiền phải từ 220.000 đ trở lên'), findsNothing);
+    expect(find.text('Đã nhận 300.000 đ · Cho lên xe'), findsOneWidget);
+    expect(find.text('Trả lại khách 80.000 đ'), findsOneWidget);
+    expect(tester.widget<BigButton>(find.byType(BigButton)).onPressed, isNotNull);
+
+    // 5. Submit collection
+    await tester.tap(find.byType(BigButton));
+    await tester.pumpAndSettle();
+
+    expect(store.codCash, 220000);
+    final after = store.manifest.firstWhere((p) => p.seat == 'A02');
+    expect(after.status, PaxStatus.boarded);
+    expect(after.paid, isTrue);
+    store.dispose();
+  });
+
+  testWidgets('hail sheet shows all free seats, default given = fare, choosing 500k shows the change and sends the mapped method', (tester) async {
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final store = await started();
+    // The company turned the BusGo wallet on (H-03); otherwise the wallet choice is not offered.
+    store.walletEnabled = true;
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (ctx) => ElevatedButton(
+              onPressed: () => showHailSheet(ctx),
+              child: const Text('Mở Khách vẫy'),
+            ),
+          ),
+        ),
+      ),
+    ));
+
+    await tester.tap(find.text('Mở Khách vẫy'));
+    await tester.pumpAndSettle();
+
+    // 1. Hail sheet shows all free seats (A03 through A10 from seat-map)
+    expect(find.text('A03'), findsOneWidget);
+    expect(find.text('A08'), findsOneWidget);
+    expect(find.text('A09'), findsOneWidget);
+    expect(find.text('A10'), findsOneWidget);
+
+    // 2. Default given = fare (220.000 đ)
+    expect(find.text('Đã nhận 220.000 đ · Cho lên xe'), findsOneWidget);
+    expect(find.text('Đủ tiền, không có tiền thừa'), findsOneWidget);
+    expect(find.text('Trả tiền mặt ngay'), findsNothing);
+
+    // 3. Choosing 500k shows the change and options
+    await tester.ensureVisible(find.text('500k'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('500k'));
+    await tester.pumpAndSettle();
+    expect(find.text('Trả lại khách 280.000 đ'), findsOneWidget);
+    expect(find.text('Đã nhận 500.000 đ · Cho lên xe'), findsOneWidget);
+    expect(find.text('Trả tiền mặt ngay'), findsOneWidget);
+
+    // Wallet credit is disabled when no phone is entered
+    final walletTile = tester.widget<ChoiceTile>(find.widgetWithText(ChoiceTile, 'Cộng vào ví của khách'));
+    expect(walletTile.enabled, isFalse);
+
+    // 4. Submit with default CASH method and verify mapped method sent to server
+    await tester.ensureVisible(find.widgetWithText(BigButton, 'Đã nhận 500.000 đ · Cho lên xe'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(BigButton, 'Đã nhận 500.000 đ · Cho lên xe'));
+    await tester.pumpAndSettle();
+
+    final hailReq = sent.firstWhere((r) => r.url.path.endsWith('/onboard-hail'));
+    final payload = jsonDecode(hailReq.body) as Map<String, dynamic>;
+    expect(payload['seat_code'], 'A03');
+    expect(payload['amount_collected_vnd'], 500000);
+    expect(payload['change_settlement_method'], 'CASH_RETURNED');
+    store.dispose();
+  });
+
+  test('leaveStop calls departStop on server and sets bus moving', () async {
+    final store = await started();
+    expect(sent.any((r) => r.url.path.endsWith('/depart')), isFalse);
+    store.leaveStop();
+    await Future.delayed(const Duration(milliseconds: 50));
+    expect(sent.any((r) => r.url.path.contains('/stops/stp_hn_gb/depart')), isTrue);
+    expect(store.moving, isTrue);
+    store.dispose();
+  });
+
+  testWidgets('departure warning distinguishes hotline hold from paid ticket', (tester) async {
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+    addTearDown(() {
+      tester.view.reset();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    final store = await started();
+    final p = Passenger(
+      ticketId: 'hl_rsv_1_A01',
+      seat: 'A01',
+      name: 'Khách Hotline',
+      phone: '098***111',
+      pay: 'Thu tiền khi lên xe',
+      from: 'stp_hn_gb',
+      to: 'stp_th_pb',
+      isHotline: true,
+      status: PaxStatus.waiting,
+    );
+    store.manifest.add(p);
+    await tester.pumpWidget(MaterialApp(
+      home: DriverScope(
+        store: store,
+        child: const DriverManifestScreen(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(BigButton, 'Rời trạm'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Ghế A01 giữ qua tổng đài sẽ được nhả, điều hành được báo.'), findsOneWidget);
+    store.dispose();
+  });
+
+  testWidgets('Danh sách khách opens read-only list grouped by pickup stop before departure (F13)', (tester) async {
+    final store = storeWithServer();
+    expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+
+    store.manifest.clear();
+    store.manifest.addAll([
+      Passenger(
+        ticketId: 'tkt_01',
+        seat: 'A01',
+        name: 'Nguyễn Văn A',
+        phone: '098***123',
+        pay: 'VietQR',
+        from: 'stp_hn_gb',
+        to: 'stp_th_pb',
+        cod: 220000,
+        status: PaxStatus.waiting,
+      ),
+      Passenger(
+        ticketId: 'tkt_02',
+        seat: 'A02',
+        name: 'Trần Thị B',
+        phone: '091***456',
+        pay: 'Đã trả trước',
+        from: 'stp_hn_gb',
+        to: 'stp_nb',
+        cod: 0,
+        status: PaxStatus.waiting,
+      ),
+      Passenger(
+        ticketId: 'tkt_03',
+        seat: 'B01',
+        name: 'Lê Văn C',
+        phone: '097***789',
+        pay: 'COD',
+        from: 'stp_nb',
+        to: 'stp_th_pb',
+        cod: 150000,
+        status: PaxStatus.waiting,
+      ),
+    ]);
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(
+        home: DriverTodayTripsScreen(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(BigButton, 'Danh sách khách'), findsOneWidget);
+    await tester.tap(find.widgetWithText(BigButton, 'Danh sách khách'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DriverPassengerListScreen), findsOneWidget);
+    expect(find.text('Danh sách khách'), findsOneWidget);
+
+    expect(find.text('Bến xe Giáp Bát'), findsOneWidget);
+    expect(find.text('2 khách'), findsOneWidget);
+    expect(find.text('Bến xe Ninh Bình'), findsOneWidget);
+    expect(find.text('1 khách'), findsOneWidget);
+
+    expect(find.text('A01'), findsOneWidget);
+    expect(find.text('Nguyễn Văn A'), findsOneWidget);
+    expect(find.text('098***123'), findsOneWidget);
+    expect(find.text('Thu 220.000 đ khi lên'), findsOneWidget);
+    expect(find.text('Bến xe Giáp Bát → Bến xe Phía Bắc Thanh Hóa'), findsOneWidget);
+
+    expect(find.text('A02'), findsOneWidget);
+    expect(find.text('Trần Thị B'), findsOneWidget);
+    expect(find.text('091***456'), findsOneWidget);
+    expect(find.text('Bến xe Giáp Bát → Bến xe Ninh Bình'), findsOneWidget);
+
+    expect(find.text('B01'), findsOneWidget);
+    expect(find.text('Lê Văn C'), findsOneWidget);
+    expect(find.text('097***789'), findsOneWidget);
+    expect(find.text('Thu 150.000 đ khi lên'), findsOneWidget);
+    expect(find.text('Bến xe Ninh Bình → Bến xe Phía Bắc Thanh Hóa'), findsOneWidget);
+
+    expect(find.widgetWithText(BigButton, 'Cho lên xe'), findsNothing);
+    expect(find.text('Vắng mặt'), findsNothing);
+    expect(find.widgetWithText(BigButton, 'Quét vé'), findsNothing);
+
+    store.dispose();
+  });
+
+  testWidgets('G1: load trip B after ending trip A -> no "Đã nộp" on B', (tester) async {
+    final store = await started();
+    store.leaveStop();
+    await store.arrive();
+    store.leaveStop();
+    await store.arrive();
+    expect(store.lastStop, isTrue);
+    expect(await store.endTrip(), isNull);
+    expect(store.trip, TripState.completed);
+    expect(store.endedCash, 0);
+
+    trip = {
+      'trip_id': 'trp_hn_th_02',
+      'route_name': 'Hà Nội — Thanh Hóa (Chiều về)',
+      'planned_departure_time': '2026-08-28T14:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-888.22',
+      'base_fare_vnd': 220000,
+      'current_stop_index': 0,
+      'total_cod_collected_vnd': 0,
+      'total_hail_collected_vnd': 0,
+      'debts': <Map<String, dynamic>>[],
+      'readiness_checklist': {for (final k in DriverStore.checkKeys) k: false},
+      'stops': [
+        {'stop_id': 'stp_th_pb', 'name': 'Bến xe Phía Bắc Thanh Hóa', 'order': 1, 'status': 'PENDING'},
+        {'stop_id': 'stp_hn_gb', 'name': 'Bến xe Giáp Bát', 'order': 2, 'status': 'PENDING'},
+      ],
+      'manifest': <Map<String, dynamic>>[],
+    };
+
+    await store.loadShift();
+    expect(store.tripId, 'trp_hn_th_02');
+    expect(store.trip, TripState.readyCheck);
+    expect(store.endedCash, isNull);
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverTodayTripsScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Đã nộp'), findsNothing);
+    store.dispose();
+  });
+
+  testWidgets('G4: no early-end warning after loading a new trip or when reaching last stop', (tester) async {
+    final store = await started();
+    store.earlyEndReason = 'Den Ben xe Sam Son';
+    expect(store.earlyEndReason, 'Den Ben xe Sam Son');
+
+    trip = {
+      'trip_id': 'trp_hn_th_02',
+      'route_name': 'Hà Nội — Thanh Hóa (Chiều về)',
+      'planned_departure_time': '2026-08-28T14:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-888.22',
+      'base_fare_vnd': 220000,
+      'current_stop_index': 0,
+      'total_cod_collected_vnd': 0,
+      'total_hail_collected_vnd': 0,
+      'debts': <Map<String, dynamic>>[],
+      'readiness_checklist': {for (final k in DriverStore.checkKeys) k: true},
+      'stops': [
+        {'stop_id': 'stp_th_pb', 'name': 'Bến xe Phía Bắc Thanh Hóa', 'order': 1, 'status': 'PENDING'},
+        {'stop_id': 'stp_hn_gb', 'name': 'Bến xe Giáp Bát', 'order': 2, 'status': 'PENDING'},
+      ],
+      'manifest': <Map<String, dynamic>>[],
+    };
+
+    await store.loadShift();
+    expect(store.earlyEndReason, isNull);
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverEndTripScreen()),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Kết thúc trước bến cuối'), findsNothing);
+
+    store.stopIndex = store.stops.length - 1;
+    store.atStop = true;
+    store.earlyEndReason = 'Den Ben xe Sam Son';
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverEndTripScreen()),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Kết thúc trước bến cuối'), findsNothing);
+
+    store.dispose();
+  });
+
+  test('loadShift prefers a real upcoming trip over a 2026-08-28 demo trip when both are returned and now is near the upcoming one', () async {
+    final demoTrip = {
+      'trip_id': 'trp_demo_2026',
+      'route_name': 'Hà Nội — Thanh Hóa',
+      'planned_departure_time': '2026-08-28T07:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-882.19',
+      'stops': <Map<String, dynamic>>[],
+      'manifest': <Map<String, dynamic>>[],
+    };
+    final upcomingTrip = {
+      'trip_id': 'trp_upcoming_real',
+      'route_name': 'Hà Nội — Thanh Hóa (Chiều về)',
+      'planned_departure_time': '2026-10-19T08:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-999.88',
+      'stops': <Map<String, dynamic>>[],
+      'manifest': <Map<String, dynamic>>[],
+    };
+
+    final tripsMap = {
+      'trp_demo_2026': demoTrip,
+      'trp_upcoming_real': upcomingTrip,
+    };
+
+    final client = MockClient((req) async {
+      final path = req.url.path;
+      if (path.endsWith('/trips/today')) {
+        return ok({'trips': [demoTrip, upcomingTrip]});
+      }
+      for (final entry in tripsMap.entries) {
+        if (path.endsWith('/trips/${entry.key}')) return ok(entry.value);
+      }
+      return ok(upcomingTrip);
+    });
+
+    final testNow = DateTime.parse('2026-10-19T07:30:00+07:00');
+    final store = DriverStore(
+      api: DriverApiClientService(baseUrl: 'http://test', client: client),
+      clock: () => testNow,
+    );
+
+    await store.loadShift();
+    expect(store.tripId, 'trp_upcoming_real', reason: 'Upcoming trip is within 12h, whereas demo trip is in the distant past');
+    expect(store.shift.length, 2);
+    store.dispose();
+  });
+
+  test('selectTrip switches tripId and is refused while in transit', () async {
+    final tripA = {
+      'trip_id': 'trp_trip_a',
+      'route_name': 'Hà Nội — Thanh Hóa',
+      'planned_departure_time': '2026-08-28T07:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-111.11',
+      'stops': [
+        {'stop_id': 's1', 'name': 'Bến Giáp Bát', 'order': 1, 'status': 'PENDING'},
+        {'stop_id': 's2', 'name': 'Bến Phía Bắc', 'order': 2, 'status': 'PENDING'},
+      ],
+      'manifest': <Map<String, dynamic>>[],
+      'readiness_checklist': {for (final k in DriverStore.checkKeys) k: true},
+    };
+    final tripB = {
+      'trip_id': 'trp_trip_b',
+      'route_name': 'Thanh Hóa — Hà Nội',
+      'planned_departure_time': '2026-08-28T14:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-222.22',
+      'stops': [
+        {'stop_id': 's2', 'name': 'Bến Phía Bắc', 'order': 1, 'status': 'PENDING'},
+        {'stop_id': 's1', 'name': 'Bến Giáp Bát', 'order': 2, 'status': 'PENDING'},
+      ],
+      'manifest': <Map<String, dynamic>>[],
+      'readiness_checklist': {for (final k in DriverStore.checkKeys) k: true},
+    };
+
+    final tripsMap = {'trp_trip_a': tripA, 'trp_trip_b': tripB};
+    final client = MockClient((req) async {
+      final path = req.url.path;
+      if (path.endsWith('/trips/today')) {
+        return ok({'trips': [tripA, tripB]});
+      }
+      if (path.endsWith('/start')) {
+        tripB['status'] = 'IN_TRANSIT';
+        return ok(tripB);
+      }
+      for (final entry in tripsMap.entries) {
+        if (path.contains('/trips/${entry.key}')) return ok(entry.value);
+      }
+      return ok(tripA);
+    });
+
+    final store = DriverStore(api: DriverApiClientService(baseUrl: 'http://test', client: client));
+    await store.loadShift();
+    expect(store.tripId, 'trp_trip_a');
+
+    // Switch to trip B while readyCheck
+    final errSelect = await store.selectTrip('trp_trip_b');
+    expect(errSelect, isNull);
+    expect(store.tripId, 'trp_trip_b');
+
+    // Start trip B -> moves to inTransit
+    final errStart = await store.startTrip();
+    expect(errStart, isNull);
+    expect(store.trip, TripState.inTransit);
+
+    // Attempting to select trip A while in transit must be refused
+    final errRefused = await store.selectTrip('trp_trip_a');
+    expect(errRefused, isNotNull);
+    expect(store.tripId, 'trp_trip_b');
+    store.dispose();
+  });
+
+  testWidgets('widget: trips screen shows home-pickup action when confirmed home pickup exists, and stop-pickup line otherwise', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    });
+
+    // 1) Current trip in storeWithServer has 2 passengers with NO home pickup.
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: Scaffold(body: DriverTodayTripsScreen())),
+    ));
+    await tester.pump();
+
+    // With no home pickups: no "Đi đón khách tận nhà", but shows "Đón 2 khách tại bến · bấm Kiểm tra xe, rồi Xuất bến"
+    expect(find.textContaining('Đi đón khách tận nhà'), findsNothing);
+    expect(find.textContaining('Đón 2 khách tại bến · bấm Kiểm tra xe, rồi Xuất bến'), findsOneWidget);
+
+    // 2) Add a confirmed home pickup to manifest
+    (trip['manifest'] as List).add({
+      'ticket_id': 't_home_1',
+      'seat_code': 'A03',
+      'passenger_name': 'Khách Đón Nhà',
+      'phone_masked': '091***789',
+      'pickup_stop_id': 'stp_hn_gb',
+      'dropoff_stop_id': 'stp_th_pb',
+      'boarding_status': 'ISSUED',
+      'payment_method': 'VIETQR',
+      'cod_amount_vnd': 0,
+      'home_pickup': {
+        'address': '123 Phố Huế',
+        'lat': 21.01,
+        'lng': 105.85,
+        'window_from': '2026-08-28T05:00:00Z',
+        'window_to': '2026-08-28T05:40:00Z',
+      },
+    });
+
+    await tester.runAsync(() async {
+      await store.refreshTrip();
+    });
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: Scaffold(body: DriverTodayTripsScreen())),
+    ));
+    await tester.pump();
+
+    // Now has 1 confirmed home pickup: shows "Đi đón khách tận nhà (1)" and does NOT show the "Đón … tại bến" line
+    expect(find.text('Đi đón khách tận nhà (1)'), findsOneWidget);
+    expect(find.textContaining('khách tại bến'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('the other-trips list shows "Ngày mai" for a trip departing tomorrow', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+
+    final testNow = DateTime.parse('2026-10-19T07:00:00+07:00');
+    final tripToday = {
+      'trip_id': 'trp_today',
+      'route_name': 'Hà Nội — Thanh Hóa',
+      'planned_departure_time': '2026-10-19T08:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-111.11',
+      'stops': [
+        {'stop_id': 's1', 'name': 'Bến Giáp Bát', 'order': 1, 'status': 'PENDING'},
+      ],
+      'manifest': <Map<String, dynamic>>[],
+    };
+    final tripTomorrow = {
+      'trip_id': 'trp_tomorrow',
+      'route_name': 'Hà Nội — Ninh Bình',
+      'planned_departure_time': '2026-10-20T09:00:00+07:00',
+      'status': 'READY',
+      'vehicle_plate': '29B-222.22',
+      'stops': [
+        {'stop_id': 's1', 'name': 'Bến Giáp Bát', 'order': 1, 'status': 'PENDING'},
+      ],
+      'manifest': <Map<String, dynamic>>[],
+    };
+
+    final client = MockClient((req) async {
+      final path = req.url.path;
+      if (path.endsWith('/trips/today')) {
+        return ok({'trips': [tripToday, tripTomorrow]});
+      }
+      if (path.contains('/trips/trp_tomorrow')) return ok(tripTomorrow);
+      return ok(tripToday);
+    });
+
+    final store = DriverStore(
+      api: DriverApiClientService(baseUrl: 'http://test', client: client),
+      clock: () => testNow,
+    );
+
+    await tester.runAsync(() async {
+      await store.loadShift();
+    });
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: Scaffold(body: DriverTodayTripsScreen())),
+    ));
+    await tester.pump();
+
+    expect(find.text('Chuyến của bạn'), findsOneWidget);
+    expect(find.text('Ngày mai'), findsOneWidget);
+    expect(find.text('Hà Nội → Ninh Bình'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('DRI-021: renders a month with trips and the count on the right days', (tester) async {
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      await store.loadMonthlySchedule('2026-10');
+    });
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverScheduleScreen()),
+    ));
+    await tester.pump();
+
+    // Month header
+    expect(find.text('Tháng 10/2026'), findsOneWidget);
+    // Weekday headers
+    for (final label in ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']) {
+      expect(find.text(label), findsOneWidget);
+    }
+    // Days with trips have count badges
+    expect(find.text('19'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget); // 2 trips on day 19
+    expect(find.text('20'), findsOneWidget);
+    expect(find.text('1'), findsOneWidget); // 1 trip on day 20
+    // Month summary
+    expect(find.text('3 chuyến · 1 đã chạy · 2 sắp chạy'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('DRI-021: selecting a day lists its trips with the right pills and the Lịch mặc định note', (tester) async {
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      await store.loadMonthlySchedule('2026-10');
+    });
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverScheduleScreen()),
+    ));
+    await tester.pump();
+
+    // Day 19 is default selected (today in current month)
+    expect(find.text('Chuyến ngày 19/10/2026 (2 chuyến)'), findsOneWidget);
+
+    // Trip 1
+    expect(find.text('07:00'), findsOneWidget);
+    expect(find.text('Hà Nội — Thanh Hóa (Cao tốc)'), findsOneWidget);
+    expect(find.text('29B-882.19'), findsOneWidget);
+    expect(find.text('Sắp chạy'), findsOneWidget);
+    expect(find.text('14 khách'), findsOneWidget);
+    expect(find.text('Lịch mặc định'), findsOneWidget);
+
+    // Trip 2
+    expect(find.text('14:00'), findsOneWidget);
+    expect(find.text('Thanh Hóa — Hà Nội'), findsOneWidget);
+    expect(find.text('29B-123.45'), findsOneWidget);
+    expect(find.text('Đã chạy'), findsOneWidget);
+    expect(find.text('28 khách · Đã nộp 440.000 đ'), findsOneWidget);
+
+    // Tap day 20
+    await tester.tap(find.text('20'));
+    await tester.pump();
+
+    expect(find.text('Chuyến ngày 20/10/2026 (1 chuyến)'), findsOneWidget);
+    expect(find.text('Chưa có xe'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('DRI-021: next/previous month loads the other month and honors boundaries', (tester) async {
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      await store.loadMonthlySchedule('2026-10');
+    });
+
+    scheduleHandler = (req) {
+      final m = req.url.queryParameters['month'] ?? '2026-10';
+      if (m == '2026-11') {
+        return ok({
+          'month': '2026-11',
+          'today': '2026-10-19',
+          'days': [
+            {
+              'date': '2026-11-05',
+              'trips': [
+                {
+                  'trip_id': 'trp_nov_01',
+                  'departure_time': '2026-11-05T08:00:00+07:00',
+                  'departure': '08:00',
+                  'route_name': 'Hà Nội — Hải Phòng',
+                  'vehicle_plate': '29B-999.99',
+                  'status': 'SCHEDULED',
+                  'source': 'SCHEDULE_DEFAULT',
+                  'passengers': null,
+                  'delay_minutes': 0,
+                  'cash_handed_in_vnd': null,
+                }
+              ]
+            }
+          ],
+          'summary': {'total': 1, 'completed': 0, 'upcoming': 1, 'cancelled': 0},
+        });
+      }
+      return null;
+    };
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverScheduleScreen()),
+    ));
+    await tester.pump();
+
+    expect(find.text('Tháng 10/2026'), findsOneWidget);
+
+    // Tap next month
+    await tester.tap(find.byTooltip('Tháng sau'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tháng 11/2026'), findsOneWidget);
+    expect(find.text('Hà Nội — Hải Phòng'), findsOneWidget);
+
+    // Tap previous month
+    await tester.tap(find.byTooltip('Tháng trước'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tháng 10/2026'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('DRI-021: empty month text and empty selected day text', (tester) async {
+    final store = storeWithServer();
+
+    // 1. Empty month
+    scheduleHandler = (req) => ok({
+          'month': '2026-09',
+          'today': '2026-10-19',
+          'days': <Map<String, dynamic>>[],
+          'summary': {'total': 0, 'completed': 0, 'upcoming': 0, 'cancelled': 0},
+        });
+
+    await tester.runAsync(() async {
+      await store.loadMonthlySchedule('2026-09');
+    });
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverScheduleScreen()),
+    ));
+    await tester.pump();
+
+    expect(find.text('Tháng 9/2026'), findsOneWidget);
+    expect(find.text('Tháng này bạn chưa có chuyến nào.'), findsOneWidget);
+
+    // 2. Month with trips but a day without trips selected
+    scheduleHandler = null; // back to default with trips on 19 and 20
+    await tester.runAsync(() async {
+      await store.loadMonthlySchedule('2026-10');
+    });
+    await tester.pump();
+
+    // Tap day 15 (no trips)
+    await tester.tap(find.text('15'));
+    await tester.pump();
+
+    expect(find.text('Chuyến ngày 15/10/2026'), findsOneWidget);
+    expect(find.text('Không có chuyến trong ngày này.'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('DRI-021: server error shows the message and Thử lại button', (tester) async {
+    final store = storeWithServer();
+    var calls = 0;
+    scheduleHandler = (req) {
+      calls++;
+      if (calls == 1) {
+        return fail(400, 'MONTH_OUT_OF_RANGE', 'Tháng xem lịch phải trong khoảng 3 tháng trước đến 3 tháng sau');
+      }
+      return ok({
+        'month': '2026-10',
+        'today': '2026-10-19',
+        'days': <Map<String, dynamic>>[],
+        'summary': {'total': 0, 'completed': 0, 'upcoming': 0, 'cancelled': 0},
+      });
+    };
+
+    await tester.runAsync(() async {
+      await store.loadMonthlySchedule('2026-10');
+    });
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverScheduleScreen()),
+    ));
+    await tester.pump();
+
+    expect(find.text('Tháng xem lịch phải trong khoảng 3 tháng trước đến 3 tháng sau'), findsOneWidget);
+    expect(find.text('Thử lại'), findsOneWidget);
+
+    // Tap Thử lại
+    await tester.tap(find.text('Thử lại'));
+    await tester.pumpAndSettle();
+
+    expect(calls, 2);
+    expect(find.text('Tháng này bạn chưa có chuyến nào.'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('DRI-021: the shell shows the Lịch tab and opening it shows the screen', (tester) async {
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    });
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: MainShellScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Chuyến'), findsOneWidget);
+    expect(find.text('Lịch'), findsOneWidget);
+    expect(find.text('Đồng bộ'), findsOneWidget);
+    expect(find.text('Hồ sơ'), findsOneWidget);
+
+    // Tap Lịch tab
+    await tester.tap(find.text('Lịch'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DriverScheduleScreen), findsOneWidget);
+    expect(find.text('Lịch chạy'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('DRI-021: no overflow at 360x640 phone and tablet with side rail', (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+
+    // 1. Phone 360x640
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 0.6;
+
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+      await store.loadMonthlySchedule('2026-10');
+    });
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: MainShellScreen()),
+    ));
+    await tester.pump();
+
+    await tester.tap(find.text('Lịch'));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull, reason: 'MainShellScreen with DriverScheduleScreen on 360x640 phone');
+
+    // 2. Tablet 1280x720 with side rail
+    tester.view.physicalSize = const Size(1280, 720);
+    await tester.pump();
+    expect(tester.takeException(), isNull, reason: 'MainShellScreen with DriverScheduleScreen on 1280x720 tablet');
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('SH-006: the profile tab opens the about screen with the server terms, the model notice and the licences', (tester) async {
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    });
+    await tester.pumpWidget(DriverScope(store: store, child: const MaterialApp(home: MainShellScreen())));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Hồ sơ'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Giới thiệu và điều khoản'), 200);
+    await tester.tap(find.text('Giới thiệu và điều khoản'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Phiên bản 3.0.0'), findsOneWidget);
+    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsNWidgets(2));
+    expect(sent.where((r) => r.url.path == '/api/v1/legal').single.url.queryParameters['app'], 'driver');
+
+    await tester.tap(find.text('Điều khoản sử dụng'));
+    await tester.pumpAndSettle();
+    expect(find.text('2. Vị trí trong ca'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Chính sách quyền riêng tư'));
+    await tester.pumpAndSettle();
+    expect(find.text('1. Ai chịu trách nhiệm về dữ liệu của bạn'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Giấy phép mô hình và dữ liệu'));
+    await tester.pumpAndSettle();
+    expect(find.text('1. Mô hình trí tuệ nhân tạo'), findsOneWidget);
+    expect(find.text('OpenStreetMap — bản quyền'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Giấy phép mã nguồn mở'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LicensePage), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('SH-006: when the terms cannot load, their rows are closed and Thử lại loads them', (tester) async {
+    final store = storeWithServer();
+    legalDown = true;
+    await tester.pumpWidget(DriverScope(store: store, child: const MaterialApp(home: DriverAboutScreen())));
+    await tester.pumpAndSettle();
+    expect(find.text('Chưa tải được'), findsNWidgets(3));
+    await tester.tap(find.text('Điều khoản sử dụng'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DriverLegalDocScreen), findsNothing);
+    await tester.tap(find.text('Chính sách quyền riêng tư'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DriverLegalDocScreen), findsNothing);
+    // The open-source licences are in the app and open without the server.
+    expect(tester.widget<InkWell>(find.ancestor(of: find.text('Giấy phép mã nguồn mở'), matching: find.byType(InkWell))).onTap, isNotNull);
+
+    legalDown = false;
+    await tester.tap(find.text('Thử lại'));
+    await tester.pumpAndSettle();
+    expect(find.text('Phiên bản 1.0 · hiệu lực từ 20/10/2026'), findsNWidgets(2));
+    expect(find.text('Thử lại'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('driver login screen consent links open terms and privacy policy before sign-in', (tester) async {
+    final store = storeWithServer();
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverLoginScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Bằng việc tiếp tục, bạn đồng ý với'), findsOneWidget);
+
+    // Tap terms
+    await tester.tap(find.text('Điều khoản sử dụng'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DriverLegalDocScreen), findsOneWidget);
+    expect(find.text('2. Vị trí trong ca'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    // Tap privacy
+    await tester.tap(find.text('Chính sách quyền riêng tư'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DriverLegalDocScreen), findsOneWidget);
+    expect(find.text('1. Ai chịu trách nhiệm về dữ liệu của bạn'), findsOneWidget);
+    await tester.tap(find.byTooltip('Quay lại'));
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('driver login screen consent link shows toast when legal fails to load', (tester) async {
+    final store = storeWithServer();
+    store.legalInfo = null;
+    legalDown = true;
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverLoginScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Điều khoản sử dụng'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DriverLegalDocScreen), findsNothing);
+    expect(find.text('Chưa tải được, thử lại sau'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
+
+  testWidgets('notifications requested before the run starts and refusal does not block', (tester) async {
+    final store = storeWithServer();
+    await tester.runAsync(() async {
+      expect(await store.login('SAOMAI', 'TX8821', '123456'), isNull);
+    });
+    final fake = FakePermissions(LocationAccess.always, notificationsOk: false);
+    driverPermissions = fake;
+
+    await tester.pumpWidget(DriverScope(
+      store: store,
+      child: const MaterialApp(home: DriverReadinessScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    // Tick all 6 checkboxes to enable 'Xuất bến'
+    for (int i = 0; i < 6; i++) {
+      store.toggleCheck(i, true);
+    }
+    await tester.pumpAndSettle();
+
+    expect(find.text('Xuất bến'), findsOneWidget);
+    await tester.tap(find.text('Xuất bến'));
+    await tester.pumpAndSettle();
+
+    // Verify notifications were requested
+    expect(fake.asked, contains('notifications'));
+
+    // Confirmation sheet opens despite notification refusal
+    expect(find.textContaining('Xuất bến chuyến 07:00?'), findsOneWidget);
+
+    // Confirm start trip
+    await tester.tap(find.text('Xuất bến').last);
+    await tester.pumpAndSettle();
+
+    expect(store.trip, TripState.inTransit);
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
 }
 
 class FakePermissions implements DevicePermissions {
-  FakePermissions(this.access, {this.afterRequest, this.cameraOk = false});
+  FakePermissions(this.access, {this.afterRequest, this.cameraOk = false, this.notificationsOk = true});
   LocationAccess access;
   final LocationAccess? afterRequest;
   final bool cameraOk;
+  final bool notificationsOk;
   final List<String> asked = [];
 
   @override
@@ -732,6 +2190,12 @@ class FakePermissions implements DevicePermissions {
   Future<LocationAccess> requestBackgroundLocation() async {
     asked.add('background');
     return access;
+  }
+
+  @override
+  Future<bool> requestNotifications() async {
+    asked.add('notifications');
+    return notificationsOk;
   }
 
   @override

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:data/src/service/passenger_api_service.dart';
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
@@ -8,10 +9,89 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'passenger_dates.dart';
 
+export 'passenger_banks.dart';
 export 'passenger_dates.dart';
+import 'passenger_banks.dart';
 
 /// State of the passenger app, backed by the FleetBus API (`PassengerApiClientService`, OQ-029).
 /// Screens follow the Claude Design canvas "FleetBus — Thiết kế lại 3 app".
+
+class RefundAccount {
+  const RefundAccount({
+    required this.bankBin,
+    this.bankName,
+    this.bankShortName,
+    required this.accountNumber,
+    required this.accountName,
+  });
+
+  final String bankBin;
+  final String? bankName;
+  final String? bankShortName;
+  final String accountNumber;
+  final String accountName;
+
+  String get displayBankName {
+    if (bankName != null && bankName!.isNotEmpty) return bankName!;
+    if (bankShortName != null && bankShortName!.isNotEmpty) return bankShortName!;
+    final found = vietQrBanks.where((b) => b.bin == bankBin).firstOrNull;
+    if (found != null) return found.shortName;
+    return bankBin;
+  }
+
+  factory RefundAccount.fromJson(Map<String, dynamic> j) => RefundAccount(
+        bankBin: '${j['bank_bin'] ?? j['bin'] ?? ''}',
+        bankName: j['bank_name'] as String?,
+        bankShortName: j['bank_short_name'] as String?,
+        accountNumber: '${j['account_number'] ?? ''}',
+        accountName: '${j['account_name'] ?? ''}',
+      );
+
+  Map<String, dynamic> toJson() => {
+        'bank_bin': bankBin,
+        if (bankName != null) 'bank_name': bankName,
+        if (bankShortName != null) 'bank_short_name': bankShortName,
+        'account_number': accountNumber,
+        'account_name': accountName,
+      };
+}
+
+class TicketRefund {
+  TicketRefund({
+    required this.refundId,
+    required this.status,
+    required this.amountVnd,
+    this.rejectNote,
+    this.account,
+  });
+
+  final String refundId;
+  final String status;
+  final int amountVnd;
+  final String? rejectNote;
+  final RefundAccount? account;
+
+  bool get isPending => status == 'REFUND_REQUESTED';
+  bool get isRefunded => status == 'REFUNDED';
+  bool get isRejected => status == 'REFUND_REJECTED' || status == 'REJECTED';
+
+  String get statusLabel => switch (status) {
+        'REFUND_REQUESTED' => 'Đang chờ hoàn tiền',
+        'REFUNDED' => 'Đã hoàn tiền',
+        'REFUND_REJECTED' || 'REJECTED' => 'Từ chối',
+        _ => status,
+      };
+
+  factory TicketRefund.fromJson(Map<String, dynamic> j) => TicketRefund(
+        refundId: '${j['refund_id'] ?? ''}',
+        status: '${j['status'] ?? ''}',
+        amountVnd: (j['amount_vnd'] as num?)?.toInt() ?? 0,
+        rejectNote: (j['reject_note'] ?? j['notes'] ?? j['reason']) as String?,
+        account: j['refund_account'] is Map<String, dynamic>
+            ? RefundAccount.fromJson(j['refund_account'] as Map<String, dynamic>)
+            : null,
+      );
+}
 
 class OperatorInfo {
   const OperatorInfo({
@@ -20,16 +100,28 @@ class OperatorInfo {
     required this.shortName,
     required this.hotline,
     required this.primaryColor,
+    this.supportEmail = '',
+    this.address = '',
     this.pickupModes = const ['FIXED_STOP'],
     this.dropoffModes = const ['FIXED_LOCATION'],
+    this.allowCash = true,
+    this.allowTransfer = true,
+    this.insuranceEnabled = false,
+    this.walletEnabled = false,
   });
   final String code;
   final String name;
   final String shortName;
   final String hotline;
   final String primaryColor;
+  final String supportEmail;
+  final String address;
   final List<String> pickupModes;
   final List<String> dropoffModes;
+  final bool allowCash;
+  final bool allowTransfer;
+  final bool insuranceEnabled;
+  final bool walletEnabled;
 
   bool get homePickup => pickupModes.contains('HOME_PICKUP');
   bool get homeDropoff => dropoffModes.contains('HOME_DROPOFF');
@@ -40,8 +132,15 @@ class OperatorInfo {
         shortName: j['short_name'] ?? '',
         hotline: j['hotline'] ?? '',
         primaryColor: j['primary_color'] ?? '',
+        supportEmail: j['support_email'] ?? '',
+        address: j['address'] ?? '',
         pickupModes: [for (final m in (j['pickup_modes'] as List? ?? const ['FIXED_STOP'])) '$m'],
         dropoffModes: [for (final m in (j['dropoff_modes'] as List? ?? const ['FIXED_LOCATION'])) '$m'],
+        allowCash: j['allow_cash_payment'] != false,
+        // Older servers send no payment_methods: they always took transfers.
+        allowTransfer: (j['payment_methods'] as List?)?.contains('BANK_TRANSFER') ?? true,
+        insuranceEnabled: j['insurance_enabled'] == true,
+        walletEnabled: j['wallet_enabled'] == true,
       );
 }
 
@@ -70,6 +169,53 @@ class ServiceArea {
         to: '${j['service_hours']?['to'] ?? ''}',
         manual: j['confirmation'] == 'MANUAL',
       );
+}
+
+/// The company's cancellation policy (D184): refund tiers by hours before the departure, and the lines the passenger
+/// reads and agrees to before cancelling. The server applies the same policy; [fallback] is its default.
+class CancelPolicy {
+  const CancelPolicy({required this.tiers, required this.delayWaiverMinutes, required this.rules});
+  /// Highest bound first; the last one starts at 0 hours.
+  final List<({int minHours, int percent})> tiers;
+  final int? delayWaiverMinutes;
+  final List<String> rules;
+
+  static const fallback = CancelPolicy(
+    tiers: [(minHours: 12, percent: 100), (minHours: 6, percent: 80), (minHours: 0, percent: 0)],
+    delayWaiverMinutes: 30,
+    rules: [
+      'Hủy từ 12 giờ trở lên trước giờ chạy: Hoàn tiền 100%',
+      'Hủy trước giờ chạy 6-12 giờ: Hoàn tiền 80% (Phí hủy 20%)',
+      'Hủy dưới 6 giờ trước giờ chạy: Không hoàn tiền',
+      'Chuyến chậm hơn 30 phút so với giờ chạy: Hoàn tiền 100%, không thu phí hủy',
+      'Nhà xe không nhận đón/trả tận nhà bạn đã đặt: Hoàn tiền 100%, không thu phí hủy',
+      'Vé đã hủy không khôi phục được, ghế được nhả ngay cho người khác.',
+    ],
+  );
+
+  static CancelPolicy fromJson(Map<String, dynamic>? j) {
+    final tiers = [
+      for (final t in (j?['tiers'] as List? ?? const []))
+        (minHours: (t['min_hours_before'] as num).toInt(), percent: (t['refund_percent'] as num).toInt()),
+    ];
+    if (tiers.isEmpty) return fallback;
+    return CancelPolicy(
+      tiers: tiers,
+      delayWaiverMinutes: (j!['delay_waiver_minutes'] as num?)?.toInt(),
+      rules: [for (final r in (j['rules'] as List? ?? const [])) '$r'],
+    );
+  }
+
+  /// The tier for a cancellation [hours] before the departure, worded as the server words it.
+  ({int percent, String tier}) tierFor(double hours) {
+    var i = tiers.indexWhere((t) => hours >= t.minHours);
+    if (i < 0) i = tiers.length - 1;
+    final (minHours: from, :percent) = tiers[i];
+    final refund = percent >= 100 ? 'Hoàn tiền 100%' : (percent <= 0 ? 'Không hoàn tiền' : 'Hoàn tiền $percent% (Phí hủy ${100 - percent}%)');
+    if (i == 0) return (percent: percent, tier: from == 0 ? 'Hủy trước giờ chạy: $refund' : 'Hủy từ $from giờ trở lên trước giờ chạy: $refund');
+    final to = tiers[i - 1].minHours;
+    return (percent: percent, tier: from == 0 ? 'Hủy dưới $to giờ trước giờ chạy: $refund' : 'Hủy trước giờ chạy $from-$to giờ: $refund');
+  }
 }
 
 /// A home address the server accepted for pickup or drop-off, with its fee.
@@ -143,6 +289,16 @@ class Stop {
   String get short => name.replaceFirst('Bến xe ', '').replaceFirst('Phía Bắc Thanh Hóa', 'Phía Bắc TH');
 }
 
+const bookingClosedCodes = {
+  'TRIP_DEPARTED',
+  'BOOKING_CUTOFF_PASSED',
+  'SALES_CLOSED',
+  'TRIP_CANCELLED',
+  'TRIP_COMPLETED',
+  'ROUTE_SUSPENDED',
+  'TRIP_NOT_SCHEDULED',
+};
+
 class Trip {
   const Trip({
     required this.id,
@@ -163,6 +319,10 @@ class Trip {
     this.pickupModes = const ['FIXED_STOP'],
     this.dropoffModes = const ['FIXED_LOCATION'],
     this.routeShape = const [],
+    this.bookable = true,
+    this.blockCode,
+    this.blockMessage,
+    this.bookUntil,
   });
   /// How the route offers fixed stops: ROUTE_LINE (drawn like a bus line) or STATIONS (stations only).
   final String stopStyle;
@@ -188,6 +348,81 @@ class Trip {
   final int seatsLeft;
   final String plate;
   final List<Stop> stops;
+
+  final bool bookable;
+  final String? blockCode;
+  final String? blockMessage;
+  final DateTime? bookUntil;
+
+  bool get bookableNow => bookable && (bookUntil == null || DateTime.now().isBefore(bookUntil!));
+
+  String get blockLabel {
+    if (blockCode == 'TRIP_DEPARTED') return 'Đã xuất bến';
+    if (blockCode == 'SALES_CLOSED') return 'Nhà xe ngừng bán';
+    if (blockCode == 'TRIP_CANCELLED') return 'Nhà xe đã hủy chuyến';
+    if (blockCode == 'BOOKING_CUTOFF_PASSED' || (bookUntil != null && !DateTime.now().isBefore(bookUntil!))) {
+      return 'Hết giờ đặt online';
+    }
+    return 'Không đặt được';
+  }
+
+  String? get effectiveBlockMessage {
+    if (blockMessage != null && blockMessage!.isNotEmpty) return blockMessage;
+    if (bookUntil != null && !DateTime.now().isBefore(bookUntil!)) {
+      return 'Đã hết giờ đặt vé trực tuyến. Gọi tổng đài nhà xe để được hỗ trợ.';
+    }
+    return null;
+  }
+
+  Trip copyWith({
+    String? id,
+    String? dep,
+    String? arr,
+    String? duration,
+    String? type,
+    bool? vip,
+    int? price,
+    String? from,
+    String? to,
+    String? via,
+    int? seatsLeft,
+    String? plate,
+    List<Stop>? stops,
+    String? day,
+    String? stopStyle,
+    List<String>? pickupModes,
+    List<String>? dropoffModes,
+    List<(double, double)>? routeShape,
+    bool? bookable,
+    String? blockCode,
+    String? blockMessage,
+    DateTime? bookUntil,
+  }) {
+    return Trip(
+      id: id ?? this.id,
+      dep: dep ?? this.dep,
+      arr: arr ?? this.arr,
+      duration: duration ?? this.duration,
+      type: type ?? this.type,
+      vip: vip ?? this.vip,
+      price: price ?? this.price,
+      from: from ?? this.from,
+      to: to ?? this.to,
+      via: via ?? this.via,
+      seatsLeft: seatsLeft ?? this.seatsLeft,
+      plate: plate ?? this.plate,
+      stops: stops ?? this.stops,
+      day: day ?? this.day,
+      stopStyle: stopStyle ?? this.stopStyle,
+      pickupModes: pickupModes ?? this.pickupModes,
+      dropoffModes: dropoffModes ?? this.dropoffModes,
+      routeShape: routeShape ?? this.routeShape,
+      bookable: bookable ?? this.bookable,
+      blockCode: blockCode ?? this.blockCode,
+      blockMessage: blockMessage ?? this.blockMessage,
+      bookUntil: bookUntil ?? this.bookUntil,
+    );
+  }
 
   factory Trip.fromJson(Map<String, dynamic> j) {
     final dep = DateTime.parse(j['departure_time']).toUtc().add(const Duration(hours: 7));
@@ -236,6 +471,10 @@ class Trip {
       pickupModes: [for (final m in (j['service']?['pickup_modes'] as List? ?? const ['FIXED_STOP'])) '$m'],
       dropoffModes: [for (final m in (j['service']?['dropoff_modes'] as List? ?? const ['FIXED_LOCATION'])) '$m'],
       routeShape: [for (final p in (j['route_shape'] as List? ?? const [])) ((p[0] as num).toDouble(), (p[1] as num).toDouble())],
+      bookable: (j['bookable'] == false || j['bookable'] == 'false') ? false : true,
+      blockCode: j['block_code'] as String?,
+      blockMessage: j['block_message'] as String?,
+      bookUntil: j['book_until'] != null ? DateTime.tryParse('${j['book_until']}') : null,
     );
   }
 }
@@ -266,10 +505,13 @@ class Ticket {
   Ticket({
     required this.id,
     required this.pnr,
+    this.orderId,
+    List<String>? ticketIds,
     required this.tripId,
     required this.route,
     required this.date,
     required this.dep,
+    this.departureTime,
     required this.seat,
     required this.pickup,
     this.dropoff = '',
@@ -286,18 +528,33 @@ class Ticket {
     this.homePickupReason,
     this.homeDropoffReason,
     this.past = false,
-  });
+    this.pickupTime,
+    this.pickupTimeEstimated = false,
+    this.paymentStatus = '',
+    this.paymentMethod = 'VIETQR_NAPAS247',
+    this.codDue = 0,
+    this.refundInfo,
+  }) : ticketIds = ticketIds ?? (id.isNotEmpty ? [id] : const []);
   final String id;
   final String pnr;
+  final String? orderId;
+  final List<String> ticketIds;
   final String tripId;
   final String route;
   final String date;
   final String dep;
+  final String? departureTime;
   final String seat;
   final String pickup;
   final String dropoff;
   final int paid;
   final String name;
+  final String paymentStatus;
+  final String paymentMethod;
+  final int codDue;
+  /// Planned pickup stop time if different from first departure.
+  final String? pickupTime;
+  final bool pickupTimeEstimated;
   /// Home pickup / drop-off address (spec 3.1); the ticket still rides from [pickup] to [dropoff].
   final String? homePickup;
   final String? homeDropoff;
@@ -321,13 +578,129 @@ class Ticket {
   String? qrValue;
   String? pin;
   int? refund;
+  TicketRefund? refundInfo;
   bool past;
+  /// D178: the pass shown is the one saved on the device; the server could not be reached.
+  bool qrFromCache = false;
 
+  Ticket copyWith({
+    String? id,
+    String? pnr,
+    String? orderId,
+    List<String>? ticketIds,
+    String? tripId,
+    String? route,
+    String? date,
+    String? dep,
+    String? departureTime,
+    String? seat,
+    String? pickup,
+    String? dropoff,
+    int? paid,
+    String? name,
+    TicketStatus? status,
+    String? plate,
+    String? homePickup,
+    String? homeDropoff,
+    String? pickupWindow,
+    String? pickupNotice,
+    String? homePickupStatus,
+    String? homeDropoffStatus,
+    String? homePickupReason,
+    String? homeDropoffReason,
+    bool? past,
+    String? pickupTime,
+    bool? pickupTimeEstimated,
+    String? paymentStatus,
+    String? paymentMethod,
+    int? codDue,
+    TicketRefund? refundInfo,
+    int? delay,
+    int? qrVersion,
+    String? qrValue,
+    String? pin,
+    int? refund,
+    bool? qrFromCache,
+  }) {
+    final t = Ticket(
+      id: id ?? this.id,
+      pnr: pnr ?? this.pnr,
+      orderId: orderId ?? this.orderId,
+      ticketIds: ticketIds ?? this.ticketIds,
+      tripId: tripId ?? this.tripId,
+      route: route ?? this.route,
+      date: date ?? this.date,
+      dep: dep ?? this.dep,
+      departureTime: departureTime ?? this.departureTime,
+      seat: seat ?? this.seat,
+      pickup: pickup ?? this.pickup,
+      dropoff: dropoff ?? this.dropoff,
+      paid: paid ?? this.paid,
+      name: name ?? this.name,
+      status: status ?? this.status,
+      plate: plate ?? this.plate,
+      homePickup: homePickup ?? this.homePickup,
+      homeDropoff: homeDropoff ?? this.homeDropoff,
+      pickupWindow: pickupWindow ?? this.pickupWindow,
+      pickupNotice: pickupNotice ?? this.pickupNotice,
+      homePickupStatus: homePickupStatus ?? this.homePickupStatus,
+      homeDropoffStatus: homeDropoffStatus ?? this.homeDropoffStatus,
+      homePickupReason: homePickupReason ?? this.homePickupReason,
+      homeDropoffReason: homeDropoffReason ?? this.homeDropoffReason,
+      past: past ?? this.past,
+      pickupTime: pickupTime ?? this.pickupTime,
+      pickupTimeEstimated: pickupTimeEstimated ?? this.pickupTimeEstimated,
+      paymentStatus: paymentStatus ?? this.paymentStatus,
+      paymentMethod: paymentMethod ?? this.paymentMethod,
+      codDue: codDue ?? this.codDue,
+      refundInfo: refundInfo ?? this.refundInfo,
+    );
+    t.delay = delay ?? this.delay;
+    t.qrVersion = qrVersion ?? this.qrVersion;
+    t.qrValue = qrValue ?? this.qrValue;
+    t.pin = pin ?? this.pin;
+    t.refund = refund ?? this.refund;
+    t.qrFromCache = qrFromCache ?? this.qrFromCache;
+    return t;
+  }
+
+  bool get unpaidCash => paymentStatus == 'UNPAID_COD' && codDue > 0;
+
+  /// Whether the ticket is paid and how, as the passenger reads it (D187).
+  String get paymentLabel {
+    if (unpaidCash) return 'Chưa thanh toán · trả ${vnd(codDue)} tiền mặt khi lên xe';
+    final how = switch (paymentMethod) {
+      'CASH' || 'COD' => 'tiền mặt',
+      'VIETQR' || 'VIETQR_NAPAS247' || 'BANK_TRANSFER' => 'chuyển khoản VietQR',
+      'VNPAY_ONLINE' => 'VNPAY',
+      'COUNTER' || 'CASH_POS' => 'tại quầy',
+      'CARD_POS' => 'thẻ tại quầy',
+      _ => '',
+    };
+    return how.isEmpty ? 'Đã thanh toán' : 'Đã thanh toán · $how';
+  }
+
+  bool get isTransferPayment => !unpaidCash && paymentMethod != 'CASH';
   bool get active => status == TicketStatus.active || status == TicketStatus.boarded;
+  bool get isGroup => ticketIds.length > 1 || seat.contains(',');
   String get departure => delay == 0 ? dep : addMinutes(dep, delay);
+  String get effectivePickupTime {
+    final base = pickupTime ?? dep;
+    return delay == 0 ? base : addMinutes(base, delay);
+  }
+  String get pickupTimeLabel => '${pickupTimeEstimated ? 'khoảng ' : ''}$effectivePickupTime';
 
   factory Ticket.fromJson(Map<String, dynamic> j, {bool past = false}) {
     final dep = DateTime.parse(j['departure_time']).toUtc().add(const Duration(hours: 7));
+    String? pTime;
+    if (j['pickup_time'] != null) {
+      try {
+        final parsed = DateTime.parse(j['pickup_time']).toUtc().add(const Duration(hours: 7));
+        pTime = _hhmm(parsed);
+      } catch (_) {
+        pTime = j['pickup_time']?.toString();
+      }
+    }
     final status = switch (j['status']) {
       'ACTIVE' => TicketStatus.active,
       'BOARDED' => TicketStatus.boarded,
@@ -335,19 +708,25 @@ class Ticket {
       'REFUND_REQUESTED' || 'REFUNDED' => TicketStatus.refunding,
       _ => TicketStatus.cancelled,
     };
+    final tktIds = (j['ticket_ids'] as List?)?.map((e) => e.toString()).toList() ??
+        (j['ticket_id'] != null ? [j['ticket_id'].toString()] : const <String>[]);
     return Ticket(
-      id: j['ticket_id'],
-      pnr: j['pnr'],
+      id: j['ticket_id'] ?? (tktIds.isNotEmpty ? tktIds.first : ''),
+      pnr: j['pnr'] ?? '',
+      orderId: j['order_id']?.toString(),
+      ticketIds: tktIds,
       tripId: j['trip_id'],
       route: routeLabel(j['route_name'] ?? ''),
       date: '${const ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][dep.weekday % 7]} ${_two(dep.day)}/${_two(dep.month)}',
       dep: _hhmm(dep),
+      departureTime: j['departure_time']?.toString(),
       seat: j['seat_code'] ?? '',
       pickup: '${j['pickup_stop'] ?? ''}'.replaceFirst('Bến xe ', ''),
       dropoff: '${j['dropoff_stop'] ?? ''}'.replaceFirst('Bến xe ', ''),
       paid: (j['fare_vnd'] as num?)?.toInt() ?? 0,
       name: j['passenger_name'] ?? '',
       status: status,
+      plate: j['vehicle_plate']?.toString() ?? j['plate']?.toString() ?? '',
       homePickup: j['home_pickup']?['address'],
       homeDropoff: j['home_dropoff']?['address'],
       pickupWindow: _window(j['home_pickup']),
@@ -358,8 +737,16 @@ class Ticket {
       pickupNotice: j['home_pickup']?['inaccessible_at'] == null
           ? null
           : 'Xe không vào được địa chỉ (${j['home_pickup']['inaccessible_reason'] ?? ''})${j['home_pickup']['meeting_point'] != null ? '. Hẹn ở ${j['home_pickup']['meeting_point']}' : '. Tài xế sẽ gọi cho bạn'}',
-      past: past,
-    )..refund = (j['refund_amount_vnd'] as num?)?.toInt();
+      past: past || j['trip_completed'] == true,
+      pickupTime: pTime,
+      pickupTimeEstimated: j['pickup_time_estimated'] == true,
+      paymentStatus: '${j['payment_status'] ?? ''}',
+      paymentMethod: '${j['payment_method'] ?? (j['payment_status'] == 'UNPAID_COD' ? 'CASH' : 'VIETQR_NAPAS247')}',
+      codDue: (j['cod_amount_vnd'] as num?)?.toInt() ?? 0,
+      refundInfo: j['refund'] is Map<String, dynamic>
+          ? TicketRefund.fromJson(j['refund'] as Map<String, dynamic>)
+          : (j['refund_id'] != null || j['refund_status'] != null ? TicketRefund.fromJson(j) : null),
+    )..refund = (j['refund'] is Map<String, dynamic> ? (j['refund']['amount_vnd'] as num?)?.toInt() : null) ?? (j['refund_amount_vnd'] as num?)?.toInt();
   }
 }
 
@@ -389,13 +776,76 @@ class PromoBanner {
       );
 }
 
+/// SH-006: one titled text of the about screen (terms of use, or the model and data notice).
+class LegalDoc {
+  const LegalDoc(this.title, this.sections);
+  final String title;
+  final List<LegalSection> sections;
+
+  factory LegalDoc.fromJson(Map<String, dynamic> j) => LegalDoc('${j['title'] ?? ''}', [
+        for (final s in (j['sections'] as List? ?? const []))
+          if (s is Map<String, dynamic>) LegalSection.fromJson(s),
+      ]);
+}
+
+class LegalSection {
+  const LegalSection(this.heading, this.body, [this.links = const []]);
+  final String heading;
+  final String body;
+  final List<({String label, String url})> links;
+
+  factory LegalSection.fromJson(Map<String, dynamic> j) => LegalSection('${j['heading'] ?? ''}', '${j['body'] ?? ''}', [
+        for (final l in (j['links'] as List? ?? const []))
+          if (l is Map<String, dynamic>) (label: '${l['label'] ?? ''}', url: '${l['url'] ?? ''}'),
+      ]);
+}
+
+class LegalUrls {
+  const LegalUrls({this.terms, this.privacy, this.accountDeletion});
+  final String? terms;
+  final String? privacy;
+  final String? accountDeletion;
+
+  factory LegalUrls.fromJson(Map<String, dynamic> j) => LegalUrls(
+        terms: j['terms'] as String?,
+        privacy: j['privacy'] as String?,
+        accountDeletion: j['account_deletion'] as String?,
+      );
+}
+
+class LegalInfo {
+  const LegalInfo({
+    required this.version,
+    required this.effectiveDate,
+    required this.terms,
+    required this.privacy,
+    required this.modelNotice,
+    this.urls = const LegalUrls(),
+  });
+  final String version;
+  final String effectiveDate;
+  final LegalDoc terms;
+  final LegalDoc privacy;
+  final LegalDoc modelNotice;
+  final LegalUrls urls;
+
+  factory LegalInfo.fromJson(Map<String, dynamic> j) => LegalInfo(
+        version: '${j['version'] ?? ''}',
+        effectiveDate: '${j['effective_date'] ?? ''}',
+        terms: LegalDoc.fromJson(j['terms'] as Map<String, dynamic>? ?? const {}),
+        privacy: LegalDoc.fromJson(j['privacy'] as Map<String, dynamic>? ?? const {}),
+        modelNotice: LegalDoc.fromJson(j['model_notice'] as Map<String, dynamic>? ?? const {}),
+        urls: LegalUrls.fromJson(j['urls'] as Map<String, dynamic>? ?? const {}),
+      );
+}
+
 Color? _hexColor(Object? hex) {
   if (hex is! String || !RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(hex)) return null;
   return Color(0xFF000000 | int.parse(hex.substring(1), radix: 16));
 }
 
 class AppNotice {
-  AppNotice(this.title, this.body, this.time, {this.tripId, this.type = '', this.id = '', this.ticketId, this.isRead = true});
+  AppNotice(this.title, this.body, this.time, {this.tripId, this.type = '', this.id = '', this.ticketId, this.pnr, this.isRead = true});
   final String title;
   final String body;
   final String time;
@@ -403,6 +853,7 @@ class AppNotice {
   final String type;
   final String id;
   final String? ticketId;
+  final String? pnr;
   final bool isRead;
 
   /// D144: the notices that make someone go out to the bus; the app shows them on top of any screen.
@@ -497,11 +948,18 @@ class Tracking {
     this.queuePosition,
     this.queueTotal,
     this.readyStatus,
+    this.unreachable = false,
     this.readyMinutes,
     this.homeWaitMinutes,
     this.doorArrivedAt,
+    this.nearDoor = false,
+    this.atDoor = false,
+    this.ended = false,
+    this.tripStatus,
   });
 
+  /// The passenger's phone could not reach the server; nothing is known about the bus from this answer.
+  final bool unreachable;
   final GpsSignal signal;
   final int? etaMinutes;
   final double? distanceKm;
@@ -533,14 +991,20 @@ class Tracking {
   final int? readyMinutes;
   final int? homeWaitMinutes;
   final DateTime? doorArrivedAt;
+  /// D159, home pickup: the bus is a few hundred metres from the door, or pulled up at it.
+  final bool nearDoor;
+  final bool atDoor;
+  final bool ended;
+  final String? tripStatus;
 }
 
 /// Result of a call: null message means success.
 class ApiResult<T> {
-  const ApiResult(this.value, [this.error, this.code]);
+  const ApiResult(this.value, [this.error, this.code, this.raw]);
   final T? value;
   final String? error;
   final String? code;
+  final Map<String, dynamic>? raw;
   bool get ok => error == null;
 }
 
@@ -569,22 +1033,44 @@ String vnd(int amount) {
 String maskPhone(String phone) => phone.length < 7 ? phone : '${phone.substring(0, 4)} *** ${phone.substring(phone.length - 3)}';
 
 const _networkError = 'Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.';
+const insecureMessage = insecureConnectionErrorMessage;
 
 class PassengerStore extends ChangeNotifier {
   PassengerStore({PassengerApiClientService? api}) : api = api ?? PassengerApiClientService();
 
   final PassengerApiClientService api;
 
+  static const appVersion = passengerAppVersion;
+
   OperatorInfo? operator;
   Map<String, Place> places = {};
 
-  static const knownVouchers = {'BUSGO50K': 50000};
+  bool get insuranceEnabled => operator?.insuranceEnabled ?? false;
+  bool get walletEnabled => operator?.walletEnabled ?? false;
+
+  int walletBalanceVnd = 0;
+
   static const maxSeats = 5;
 
   // Session
   String? userName;
   String? userPhone;
+  /// The photo the passenger chose (D186), kept on the device so it shows offline too.
+  Uint8List? userAvatar;
+  bool isVip = false;
   bool get loggedIn => api.authToken != null;
+
+  /// D178: when the wallet shown was saved, while the server cannot be reached; null when it is fresh.
+  DateTime? walletOfflineSince;
+  /// Why the last payment check had no answer ('NETWORK'), so a manual check does not blame the transfer.
+  String? lastPaymentCheckCode;
+  /// Error code of the last holdSeats or createOrder failure (D185).
+  String? lastErrorCode;
+  /// No station could be shown, not even saved ones; the home screen offers to try again.
+  String? placesError;
+
+  /// The server refused the saved session as expired; the wallet asks to sign in again and says why.
+  bool sessionExpired = false;
   String? devOtp; // development server only: fills the OTP field like an SMS autofill
 
   // Search
@@ -607,7 +1093,8 @@ class PassengerStore extends ChangeNotifier {
   HomeAddress? homePickup;
   HomeAddress? homeDropoff;
   List<ServiceArea> serviceAreas = [];
-  int get homeFees => (homePickup?.feeVnd ?? 0) + (homeDropoff?.feeVnd ?? 0);
+  CancelPolicy cancelPolicy = CancelPolicy.fallback;
+  int get homeFees => isVip ? 0 : (homePickup?.feeVnd ?? 0) + (homeDropoff?.feeVnd ?? 0);
   int deck = 1;
   int seatColumns = 1;
   List<Seat> seatMap = [];
@@ -615,13 +1102,26 @@ class PassengerStore extends ChangeNotifier {
   final List<String> seats = [];
   String? holdId;
   String? voucher;
+  int voucherDiscount = 0;
   bool insured = false;
+  String paymentMethod = 'VIETQR_NAPAS247';
+  bool get payByCash => paymentMethod == 'CASH';
+  /// A company that takes cash only starts on cash; a 0 đ order is always settled as a transfer.
+  String get defaultPaymentMethod => operator?.allowTransfer == false && operator?.allowCash != false ? 'CASH' : 'VIETQR_NAPAS247';
 
   // Order and payment (PAX-013)
   String? orderId;
   String? orderPnr;
   int orderAmount = 0;
+  /// After an underpaid transfer: what the bank reported and what is still missing (D189).
+  int orderPaidVnd = 0;
+  int orderRemainingVnd = 0;
+  bool get underpaid => orderPaidVnd > 0 && orderRemainingVnd > 0;
+  /// What the passenger still has to transfer.
+  int get amountDue => underpaid ? orderRemainingVnd : orderAmount;
+  String get underpaidNotice => 'Đã nhận ${vnd(orderPaidVnd)}. Còn thiếu ${vnd(orderRemainingVnd)}: chuyển thêm ${vnd(orderRemainingVnd)} với đúng nội dung bên dưới.';
   String bankName = '';
+  String accountName = '';
   String accountNumber = '';
   String transferMemo = '';
   String vietQrPayload = '';
@@ -673,8 +1173,13 @@ class PassengerStore extends ChangeNotifier {
   List<TravelDate> get bookableDates => [for (final d in calendar.days) TravelDate.of(d, today: calendar.today)];
 
   ApiResult<Map<String, dynamic>> _result(Map<String, dynamic> json) {
+    // A session that ran out while the app stayed open (12 h): sign out at once instead of showing an empty wallet.
+    if ((json['code'] == 'TOKEN_EXPIRED' || json['code'] == 'INVALID_TOKEN') && api.authToken != null) {
+      sessionExpired = true;
+      logout();
+    }
     if (json['status'] == 'success') return ApiResult(json['data'] is Map<String, dynamic> ? json['data'] as Map<String, dynamic> : {'value': json['data']});
-    return ApiResult(null, '${json['message'] ?? 'Có lỗi, thử lại sau.'}', '${json['code'] ?? ''}');
+    return ApiResult(null, '${json['message'] ?? 'Có lỗi, thử lại sau.'}', '${json['code'] ?? ''}', json);
   }
 
   Future<ApiResult<Map<String, dynamic>>> _call(Future<Map<String, dynamic>> Function() request) async {
@@ -686,21 +1191,28 @@ class PassengerStore extends ChangeNotifier {
   }
 
   // ---------- Operator & Places ----------
+  void _applyConfig(String code, Map<String, dynamic> config, SharedPreferences prefs) {
+    api.operatorCode = code;
+    operator = OperatorInfo.fromJson(config['operator'] as Map<String, dynamic>);
+    paymentMethod = defaultPaymentMethod;
+    calendar = ServiceCalendar.fromJson(config['service_calendar'] as Map<String, dynamic>?);
+    fixedEndpoints = FixedEndpoints.fromJson(config['fixed_endpoints']);
+    _rememberedRides = _readRides(prefs.getString('rides_$code'));
+  }
+
   Future<String?> selectOperator(String rawCode) async {
+    if (!api.isSecure) return insecureConnectionErrorMessage;
     final code = rawCode.trim().toUpperCase();
     if (code.isEmpty) return 'Nhập mã nhà xe';
     
     final r = await _call(() => api.getAppConfig(operatorCode: code));
     if (!r.ok) return r.error;
     
-    api.operatorCode = code;
-    operator = OperatorInfo.fromJson(r.value!['operator'] as Map<String, dynamic>);
-    calendar = ServiceCalendar.fromJson(r.value!['service_calendar'] as Map<String, dynamic>?);
-    fixedEndpoints = FixedEndpoints.fromJson(r.value!['fixed_endpoints']);
-    
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('operator_code', code);
-    _rememberedRides = _readRides(prefs.getString('rides_$code'));
+    // D178: kept so the app opens on this company without a network.
+    await prefs.setString('config_$code', jsonEncode(r.value!));
+    _applyConfig(code, r.value!, prefs);
     
     await loadPlaces();
     notifyListeners();
@@ -716,6 +1228,17 @@ class PassengerStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  LegalInfo? legalInfo;
+
+  /// SH-006: the terms and notices come from the server so they change without an app release (D157).
+  Future<ApiResult<LegalInfo>> loadLegal() async {
+    final r = await _call(api.getLegal);
+    if (!r.ok) return ApiResult(null, r.error, r.code);
+    final info = LegalInfo.fromJson(r.value!);
+    legalInfo = info;
+    return ApiResult(info);
+  }
+
   /// The HTML page of one slide; the error is shown in place of the page.
   Future<ApiResult<String>> loadBannerPage(String bannerId) async {
     final r = await _call(() => api.getPromoBanner(bannerId));
@@ -727,12 +1250,70 @@ class PassengerStore extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final code = prefs.getString('operator_code');
     if (code != null && code.isNotEmpty) {
-      await selectOperator(code); // silently ignore errors
+      final error = await selectOperator(code); // other errors: the passenger picks the company again
+      // D178: offline, the company saved on the last start; the wallet and its passes come from the device too.
+      final cached = prefs.getString('config_$code');
+      if (operator == null && error == _networkError && cached != null) {
+        try {
+          _applyConfig(code, jsonDecode(cached) as Map<String, dynamic>, prefs);
+          await loadPlaces();
+        } catch (_) {}
+      }
+      if (operator != null) await _restoreSession(prefs);
+    }
+  }
+
+  static const _sessionKey = 'passenger_session';
+
+  /// Keeps the signed-in passenger on the device so reopening the app does not ask for an OTP again.
+  Future<void> _saveSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_sessionKey, jsonEncode({'token': api.authToken, 'operator_code': operator?.code, 'phone': userPhone, 'name': userName, 'vip': isVip}));
+  }
+
+  /// Signs the passenger back in with the saved token of this company while it has not expired.
+  Future<void> _restoreSession(SharedPreferences prefs) async {
+    final raw = prefs.getString(_sessionKey);
+    if (raw == null) return;
+    try {
+      final s = jsonDecode(raw) as Map<String, dynamic>;
+      final token = s['token'];
+      if (token is! String || s['operator_code'] != operator?.code || !tokenStillValid(token)) {
+        isVip = false;
+        await prefs.remove(_sessionKey);
+        return;
+      }
+      api.authToken = token;
+      userPhone = s['phone'] as String?;
+      userName = s['name'] as String?;
+      isVip = s['vip'] == true;
+      final avatar = prefs.getString(_avatarKey);
+      userAvatar = avatar == null ? null : base64Decode(avatar);
+    } catch (_) {
+      isVip = false;
+      await prefs.remove(_sessionKey);
+      return;
+    }
+    notifyListeners();
+    unawaited(loadTickets());
+    unawaited(loadNotices());
+    unawaited(_registerDevice());
+  }
+
+  /// The server's token is `<prefix><base64url(json)>.<signature>` with `exp` in milliseconds.
+  static bool tokenStillValid(String token, {DateTime? now}) {
+    try {
+      final body = token.split('_jwt_').last.split('.').first;
+      final payload = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(body)))) as Map<String, dynamic>;
+      final exp = payload['exp'];
+      return exp is num && exp > (now ?? DateTime.now()).millisecondsSinceEpoch;
+    } catch (_) {
+      return false;
     }
   }
 
   Future<void> changeOperator() async {
-    logout();
+    await logout();
     operator = null;
     fixedEndpoints = null;
     places.clear();
@@ -759,55 +1340,98 @@ class PassengerStore extends ChangeNotifier {
     return lower;
   }
 
+  void _populatePlaces(List<dynamic> json) {
+    final cityGroups = <String, List<Map<String, dynamic>>>{};
+    for (final s in json) {
+      if (s is! Map<String, dynamic>) continue;
+      final city = s['city'] as String? ?? '';
+      if (city.isEmpty) continue;
+      final code = _foldToCode(city);
+      (cityGroups[code] ??= []).add(s);
+    }
+    
+    places.clear();
+    for (final e in cityGroups.entries) {
+      final code = e.key;
+      final group = e.value;
+      final city = group.first['city'] as String;
+      final sorted = group.toList()..sort((a, b) => (b['popular'] == true ? 1 : 0).compareTo(a['popular'] == true ? 1 : 0));
+      final mainStation = sorted.first['name'] as String;
+      final alt = sorted.skip(1).map((s) => s['name'] as String).toList();
+      places[code] = Place(code, city, mainStation, alt);
+    }
+
+    final fixed = fixedEndpoints;
+    if (fixed != null) {
+      // The two stations the company set: shown as they are, nothing else to pick.
+      final o = _foldToCode(fixed.originCity);
+      final d = _foldToCode(fixed.destCity);
+      places[o] = Place(o, fixed.originCity, fixed.originStation, const []);
+      places[d] = Place(d, fixed.destCity, fixed.destStation, const []);
+      origin = o;
+      dest = d;
+    } else if (places.isNotEmpty) {
+      final hn = places.values.where((p) => p.city == 'Hà Nội').firstOrNull;
+      origin = hn?.code ?? places.keys.first;
+      
+      final th = places.values.where((p) => p.city == 'Thanh Hóa').firstOrNull;
+      dest = th?.code ?? places.keys.lastWhere((k) => k != origin, orElse: () => places.keys.first);
+    }
+  }
+
   Future<void> loadPlaces() async {
+    if (!api.isSecure) {
+      places = {};
+      placesError = insecureConnectionErrorMessage;
+      notifyListeners();
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final op = operator?.code ?? api.operatorCode ?? prefs.getString('operator_code') ?? '';
     try {
       final json = await api.searchStations('');
-      final cityGroups = <String, List<Map<String, dynamic>>>{};
-      for (final s in json) {
-        final city = s['city'] as String? ?? '';
-        if (city.isEmpty) continue;
-        final code = _foldToCode(city);
-        (cityGroups[code] ??= []).add(s as Map<String, dynamic>);
-      }
-      
-      places.clear();
-      for (final e in cityGroups.entries) {
-        final code = e.key;
-        final group = e.value;
-        final city = group.first['city'] as String;
-        final sorted = group.toList()..sort((a, b) => (b['popular'] == true ? 1 : 0).compareTo(a['popular'] == true ? 1 : 0));
-        final mainStation = sorted.first['name'] as String;
-        final alt = sorted.skip(1).map((s) => s['name'] as String).toList();
-        places[code] = Place(code, city, mainStation, alt);
-      }
-
-      final fixed = fixedEndpoints;
-      if (fixed != null) {
-        // The two stations the company set: shown as they are, nothing else to pick.
-        final o = _foldToCode(fixed.originCity);
-        final d = _foldToCode(fixed.destCity);
-        places[o] = Place(o, fixed.originCity, fixed.originStation, const []);
-        places[d] = Place(d, fixed.destCity, fixed.destStation, const []);
-        origin = o;
-        dest = d;
-      } else if (places.isNotEmpty) {
-        final hn = places.values.where((p) => p.city == 'Hà Nội').firstOrNull;
-        origin = hn?.code ?? places.keys.first;
-        
-        final th = places.values.where((p) => p.city == 'Thanh Hóa').firstOrNull;
-        dest = th?.code ?? places.keys.lastWhere((k) => k != origin, orElse: () => places.keys.first);
+      _populatePlaces(json);
+      placesError = null;
+      if (op.isNotEmpty) {
+        await prefs.setString('stations_$op', jsonEncode(json));
       }
     } catch (_) {
-      // Ignore network errors on loadPlaces as instructed or leave empty
+      // D178: offline, the stations saved on the last start, so the search form is never blank.
+      final cached = op.isNotEmpty ? prefs.getString('stations_$op') : null;
+      if (cached != null) {
+        try {
+          final list = (jsonDecode(cached) as List).cast<dynamic>();
+          _populatePlaces(list);
+          placesError = null;
+          notifyListeners();
+          return;
+        } catch (_) {}
+      }
+      placesError = _networkError;
     }
+    notifyListeners();
   }
 
 
   // ---------- Login (PAX-002 / PAX-003) ----------
+  int otpCooldownSeconds = 60;
+  int? lastRemainingCooldown;
+
   Future<String?> requestOtp(String phone) async {
     final r = await _call(() => api.requestOtp(phone));
-    if (!r.ok) return r.error;
+    if (!r.ok) {
+      // COOLDOWN_ACTIVE tells how long to wait; the resend button counts it down.
+      final details = r.raw?['details'];
+      final cd = details is Map ? details['remainingCooldown'] : null;
+      lastRemainingCooldown = cd is num && cd > 0 ? cd.toInt() : null;
+      return r.error;
+    }
+    lastRemainingCooldown = null;
     devOtp = r.value!['mock_otp']?.toString();
+    final cd = r.value!['cooldown_seconds'];
+    if (cd is num && cd > 0) {
+      otpCooldownSeconds = cd.toInt();
+    }
     return null;
   }
 
@@ -822,10 +1446,17 @@ class PassengerStore extends ChangeNotifier {
     }
     
     userPhone = phone;
-    final name = r.value!['user']?['full_name'];
-    userName = name is String && name != 'Hành khách BusGo' ? name : null;
+    sessionExpired = false;
+    userName = _chosenName(r.value!['user']?['full_name']);
+    isVip = r.value!['user']?['is_vip'] == true;
     devOtp = null;
+    final op = r.value!['user']?['operator'];
+    if (op is Map<String, dynamic>) {
+      operator = OperatorInfo.fromJson(op);
+    }
+    await _saveSession();
     notifyListeners();
+    unawaited(loadProfile());
     unawaited(loadTickets());
     unawaited(loadNotices());
     // D144: the server learns this phone runs the app (a push token joins once push is set up).
@@ -833,13 +1464,102 @@ class PassengerStore extends ChangeNotifier {
     return null;
   }
 
-  void logout() {
+  static String? _chosenName(Object? name) => name is String && name.trim().isNotEmpty && name != 'Hành khách BusGo' ? name : null;
+
+  static const _avatarKey = 'passenger_avatar';
+
+  static Uint8List? _avatarBytes(Object? dataUrl) {
+    if (dataUrl is! String || !dataUrl.startsWith('data:image/')) return null;
+    final comma = dataUrl.indexOf(',');
+    try {
+      return comma < 0 ? null : base64Decode(dataUrl.substring(comma + 1));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// JPEG, PNG or WebP by their first bytes; null for any other format (HEIC, GIF), which the server refuses.
+  static String? avatarMime(Uint8List bytes) {
+    bool starts(List<int> magic) => bytes.length >= magic.length && [for (var i = 0; i < magic.length; i++) bytes[i] == magic[i]].every((b) => b);
+    if (starts([0xff, 0xd8, 0xff])) return 'image/jpeg';
+    if (starts([0x89, 0x50, 0x4e, 0x47])) return 'image/png';
+    if (starts([0x52, 0x49, 0x46, 0x46])) return 'image/webp';
+    return null;
+  }
+
+  void _applyProfile(Map<String, dynamic> p) {
+    final name = _chosenName(p['full_name']);
+    if (name != null) userName = name;
+    if (p.containsKey('avatar')) userAvatar = _avatarBytes(p['avatar']);
+  }
+
+  Future<void> _saveAvatar() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (userAvatar == null) {
+      await prefs.remove(_avatarKey);
+    } else {
+      await prefs.setString(_avatarKey, base64Encode(userAvatar!));
+    }
+  }
+
+  /// PAX-022 (D186): saves a new name and / or photo; [removeAvatar] deletes the photo. The phone never changes.
+  /// Returns an error to show, or null.
+  Future<String?> updateProfile({String? name, Uint8List? avatar, bool removeAvatar = false}) async {
+    String? dataUrl;
+    if (avatar != null) {
+      final mime = avatarMime(avatar);
+      if (mime == null) return 'Chọn ảnh JPEG hoặc PNG';
+      if (avatar.length > 256 * 1024) return 'Ảnh quá lớn, hãy chọn ảnh khác';
+      dataUrl = 'data:$mime;base64,${base64Encode(avatar)}';
+    }
+    final fullName = name?.trim().replaceAll(RegExp(r'\s+'), ' ');
+    // Without a photo change the avatar is left out of the request; removing it sends null.
+    final r = await _call(() => removeAvatar || dataUrl != null ? api.updateProfile(fullName: fullName, avatar: dataUrl) : api.updateProfile(fullName: fullName));
+    if (!r.ok) return r.error;
+    _applyProfile(r.value!);
+    await _saveSession();
+    await _saveAvatar();
+    notifyListeners();
+    return null;
+  }
+
+  Future<void> loadProfile() async {
+    if (!loggedIn) return;
+    final r = await _call(() => api.getProfile());
+    if (r.ok && r.value != null) {
+      _applyProfile(r.value!);
+      unawaited(_saveAvatar());
+      final bal = r.value!['wallet_balance_vnd'];
+      if (bal is num) {
+        walletBalanceVnd = bal.toInt();
+      }
+      final op = r.value!['operator'];
+      if (op is Map<String, dynamic>) {
+        operator = OperatorInfo.fromJson(op);
+      }
+      notifyListeners();
+    }
+  }
+
+  Future<void> logout() async {
+    final cacheKey = _walletCacheKey();
+    // D192: this phone stops getting the account's pushes; the request leaves before the session is cleared.
+    if (pushToken != null && loggedIn) unawaited(_call(() => api.registerDevice(platform: defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android')));
     api.authToken = null;
     userPhone = null;
     userName = null;
+    userAvatar = null;
+    isVip = false;
     tickets = [];
     notices = [];
+    walletOfflineSince = null;
+    _walletRows = {};
     notifyListeners();
+    // D178: the saved wallet leaves the device with the session.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_sessionKey);
+    await prefs.remove(_avatarKey);
+    if (cacheKey != null) await prefs.remove(cacheKey);
   }
 
   // ---------- Search (PAX-004 to PAX-006) ----------
@@ -903,6 +1623,13 @@ class PassengerStore extends ChangeNotifier {
   }
 
   Future<void> loadTrips() async {
+    if (!api.isSecure) {
+      trips = [];
+      tripsError = insecureConnectionErrorMessage;
+      loadingTrips = false;
+      notifyListeners();
+      return;
+    }
     loadingTrips = true;
     tripsError = null;
     notifyListeners();
@@ -984,6 +1711,7 @@ class PassengerStore extends ChangeNotifier {
     seats.clear();
     seatMap = [];
     deck = 1;
+    paymentMethod = defaultPaymentMethod;
     notifyListeners();
     if (t.homePickup || t.homeDropoff) loadServiceAreas();
   }
@@ -993,7 +1721,23 @@ class PassengerStore extends ChangeNotifier {
     final r = await _call(() => api.getServiceConfig());
     if (!r.ok) return;
     serviceAreas = [for (final a in (r.value!['service_areas'] as List? ?? const [])) ServiceArea.fromJson(a as Map<String, dynamic>)];
+    cancelPolicy = CancelPolicy.fromJson(r.value!['cancellation_policy'] as Map<String, dynamic>?);
     notifyListeners();
+  }
+
+  /// Reads the company's cancellation policy before the cancel sheet opens; offline, the last one read (or the
+  /// default) is shown and the server still applies its own.
+  Future<void> loadCancelPolicy() async {
+    final r = await _call(() => api.getServiceConfig());
+    if (!r.ok) return;
+    cancelPolicy = CancelPolicy.fromJson(r.value!['cancellation_policy'] as Map<String, dynamic>?);
+  }
+
+  /// The street address of a pinned point, or null when the server cannot tell (D187).
+  Future<String?> addressAt(double lat, double lng) async {
+    final r = await _call(() => api.reverseGeocode(lat, lng));
+    final address = r.ok ? (r.value?['address']) : null;
+    return address is String && address.trim().isNotEmpty ? address.trim() : null;
   }
 
   /// Checks a home address with the server for this trip; returns an error to show, or null once it is set.
@@ -1032,7 +1776,7 @@ class PassengerStore extends ChangeNotifier {
   String? homeServiceSummary({required bool pickupSide}) {
     final areas = serviceAreas.where((a) => a.kind == (pickupSide ? 'PICKUP' : 'DROPOFF')).toList();
     if (areas.isEmpty) return null;
-    final fees = areas.map((a) => a.feeVnd).toList()..sort();
+    final fees = areas.map((a) => feeOf(a.feeVnd)).toList()..sort();
     final lead = areas.map((a) => a.leadMinutes).reduce((a, b) => a < b ? a : b);
     final parts = [
       fees.first == fees.last ? '+${vnd(fees.first)}' : 'Từ +${vnd(fees.first)}',
@@ -1070,6 +1814,22 @@ class PassengerStore extends ChangeNotifier {
     if (!r.ok) {
       notifyListeners();
       return r.error;
+    }
+    if (trip != null && r.value != null) {
+      final val = r.value!;
+      final map = val['trip'] is Map<String, dynamic> ? val['trip'] as Map<String, dynamic> : val;
+      if (map.containsKey('bookable') || map.containsKey('block_code') || map.containsKey('book_until')) {
+        final b = map['bookable'];
+        final bc = map['block_code'] as String?;
+        final bm = map['block_message'] as String?;
+        final bu = map['book_until'] != null ? DateTime.tryParse('${map['book_until']}') : null;
+        trip = trip!.copyWith(
+          bookable: (b == false || b == 'false') ? false : (b == true ? true : trip!.bookable),
+          blockCode: bc ?? trip!.blockCode,
+          blockMessage: bm ?? trip!.blockMessage,
+          bookUntil: bu ?? trip!.bookUntil,
+        );
+      }
     }
     seatMap = (r.value!['seats'] as List).cast<Map<String, dynamic>>().map((s) {
       final state = switch ('${s['segment_state'] ?? s['state']}') {
@@ -1121,19 +1881,27 @@ class PassengerStore extends ChangeNotifier {
 
   Future<String?> holdSeats() async {
     final r = await _call(() => api.holdSeats(trip!.id, List.of(seats), pickupStopId: pickup, dropoffStopId: dropoff));
+    lastErrorCode = r.ok ? null : r.code;
     if (!r.ok) {
       if (r.code == 'SEAT_LOCKED_BY_OTHER' || r.code == 'SEAT_ALREADY_BOOKED' || r.code == 'SEAT_BLOCKED') await loadSeatMap();
       return r.error;
     }
     holdId = r.value!['hold_id'];
+    // Other seats or another trip price differently: a code applied before is checked again at checkout.
+    voucher = null;
+    voucherDiscount = 0;
+    paymentMethod = defaultPaymentMethod;
     _startCountdown('hold', (r.value!['seconds_remaining'] as num?)?.toInt() ?? 600);
     return null;
   }
 
+  int fareOf(Trip t) => isVip ? 0 : t.price;
+  int feeOf(int fee) => isVip ? 0 : fee;
+
   // ---------- Checkout (PAX-011 / PAX-012) ----------
-  int get baseFare => (trip?.price ?? 0) * seats.length;
-  int get insuranceFee => insured ? 10000 * seats.length : 0;
-  int get discount => voucher == null ? 0 : (knownVouchers[voucher]! < baseFare ? knownVouchers[voucher]! : baseFare);
+  int get baseFare => isVip ? 0 : (trip?.price ?? 0) * seats.length;
+  int get insuranceFee => isVip ? 0 : (insured ? 10000 * seats.length : 0);
+  int get discount => isVip ? 0 : (voucher == null ? 0 : (voucherDiscount < baseFare ? voucherDiscount : baseFare));
   // The home pickup / drop-off fee is per order, not per seat (server rule).
   int get total => baseFare + insuranceFee - discount + homeFees;
 
@@ -1142,17 +1910,32 @@ class PassengerStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  String? applyVoucher(String code) {
+  void setPaymentMethod(String m) {
+    if (m == 'CASH' && operator?.allowCash == false) return;
+    if (m != 'CASH' && operator?.allowTransfer == false && total > 0) return;
+    paymentMethod = m;
+    notifyListeners();
+  }
+
+  /// PAX-012: the company's server says whether the code applies and what it takes off this order.
+  Future<String?> applyVoucher(String code) async {
+    if (isVip) return 'Tài khoản VIP đã được miễn phí vé.';
     final c = code.trim().toUpperCase();
     if (c.isEmpty) return 'Nhập mã giảm giá.';
-    if (!knownVouchers.containsKey(c)) return 'Mã không hợp lệ hoặc đã hết hạn.';
-    voucher = c;
+    final r = await _call(() => api.checkVoucher(c, baseFare));
+    if (!r.ok) return r.error;
+    voucher = '${r.value!['code'] ?? c}';
+    voucherDiscount = (r.value!['discount_vnd'] as num?)?.toInt() ?? 0;
+    if (total <= 0) paymentMethod = 'VIETQR_NAPAS247';
     notifyListeners();
     return null;
   }
 
   void removeVoucher() {
     voucher = null;
+    voucherDiscount = 0;
+    // A free order was switched to transfer; with a fare again a cash-only company is back on cash.
+    if (operator?.allowTransfer == false) paymentMethod = defaultPaymentMethod;
     notifyListeners();
   }
 
@@ -1169,18 +1952,39 @@ class PassengerStore extends ChangeNotifier {
           dropoffStop: dropoff,
           homePickup: homePickup?.toJson(),
           homeDropoff: homeDropoff?.toJson(),
-          insuranceSelected: insured,
+          insuranceSelected: insuranceEnabled && insured,
+          paymentMethod: paymentMethod,
         ));
-    if (!r.ok) return r.error;
+    lastErrorCode = r.ok ? null : r.code;
+    if (!r.ok) {
+      // The code stopped applying since it was checked (used up, expired): drop it so the next try is at full price, shown first.
+      if (r.code != null && r.code!.startsWith('VOUCHER_')) removeVoucher();
+      return r.error;
+    }
     final pay = r.value!['payment'] as Map<String, dynamic>;
-    final details = pay['payment_details'] as Map<String, dynamic>;
+    final details = pay['payment_details'] as Map<String, dynamic>?;
     orderId = pay['order_id'];
     orderPnr = pay['pnr'];
     orderAmount = (pay['amount_vnd'] as num).toInt();
-    bankName = details['bank_name'] ?? '';
-    accountNumber = details['account_number'] ?? '';
-    transferMemo = details['transfer_memo'] ?? '';
-    vietQrPayload = details['qr_payload'] ?? '';
+    orderPaidVnd = 0;
+    orderRemainingVnd = 0;
+    if (pay['payment_method'] == 'CASH') {
+      paymentMethod = 'CASH';
+      bankName = '';
+      accountName = '';
+      accountNumber = '';
+      transferMemo = '';
+      vietQrPayload = '';
+      stopHold();
+      await loadTickets();
+      return null;
+    }
+    paymentMethod = 'VIETQR_NAPAS247';
+    bankName = details?['bank_name'] ?? '';
+    accountName = details?['account_name'] ?? '';
+    accountNumber = details?['account_number'] ?? '';
+    transferMemo = details?['transfer_memo'] ?? '';
+    vietQrPayload = details?['qr_payload'] ?? '';
     final expires = DateTime.tryParse('${pay['expires_at']}');
     _startCountdown('pay', expires == null ? 600 : expires.difference(DateTime.now()).inSeconds.clamp(60, 1800));
     return null;
@@ -1198,21 +2002,54 @@ class PassengerStore extends ChangeNotifier {
   Future<bool> checkPayment({bool manual = false}) async {
     if (orderId == null) return false;
     final r = await _call(() => api.verifyPaymentStatus(orderId!, manualTrigger: manual));
-    if (!r.ok || r.value!['payment_status'] != 'PAID') return false;
+    lastPaymentCheckCode = r.code;
+    final order = r.value?['data'];
+    if (order is Map<String, dynamic>) {
+      orderPaidVnd = (order['paid_amount_vnd'] as num?)?.toInt() ?? orderPaidVnd;
+      orderRemainingVnd = (order['remaining_vnd'] as num?)?.toInt() ?? orderRemainingVnd;
+      final payDetails = order['payment_details'] as Map?;
+      final qr = payDetails?['qr_payload'];
+      if (orderRemainingVnd > 0 && qr is String && qr.isNotEmpty) vietQrPayload = qr;
+      if (payDetails?['account_name'] is String && (payDetails!['account_name'] as String).isNotEmpty) {
+        accountName = payDetails['account_name'] as String;
+      }
+    }
+    if (!r.ok || r.value!['payment_status'] != 'PAID') {
+      notifyListeners();
+      return false;
+    }
     stopHold();
     await loadTickets();
     final issued = tickets.where((t) => t.pnr == orderPnr).toList();
     if (issued.isNotEmpty) {
       final first = issued.first;
-      lastTicket = Ticket(id: first.id, pnr: first.pnr, tripId: first.tripId, route: first.route, date: first.date, dep: first.dep, seat: issued.map((t) => t.seat).join(', '), pickup: first.pickup, paid: orderAmount, name: first.name, status: first.status, plate: trip?.plate ?? '', homePickup: first.homePickup, homeDropoff: first.homeDropoff, pickupWindow: first.pickupWindow);
+      final serverPlate = (r.value!['tickets'] as List? ?? [])
+          .cast<Map<String, dynamic>>()
+          .map((m) => m['vehicle_plate']?.toString() ?? m['plate']?.toString())
+          .firstWhere((p) => p != null && p.isNotEmpty, orElse: () => null);
+      final settledPlate = (first.plate.isNotEmpty ? first.plate : null) ??
+          serverPlate ??
+          (trip?.plate.isNotEmpty == true ? trip!.plate : '');
+      lastTicket = first.copyWith(
+        orderId: first.orderId ?? orderId,
+        ticketIds: issued.expand((t) => t.ticketIds.isNotEmpty ? t.ticketIds : [t.id]).toList(),
+        seat: issued.map((t) => t.seat).join(', '),
+        paid: orderAmount,
+        plate: settledPlate,
+        codDue: issued.fold<int>(0, (sum, t) => sum + t.codDue),
+      );
       for (final t in issued) {
-        t.plate = trip?.plate ?? '';
+        if (settledPlate.isNotEmpty) t.plate = settledPlate;
       }
     }
     orderId = null;
+    orderPaidVnd = 0;
+    orderRemainingVnd = 0;
     seats.clear();
     voucher = null;
+    voucherDiscount = 0;
     insured = false;
+    paymentMethod = defaultPaymentMethod;
     await loadNotices();
     return true;
   }
@@ -1222,7 +2059,10 @@ class PassengerStore extends ChangeNotifier {
     if (trip != null) await _call(() => api.releaseHold(trip!.id));
     orderId = null;
     orderPnr = null;
+    orderPaidVnd = 0;
+    orderRemainingVnd = 0;
     seats.clear();
+    paymentMethod = defaultPaymentMethod;
     notifyListeners();
   }
 
@@ -1250,30 +2090,104 @@ class PassengerStore extends ChangeNotifier {
   }
 
   // ---------- Wallet, pass, cancellation (PAX-016, PAX-017, PAX-021) ----------
+  /// D178: the wallet of this phone at this company, kept on the device so the pass shows without a network.
+  String? _walletCacheKey() {
+    final op = operator?.code ?? api.operatorCode;
+    final digits = (userPhone ?? '').replaceAll(RegExp(r'\D'), '');
+    if (op == null || op.isEmpty || digits.isEmpty) return null;
+    return 'wallet_${op}_$digits';
+  }
+
+  /// The server's rows of the last successful load, by tab; the cache writes them back with each pass.
+  Map<String, List<Map<String, dynamic>>> _walletRows = {};
+
+  Future<void> _saveWalletCache() async {
+    final key = _walletCacheKey();
+    if (key == null || _walletRows.isEmpty) return;
+    Map<String, dynamic> withPass(Map<String, dynamic> j) {
+      final t = tickets.where((t) => t.id == j['ticket_id']).firstOrNull;
+      return t == null ? j : {...j, '_qr': t.qrValue, '_qr_version': t.qrVersion, '_pin': t.pin};
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, jsonEncode({
+      'saved_at': DateTime.now().toIso8601String(),
+      for (final e in _walletRows.entries) e.key: [for (final j in e.value) withPass(j)],
+    }));
+  }
+
+  /// The tickets of one tab as last saved, with their pass; empty when nothing was saved.
+  List<Ticket> _cachedTickets(Map<String, dynamic>? cache, String tab) {
+    final rows = cache?[tab];
+    if (rows is! List) return [];
+    return [
+      for (final j in rows.cast<Map<String, dynamic>>())
+        Ticket.fromJson(j, past: tab == 'HISTORY' || tab == 'CANCELLED')
+          ..qrValue = j['_qr'] as String?
+          ..qrVersion = (j['_qr_version'] as num?)?.toInt() ?? 1
+          ..pin = j['_pin'] as String?,
+    ];
+  }
+
   Future<void> loadTickets() async {
     if (!loggedIn) return;
     loadingTickets = true;
     notifyListeners();
     final up = await _call(() => api.getTicketWallet(tab: 'UPCOMING'));
     final past = await _call(() => api.getTicketWallet(tab: 'HISTORY'));
-    final list = <Ticket>[];
-    if (up.ok) {
-      list.addAll(((up.value!['value'] ?? up.value) as List).cast<Map<String, dynamic>>().map(Ticket.fromJson));
+    final cancelled = await _call(() => api.getTicketWallet(tab: 'CANCELLED'));
+    List<Map<String, dynamic>> rows(ApiResult<Map<String, dynamic>> r) => ((r.value!['value'] ?? r.value) as List).cast<Map<String, dynamic>>();
+
+    // D178: without a network a tab keeps what is on screen, or what was saved on the device; never an empty wallet.
+    Map<String, dynamic>? cache;
+    if (up.code == 'NETWORK' || past.code == 'NETWORK' || cancelled.code == 'NETWORK') {
+      final raw = (await SharedPreferences.getInstance()).getString(_walletCacheKey() ?? '');
+      try {
+        cache = raw == null ? null : jsonDecode(raw) as Map<String, dynamic>;
+      } catch (_) {}
     }
-    if (past.ok) {
-      list.addAll(((past.value!['value'] ?? past.value) as List).cast<Map<String, dynamic>>().map((j) => Ticket.fromJson(j, past: true)));
+    List<Ticket> offlineTab(String tab) {
+      final shown = switch (tab) {
+        'UPCOMING' => tickets.where((t) => !t.past).toList(),
+        'CANCELLED' => tickets.where((t) => t.past && t.status == TicketStatus.cancelled).toList(),
+        _ => tickets.where((t) => t.past && t.status != TicketStatus.cancelled).toList(),
+      };
+      return shown.isNotEmpty ? shown : _cachedTickets(cache, tab);
     }
+
+    // History holds the trips taken and the cancelled tickets (with their refund), latest departure first.
+    final history = <Ticket>[
+      if (past.ok) ...rows(past).map((j) => Ticket.fromJson(j, past: true)) else if (past.code == 'NETWORK') ...offlineTab('HISTORY'),
+      if (cancelled.ok) ...rows(cancelled).map((j) => Ticket.fromJson(j, past: true)) else if (cancelled.code == 'NETWORK') ...offlineTab('CANCELLED'),
+    ]..sort((a, b) => (b.departureTime ?? '').compareTo(a.departureTime ?? ''));
+
+    final list = <Ticket>[
+      if (up.ok) ...rows(up).map(Ticket.fromJson) else if (up.code == 'NETWORK') ...offlineTab('UPCOMING'),
+      ...history,
+    ];
     for (final t in list) {
       final old = tickets.where((o) => o.id == t.id).firstOrNull;
-      if (old != null) t.plate = old.plate;
+      if (old == null || identical(old, t)) continue;
+      if (t.plate.isEmpty) t.plate = old.plate;
+      // The wallet rows carry no pass: keep the one already loaded until the pass screen asks again.
+      t.qrValue ??= old.qrValue;
+      t.pin ??= old.pin;
+      if (old.qrVersion > t.qrVersion) t.qrVersion = old.qrVersion;
     }
     tickets = list;
-    for (final tripId in tickets.where((t) => !t.past && t.active).map((t) => t.tripId).toSet()) {
-      final d = await _call(() => api.getDisruptions(tripId));
-      final minutes = d.ok ? (d.value!['delay_minutes'] ?? d.value!['current_delay_minutes'] ?? 0) : 0;
-      for (final t in tickets.where((t) => t.tripId == tripId)) {
-        t.delay = (minutes as num).toInt();
+
+    if (up.ok && past.ok && cancelled.ok) {
+      walletOfflineSince = null;
+      _walletRows = {'UPCOMING': rows(up), 'HISTORY': rows(past), 'CANCELLED': rows(cancelled)};
+      await _saveWalletCache();
+      for (final tripId in tickets.where((t) => !t.past && t.active).map((t) => t.tripId).toSet()) {
+        final d = await _call(() => api.getDisruptions(tripId));
+        final minutes = d.ok ? (d.value!['delay_minutes'] ?? d.value!['current_delay_minutes'] ?? 0) : 0;
+        for (final t in tickets.where((t) => t.tripId == tripId)) {
+          t.delay = (minutes as num).toInt();
+        }
       }
+    } else if (up.code == 'NETWORK' || past.code == 'NETWORK' || cancelled.code == 'NETWORK') {
+      walletOfflineSince = tickets.isEmpty ? null : DateTime.tryParse('${cache?['saved_at']}') ?? walletOfflineSince ?? DateTime.now();
     }
     loadingTickets = false;
     notifyListeners();
@@ -1281,25 +2195,80 @@ class PassengerStore extends ChangeNotifier {
 
   Future<String?> loadPass(Ticket t) async {
     final r = await _call(() => api.getTicketQR(t.id));
-    if (!r.ok) return r.error;
+    if (!r.ok) {
+      // D178: offline, the pass already on the device still boards the passenger.
+      if (r.code == 'NETWORK' && t.qrValue != null) {
+        t.qrFromCache = true;
+        notifyListeners();
+        return null;
+      }
+      return r.error;
+    }
+    t.qrFromCache = false;
     final qr = r.value!['boarding_qr'] as Map<String, dynamic>?;
-    t.qrValue = qr?['qr_code_value'];
     t.qrVersion = (qr?['version'] as num?)?.toInt() ?? t.qrVersion;
     t.pin = r.value!['offline_pin']?.toString();
     final status = r.value!['ticket']?['status'];
     if (status == 'BOARDED') t.status = TicketStatus.boarded;
+    if (r.value!['ticket']?['trip_completed'] == true) {
+      t.past = true;
+      _tripEnded[t.tripId] = true;
+    }
+    final vp = r.value!['ticket']?['vehicle_plate']?.toString();
+    final lp = r.value!['ticket']?['plate']?.toString();
+    final plate = (vp != null && vp.isNotEmpty) ? vp : ((lp != null && lp.isNotEmpty) ? lp : null);
+    if (plate != null) {
+      t.plate = plate;
+    }
+
+    if (t.isGroup) {
+      if (t.status == TicketStatus.active) {
+        final orderId = t.orderId ?? '';
+        if (orderId.isNotEmpty) {
+          final grp = await _call(() => api.getGroupQr(orderId));
+          if (!grp.ok) {
+            if (grp.code == 'NETWORK' && t.qrValue != null) {
+              t.qrFromCache = true;
+              notifyListeners();
+              return null;
+            }
+            return grp.error;
+          }
+          final groupQr = grp.value!['group_qr'] as Map<String, dynamic>?;
+          t.qrValue = groupQr?['qr_code_value']?.toString();
+        }
+      } else {
+        t.qrValue = null;
+      }
+    } else {
+      t.qrValue = qr?['qr_code_value'];
+    }
+
+    await _saveWalletCache();
     notifyListeners();
     return null;
   }
 
   /// D104: a new QR version; the server refuses it once the trip has left (BOARDING_STARTED).
   Future<ApiResult<void>> reissueQr(Ticket t) async {
+    if (t.isGroup) {
+      final ids = t.ticketIds.isNotEmpty ? t.ticketIds : [t.id];
+      for (final id in ids) {
+        final r = await _call(() => api.reissueBoardingQr(id));
+        if (!r.ok) return ApiResult(null, r.error, r.code);
+      }
+      final err = await loadPass(t);
+      if (err != null) return ApiResult(null, err);
+      return const ApiResult(null);
+    }
     final r = await _call(() => api.reissueBoardingQr(t.id));
     if (!r.ok) return ApiResult(null, r.error, r.code);
     final qr = r.value!['boarding_qr'] as Map<String, dynamic>;
+    t.qrFromCache = false;
     t.qrValue = qr['qr_code_value'];
     t.qrVersion = (qr['version'] as num).toInt();
     t.pin = r.value!['offline_pin']?.toString();
+    await _saveWalletCache();
     notifyListeners();
     return const ApiResult(null);
   }
@@ -1311,11 +2280,19 @@ class PassengerStore extends ChangeNotifier {
 
   /// Preview of PAX-021 tiers; the server decides the refund.
   ({int percent, String tier}) refundFor(Ticket t) {
-    if (t.delay > 30) return (percent: 100, tier: 'Chuyến chậm hơn 30 phút: hoàn 100%, không phí');
+    if (t.unpaidCash) return (percent: 0, tier: 'Vé tiền mặt chưa thanh toán nên không phát sinh hoàn tiền.');
+    final waiver = cancelPolicy.delayWaiverMinutes;
+    if (waiver != null && t.delay > waiver) return (percent: 100, tier: 'Chuyến chậm hơn $waiver phút: hoàn 100%, không phí');
     if (t.homePickupStatus == 'REJECTED' || t.homeDropoffStatus == 'REJECTED') {
       return (percent: 100, tier: 'Nhà xe không nhận đón/trả tận nhà: hoàn 100% tiền còn lại, không phí');
     }
-    return (percent: -1, tier: 'Mức hoàn tính theo số giờ trước giờ chạy: từ 12 giờ hoàn 100%, 6 đến 12 giờ hoàn 80%, dưới 6 giờ không hoàn.');
+    if (t.departureTime != null) {
+      final depTime = DateTime.tryParse(t.departureTime!);
+      if (depTime != null) {
+        return cancelPolicy.tierFor(depTime.difference(DateTime.now()).inMinutes / 60.0);
+      }
+    }
+    return (percent: -1, tier: 'Mức hoàn tính theo số giờ trước giờ chạy, xem chính sách hủy vé bên dưới.');
   }
 
   /// Takes back a home pickup (pickupSide) or drop-off still under review; the fee is refunded (D130).
@@ -1327,25 +2304,108 @@ class PassengerStore extends ChangeNotifier {
     return const ApiResult(null);
   }
 
-  Future<ApiResult<int>> cancelTicket(Ticket t) async {
-    final r = await _call(() => api.cancelTicket(t.id));
-    if (!r.ok) return ApiResult(null, r.error, r.code);
-    final amount = (r.value!['refund_amount_vnd'] as num?)?.toInt() ?? 0;
+  Future<RefundAccount?> getLastRefundAccount() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('last_refund_account');
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final j = jsonDecode(raw);
+      if (j is Map<String, dynamic>) return RefundAccount.fromJson(j);
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> saveLastRefundAccount(RefundAccount account) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('last_refund_account', jsonEncode(account.toJson()));
+  }
+
+  /// Cancels the ticket, or the chosen seats of a multi-seat order one by one (D190); returns the refund asked for.
+  Future<ApiResult<int>> cancelTicket(Ticket t, {List<String>? ids, Map<String, dynamic>? refundAccount}) async {
+    var amount = 0;
+    for (final id in ids ?? [t.id]) {
+      final r = await _call(() => api.cancelTicket(id, refundAccount: refundAccount));
+      if (!r.ok) {
+        // Seats cancelled before the failure stay cancelled: show them as they are now.
+        await loadTickets();
+        return ApiResult(null, r.error, r.code);
+      }
+      amount += (r.value!['refund_amount_vnd'] as num?)?.toInt() ?? 0;
+    }
+    if (refundAccount != null) {
+      await saveLastRefundAccount(RefundAccount.fromJson(refundAccount));
+    }
     await loadTickets();
     await loadNotices();
     return ApiResult(amount);
   }
 
+  Future<ApiResult<Map<String, dynamic>>> updateRefundAccount(Ticket t, Map<String, dynamic> refundAccount) async {
+    final r = await _call(() => api.updateRefundAccount(t.id, refundAccount: refundAccount));
+    if (!r.ok) return ApiResult(null, r.error, r.code);
+    await saveLastRefundAccount(RefundAccount.fromJson(refundAccount));
+    if (r.value != null && r.value!['refund_account'] is Map<String, dynamic>) {
+      final masked = RefundAccount.fromJson(r.value!['refund_account'] as Map<String, dynamic>);
+      if (t.refundInfo != null) {
+        t.refundInfo = TicketRefund(
+          refundId: t.refundInfo!.refundId,
+          status: t.refundInfo!.status,
+          amountVnd: t.refundInfo!.amountVnd,
+          rejectNote: t.refundInfo!.rejectNote,
+          account: masked,
+        );
+      }
+    }
+    await loadTickets();
+    notifyListeners();
+    return ApiResult(r.value);
+  }
+
+  Future<ApiResult<void>> deleteAccount() async {
+    final cacheKey = _walletCacheKey();
+    final r = await _call(() => api.deleteAccount());
+    if (!r.ok) return ApiResult(null, r.error, r.code);
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_sessionKey);
+    await prefs.remove(_avatarKey);
+    await prefs.remove('last_refund_account');
+    if (cacheKey != null) await prefs.remove(cacheKey);
+
+    api.authToken = null;
+    userPhone = null;
+    userName = null;
+    userAvatar = null;
+    isVip = false;
+    tickets = [];
+    notices = [];
+    walletBalanceVnd = 0;
+    sessionExpired = false;
+    walletOfflineSince = null;
+    _walletRows = {};
+    notifyListeners();
+    return const ApiResult(null);
+  }
+
   // ---------- Tracking and notices (PAX-018, PAX-020) ----------
+  final Map<String, bool> _tripEnded = {};
+  bool isTripEnded(String tripId) => _tripEnded[tripId] == true;
+
   Future<Tracking> loadTracking(String tripId, {String? ticketId}) async {
     final r = await _call(() => api.getLiveRadarHUD(tripId, ticketId: ticketId));
-    if (!r.ok) return Tracking(GpsSignal.none, text: r.error!);
-    return _trackingFrom(r.value!);
+    if (!r.ok) return Tracking(GpsSignal.none, text: r.error!, unreachable: r.code == 'NETWORK');
+    final tr = _trackingFrom(r.value!);
+    if (tr.ended || tr.tripStatus == 'COMPLETED') _tripEnded[tripId] = true;
+    return tr;
   }
 
   /// The bus pushed by the server after each of its positions; errors or ends when the connection drops.
   Stream<Tracking> watchTracking(String tripId, {String? ticketId}) =>
-      api.watchLiveRadarHUD(tripId, ticketId: ticketId).map(_trackingFrom);
+      api.watchLiveRadarHUD(tripId, ticketId: ticketId).map((d) {
+        final tr = _trackingFrom(d);
+        if (tr.ended || tr.tripStatus == 'COMPLETED') _tripEnded[tripId] = true;
+        return tr;
+      });
 
   Tracking _trackingFrom(Map<String, dynamic> d) {
     final signal = switch (d['signal_status']) {
@@ -1428,6 +2488,10 @@ class PassengerStore extends ChangeNotifier {
       readyMinutes: (d['pickup_ready']?['minutes'] as num?)?.toInt(),
       homeWaitMinutes: (d['home_wait_minutes'] as num?)?.toInt(),
       doorArrivedAt: vn(d['door_arrived_at']),
+      nearDoor: d['near_door'] == true,
+      atDoor: d['at_door'] == true,
+      ended: d['tracking_ended'] == true || d['trip_status'] == 'COMPLETED',
+      tripStatus: d['trip_status'] as String?,
       location: loc == null
           ? null
           : BusLocation(
@@ -1446,11 +2510,11 @@ class PassengerStore extends ChangeNotifier {
     final list = ((r.value!['value'] ?? r.value) as List).cast<Map<String, dynamic>>();
     notices = [
       for (final n in list)
-        AppNotice(n['title'] ?? '', n['body'] ?? '', _ago(n['created_at']), tripId: n['payload']?['trip_id'], type: n['type'] ?? '', id: '${n['id'] ?? ''}', ticketId: n['payload']?['ticket_id'] as String?, isRead: n['is_read'] != false),
+        AppNotice(n['title'] ?? '', n['body'] ?? '', _ago(n['created_at']), tripId: n['payload']?['trip_id'], type: n['type'] ?? '', id: '${n['id'] ?? ''}', ticketId: n['payload']?['ticket_id'] as String?, pnr: n['payload']?['pnr'] as String?, isRead: n['is_read'] != false),
     ];
     unread = list.any((n) => n['is_read'] == false);
-    // D144: a new "the bus is coming" notice shows on top of the app; the first load only learns what is there.
-    final fresh = notices.where((n) => !n.isRead && !_seenNotices.contains(n.id) && AppNotice.alertTypes.contains(n.type)).toList();
+    // D144, D191: every new unread notice shows as a heads-up on top of the app; the first load only learns what is there.
+    final fresh = notices.where((n) => !n.isRead && !_seenNotices.contains(n.id)).toList();
     if (_noticesLoaded && fresh.isNotEmpty) pendingAlert = fresh.first;
     _seenNotices.addAll(notices.map((n) => n.id));
     _noticesLoaded = true;
@@ -1460,11 +2524,21 @@ class PassengerStore extends ChangeNotifier {
   final Set<String> _seenNotices = {};
   bool _noticesLoaded = false;
 
-  /// The newest "the bus is coming" notice not shown yet (D144); the shell shows it and clears it.
+  /// The newest notice not shown yet (D191); the shell shows it and clears it.
   AppNotice? pendingAlert;
 
   /// D145: the phone's push token (Firebase), sent with the device so the server can push instead of texting.
   String? pushToken;
+
+  /// D192: a push the passenger tapped; the shell opens what it is about once someone is signed in, then clears it.
+  AppNotice? pushToOpen;
+
+  void openFromPush(AppNotice notice) {
+    pushToOpen = notice;
+    // The phone already showed it: the next notice load must not show it again on top of the app.
+    if (notice.id.isNotEmpty) _seenNotices.add(notice.id);
+    notifyListeners();
+  }
 
   Future<void> setPushToken(String? token) async {
     if (token == null || token == pushToken) return;

@@ -79,7 +79,7 @@ class DriverCockpitDashboard extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(child: Stat('Trả', '$drop', size: wide ? 28 : 20)),
           const SizedBox(width: 8),
-          Expanded(child: Stat('Thu COD', '$cod', color: DTokens.warnInk, size: wide ? 28 : 20)),
+          Expanded(child: Stat('Thu tiền', '$cod', color: DTokens.warnInk, size: wide ? 28 : 20)),
         ]),
       ]),
     );
@@ -169,11 +169,18 @@ class DriverCockpitDashboard extends StatelessWidget {
               child: Row(children: [
                 Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: store.offline ? const Color(0xFFF59E0B) : const Color(0xFF22C55E))),
                 const SizedBox(width: 6),
-                Text(store.offline ? 'Mất mạng · lưu trên máy' : 'Đang gửi vị trí', style: dsans(size: 13, color: store.offline ? DTokens.warnInk : DTokens.okInk)),
-                Text('  ·  ', style: dsans(size: 13, color: const Color(0xFF475569))),
-                Text(store.queue.isEmpty ? 'Đã đồng bộ' : '${store.queue.length} chờ đồng bộ', style: dsans(size: 13, color: DTokens.sub)),
-                const Spacer(),
-                Text(hhmm(store.clock), style: dmono(size: 13, weight: FontWeight.w500, color: DTokens.muted)),
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(children: [
+                      TextSpan(text: store.offline ? 'Mất mạng · lưu trên máy' : 'Đang gửi vị trí', style: dsans(size: 13, color: store.offline ? DTokens.warnInk : DTokens.okInk)),
+                      TextSpan(text: '  ·  ', style: dsans(size: 13, color: const Color(0xFF475569))),
+                      TextSpan(text: store.queue.isEmpty ? 'Đã đồng bộ' : '${store.queue.length} chờ đồng bộ', style: dsans(size: 13, color: DTokens.sub)),
+                    ]),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // A demo trip of another day runs on a quick clock; say so rather than show a time that is not the phone's.
+                Text(store.realClock ? hhmm(store.clock) : 'giờ chạy thử ${hhmm(store.clock)}', style: dmono(size: 13, weight: FontWeight.w500, color: DTokens.muted)),
               ]),
             ),
             if (store.incident != null)
@@ -181,7 +188,14 @@ class DriverCockpitDashboard extends StatelessWidget {
                 width: double.infinity,
                 color: DTokens.dangerBg,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: Text('Đã báo ${store.incident!.type.toLowerCase()} lúc ${hhmm(store.incident!.at)} · ước tính chậm ${store.incident!.delay} phút. Điều hành đã nhận.', style: dsans(size: 13, color: DTokens.dangerInk)),
+                child: Row(children: [
+                  Expanded(child: Text('Đã báo ${store.incident!.type.toLowerCase()} lúc ${hhmm(store.incident!.at)} · ước tính chậm ${store.incident!.delay} phút. Điều hành đã nhận.', style: dsans(size: 13, color: DTokens.dangerInk))),
+                  TextButton(
+                    onPressed: store.clearIncident,
+                    style: TextButton.styleFrom(minimumSize: const Size(48, 44)),
+                    child: Text('Đã hết, đi tiếp', style: dsans(size: 14, weight: FontWeight.w700, color: DTokens.ink)),
+                  ),
+                ]),
               ),
             Expanded(
               child: wide

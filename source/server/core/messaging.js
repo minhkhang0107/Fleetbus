@@ -4,7 +4,7 @@
  * token) or else by SMS, with the link to follow the bus.
  *
  * Providers are plugged by URL: FLEETBUS_SMS_WEBHOOK_URL and FLEETBUS_PUSH_WEBHOOK_URL receive
- * POST {to, text, title, type, link} (an SMS gateway, a Zalo ZNS bridge, a function calling Firebase). Push also
+ * POST {to, text, title, type, link}, with `Authorization: Bearer` FLEETBUS_SMS_WEBHOOK_TOKEN / _PUSH_WEBHOOK_TOKEN when set (an SMS gateway, a Zalo ZNS bridge, a function calling Firebase). Push also
  * goes straight to Firebase Cloud Messaging with FLEETBUS_FCM_SERVICE_ACCOUNT (path to the project's service
  * account key, D145). Without a provider, a message is kept in the outbox as LOGGED, so the office sees what
  * would have gone out.
@@ -55,9 +55,13 @@ export class FcmSender {
     return this.token;
   }
 
-  /** Sends one notification to a device; resolves to the fetch response. */
-  async send({ to, title, body, type, link }) {
+  /**
+   * Sends one notification to a device; resolves to the fetch response. `data` carries what the app needs to open
+   * the right screen when the notification is tapped (D192); FCM data values must be strings.
+   */
+  async send({ to, title, body, type, link, data = {} }) {
     const token = await this._accessToken();
+    const strings = Object.fromEntries(Object.entries({ ...data, type: type || '', link: link || '' }).filter(([, v]) => v !== null && v !== undefined).map(([k, v]) => [k, String(v)]));
     return this.fetch(`https://fcm.googleapis.com/v1/projects/${this.account.project_id}/messages:send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -65,17 +69,32 @@ export class FcmSender {
         message: {
           token: to,
           notification: { title, body },
-          data: { type: type || '', link: link || '' },
-          android: { priority: 'HIGH' }
+          data: strings,
+          // The apps' "Chuyến đi" channel (heads-up with sound on Android) and the default sound on iPhone.
+          android: { priority: 'HIGH', notification: { channel_id: PUSH_CHANNEL_ID, sound: 'default' } },
+          apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default' } } }
         }
       })
     });
   }
 }
 
-/** The notices worth a push or an SMS: the home run, the bus coming, the bus at the door, a missed pickup, a phone booking. */
+/** The Android notification channel both apps create (D192). */
+export const PUSH_CHANNEL_ID = 'busgo_trip';
+
+/** FCM answers 404, or 400 with UNREGISTERED / INVALID_ARGUMENT on the token, for a token that no longer works. */
+async function deadToken(r) {
+  if (r.status === 404) return true;
+  if (r.status !== 400 || typeof r.json !== 'function') return false;
+  const body = await r.json().catch(() => ({}));
+  const code = body?.error?.details?.find?.(d => d.errorCode)?.errorCode || body?.error?.status;
+  return code === 'UNREGISTERED' || (code === 'INVALID_ARGUMENT' && /registration token/i.test(body?.error?.message || ''));
+}
+
+/** The notices worth a push or an SMS: the home run, the bus in the area or coming, the bus at the door, a missed pickup, a phone booking. */
 export const OUTSIDE_APP_TYPES = new Set([
   'HOME_RUN_STARTED',
+  'HOME_PICKUP_NEAR_AREA',
   'PICKUP_APPROACHING',
   'PICKUP_ARRIVED',
   'HOME_PICKUP_ARRIVED',
@@ -84,20 +103,33 @@ export const OUTSIDE_APP_TYPES = new Set([
   'HOME_PICKUP_INACCESSIBLE',
   'PHONE_BOOKING_CONFIRMED',
   'HOME_APPOINTMENT_CHANGED',
-  'TRIP_CANCELLED'
+  'TRIP_CANCELLED',
+  'TRIP_DELAY'
 ]);
 
 const MAX_OUTBOX = 5000;
 const SMS_MAX_CHARS = 320;
 
+function stripDiacritics(str) {
+  return String(str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
+}
+
 export class Messenger {
   constructor({ env = process.env, fetchImpl = globalThis.fetch, fcm = undefined } = {}) {
     this.outbox = [];
     this.devices = new Map(); // phone -> { phone, operator_id, token, platform, registered_at }
+    this.driverDevices = new Map(); // driver_id -> the same, for the driver app (D192)
     this.smsUrl = env.FLEETBUS_SMS_WEBHOOK_URL || null;
     this.pushUrl = env.FLEETBUS_PUSH_WEBHOOK_URL || null;
+    // SMS gateways and Zalo ZNS bridges want a key: sent as a Bearer token when set.
+    this.smsToken = env.FLEETBUS_SMS_WEBHOOK_TOKEN || null;
+    this.pushToken = env.FLEETBUS_PUSH_WEBHOOK_TOKEN || null;
     this.fetch = fetchImpl;
     this.fcm = fcm === undefined ? FcmSender.fromEnv(env, fetchImpl) : fcm;
+  }
+
+  _headers(token) {
+    return { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
   }
 
   /** Whether a push can leave: straight to Firebase, or through a push webhook. */
@@ -113,13 +145,71 @@ export class Messenger {
   }
 
   /**
-   * Sends one notice outside the app when its type calls for it: a push when the phone has a push token and a push
-   * provider is set, else an SMS. Returns the outbox entry, or null when the notice stays in the app.
+   * Sends an OTP via the SMS webhook without diacritics and records a masked entry in the outbox.
    */
-  dispatch({ operatorId, phone, title, body, type, payload = {}, link = null }) {
-    if (!phone || !OUTSIDE_APP_TYPES.has(type)) return null;
+  sendOtp({ operatorId = null, phone, otp, brand = 'BusGo' } = {}) {
+    if (!phone || !otp) return null;
+    const prefix = stripDiacritics(brand || 'BusGo');
+    const text = `${prefix}: Ma xac thuc cua ban la ${otp}, hieu luc 5 phut. Khong chia se ma nay.`;
+    const maskedText = `${prefix}: Ma xac thuc cua ban la ******, hieu luc 5 phut. Khong chia se ma nay.`;
+    const url = this.smsUrl;
+    const entry = {
+      id: `msg_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
+      operator_id: operatorId,
+      trip_id: null,
+      ticket_id: null,
+      type: 'OTP',
+      channel: 'SMS',
+      to: phone,
+      text: maskedText,
+      link: null,
+      status: url ? 'SENDING' : 'LOGGED',
+      created_at: new Date().toISOString(),
+      sent_at: null,
+      error: null
+    };
+    this.outbox.push(entry);
+    if (this.outbox.length > MAX_OUTBOX) this.outbox.shift();
+    const sending = url && typeof this.fetch === 'function'
+      ? this.fetch(url, {
+        method: 'POST',
+        headers: this._headers(this.smsToken),
+        body: JSON.stringify({ to: phone, text, type: 'OTP' })
+      })
+      : null;
+    if (sending) {
+      Promise.resolve(sending)
+        .then((r) => {
+          entry.status = r?.ok ? 'SENT' : 'FAILED';
+          entry.sent_at = new Date().toISOString();
+          if (!r?.ok) entry.error = `HTTP ${r?.status}`;
+        })
+        .catch((err) => {
+          entry.status = 'FAILED';
+          entry.error = err.message;
+        });
+    }
+    return entry;
+  }
+
+  /** The driver app's push token (D192); a driver signing out sends none. */
+  registerDriverDevice(driverId, { token = null, platform = null, operatorId }) {
+    const entry = { driver_id: driverId, operator_id: operatorId, token: token || null, platform: platform || null, registered_at: new Date().toISOString() };
+    this.driverDevices.set(driverId, entry);
+    return entry;
+  }
+
+  /**
+   * Sends one notice outside the app. A phone with a push token gets every notice by push, since a push costs
+   * nothing (D192); without one, only the notices that make someone go out to the bus leave by SMS.
+   * Returns the outbox entry, or null when the notice stays in the app.
+   */
+  dispatch({ operatorId, phone, title, body, type, payload = {}, link = null, noticeId = null }) {
+    if (!phone) return null;
     const device = this.devices.get(phone);
-    const channel = device?.token && this.pushReady ? 'PUSH' : 'SMS';
+    const canPush = Boolean(device?.token && this.pushReady);
+    if (!canPush && !OUTSIDE_APP_TYPES.has(type)) return null;
+    const channel = canPush ? 'PUSH' : 'SMS';
     const viaFcm = channel === 'PUSH' && this.fcm;
     const url = channel === 'PUSH' ? this.pushUrl : this.smsUrl;
     const text = `${title}: ${body}${link ? ` ${link}` : ''}`.slice(0, SMS_MAX_CHARS);
@@ -141,17 +231,48 @@ export class Messenger {
     // Appended, so the stored list only grows at its end (the store writes changed positions).
     this.outbox.push(entry);
     if (this.outbox.length > MAX_OUTBOX) this.outbox.shift();
+    const data = { notice_id: noticeId, ticket_id: payload.ticket_id, pnr: payload.pnr, trip_id: payload.trip_id };
+    return this._send(entry, { viaFcm, url, channel, to: channel === 'PUSH' ? device.token : phone, title, body, type, link, text, data, onDead: () => { if (this.devices.get(phone) === device) device.token = null; } });
+  }
+
+  /** A push to the driver's phone (D192): trips given, taken away or cancelled. Null when the driver has no token. */
+  dispatchDriver({ operatorId, driverId, title, body, type, payload = {} }) {
+    const device = this.driverDevices.get(driverId);
+    if (!device?.token || !this.pushReady) return null;
+    const entry = {
+      id: `msg_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
+      operator_id: operatorId,
+      trip_id: payload.trip_id || null,
+      ticket_id: null,
+      type,
+      channel: 'PUSH',
+      to: driverId,
+      text: `${title}: ${body}`.slice(0, SMS_MAX_CHARS),
+      link: null,
+      status: 'SENDING',
+      created_at: new Date().toISOString(),
+      sent_at: null,
+      error: null
+    };
+    this.outbox.push(entry);
+    if (this.outbox.length > MAX_OUTBOX) this.outbox.shift();
+    return this._send(entry, { viaFcm: Boolean(this.fcm), url: this.pushUrl, channel: 'PUSH', to: device.token, title, body, type, link: null, text: entry.text, data: { trip_id: payload.trip_id }, onDead: () => { device.token = null; } });
+  }
+
+  _send(entry, { viaFcm, url, channel, to, title, body, type, link, text, data, onDead }) {
     const sending = viaFcm
-      ? this.fcm.send({ to: device.token, title, body, type, link })
+      ? this.fcm.send({ to, title, body, type, link, data })
       : url && typeof this.fetch === 'function'
-        ? this.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: channel === 'PUSH' ? device.token : phone, text, title, body, type, link }) })
+        ? this.fetch(url, { method: 'POST', headers: this._headers(channel === 'PUSH' ? this.pushToken : this.smsToken), body: JSON.stringify({ to, text, title, body, type, link, data }) })
         : null;
     if (sending) {
       sending
-        .then((r) => {
+        .then(async (r) => {
           entry.status = r.ok ? 'SENT' : 'FAILED';
           entry.sent_at = new Date().toISOString();
           if (!r.ok) entry.error = `HTTP ${r.status}`;
+          // An uninstalled app's token is dropped, so the next notice goes by SMS instead of failing again.
+          if (!r.ok && viaFcm && await deadToken(r)) onDead();
         })
         .catch((err) => {
           entry.status = 'FAILED';

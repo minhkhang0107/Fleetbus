@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../../resources/lib/src/theme/app_colors.dart';
+import 'package:resources/resources.dart';
 
 class ManagerPosBookingScreen extends StatefulWidget {
   const ManagerPosBookingScreen({super.key});
@@ -70,7 +70,7 @@ class _ManagerPosBookingScreenState extends State<ManagerPosBookingScreen> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
-                  value: _selectedSeat,
+                  initialValue: _selectedSeat,
                   dropdownColor: ManagerColors.surfaceElevated,
                   style: const TextStyle(color: ManagerColors.textPrimary),
                   decoration: InputDecoration(

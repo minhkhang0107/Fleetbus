@@ -4,7 +4,7 @@
  */
 
 import { homeConfirmed } from '../../../core/serviceAreas.js';
-import { homeAppointments, homeOrder, homeQueue, homeWaitMinutes, isWaitingHome, missableAt } from '../../../core/homeRun.js';
+import { doorKey, doorPositions, homeAppointments, homeOrder, homeQueue, homeRunOutlook, homeWaitMinutes, isWaitingHome, missableAt } from '../../../core/homeRun.js';
 import crypto from 'crypto';
 import {
   generateBoardingQR,
@@ -17,14 +17,42 @@ import { getTicketSecret, isProduction } from '../../../config.js';
 import { maskPhone, validateVietnamPhone } from '../../passenger/core/formatters.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
-import { stopCoords, routeShape } from '../../../core/geo.js';
+import { stopCoords, routeShape, distanceAlongRoute } from '../../../core/geo.js';
+import { hailFares, haversineMeters } from '../../../core/hailFare.js';
 import { DEFAULT_OPERATOR_ID, findOperatorById, publicOperatorProfile } from '../../../core/operators.js';
-import { DEMO_DATE, vnDate } from '../../../core/serviceDate.js';
+import { DEMO_DATE, vnDate, runId } from '../../../core/serviceDate.js';
+import { getScheduleTemplates, getScheduleTemplate, runsOn, settingsOn } from '../../passenger/modules/search.js';
 
-const CHANGE_METHODS = ['CASH_RETURNED', 'REST_STOP_DEBT_RECEIPT', 'WALLET_CREDIT'];
+export const CHANGE_METHODS = ['CASH_RETURNED', 'REST_STOP_DEBT_RECEIPT', 'WALLET_CREDIT'];
 const NO_SHOW_GRACE_MINUTES = 10;
 // BR-COD-005: change owed to passengers as debt receipts may total at most this much per trip
 const DEBT_LIMIT_PER_TRIP_VND = 1000000;
+// The evening before, the driver prepares early trips and home pickups start 75 min before departure.
+export const DRIVER_UPCOMING_WINDOW_MS = 12 * 3600000;
+
+// A trip may start at most this long before its timetable time (D189).
+const EARLY_START_MS = 60 * 60000;
+
+/** The clock time and the day (dd/mm) of an instant, in Vietnam time. */
+function vnWhen(ms) {
+  const vn = new Date(ms + 7 * 3600000).toISOString();
+  return { hhmm: vn.slice(11, 16), day: `${vn.slice(8, 10)}/${vn.slice(5, 7)}` };
+}
+
+/** What the driver reads when a scan is refused: plain words, never the reason code (D194). */
+function qrErrorMessage(reason) {
+  return reason === 'INVALID_SIGNATURE'
+    ? 'Mã vé bị sửa hoặc giả. Không cho lên xe, gọi nhà xe nếu khách phản đối.'
+    : 'Không phải mã vé BusGo. Đề nghị khách mở vé trong app.';
+}
+
+/** A driver session token; `tv` ties it to the account's token version so it can be revoked (H-06). */
+function driverToken(driver, operatorId, now = Date.now()) {
+  return signToken(
+    { sub: driver.driver_id, staff_id: driver.staff_id, role: 'ROLE_DRIVER', kind: 'driver', operator_id: operatorId, tv: driver.token_version || 0 },
+    { prefix: TOKEN_PREFIXES.driver, ttlSeconds: 12 * 3600, now }
+  );
+}
 
 export const MOCK_DRIVERS_DB = [
   {
@@ -33,11 +61,12 @@ export const MOCK_DRIVERS_DB = [
     phone: '0912345678',
     pin: hashSecret('123456'),
     full_name: 'Trần Văn Bình',
-    license_class: 'FC',
+    license_class: 'E',
     license_valid_until: '2028-12-31',
     is_license_expired: false,
     assigned_vehicle_plate: '29B-123.45',
     status: 'ACTIVE',
+    token_version: 0,
     must_change_pin: false,
     operator_id: 'op_saomai'
   },
@@ -47,11 +76,12 @@ export const MOCK_DRIVERS_DB = [
     phone: '0987654321',
     pin: hashSecret('654321'),
     full_name: 'Lê Hoàng Nam',
-    license_class: 'FC',
+    license_class: 'E',
     license_valid_until: '2025-01-01', // Expired license
     is_license_expired: true,
     assigned_vehicle_plate: '29B-678.90',
     status: 'LICENSE_EXPIRED',
+    token_version: 0,
     must_change_pin: false,
     operator_id: 'op_saomai'
   },
@@ -61,11 +91,12 @@ export const MOCK_DRIVERS_DB = [
     phone: '0988776655',
     pin: hashSecret('112233'),
     full_name: 'Phạm Quốc Huy',
-    license_class: 'FC',
+    license_class: 'E',
     license_valid_until: '2028-06-30',
     is_license_expired: false,
     assigned_vehicle_plate: '29B-444.11',
     status: 'ACTIVE',
+    token_version: 0,
     must_change_pin: false,
     operator_id: 'op_saomai'
   },
@@ -75,11 +106,12 @@ export const MOCK_DRIVERS_DB = [
     phone: '0901777001',
     pin: hashSecret('246810'),
     full_name: 'Đỗ Minh Khoa',
-    license_class: 'FC',
+    license_class: 'E',
     license_valid_until: '2029-03-31',
     is_license_expired: false,
     assigned_vehicle_plate: '30H-246.80',
     status: 'ACTIVE',
+    token_version: 0,
     must_change_pin: false,
     operator_id: 'op_xuyenviet'
   }
@@ -92,6 +124,7 @@ function tripLifecycle(status) {
 
 function stopLifecycle(trip, stop, index) {
   if (stop.skipped_at) return 'SKIPPED';
+  if (stop.departed_at) return 'COMPLETED';
   if (stop.status === 'ARRIVED') return index < trip.current_stop_index || trip.status === 'COMPLETED' ? 'COMPLETED' : 'ARRIVED';
   return 'UPCOMING';
 }
@@ -283,10 +316,9 @@ export class DriverCockpitService {
       };
     }
 
-    const token = signToken(
-      { sub: driver.driver_id, staff_id: driver.staff_id, role: 'ROLE_DRIVER', kind: 'driver', operator_id: operatorId },
-      { prefix: TOKEN_PREFIXES.driver, ttlSeconds: 12 * 3600, now: mockNow }
-    );
+    driver.last_login_at = new Date(mockNow).toISOString();
+
+    const token = driverToken(driver, operatorId, mockNow);
 
     const op = findOperatorById(operatorId);
 
@@ -355,10 +387,12 @@ export class DriverCockpitService {
 
     driver.pin = hashSecret(next);
     driver.must_change_pin = false;
+    // Every other session ends (H-06); the app that changed it carries on with a new token.
+    driver.token_version = (driver.token_version || 0) + 1;
     this.loginGuard.succeed(loginKey);
     this.loginGuard.succeed(phoneKey);
 
-    return { success: true };
+    return { success: true, token: driverToken(driver, driver.operator_id || operatorId) };
   }
 
   /**
@@ -368,7 +402,8 @@ export class DriverCockpitService {
   _publicPassenger(passenger) {
     const { passenger_phone: rawPhone, phone: rawPhone2, ...rest } = passenger;
     const phoneToMask = rawPhone || rawPhone2;
-    return { ...rest, phone_masked: rest.phone_masked || (phoneToMask ? maskPhone(phoneToMask) : null) };
+    const source = passenger.source || (passenger.reservation_id ? 'HOTLINE' : 'ONLINE');
+    return { ...rest, source, phone_masked: rest.phone_masked || (phoneToMask ? maskPhone(phoneToMask) : null) };
   }
 
   /**
@@ -377,7 +412,20 @@ export class DriverCockpitService {
    */
   _event(trip, type, fields = {}, at = Date.now()) {
     if (!trip.events) trip.events = [];
-    trip.events.push({ type, trip_id: trip.trip_id, actor: trip.driver_id || null, at: new Date(at).toISOString(), ...fields });
+    const stopId = fields.stop_id;
+    let stopName = fields.stop_name;
+    if (stopId && !stopName) {
+      const stop = (trip.stops || []).find(s => s.stop_id === stopId);
+      stopName = stop?.name || null;
+    }
+    trip.events.push({
+      type,
+      trip_id: trip.trip_id,
+      actor: trip.driver_id || null,
+      at: new Date(at).toISOString(),
+      ...fields,
+      ...(stopName ? { stop_name: stopName } : {})
+    });
     if (trip.events.length > 2000) trip.events.shift();
   }
 
@@ -394,7 +442,7 @@ export class DriverCockpitService {
     };
   }
 
-  _publicTrip(trip) {
+  _publicTrip(trip, groupCache = new Map()) {
     const stops = (trip.stops || []).map((s, index) => {
       const extra = { lifecycle_status: stopLifecycle(trip, s, index), counts: this._stopCounts(trip, s.stop_id) };
       const coords = stopCoords(s.stop_id);
@@ -412,8 +460,35 @@ export class DriverCockpitService {
       stops,
       route_shape: routeShape(trip.trip_id) || null,
       home_run: this._homeRunView(trip),
-      manifest: (trip.manifest || []).map(p => this._publicPassenger(p))
+      hail_fares: this._hailFares(trip, trip.current_stop_index || 0),
+      manifest: this._buildManifest(trip.manifest, groupCache)
     };
+  }
+
+  /** The manifest as the driver app gets it: each seat still to ride carries what an offline check needs (D194). */
+  _buildManifest(manifestList, groupCache = new Map()) {
+    return (manifestList || []).map(p => p.boarding_status === 'CANCELLED'
+      ? this._publicPassenger(p)
+      : { ...this._publicPassenger(p), boarding_check: this._boardingCheck(p, groupCache) });
+  }
+
+  /** The signature of the group QR the passenger holds now for this booking, once per booking per response. */
+  _groupDigest(pnr, cache) {
+    if (!pnr) return null;
+    if (!cache.has(pnr)) cache.set(pnr, this.paymentService?.getGroupBoardingPass?.(pnr)?.data?.group_qr?.hmac_signature || null);
+    return cache.get(pnr);
+  }
+
+  /** D188: walk-up fare from the stop at `fromIndex` to each later stop, by the distance along the road. */
+  _hailFares(trip, fromIndex) {
+    const stops = trip.stops || [];
+    const points = stops.map(s => stopCoords(s.stop_id) || (typeof s.lat === 'number' && typeof s.lng === 'number' ? { lat: s.lat, lng: s.lng } : null));
+    const shape = routeShape(trip.trip_id);
+    const leg = (a, b) => {
+      const onRoad = shape ? distanceAlongRoute(shape, a.lat, a.lng, b.lat, b.lng) : null;
+      return onRoad && onRoad > 0 ? onRoad : haversineMeters(a, b);
+    };
+    return hailFares(stops, points, Math.min(fromIndex, Math.max(0, stops.length - 1)), trip.base_fare_vnd, leg);
   }
 
   /** Stops with their counts and the event log of a trip, for the office (spec 5.2, 5.3). */
@@ -428,7 +503,7 @@ export class DriverCockpitService {
         status: trip.status,
         lifecycle_status: pub.lifecycle_status,
         on_board_count: pub.on_board_count,
-        stops: pub.stops.map(({ stop_id, name, order, time, lifecycle_status, counts, arrived_at, skipped_at }) => ({ stop_id, name, order, time, lifecycle_status, counts, arrived_at: arrived_at || null, skipped_at: skipped_at || null })),
+        stops: pub.stops.map(({ stop_id, name, order, time, lifecycle_status, counts, arrived_at, departed_at, skipped_at }) => ({ stop_id, name, order, time, lifecycle_status, counts, arrived_at: arrived_at || null, departed_at: departed_at || null, skipped_at: skipped_at || null })),
         home_pickups: (() => {
           // D144: in collection order, with each passenger's time, answer and what happened at the door.
           const run = this._homeRunView(trip);
@@ -442,7 +517,13 @@ export class DriverCockpitService {
             inaccessible_at: p.home_pickup.inaccessible_at || null, source: p.source || null
           }));
         })(),
-        events: [...(trip.events || [])].reverse()
+        events: [...(trip.events || [])].reverse().map(ev => {
+          if (ev.stop_id && !ev.stop_name) {
+            const stop = (trip.stops || []).find(s => s.stop_id === ev.stop_id);
+            if (stop?.name) return { ...ev, stop_name: stop.name };
+          }
+          return ev;
+        })
       }
     };
   }
@@ -453,13 +534,14 @@ export class DriverCockpitService {
   getManifest(tripId) {
     const trip = this.activeTrips.get(tripId);
     if (!trip) return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
+    const groupCache = new Map();
     return {
       success: true,
       data: {
         trip_id: tripId,
         vehicle_plate: trip.vehicle_plate,
         boarded_count: trip.boarded_count,
-        manifest: trip.manifest.map(p => ({ ...this._publicPassenger(p), boarding_check: this._boardingCheck(p) }))
+        manifest: this._buildManifest(trip.manifest, groupCache)
       }
     };
   }
@@ -469,13 +551,14 @@ export class DriverCockpitService {
    * current QR must carry and a digest of its PIN. No shared secret ever leaves the server, so a lost
    * tablet exposes one trip at most, never the means to forge any ticket.
    */
-  _boardingCheck(passenger) {
+  _boardingCheck(passenger, groupCache = new Map()) {
     const version = passenger.qr_version || 1;
     const pin = generateTicketPin(passenger.ticket_id, this.secretKey, version);
     return {
       qr_version: version,
       qr_digest: generateBoardingQR({ ...passenger, qr_version: version }, this.secretKey).hmac_signature,
-      pin_digest: crypto.createHash('sha256').update(`${passenger.ticket_id}|${pin}`).digest('hex')
+      pin_digest: crypto.createHash('sha256').update(`${passenger.ticket_id}|${pin}`).digest('hex'),
+      group_digest: this._groupDigest(passenger.pnr, groupCache)
     };
   }
 
@@ -561,20 +644,269 @@ export class DriverCockpitService {
   /** The driver's trips of today (Vietnam time); outside production the seed demo day too. */
   getTodayTrips(driverId, now = Date.now()) {
     const today = vnDate(now);
+    const groupCache = new Map();
     const trips = Array.from(this.activeTrips.values())
       .filter(t => t.driver_id === driverId)
       .filter(t => {
-        const day = t.planned_departure_time ? vnDate(Date.parse(t.planned_departure_time)) : null;
-        return !day || day === today || (!isProduction() && day === DEMO_DATE);
+        const departureMs = t.planned_departure_time ? Date.parse(t.planned_departure_time) : null;
+        const day = departureMs ? vnDate(departureMs) : null;
+        const isToday = !day || day === today || (!isProduction() && day === DEMO_DATE);
+        const isUpcoming = departureMs !== null && departureMs > now && departureMs <= now + DRIVER_UPCOMING_WINDOW_MS;
+        // A night trip still on the road after midnight stays in the driver's list until it ends (D188).
+        return isToday || isUpcoming || t.status === 'IN_TRANSIT';
       })
       .sort((a, b) => Date.parse(a.planned_departure_time || 0) - Date.parse(b.planned_departure_time || 0))
-      .map(t => this._publicTrip(t));
+      .map(t => this._publicTrip(t, groupCache));
     return {
       success: true,
       data: {
         shift_date: new Date().toISOString().split('T')[0],
         total_trips: trips.length,
         trips
+      }
+    };
+  }
+
+  /**
+   * DRI-021: Driver's monthly trip schedule (decision D155).
+   * Lists trips assigned to the driver at trip-level or via schedule default for the requested month.
+   */
+  getMonthlySchedule(driverId, options = {}) {
+    const now = typeof options.now === 'number' ? options.now : Date.now();
+    const today = vnDate(now);
+    const currentMonth = today.slice(0, 7);
+
+    let targetMonth = currentMonth;
+    if (options.month !== undefined && options.month !== null && options.month !== '') {
+      const monthStr = String(options.month).trim();
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthStr)) {
+        return {
+          success: false,
+          error: 'Định dạng tháng không hợp lệ (định dạng YYYY-MM)',
+          code: 'INVALID_MONTH',
+          status: 400
+        };
+      }
+      const [currY, currM] = currentMonth.split('-').map(Number);
+      const [targetY, targetM] = monthStr.split('-').map(Number);
+      const monthDiff = (targetY - currY) * 12 + (targetM - currM);
+      if (monthDiff < -3 || monthDiff > 3) {
+        return {
+          success: false,
+          error: 'Tháng xem lịch phải trong khoảng 3 tháng trước đến 3 tháng sau',
+          code: 'MONTH_OUT_OF_RANGE',
+          status: 400
+        };
+      }
+      targetMonth = monthStr;
+    }
+
+    const [year, mon] = targetMonth.split('-').map(Number);
+    const numDays = new Date(Date.UTC(year, mon, 0)).getUTCDate();
+
+    const operatorId = options.operatorId || this.operatorId || DEFAULT_OPERATOR_ID;
+    const manager = options.managerService || this.managerService;
+
+    const vnDeparture = (iso) => {
+      const ms = Date.parse(iso);
+      if (!Number.isFinite(ms)) return null;
+      return new Date(ms + 7 * 3600 * 1000).toISOString().slice(11, 16);
+    };
+
+    const SCHEDULE_STATUS_MAP = {
+      DISPATCHED: 'SCHEDULED',
+      SCHEDULED: 'SCHEDULED',
+      READY: 'SCHEDULED',
+      IN_TRANSIT: 'IN_TRANSIT',
+      COMPLETED: 'COMPLETED',
+      CANCELLED: 'CANCELLED'
+    };
+
+    // Index manager trips by trip_id once
+    const managerTripsById = new Map();
+    if (manager?.trips) {
+      for (const t of manager.trips) {
+        if (t?.trip_id) managerTripsById.set(t.trip_id, t);
+      }
+    }
+
+    const allTripIds = new Set(managerTripsById.keys());
+    for (const tripId of this.activeTrips.keys()) {
+      allTripIds.add(tripId);
+    }
+
+    // 1. Trip-level assignments
+    const assignedTrips = [];
+    const tripLevelRuns = new Set();
+
+    for (const tripId of allTripIds) {
+      const mgrTrip = managerTripsById.get(tripId) || null;
+      const actTrip = this.activeTrips.get(tripId) || null;
+
+      const tripOperator = actTrip?.operator_id || mgrTrip?.operator_id || DEFAULT_OPERATOR_ID;
+      if (tripOperator !== operatorId) continue;
+
+      const depTime = actTrip?.planned_departure_time || mgrTrip?.departure_time;
+      if (!depTime) continue;
+
+      const depMs = Date.parse(depTime);
+      if (!Number.isFinite(depMs)) continue;
+
+      const tripDate = vnDate(depMs);
+      if (!tripDate.startsWith(targetMonth + '-')) continue;
+
+      tripLevelRuns.add(tripId);
+
+      const assignedDriver = actTrip?.driver_id || mgrTrip?.driver_id;
+      if (assignedDriver === driverId) {
+        let rawStatus = actTrip?.status;
+        if (actTrip?.status === 'CANCELLED' || mgrTrip?.status === 'CANCELLED') {
+          rawStatus = 'CANCELLED';
+        } else if (!rawStatus) {
+          rawStatus = mgrTrip?.status;
+        }
+        const status = SCHEDULE_STATUS_MAP[rawStatus] || 'SCHEDULED';
+
+        let passengers = null;
+        if (typeof actTrip?.booked_passengers_count === 'number') {
+          passengers = actTrip.booked_passengers_count;
+        } else if (typeof mgrTrip?.booked_seats === 'number') {
+          passengers = mgrTrip.booked_seats;
+        }
+
+        const delay_minutes = actTrip?.delay_minutes ?? mgrTrip?.delay_minutes ?? 0;
+
+        let cash_handed_in_vnd = null;
+        if (status === 'COMPLETED') {
+          if (typeof actTrip?.total_cash_to_handover_vnd === 'number') {
+            cash_handed_in_vnd = actTrip.total_cash_to_handover_vnd;
+          } else if (typeof mgrTrip?.cash_handed_in_vnd === 'number') {
+            cash_handed_in_vnd = mgrTrip.cash_handed_in_vnd;
+          }
+        }
+
+        const template = getScheduleTemplate(mgrTrip?.schedule_id || tripId);
+        const routeName = actTrip?.route_name ||
+          mgrTrip?.route_name ||
+          (mgrTrip?.route_id && manager?.routes?.find(r => r.route_id === mgrTrip.route_id)?.name) ||
+          template?.route_name ||
+          null;
+
+        const vehiclePlate = actTrip?.vehicle_plate || mgrTrip?.vehicle_plate || null;
+
+        assignedTrips.push({
+          trip_id: tripId,
+          departure_time: depTime,
+          departure: vnDeparture(depTime),
+          route_name: routeName,
+          vehicle_plate: vehiclePlate,
+          status,
+          source: 'ASSIGNED',
+          passengers,
+          delay_minutes,
+          cash_handed_in_vnd,
+          _date: tripDate
+        });
+      }
+    }
+
+    // 2. Schedule defaults (today and future days only, D155)
+    const templates = getScheduleTemplates();
+    const defaultTrips = [];
+
+    for (const template of templates) {
+      const templateOp = template.operator_id || DEFAULT_OPERATOR_ID;
+      if (templateOp !== operatorId) continue;
+
+      // Without an office choice a run keeps the schedule's own driver and bus, as the run itself does (D194).
+      const preset = manager?.scheduleAssignments?.[template.trip_id] ||
+        (template.schedule_id && manager?.scheduleAssignments?.[template.schedule_id]) ||
+        managerTripsById.get(template.trip_id) ||
+        null;
+
+      if (!preset || preset.driver_id !== driverId) continue;
+
+      for (let d = 1; d <= numDays; d++) {
+        const dayStr = `${targetMonth}-${String(d).padStart(2, '0')}`;
+        // D155: A schedule default is a promise about the future. Do not list for days before today.
+        if (dayStr < today) continue;
+        if (!runsOn(template, dayStr)) continue;
+
+        const expectedRunId = runId(template.trip_id, dayStr);
+        if (tripLevelRuns.has(expectedRunId)) {
+          continue;
+        }
+
+        const settings = settingsOn(template, dayStr);
+        const timeSuffix = settings.departure_time.slice(10);
+        const departure_time = `${dayStr}${timeSuffix}`;
+
+        const vehicle = preset.vehicle_id ? manager?.vehicles?.find(v => v.vehicle_id === preset.vehicle_id) : null;
+        const vehicle_plate = vehicle?.plate_number || manager?.defaultPlateFor?.(template.trip_id) || null;
+
+        const routeName = settings.route_name ||
+          template.route_name ||
+          (template.route_id && manager?.routes?.find(r => r.route_id === template.route_id)?.name) ||
+          null;
+
+        defaultTrips.push({
+          trip_id: expectedRunId,
+          departure_time,
+          departure: vnDeparture(departure_time),
+          route_name: routeName,
+          vehicle_plate,
+          status: 'SCHEDULED',
+          source: 'SCHEDULE_DEFAULT',
+          passengers: null,
+          delay_minutes: 0,
+          cash_handed_in_vnd: null,
+          _date: dayStr
+        });
+      }
+    }
+
+    const allTrips = [...assignedTrips, ...defaultTrips];
+
+    const daysMap = new Map();
+    for (const trip of allTrips) {
+      const date = trip._date;
+      if (!daysMap.has(date)) {
+        daysMap.set(date, []);
+      }
+      const { _date, ...cleanTrip } = trip;
+      daysMap.get(date).push(cleanTrip);
+    }
+
+    const days = [];
+    const sortedDates = Array.from(daysMap.keys()).sort();
+    for (const date of sortedDates) {
+      const dayTrips = daysMap.get(date);
+      dayTrips.sort((a, b) => {
+        if (a.departure !== b.departure) {
+          return a.departure.localeCompare(b.departure);
+        }
+        return Date.parse(a.departure_time) - Date.parse(b.departure_time);
+      });
+      days.push({
+        date,
+        trips: dayTrips
+      });
+    }
+
+    const summary = {
+      total: allTrips.length,
+      completed: allTrips.filter(t => t.status === 'COMPLETED').length,
+      upcoming: allTrips.filter(t => t.status === 'SCHEDULED' || t.status === 'IN_TRANSIT').length,
+      cancelled: allTrips.filter(t => t.status === 'CANCELLED').length
+    };
+
+    return {
+      success: true,
+      data: {
+        month: targetMonth,
+        today,
+        days,
+        summary
       }
     };
   }
@@ -670,6 +1002,38 @@ export class DriverCockpitService {
   }
 
   /**
+   * DRI-008: Confirm departure from a stop of a running trip. Repeating it is harmless.
+   */
+  departStop(tripId, stopId, mockNow = Date.now()) {
+    const trip = this.activeTrips.get(tripId);
+    if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
+    if (trip.status !== 'IN_TRANSIT') {
+      return { success: false, error: 'Chuyến xe chưa chạy hoặc đã kết thúc', code: 'TRIP_NOT_ACTIVE' };
+    }
+    const index = trip.stops.findIndex(s => s.stop_id === stopId);
+    if (index === -1) return { success: false, error: 'Không tìm thấy điểm dừng', code: 'STOP_NOT_FOUND' };
+
+    const stop = trip.stops[index];
+    if (index < trip.current_stop_index) {
+      return { success: true, data: stop };
+    }
+    if (!stop.departed_at) {
+      if (stop.status !== 'ARRIVED') {
+        stop.status = 'ARRIVED';
+        stop.arrived_at = stop.arrived_at || new Date(mockNow).toISOString();
+      }
+      stop.departed_at = new Date(mockNow).toISOString();
+      // The bus now heads for the next stop; the app reads its position back from this index.
+      trip.current_stop_index = Math.max(trip.current_stop_index, Math.min(index + 1, trip.stops.length - 1));
+      this._event(trip, 'STOP_DEPARTED', { stop_id: stop.stop_id, stop_name: stop.name, message: `Rời trạm ${stop.name}` }, mockNow);
+      if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
+        this.eventBridge.emit('STOP_DEPARTED', { tripId, stopId, index, stopName: stop.name });
+      }
+    }
+    return { success: true, data: stop };
+  }
+
+  /**
    * DRI-004: Submit Pre-Start Vehicle Readiness Inspection
    */
   submitReadinessChecklist(tripId, checklist = {}) {
@@ -707,7 +1071,7 @@ export class DriverCockpitService {
   /**
    * DRI-005: Start Trip & Activate Active Cockpit (only after the readiness checklist is complete)
    */
-  startTrip(tripId) {
+  startTrip(tripId, { now = Date.now() } = {}) {
     const trip = this.activeTrips.get(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
 
@@ -719,8 +1083,11 @@ export class DriverCockpitService {
       };
     }
 
+    const blocked = this._startBlock(trip, now);
+    if (blocked) return { success: false, ...blocked };
+
     trip.status = 'IN_TRANSIT';
-    trip.actual_start_time = new Date().toISOString();
+    trip.actual_start_time = new Date(now).toISOString();
     this._event(trip, 'TRIP_STARTED');
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
@@ -731,6 +1098,31 @@ export class DriverCockpitService {
       success: true,
       message: 'Chuyến đi đã bắt đầu! Đang truyền telemetry GPS về trung tâm điều hành.',
       data: this._publicTrip(trip)
+    };
+  }
+
+  /**
+   * Why this trip may not start now (D189), or null. One bus and one driver run one trip at a time, so a trip
+   * left running blocks the next until it is ended (by the driver or the office). A trip starts at most an hour
+   * before its time: started earlier it would count as departed and stop selling. The demo day keeps its own clock.
+   */
+  _startBlock(trip, now) {
+    const plate = (trip.vehicle_plate || '').trim();
+    const running = [...this.activeTrips.values()].find(o => o !== trip && o.status === 'IN_TRANSIT'
+      && ((trip.driver_id && o.driver_id === trip.driver_id) || (plate && o.vehicle_plate === plate)));
+    if (running) {
+      const when = running.planned_departure_time ? vnWhen(Date.parse(running.planned_departure_time)) : { hhmm: '--:--', day: '--/--' };
+      return {
+        code: 'OTHER_TRIP_RUNNING',
+        error: `Chuyến ${when.hhmm} ngày ${when.day} (biển số ${running.vehicle_plate || plate}) vẫn đang chạy. Kết thúc chuyến đó trước, hoặc gọi điều hành.`
+      };
+    }
+    const depMs = Date.parse(trip.planned_departure_time || '');
+    if (!Number.isFinite(depMs) || (!isProduction() && vnDate(depMs) === DEMO_DATE) || depMs - now <= EARLY_START_MS) return null;
+    const dep = vnWhen(depMs);
+    return {
+      code: 'TRIP_TOO_EARLY',
+      error: `Chưa tới giờ chạy. Chuyến ${dep.hhmm} ngày ${dep.day}, bắt đầu được từ ${vnWhen(depMs - EARLY_START_MS).hhmm}.`
     };
   }
 
@@ -875,7 +1267,7 @@ export class DriverCockpitService {
    * Single place where a manifest passenger becomes BOARDED, so that every boarding path
    * (QR, group QR, PIN, offline ticket, manual) updates the passenger wallet and the manager through the bridge.
    */
-  _markBoarded(tripId, trip, passenger, mockNow, scanMethod = null) {
+  _markBoarded(tripId, trip, passenger, mockNow, scanMethod = null, options = {}) {
     passenger.boarding_status = 'BOARDED';
     passenger.boarded_at = new Date(mockNow).toISOString();
     if (scanMethod) passenger.scan_method = scanMethod;
@@ -894,9 +1286,35 @@ export class DriverCockpitService {
         passenger,
         ticketId: passenger.ticket_id,
         pnr: passenger.pnr,
-        now: mockNow
+        now: mockNow,
+        seatCodes: options.seatCodes,
+        skipNotification: options.skipNotification
       });
     }
+  }
+
+  _boardTogether(tripId, trip, passengers, mockNow) {
+    const byPhone = new Map();
+    for (const p of passengers) {
+      const phone = p.passenger_phone || p.phone;
+      const list = byPhone.get(phone) || [];
+      list.push(p);
+      byPhone.set(phone, list);
+    }
+
+    const boardedList = [];
+    for (const p of passengers) {
+      const phone = p.passenger_phone || p.phone;
+      const phonePax = byPhone.get(phone) || [p];
+      const isFirst = phonePax[0] === p;
+      const seatCodes = phonePax.map(x => x.seat_code).filter(Boolean);
+      this._markBoarded(tripId, trip, p, mockNow, null, {
+        seatCodes,
+        skipNotification: !isFirst
+      });
+      boardedList.push(p);
+    }
+    return boardedList;
   }
 
   /**
@@ -915,7 +1333,7 @@ export class DriverCockpitService {
     if (inputString.startsWith('BUSGO_GRP|')) {
       const groupCheck = verifyGroupBoardingQR(inputString, this.secretKey);
       if (!groupCheck.isValid) {
-        return { success: false, error: `Mã QR nhóm không hợp lệ (${groupCheck.reason})`, code: groupCheck.reason };
+        return { success: false, error: qrErrorMessage(groupCheck.reason), code: groupCheck.reason };
       }
 
       const onTrip = groupCheck.members
@@ -925,10 +1343,15 @@ export class DriverCockpitService {
         return { success: false, error: 'Vé không thuộc chuyến xe này', code: 'TICKET_WRONG_TRIP' };
       }
 
-      const boardedList = [];
+      const toBoard = [];
       const codPending = [];
       const revokedList = [];
+      const cancelledList = [];
       for (const { member, passenger } of onTrip) {
+        if (passenger.boarding_status === 'CANCELLED') {
+          cancelledList.push(passenger);
+          continue;
+        }
         if (passenger.boarding_status === 'BOARDED') continue;
         if (member.version !== versionOf(passenger)) {
           revokedList.push(passenger);
@@ -938,8 +1361,18 @@ export class DriverCockpitService {
           codPending.push(passenger);
           continue;
         }
-        this._markBoarded(tripId, trip, passenger, mockNow);
-        boardedList.push(passenger);
+        toBoard.push(passenger);
+      }
+
+      const boardedList = this._boardTogether(tripId, trip, toBoard, mockNow);
+
+      if (boardedList.length === 0 && cancelledList.length > 0) {
+        const seats = cancelledList.map(p => p.seat_code).join(', ');
+        return {
+          success: false,
+          code: 'TICKET_CANCELLED',
+          error: `Vé ghế ${seats} đã hủy, không cho lên xe.`
+        };
       }
 
       return {
@@ -950,7 +1383,8 @@ export class DriverCockpitService {
           pnr: groupCheck.pnr,
           boarded_passengers: boardedList.map(p => this._publicPassenger(p)),
           cod_pending_passengers: codPending.map(p => this._publicPassenger(p)),
-          revoked_passengers: revokedList.map(p => this._publicPassenger(p))
+          revoked_passengers: revokedList.map(p => this._publicPassenger(p)),
+          cancelled_passengers: cancelledList.map(p => this._publicPassenger(p))
         }
       };
     }
@@ -962,20 +1396,82 @@ export class DriverCockpitService {
       if (!passenger) {
         return { success: false, error: 'Vé không thuộc chuyến xe này', code: 'TICKET_WRONG_TRIP' };
       }
-      if (!verifyTicketPin(ticketId, pin, this.secretKey, versionOf(passenger)).isValid) {
+
+      const pnr = passenger.pnr;
+      const groupPassengers = pnr
+        ? trip.manifest.filter(m => m.pnr === pnr)
+        : [passenger];
+
+      const isPinValid = groupPassengers.some(t =>
+        verifyTicketPin(t.ticket_id, pin, this.secretKey, versionOf(t)).isValid
+      );
+      if (!isPinValid) {
         return { success: false, error: 'Mã PIN vé không chính xác', code: 'INVALID_PIN' };
       }
-      return this._boardOne(tripId, trip, passenger, mockNow, 'Xác thực PIN thành công');
+
+      const riding = groupPassengers.filter(p => p.boarding_status !== 'CANCELLED');
+      if (riding.length === 0) {
+        return { success: false, code: 'TICKET_CANCELLED', error: `Vé ghế ${groupPassengers.map(p => p.seat_code).join(', ')} đã hủy, không cho lên xe.` };
+      }
+      if (riding.every(p => p.boarding_status === 'BOARDED')) {
+        return {
+          success: false,
+          error: `Khách ${passenger.passenger_name} (Ghế ${passenger.seat_code}) đã lên xe trước đó!`,
+          code: 'ALREADY_BOARDED'
+        };
+      }
+
+      const toBoard = [];
+      const codPending = [];
+      const revokedList = [];
+      const cancelledList = [];
+      for (const p of groupPassengers) {
+        if (p.boarding_status === 'BOARDED') continue;
+        if (p.boarding_status === 'CANCELLED') {
+          cancelledList.push(p);
+          continue;
+        }
+        if (this._codPaymentRequired(p)) {
+          codPending.push(p);
+          continue;
+        }
+        toBoard.push(p);
+      }
+
+      const boardedList = this._boardTogether(tripId, trip, toBoard, mockNow);
+
+      const targetPassenger = boardedList.find(p => p.ticket_id === passenger.ticket_id) || boardedList[0] || passenger;
+
+      return {
+        success: true,
+        isGroup: groupPassengers.length > 1,
+        message: boardedList.length > 1
+          ? `Xác thực PIN thành công: ${boardedList.length} khách đã lên xe`
+          : (boardedList.length === 1
+            ? `Xác thực PIN thành công: ${targetPassenger.passenger_name} · Ghế ${targetPassenger.seat_code}`
+            : 'Xác thực PIN thành công'),
+        data: {
+          ...this._publicPassenger(targetPassenger),
+          pnr,
+          boarded_passengers: boardedList.map(p => this._publicPassenger(p)),
+          cod_pending_passengers: codPending.map(p => this._publicPassenger(p)),
+          revoked_passengers: revokedList.map(p => this._publicPassenger(p)),
+          cancelled_passengers: cancelledList.map(p => this._publicPassenger(p))
+        }
+      };
     }
 
     // Single boarding QR (BUSGO|pnr|ticket|v<n>|hmac)
     const qrCheck = verifyBoardingQR(inputString, this.secretKey);
     if (!qrCheck.isValid) {
-      return { success: false, error: `Mã QR không hợp lệ (${qrCheck.reason})`, code: qrCheck.reason };
+      return { success: false, error: qrErrorMessage(qrCheck.reason), code: qrCheck.reason };
     }
     const passenger = trip.manifest.find(m => m.ticket_id === qrCheck.ticket_id);
     if (!passenger) {
       return { success: false, error: 'Vé không thuộc chuyến xe này', code: 'TICKET_WRONG_TRIP' };
+    }
+    if (passenger.boarding_status === 'CANCELLED') {
+      return { success: false, code: 'TICKET_CANCELLED', error: `Vé ghế ${passenger.seat_code} đã hủy, không cho lên xe.` };
     }
     if (passenger.boarding_status !== 'BOARDED' && qrCheck.version !== versionOf(passenger)) return revoked(passenger);
     return this._boardOne(tripId, trip, passenger, mockNow, 'Soát vé thành công');
@@ -983,6 +1479,9 @@ export class DriverCockpitService {
 
   /** Shared tail of the single-ticket boarding paths: one boarding per ticket, COD first. */
   _boardOne(tripId, trip, passenger, mockNow, label) {
+    if (passenger.boarding_status === 'CANCELLED') {
+      return { success: false, code: 'TICKET_CANCELLED', error: `Vé ghế ${passenger.seat_code} đã hủy, không cho lên xe.` };
+    }
     if (passenger.boarding_status === 'BOARDED') {
       return { success: false, error: `Khách ${passenger.passenger_name} (Ghế ${passenger.seat_code}) đã lên xe trước đó!`, code: 'ALREADY_BOARDED' };
     }
@@ -1021,12 +1520,15 @@ export class DriverCockpitService {
     if (order.length === 0) return null;
     const config = this._configOf(trip);
     const appointments = homeAppointments(trip);
+    const positions = doorPositions(order);
     return {
       started_at: trip.home_run_started_at || null,
       wait_minutes: homeWaitMinutes(config),
-      stops: order.map((p, i) => ({
+      // Whether the run still fits the departure: the driver may reorder it or tell the office.
+      outlook: homeRunOutlook(trip),
+      stops: order.map(p => ({
         ticket_id: p.ticket_id,
-        position: i + 1,
+        position: positions[p.ticket_id],
         appointment_at: appointments[p.ticket_id] || null,
         arrived_at: p.home_pickup.arrived_at || null,
         missable_at: missableAt(p, config),
@@ -1059,14 +1561,15 @@ export class DriverCockpitService {
     // A new order on the road moves the times given to the passengers: each one whose time moved is told.
     if (trip.home_run_started_at) {
       const before = trip.home_appointments || {};
-      const after = homeAppointments(trip, { fresh: true });
+      const after = homeAppointments(trip, { fresh: true, now: mockNow });
       trip.home_appointments = after;
       const queue = homeQueue(trip);
+      const positions = doorPositions(queue);
       const moved = queue.filter(p => before[p.ticket_id] && after[p.ticket_id] && Math.abs(Date.parse(after[p.ticket_id]) - Date.parse(before[p.ticket_id])) >= 5 * 60000);
       if (moved.length) {
         this.eventBridge?.emit?.('HOME_APPOINTMENT_CHANGED', {
           tripId, vehiclePlate: trip.vehicle_plate,
-          passengers: moved.map(p => ({ ticket_id: p.ticket_id, phone: p.passenger_phone || null, address: p.home_pickup.address, appointment_at: after[p.ticket_id], position: queue.indexOf(p) + 1 })),
+          passengers: moved.map(p => ({ ticket_id: p.ticket_id, phone: p.passenger_phone || null, address: p.home_pickup.address, appointment_at: after[p.ticket_id], position: positions[p.ticket_id] })),
           now: mockNow
         });
       }
@@ -1079,11 +1582,13 @@ export class DriverCockpitService {
     const { trip, p, error } = this._homePassenger(tripId, ticketId);
     if (error) return error;
     if (!isWaitingHome(p)) return { success: false, error: 'Khách này không còn chờ đón tận nhà', code: 'HOME_PICKUP_CLOSED' };
-    if (!p.home_pickup.arrived_at) {
-      p.home_pickup = { ...p.home_pickup, arrived_at: new Date(mockNow).toISOString() };
-      this._event(trip, 'HOME_ARRIVED', { ticket_id: ticketId, seat_code: p.seat_code }, mockNow);
+    // The bus at a door is there for every passenger waiting at it: the wait starts for all of them.
+    const door = doorKey(p);
+    for (const q of homeQueue(trip).filter(x => doorKey(x) === door && !x.home_pickup.arrived_at)) {
+      q.home_pickup = { ...q.home_pickup, arrived_at: new Date(mockNow).toISOString() };
+      this._event(trip, 'HOME_ARRIVED', { ticket_id: q.ticket_id, seat_code: q.seat_code }, mockNow);
       this.eventBridge?.emit?.('HOME_PICKUP_DOOR', {
-        tripId, ticketId, seatCode: p.seat_code, phone: p.passenger_phone || null, address: p.home_pickup.address,
+        tripId, ticketId: q.ticket_id, seatCode: q.seat_code, phone: q.passenger_phone || null, address: q.home_pickup.address,
         vehiclePlate: trip.vehicle_plate, waitMinutes: homeWaitMinutes(this._configOf(trip)), now: mockNow
       });
     }
@@ -1155,7 +1660,7 @@ export class DriverCockpitService {
       return { success: false, error: 'Chuyến này không còn khách đón tận nhà', code: 'NO_HOME_PICKUPS' };
     }
     // Times given to the passengers are frozen when the bus sets off, with the order it follows.
-    const appointments = homeAppointments(trip);
+    const appointments = homeAppointments(trip, { now: mockNow });
     trip.home_order = homeOrder(trip).map(p => p.ticket_id);
     trip.home_appointments = appointments;
     trip.home_run_started_at = new Date(mockNow).toISOString();
@@ -1163,7 +1668,11 @@ export class DriverCockpitService {
     this.eventBridge?.emit?.('HOME_RUN_STARTED', {
       tripId,
       vehiclePlate: trip.vehicle_plate,
-      passengers: homeQueue(trip).map((p, i) => ({ ticket_id: p.ticket_id, seat_code: p.seat_code, phone: p.passenger_phone || null, address: p.home_pickup.address, position: i + 1, appointment_at: appointments[p.ticket_id] || null })),
+      passengers: (() => {
+        const queue = homeQueue(trip);
+        const positions = doorPositions(queue);
+        return queue.map(p => ({ ticket_id: p.ticket_id, seat_code: p.seat_code, phone: p.passenger_phone || null, address: p.home_pickup.address, position: positions[p.ticket_id], appointment_at: appointments[p.ticket_id] || null }));
+      })(),
       now: mockNow
     });
     return { success: true, data: this._publicTrip(trip) };
@@ -1179,6 +1688,9 @@ export class DriverCockpitService {
     const passenger = trip.manifest.find(m => (ticketId && m.ticket_id === ticketId) || (seatCode && m.seat_code === seatCode));
     if (!passenger) {
       return { success: false, error: 'Không tìm thấy hành khách trong danh sách', code: 'NOT_FOUND' };
+    }
+    if (passenger.boarding_status === 'CANCELLED') {
+      return { success: false, code: 'TICKET_CANCELLED', error: `Vé ghế ${passenger.seat_code} đã hủy, không cho lên xe.` };
     }
     if (passenger.boarding_status === 'BOARDED') {
       return { success: false, error: `Khách ${passenger.passenger_name} đã lên xe trước đó!`, code: 'ALREADY_BOARDED' };
@@ -1196,11 +1708,24 @@ export class DriverCockpitService {
    * Debt receipt codes are unique per ticket (DR-<ticket>-<thousands>K) and are listed at trip end.
    */
   _settleChange(trip, { ticketId, changeDue, method, phone }) {
-    if (!CHANGE_METHODS.includes(method)) {
-      return { success: false, error: 'Hình thức xử lý tiền thừa không hợp lệ', code: 'INVALID_SETTLEMENT_METHOD' };
-    }
-    if (method === 'WALLET_CREDIT' && changeDue > 0 && !phone) {
-      return { success: false, error: 'Cần số điện thoại của khách để cộng tiền thừa vào ví', code: 'WALLET_PHONE_REQUIRED' };
+    if (changeDue > 0) {
+      if (!CHANGE_METHODS.includes(method)) {
+        return { success: false, error: 'Hình thức xử lý tiền thừa không hợp lệ', code: 'INVALID_SETTLEMENT_METHOD' };
+      }
+      if (method === 'WALLET_CREDIT') {
+        const op = findOperatorById(trip?.operator_id || DEFAULT_OPERATOR_ID);
+        const walletEnabled = Boolean(op?.service_config?.wallet_enabled);
+        if (!walletEnabled) {
+          return {
+            success: false,
+            error: 'Nhà xe chưa bật ví BusGo. Trả tiền thừa bằng tiền mặt hoặc biên lai nợ.',
+            code: 'WALLET_DISABLED'
+          };
+        }
+        if (!phone) {
+          return { success: false, error: 'Cần số điện thoại của khách để cộng tiền thừa vào ví', code: 'WALLET_PHONE_REQUIRED' };
+        }
+      }
     }
 
     let debtReceiptCode = null;
@@ -1234,7 +1759,7 @@ export class DriverCockpitService {
 
     return {
       success: true,
-      data: { method, change_due_vnd: changeDue, debt_receipt_code: debtReceiptCode, payout_location: payoutLocation }
+      data: { method: method || null, change_due_vnd: changeDue, debt_receipt_code: debtReceiptCode, payout_location: payoutLocation }
     };
   }
 
@@ -1277,7 +1802,7 @@ export class DriverCockpitService {
     }
 
     const changeDue = collectedAmount - fareAmount;
-    const method = payload.change_settlement_method || 'CASH_RETURNED';
+    const method = payload.change_settlement_method !== undefined ? payload.change_settlement_method : (changeDue > 0 ? 'CASH_RETURNED' : null);
     const settlement = this._settleChange(trip, { ticketId, changeDue, method, phone: item.passenger_phone });
     if (!settlement.success) return settlement;
 
@@ -1295,7 +1820,7 @@ export class DriverCockpitService {
       this._markBoarded(tripId, trip, item, mockNow);
     }
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
-      this.eventBridge.emit('COD_COLLECTED', { tripId, ticketId, pnr: item.pnr, fareVnd: fareAmount });
+      this.eventBridge.emit('COD_COLLECTED', { tripId, ticketId, pnr: item.pnr, fareVnd: fareAmount, seatCode: item.seat_code });
       if (item.source === 'HOTLINE' && item.reservation_id) {
         this.eventBridge.emit('HOTLINE_HOLD_CONVERTED', { tripId, reservationId: item.reservation_id, seatCode: item.seat_code });
       }
@@ -1370,7 +1895,7 @@ export class DriverCockpitService {
       normalizedPhone = phoneCheck.normalized;
     }
 
-    const fare = trip.base_fare_vnd;
+    const fare = stops.length > 0 ? (this._hailFares(trip, pickupIndex)[dropId] ?? trip.base_fare_vnd) : trip.base_fare_vnd;
     const collected = amount_collected_vnd === undefined ? fare : Number(amount_collected_vnd);
     if (!Number.isFinite(collected) || collected < fare) {
       return { success: false, error: 'Số tiền thu chưa đủ giá vé', code: 'INSUFFICIENT_AMOUNT' };
@@ -1697,7 +2222,7 @@ export class DriverCockpitService {
    * DRI-017: End Trip at final terminal.
    * Cash is reconciled on the server from the manifest; totals sent by the client are ignored. A trip ends once.
    */
-  endTrip(tripId, { earlyEndReason = null } = {}) {
+  endTrip(tripId, { earlyEndReason = null, endedBy = null } = {}) {
     const trip = this.activeTrips.get(tripId);
     if (!trip) return { success: false, error: 'Chuyến xe không tồn tại', code: 'TRIP_NOT_FOUND' };
     if (trip.status !== 'IN_TRANSIT') {
@@ -1735,6 +2260,7 @@ export class DriverCockpitService {
       total_no_show: count('NO_SHOW'),
       unresolved_passenger_count: trip.manifest.filter(m => !settledStatuses.includes(m.boarding_status)).length,
       early_end_reason: atFinalStop ? null : reason,
+      ended_by: endedBy || 'DRIVER',
       total_cod_collected_vnd: trip.total_cod_collected_vnd,
       total_hail_collected_vnd: trip.total_hail_collected_vnd,
       total_cash_to_handover_vnd: trip.total_cod_collected_vnd + trip.total_hail_collected_vnd,
@@ -1749,19 +2275,123 @@ export class DriverCockpitService {
 
     trip.status = 'COMPLETED';
     trip.completed_at = summary.completed_at;
-    this._event(trip, 'TRIP_COMPLETED', { early_end_reason: summary.early_end_reason });
+    trip.ended_by = summary.ended_by;
+    trip.early_end_reason = summary.early_end_reason;
+    trip.total_cash_to_handover_vnd = summary.total_cash_to_handover_vnd;
+    trip.financial_reconciliation_status = summary.financial_reconciliation_status;
+    this._event(trip, 'TRIP_COMPLETED', { early_end_reason: summary.early_end_reason, ended_by: summary.ended_by });
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
       this.eventBridge.emit('TRIP_COMPLETED', {
         tripId,
+        driverId: trip.driver_id,
+        operatorId: trip.operator_id,
         summary: {
           vehicle_plate: trip.vehicle_plate,
           total_passengers: trip.booked_passengers_count,
-          boarded_count: trip.boarded_count
+          boarded_count: trip.boarded_count,
+          total_cash_to_handover_vnd: summary.total_cash_to_handover_vnd
         }
       });
     }
 
     return { success: true, data: summary };
+  }
+
+  /**
+   * H-02: Completed trips of one company for cashier cash handover settlement.
+   */
+  listCashHandovers({ operatorId = DEFAULT_OPERATOR_ID, status = 'PENDING', date = null } = {}) {
+    const list = [];
+    for (const trip of this.activeTrips.values()) {
+      if ((trip.operator_id || DEFAULT_OPERATOR_ID) !== operatorId) continue;
+      if (trip.status !== 'COMPLETED') continue;
+      const reconStatus = trip.financial_reconciliation_status || 'PENDING_DEPOT_SETTLEMENT';
+      if (status === 'PENDING' && reconStatus !== 'PENDING_DEPOT_SETTLEMENT') continue;
+      if (date) {
+        // Days are Vietnam days, like everywhere the office picks a date.
+        const completedDay = trip.completed_at ? vnDate(Date.parse(trip.completed_at)) : '';
+        const departureDay = trip.departure_time ? vnDate(Date.parse(trip.departure_time)) : '';
+        if (completedDay !== date && departureDay !== date) continue;
+      }
+      const driver = MOCK_DRIVERS_DB.find(d => d.driver_id === trip.driver_id);
+      const expectedCash = trip.total_cash_to_handover_vnd ?? ((trip.total_cod_collected_vnd || 0) + (trip.total_hail_collected_vnd || 0));
+      const debtCount = (trip.debts || []).length;
+      const debtAmount = (trip.debts || []).reduce((sum, d) => sum + (d.amount_vnd || 0), 0);
+      list.push({
+        trip_id: trip.trip_id,
+        driver_id: trip.driver_id,
+        driver_name: driver?.full_name || trip.driver_name || 'Tài xế',
+        vehicle_plate: trip.vehicle_plate || null,
+        route_name: trip.route_name || '',
+        completed_at: trip.completed_at,
+        expected_cash_vnd: expectedCash,
+        cod_collected_vnd: trip.total_cod_collected_vnd || 0,
+        hail_collected_vnd: trip.total_hail_collected_vnd || 0,
+        debt_receipts: {
+          count: debtCount,
+          amount_vnd: debtAmount
+        },
+        financial_reconciliation_status: reconStatus,
+        received_vnd: trip.received_vnd ?? null,
+        difference_vnd: trip.difference_vnd ?? null,
+        note: trip.settlement_note || null,
+        confirmed_by: trip.confirmed_by || null,
+        confirmed_at: trip.confirmed_at || null
+      });
+    }
+    return list.sort((a, b) => (Date.parse(b.completed_at || '') || 0) - (Date.parse(a.completed_at || '') || 0));
+  }
+
+  /**
+   * H-02: Cashier confirms driver's cash handover for a completed trip.
+   */
+  confirmCashHandover(tripId, { receivedVnd, note = '', staffId = null, operatorId = DEFAULT_OPERATOR_ID, mockNow = Date.now() } = {}) {
+    const trip = this.activeTrips.get(tripId);
+    if (!trip || (trip.operator_id || DEFAULT_OPERATOR_ID) !== operatorId) {
+      return { success: false, error: 'Không tìm thấy chuyến xe', code: 'TRIP_NOT_FOUND' };
+    }
+    if (trip.status !== 'COMPLETED') {
+      return { success: false, error: 'Chuyến xe chưa kết thúc', code: 'TRIP_NOT_COMPLETED' };
+    }
+    const currentStatus = trip.financial_reconciliation_status || 'PENDING_DEPOT_SETTLEMENT';
+    if (['SETTLED', 'SETTLED_WITH_DIFFERENCE'].includes(currentStatus)) {
+      return { success: false, error: 'Chuyến xe đã được quyết toán nộp tiền', code: 'ALREADY_SETTLED' };
+    }
+    const received = Number(receivedVnd);
+    if (!Number.isFinite(received) || received < 0) {
+      return { success: false, error: 'Số tiền thực nhận không hợp lệ', code: 'INVALID_AMOUNT' };
+    }
+    const expected = trip.total_cash_to_handover_vnd ?? ((trip.total_cod_collected_vnd || 0) + (trip.total_hail_collected_vnd || 0));
+    const diff = received - expected;
+    const trimmedNote = typeof note === 'string' ? note.trim() : '';
+    if (diff !== 0 && trimmedNote.length < 3) {
+      return { success: false, error: 'Ghi chú lý do chênh lệch tiền (tối thiểu 3 ký tự)', code: 'NOTE_REQUIRED' };
+    }
+
+    const nextStatus = diff === 0 ? 'SETTLED' : 'SETTLED_WITH_DIFFERENCE';
+    trip.financial_reconciliation_status = nextStatus;
+    trip.received_vnd = received;
+    trip.difference_vnd = diff;
+    trip.settlement_note = trimmedNote || null;
+    trip.confirmed_by = staffId;
+    trip.confirmed_at = new Date(mockNow).toISOString();
+
+    return {
+      success: true,
+      message: diff === 0
+        ? `Đã xác nhận nhận đủ ${received.toLocaleString('vi-VN')} đ từ tài xế`
+        : `Đã xác nhận nộp tiền có chênh lệch (${diff > 0 ? '+' : ''}${diff.toLocaleString('vi-VN')} đ)`,
+      data: {
+        trip_id: trip.trip_id,
+        financial_reconciliation_status: nextStatus,
+        expected_cash_vnd: expected,
+        received_vnd: received,
+        difference_vnd: diff,
+        note: trip.settlement_note,
+        confirmed_by: trip.confirmed_by,
+        confirmed_at: trip.confirmed_at
+      }
+    };
   }
 }

@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'passenger_main_shell.dart';
 import 'passenger_payment_processing_screen.dart';
 import 'passenger_store.dart';
 import 'passenger_widgets.dart';
 
 /// PAX-011 / PAX-012: passenger, voucher, optional insurance (off by default, BR-CHECKOUT-003)
-/// and VietQR as the only method of this version (BR-CHECKOUT-004).
+/// and payment method selection (VietQR transfer or cash on board when the operator allows it).
 class PassengerCheckoutScreen extends StatefulWidget {
   const PassengerCheckoutScreen({super.key});
 
@@ -29,6 +30,7 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
     final store = PassengerScope.read(context);
     if (_name.text.isEmpty && store.userName != null) _name.text = store.userName!;
     if (_phone.text.isEmpty && store.userPhone != null) _phone.text = store.userPhone!;
+    if (_voucher.text.isEmpty && store.voucher != null) _voucher.text = store.voucher!;
   }
 
   @override
@@ -39,7 +41,9 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
     super.dispose();
   }
 
-  void _applyVoucher(PassengerStore store) {
+  bool _checkingVoucher = false;
+
+  Future<void> _applyVoucher(PassengerStore store) async {
     if (store.voucher != null) {
       store.removeVoucher();
       setState(() {
@@ -48,10 +52,13 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
       });
       return;
     }
-    final error = store.applyVoucher(_voucher.text);
+    setState(() => _checkingVoucher = true);
+    final error = await store.applyVoucher(_voucher.text);
+    if (!mounted) return;
     setState(() {
+      _checkingVoucher = false;
       _voucherOk = error == null;
-      _voucherMessage = error ?? 'Đã áp dụng: giảm ${vnd(PassengerStore.knownVouchers[store.voucher]!)}';
+      _voucherMessage = error ?? 'Đã áp dụng: giảm ${vnd(store.discount)}';
     });
   }
 
@@ -70,7 +77,23 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
     if (!mounted) return;
     setState(() => _creating = false);
     if (error != null) {
+      if (bookingClosedCodes.contains(store.lastErrorCode)) {
+        await showBookingClosedDialog(context, store, error);
+        return;
+      }
+      // The server dropped a code that no longer applies: show it next to the field.
+      if (store.voucher == null && _voucherOk) {
+        setState(() {
+          _voucherOk = false;
+          _voucherMessage = error;
+        });
+      }
       showToast(context, error);
+      return;
+    }
+    if (store.payByCash) {
+      showToast(context, 'Đặt vé thành công. Bạn thanh toán tiền mặt cho tài xế khi lên xe.');
+      PassengerMainShell.openTab(context, 1);
       return;
     }
     Navigator.of(context).push(MaterialPageRoute(
@@ -85,6 +108,9 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
     final p = store.stop(store.pickup);
     final d = store.stop(store.dropoff);
     final n = store.seats.length;
+    final canPayCash = store.operator?.allowCash != false && store.total > 0;
+    // Nothing to transfer for a 0 đ order, so it is always shown as settled by transfer.
+    final canPayTransfer = store.operator?.allowTransfer != false || store.total <= 0;
     return Scaffold(
       appBar: const TopBar(title: 'Xác nhận đặt vé'),
       body: Column(children: [
@@ -98,7 +124,7 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
                   Text('Ghế ${store.seats.join(', ')}', style: mono(size: 14)),
                 ]),
                 gap(6),
-                Text('${TravelDate.of(store.trip!.day.isEmpty ? store.date : store.trip!.day).long} · Đón ${store.homePickup != null ? 'tận nhà: ${store.homePickup!.address}' : '${p.time} ${p.short}'} · Trả ${store.homeDropoff != null ? 'tận nhà: ${store.homeDropoff!.address}' : '${d.time} ${d.short}'}', style: sans(size: 13, color: PTokens.muted)),
+                Text('${TravelDate.of(store.trip!.day.isEmpty ? store.date : store.trip!.day).long} · Đón ${store.homePickup != null ? 'tận nhà: ${store.homePickup!.address}' : '${p.estimated ? 'khoảng ' : ''}${p.time} ${p.short}'} · Trả ${store.homeDropoff != null ? 'tận nhà: ${store.homeDropoff!.address}' : '${d.estimated ? 'khoảng ' : ''}${d.time} ${d.short}'}', style: sans(size: 13, color: PTokens.muted)),
               ]),
             ),
             gap(16),
@@ -130,6 +156,7 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Expanded(
                 child: TextField(
+                  onTapOutside: dismissKeyboard,
                   controller: _voucher,
                   enabled: store.voucher == null,
                   textCapitalization: TextCapitalization.characters,
@@ -138,30 +165,32 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              SizedBox(width: 120, child: GhostButton(label: store.voucher == null ? 'Áp dụng' : 'Bỏ mã', onPressed: () => _applyVoucher(store))),
+              SizedBox(width: 120, child: GhostButton(label: store.voucher == null ? (_checkingVoucher ? 'Đang kiểm tra' : 'Áp dụng') : 'Bỏ mã', onPressed: _checkingVoucher ? null : () => _applyVoucher(store))),
             ]),
             if (_voucherMessage != null) ...[gap(6), Text(_voucherMessage!, style: sans(size: 13, weight: FontWeight.w500, color: _voucherOk ? PTokens.success : PTokens.danger))],
           ], right: [
             if (!pWide(context)) gap(16),
-            AppCard(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              // Its own Material so the tile ripple shows above the card colour.
-              child: Material(
-                color: Colors.transparent,
-                child: SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: store.insured,
-                  onChanged: store.setInsured,
-                  title: Text('Bảo hiểm chuyến đi', style: sans(size: 14, weight: FontWeight.w600)),
-                  subtitle: Text('Không bắt buộc · 10.000 đ mỗi ghế', style: sans(size: 12, color: PTokens.muted)),
+            if (store.insuranceEnabled) ...[
+              AppCard(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                // Its own Material so the tile ripple shows above the card colour.
+                child: Material(
+                  color: Colors.transparent,
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: store.insured,
+                    onChanged: store.setInsured,
+                    title: Text('Bảo hiểm chuyến đi', style: sans(size: 14, weight: FontWeight.w600)),
+                    subtitle: Text('Không bắt buộc · 10.000 đ mỗi ghế', style: sans(size: 12, color: PTokens.muted)),
+                  ),
                 ),
               ),
-            ),
-            gap(16),
+              gap(16),
+            ],
             _line('Giá vé ($n ghế)', vnd(store.baseFare)),
-            if (store.insuranceFee > 0) _line('Bảo hiểm', vnd(store.insuranceFee)),
-            if (store.homePickup != null) _line('Phụ phí đón tận nhà', vnd(store.homePickup!.feeVnd)),
-            if (store.homeDropoff != null) _line('Phụ phí trả tận nhà', vnd(store.homeDropoff!.feeVnd)),
+            if (store.insuranceEnabled && store.insured) _line('Bảo hiểm', vnd(store.insuranceFee)),
+            if (store.homePickup != null) _line('Phụ phí đón tận nhà', vnd(store.feeOf(store.homePickup!.feeVnd))),
+            if (store.homeDropoff != null) _line('Phụ phí trả tận nhà', vnd(store.feeOf(store.homeDropoff!.feeVnd))),
             // D130: disclosed before the transfer, never shown as confirmed while the company has not answered.
             if ((store.homePickup?.needsReview ?? false) || (store.homeDropoff?.needsReview ?? false))
               Container(
@@ -176,13 +205,31 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
               ),
             if (store.discount > 0) _line('Mã ${store.voucher}', '−${vnd(store.discount)}', color: PTokens.success),
             const Divider(height: 20, color: PTokens.line),
-            Row(children: [
+            if (canPayCash && canPayTransfer) ...[
               Text('Thanh toán qua', style: sans(size: 14, weight: FontWeight.w600)),
-              const Spacer(),
-              const Icon(Icons.qr_code_2, size: 18, color: PTokens.primary),
-              const SizedBox(width: 6),
-              Flexible(child: Text('VietQR chuyển khoản', textAlign: TextAlign.end, style: sans(size: 14, weight: FontWeight.w600))),
-            ]),
+              gap(8),
+              _PaymentOption(
+                icon: Icons.qr_code_2,
+                title: 'VietQR chuyển khoản',
+                selected: !store.payByCash,
+                onTap: () => store.setPaymentMethod('VIETQR_NAPAS247'),
+              ),
+              gap(8),
+              _PaymentOption(
+                icon: Icons.payments_outlined,
+                title: 'Tiền mặt khi lên xe',
+                subtitle: 'Trả tiền mặt cho tài xế khi lên xe',
+                selected: store.payByCash,
+                onTap: () => store.setPaymentMethod('CASH'),
+              ),
+            ] else
+              Row(children: [
+                Text('Thanh toán qua', style: sans(size: 14, weight: FontWeight.w600)),
+                const Spacer(),
+                Icon(canPayTransfer ? Icons.qr_code_2 : Icons.payments_outlined, size: 18, color: PTokens.primary),
+                const SizedBox(width: 6),
+                Flexible(child: Text(canPayTransfer ? 'VietQR chuyển khoản' : 'Tiền mặt khi lên xe', textAlign: TextAlign.end, style: sans(size: 14, weight: FontWeight.w600))),
+              ]),
           ]),
         ),
       ]),
@@ -193,13 +240,72 @@ class _PassengerCheckoutScreenState extends State<PassengerCheckoutScreen> {
             Text(vnd(store.total), style: mono(size: 19, weight: FontWeight.w700)),
           ]),
         ),
-        PrimaryButton(label: _creating ? 'Đang tạo đơn…' : 'Tạo mã thanh toán', onPressed: _creating ? null : () => _pay(store)),
+        PrimaryButton(
+          label: _creating ? 'Đang tạo đơn…' : (canPayCash && (store.payByCash || !canPayTransfer) ? 'Xác nhận đặt vé' : 'Tạo mã thanh toán'),
+          onPressed: _creating ? null : () => _pay(store),
+        ),
       ]),
     );
   }
 
   Widget _line(String label, String value, {Color color = PTokens.ink}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(children: [Text(label, style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(value, style: mono(size: 14, weight: FontWeight.w500, color: color))]),
+        child: Row(children: [
+          Expanded(child: Text(label, style: sans(size: 14, color: PTokens.muted))),
+          const SizedBox(width: 8),
+          Text(value, style: mono(size: 14, weight: FontWeight.w500, color: color)),
+        ]),
       );
+}
+
+class _PaymentOption extends StatelessWidget {
+  const _PaymentOption({required this.icon, required this.title, this.subtitle, required this.selected, required this.onTap});
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      selected: selected,
+      inMutuallyExclusiveGroup: true,
+      button: true,
+      child: Material(
+        color: selected ? PTokens.primarySoft : PTokens.surface,
+        borderRadius: BorderRadius.circular(PTokens.radiusControl),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(PTokens.radiusControl),
+          child: AnimatedContainer(
+            duration: Motion.base,
+            curve: Motion.ease,
+            constraints: const BoxConstraints(minHeight: 48),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(PTokens.radiusControl),
+              border: Border.all(color: selected ? PTokens.primary : PTokens.line),
+            ),
+            child: Row(children: [
+              AnimatedSwitcher(
+                duration: Motion.fast,
+                transitionBuilder: (child, animation) => ScaleTransition(scale: animation, child: child),
+                child: Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked, key: ValueKey(selected), size: 20, color: selected ? PTokens.primary : PTokens.muted),
+              ),
+              const SizedBox(width: 10),
+              Icon(icon, size: 18, color: selected ? PTokens.primary : PTokens.muted),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(title, style: sans(size: 14, weight: FontWeight.w600)),
+                  if (subtitle != null) Text(subtitle!, style: sans(size: 12, color: PTokens.muted)),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
 }

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../../resources/lib/src/theme/app_colors.dart';
+import 'package:resources/resources.dart';
 import 'manager_dashboard_screen.dart';
 import 'manager_radar_map_screen.dart';
 import 'manager_dispatch_screen.dart';
@@ -52,7 +52,7 @@ class _ManagerWebShellState extends State<ManagerWebShell> {
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: ManagerColors.cyanAccent.withOpacity(0.15),
+                          color: ManagerColors.cyanAccent.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Icon(Icons.hub_rounded, color: ManagerColors.cyanAccent, size: 22),
@@ -111,9 +111,9 @@ class _ManagerWebShellState extends State<ManagerWebShell> {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       decoration: BoxDecoration(
-        color: isSelected ? ManagerColors.cyanAccent.withOpacity(0.15) : Colors.transparent,
+        color: isSelected ? ManagerColors.cyanAccent.withValues(alpha: 0.15) : Colors.transparent,
         borderRadius: BorderRadius.circular(8),
-        border: isSelected ? Border.all(color: ManagerColors.cyanAccent.withOpacity(0.3)) : null,
+        border: isSelected ? Border.all(color: ManagerColors.cyanAccent.withValues(alpha: 0.3)) : null,
       ),
       child: ListTile(
         leading: Icon(icon, color: isSelected ? ManagerColors.cyanAccent : ManagerColors.textSecondary, size: 20),

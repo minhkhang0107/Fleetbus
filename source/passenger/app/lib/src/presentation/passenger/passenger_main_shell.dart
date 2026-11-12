@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'passenger_heads_up.dart';
 import 'passenger_home_screen.dart';
-import 'passenger_live_radar_screen.dart';
 import 'passenger_notifications_screen.dart';
 import 'passenger_profile_screen.dart';
 import 'passenger_store.dart';
@@ -47,8 +47,11 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
       _store?.removeListener(_onStore);
       _store = store..addListener(_onStore);
       if (wasNull && _index == 1) {
-        store.loadTickets();
+        // After this frame: loading notifies the scope, which is still being built here.
+        WidgetsBinding.instance.addPostFrameCallback((_) => store.loadTickets());
       }
+      // A push tapped before the shell was there (it started the app) opens once the shell is up (D192).
+      if (store.pushToOpen != null) WidgetsBinding.instance.addPostFrameCallback((_) => _onStore());
     }
   }
 
@@ -57,6 +60,7 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
     WidgetsBinding.instance.removeObserver(this);
     _poll?.cancel();
     _store?.removeListener(_onStore);
+    hideHeadsUp();
     super.dispose();
   }
 
@@ -80,7 +84,7 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
     }
   }
 
-  /// D144: "the bus is coming" shows on top of whatever screen is open, with a way to see the bus.
+  /// D144: new notices show as a heads-up on top of whatever screen is open.
   void _onStore() {
     final store = _store;
     if (store == null || !mounted) return;
@@ -88,44 +92,27 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
     if (_bannerTicketId != null) {
       final current = store.tickets.where((t) => t.id == _bannerTicketId).firstOrNull;
       if (current != null && (current.status == TicketStatus.boarded || current.past)) {
-        ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+        hideHeadsUp();
         _bannerTicketId = null;
       }
+    }
+
+    final tapped = store.pushToOpen;
+    if (tapped != null && store.loggedIn) {
+      store.pushToOpen = null;
+      unawaited(openNotice(context, store, tapped));
     }
 
     final alert = store.pendingAlert;
     if (alert == null) return;
     store.pendingAlert = null;
     _bannerTicketId = alert.ticketId;
-    final ticket = store.tickets.where((t) => t.id == alert.ticketId).firstOrNull;
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.clearMaterialBanners();
-    messenger.showMaterialBanner(MaterialBanner(
-      backgroundColor: PTokens.primarySoft,
-      leading: const Icon(Icons.directions_bus, color: PTokens.primary),
-      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(alert.title, style: sans(size: 15, weight: FontWeight.w700, color: PTokens.ink)),
-        Text(alert.body, style: sans(size: 13, color: PTokens.ink)),
-      ]),
-      actions: [
-        TextButton(
-          onPressed: () {
-            _bannerTicketId = null;
-            messenger.hideCurrentMaterialBanner();
-          },
-          child: const Text('Đóng'),
-        ),
-        if (ticket != null)
-          TextButton(
-            onPressed: () {
-              _bannerTicketId = null;
-              messenger.hideCurrentMaterialBanner();
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerLiveRadarScreen(ticket: ticket)));
-            },
-            child: const Text('Xem xe'),
-          ),
-      ],
-    ));
+
+    showHeadsUp(
+      context,
+      notice: alert,
+      onTap: () => openNotice(context, store, alert),
+    );
   }
 
   @override
@@ -150,12 +137,12 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
               ]),
             ),
           ),
-          Expanded(child: IndexedStack(index: _index, children: pages)),
+          Expanded(child: FadeIndexedStack(index: _index, children: pages)),
         ]),
       );
     }
     return Scaffold(
-      body: IndexedStack(index: _index, children: pages),
+      body: FadeIndexedStack(index: _index, children: pages),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(color: PTokens.surface, border: Border(top: BorderSide(color: PTokens.line))),
         child: SafeArea(
@@ -194,7 +181,8 @@ class _PassengerMainShellState extends State<PassengerMainShell> with WidgetsBin
         },
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Stack(clipBehavior: Clip.none, children: [
-            Icon(icon, color: color, size: 22),
+            // The chosen tab's icon gives a small bounce, as SF Symbols do on iOS 17.
+            AnimatedScale(scale: selected ? 1.12 : 1, duration: Motion.base, curve: Curves.easeOutBack, child: Icon(icon, color: color, size: 22)),
             if (dot) Positioned(right: -2, top: -1, child: Container(width: 8, height: 8, decoration: const BoxDecoration(color: PTokens.danger, shape: BoxShape.circle))),
           ]),
           const SizedBox(height: 4),

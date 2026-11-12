@@ -64,6 +64,21 @@ describe('Tracking Privacy and GPS rules (Task S6)', () => {
     if (!pax2Res.body || !pax2Res.body.data) throw new Error('Pax 2 login failed: ' + JSON.stringify(pax2Res.body));
     otherPaxToken = pax2Res.body.data.token;
 
+    // Buy ticket for pax 1 before the bus departs (D185)
+    const holdRes = await request(`/api/v1/passenger/trips/${tripId}/hold-seats`, { 
+      method: 'POST', token: paxToken, 
+      body: { seatCodes: ['B01'], pickupStopId: 'stp_nb', dropoffStopId: 'stp_th_pb', now: Date.now() },
+      headers: { 'X-Operator-Code': 'SAOMAI' }
+    });
+    const holdId = holdRes.body.data.hold_id;
+    const bookRes = await request('/api/v1/passenger/bookings/create', { 
+      method: 'POST', token: paxToken, 
+      body: { tripId: tripId, holdId: holdId, seatCodes: ['B01'], payer: { full_name: 'Pax One', phone: '0901234567' }, passengers: [{ seat_code: 'B01', full_name: 'Pax One', phone: '0901234567' }] },
+      headers: { 'X-Operator-Code': 'SAOMAI' }
+    });
+    services.paymentService.settlePayment(bookRes.body.data.payment.order_id);
+    ticketId = [...services.paymentService.tickets.values()].find(t => t.pnr === bookRes.body.data.payment.pnr).ticket_id;
+
     // Start trip
     services.driverService.startTrip(tripId);
   });
@@ -140,24 +155,7 @@ describe('Tracking Privacy and GPS rules (Task S6)', () => {
   });
 
   it('buy a ticket and create share token', async () => {
-    const holdRes = await request(`/api/v1/passenger/trips/${tripId}/hold-seats`, { 
-      method: 'POST', token: paxToken, 
-      body: { seatCodes: ['B01'], pickupStopId: 'stp_nb', dropoffStopId: 'stp_th_pb', now: Date.now() },
-      headers: { 'X-Operator-Code': 'SAOMAI' }
-    });
-    assert.strictEqual(holdRes.status, 200, JSON.stringify(holdRes.body));
-    const holdId = holdRes.body.data.hold_id;
-
-    const bookRes = await request('/api/v1/passenger/bookings/create', { 
-      method: 'POST', token: paxToken, 
-      body: { tripId: tripId, holdId: holdId, seatCodes: ['B01'], payer: { full_name: 'Pax One', phone: '0901234567' }, passengers: [{ seat_code: 'B01', full_name: 'Pax One', phone: '0901234567' }] },
-      headers: { 'X-Operator-Code': 'SAOMAI' }
-    });
-    assert.strictEqual(bookRes.status, 201, JSON.stringify(bookRes.body));
-    const settled = services.paymentService.settlePayment(bookRes.body.data.payment.order_id);
-    assert.strictEqual(settled.success, true, JSON.stringify(settled));
-    ticketId = [...services.paymentService.tickets.values()].find(t => t.pnr === bookRes.body.data.payment.pnr).ticket_id;
-
+    assert.ok(ticketId);
     const shareRes = await request(`/api/v1/passenger/tickets/${ticketId}/share`, { method: 'POST', token: paxToken, headers: { 'X-Operator-Code': 'SAOMAI' } });
     assert.strictEqual(shareRes.status, 200, JSON.stringify(shareRes.body));
     assert.ok(shareRes.body.data.share_token);
@@ -213,12 +211,21 @@ describe('Tracking Privacy and GPS rules (Task S6)', () => {
     assert.strictEqual(track.status, 404);
   });
 
-  it('/t/<token> 200 and /t/bad 404', async () => {
+  it('/t/<token> 200 and /t/bad 404, including bus position when telemetry exists (F15)', async () => {
+    const dataRes = await request(`/api/v1/trips/${tripId}/tracking?share=${shareToken}`, { headers: { 'X-Operator-Code': 'SAOMAI' } });
+    assert.strictEqual(dataRes.status, 200);
+    assert.strictEqual(dataRes.body.data.has_position, true);
+    assert.ok(dataRes.body.data.bus_position);
+    assert.strictEqual(typeof dataRes.body.data.bus_position.lat, 'number');
+    assert.strictEqual(typeof dataRes.body.data.bus_position.lng, 'number');
+
     const page = await request(`/t/${shareToken}`);
     assert.strictEqual(page.status, 200);
     assert.ok(page.text.includes('leaflet'));
     assert.ok(page.text.includes(shareToken));
-    
+    assert.ok(page.text.includes('"bus_position"'));
+    assert.ok(page.text.includes(String(dataRes.body.data.bus_position.lat)));
+
     const bad = await request('/t/invalid_token');
     assert.strictEqual(bad.status, 404);
   });

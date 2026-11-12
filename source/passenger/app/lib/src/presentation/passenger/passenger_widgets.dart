@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import 'passenger_motion.dart';
 import 'passenger_store.dart';
+
+export 'passenger_motion.dart';
 
 /// Design tokens of the passenger app (design-system.md, D95 and D101).
 abstract class PTokens {
@@ -38,6 +42,10 @@ ThemeData passengerTheme() {
   final base = ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: PTokens.primary, primary: PTokens.primary, surface: PTokens.surface));
   return base.copyWith(
     scaffoldBackgroundColor: PTokens.canvas,
+    pageTransitionsTheme: Motion.pageTransitions,
+    // iOS has no ripple: a pressed row turns faintly grey and buttons shrink (Pressable).
+    splashFactory: NoSplash.splashFactory,
+    highlightColor: PTokens.ink.withValues(alpha: 0.05),
     textTheme: base.textTheme.apply(fontFamily: GoogleFonts.geist().fontFamily, bodyColor: PTokens.ink, displayColor: PTokens.ink),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
@@ -48,6 +56,8 @@ ThemeData passengerTheme() {
       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(PTokens.radiusControl), borderSide: const BorderSide(color: PTokens.primary, width: 2)),
       errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(PTokens.radiusControl), borderSide: const BorderSide(color: PTokens.danger)),
       focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(PTokens.radiusControl), borderSide: const BorderSide(color: PTokens.danger, width: 2)),
+      // A placeholder reads as an example, not as a value already typed (D182).
+      hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontWeight: FontWeight.w400),
     ),
     snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating, backgroundColor: PTokens.ink),
   );
@@ -149,22 +159,25 @@ class PrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 48,
-      child: FilledButton(
-        onPressed: onPressed,
-        style: FilledButton.styleFrom(
-          backgroundColor: color,
-          disabledBackgroundColor: PTokens.line,
-          disabledForegroundColor: const Color(0xFF64748B),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(PTokens.radiusControl)),
-          textStyle: sans(size: 15, weight: FontWeight.w600),
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+    return Pressable(
+      enabled: onPressed != null,
+      child: SizedBox(
+        height: 48,
+        child: FilledButton(
+          onPressed: onPressed,
+          style: FilledButton.styleFrom(
+            backgroundColor: color,
+            disabledBackgroundColor: PTokens.line,
+            disabledForegroundColor: const Color(0xFF64748B),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+            textStyle: sans(size: 15, weight: FontWeight.w600),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (icon != null) ...[Icon(icon, size: 18), const SizedBox(width: 8)],
+            Flexible(child: Text(label, overflow: TextOverflow.ellipsis)),
+          ]),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (icon != null) ...[Icon(icon, size: 18), const SizedBox(width: 8)],
-          Flexible(child: Text(label, overflow: TextOverflow.ellipsis)),
-        ]),
       ),
     );
   }
@@ -179,18 +192,21 @@ class GhostButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 48,
-      child: OutlinedButton(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: color,
-          backgroundColor: PTokens.surface,
-          side: BorderSide(color: borderColor),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(PTokens.radiusControl)),
-          textStyle: sans(size: 15, weight: FontWeight.w600),
+    return Pressable(
+      enabled: onPressed != null,
+      child: SizedBox(
+        height: 48,
+        child: OutlinedButton(
+          onPressed: onPressed,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: color,
+            backgroundColor: PTokens.surface,
+            side: BorderSide(color: borderColor),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+            textStyle: sans(size: 15, weight: FontWeight.w600),
+          ),
+          child: Text(label, textAlign: TextAlign.center),
         ),
-        child: Text(label, textAlign: TextAlign.center),
       ),
     );
   }
@@ -212,6 +228,72 @@ class LinkButton extends StatelessWidget {
   }
 }
 
+/// An iOS segmented control: equal segments on a grey track, a white thumb that slides under the chosen one (D181).
+class SegmentedSwitch<T> extends StatelessWidget {
+  const SegmentedSwitch({super.key, required this.segments, required this.value, required this.onChanged, this.height = 36});
+  final List<(T, String)> segments;
+  final T value;
+  final ValueChanged<T> onChanged;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final index = segments.indexWhere((s) => s.$1 == value);
+    final count = segments.length;
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+      child: Stack(children: [
+        Positioned.fill(
+          child: AnimatedAlign(
+            alignment: Alignment(count == 1 ? 0 : -1 + 2 * index / (count - 1), 0),
+            duration: Motion.reduced(context) ? Duration.zero : Motion.base,
+            curve: Motion.settle,
+            child: FractionallySizedBox(
+              widthFactor: 1 / count,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: PTokens.surface,
+                  borderRadius: BorderRadius.circular(6),
+                  boxShadow: const [BoxShadow(color: Color(0x1A0F172A), blurRadius: 3, offset: Offset(0, 1))],
+                ),
+              ),
+            ),
+          ),
+        ),
+        Row(children: [
+          for (final (v, label) in segments)
+            Expanded(
+              child: Semantics(
+                selected: v == value,
+                button: true,
+                inMutuallyExclusiveGroup: true,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    if (v == value) return;
+                    HapticFeedback.selectionClick();
+                    onChanged(v);
+                  },
+                  child: SizedBox(
+                    height: height,
+                    child: Center(
+                      child: AnimatedDefaultTextStyle(
+                        duration: Motion.base,
+                        style: sans(size: 13, weight: FontWeight.w600, color: v == value ? PTokens.ink : PTokens.muted),
+                        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ]),
+      ]),
+    );
+  }
+}
+
 enum PillKind { ok, warn, info, mute, danger }
 
 class Pill extends StatelessWidget {
@@ -228,10 +310,16 @@ class Pill extends StatelessWidget {
       PillKind.mute => (const Color(0xFFF1F5F9), const Color(0xFF334155)),
       PillKind.danger => (PTokens.dangerSoft, PTokens.danger),
     };
-    return Container(
+    // A status that changes (Trực tiếp → Mất tín hiệu) cross-fades instead of jumping.
+    return AnimatedContainer(
+      duration: Motion.base,
+      curve: Motion.ease,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
-      child: Text(text, style: sans(size: 12, weight: FontWeight.w600, color: fg)),
+      child: AnimatedSwitcher(
+        duration: Motion.fast,
+        child: Text(text, key: ValueKey(text), style: sans(size: 12, weight: FontWeight.w600, color: fg)),
+      ),
     );
   }
 }
@@ -264,7 +352,7 @@ class AppCard extends StatelessWidget {
       child: child,
     );
     if (onTap == null) return box;
-    return Material(color: Colors.transparent, child: InkWell(borderRadius: BorderRadius.circular(PTokens.radius), onTap: onTap, child: box));
+    return Pressable(scale: 0.98, child: Material(color: Colors.transparent, child: InkWell(borderRadius: BorderRadius.circular(PTokens.radius), onTap: onTap, child: box)));
   }
 }
 
@@ -333,6 +421,43 @@ class HoldBanner extends StatelessWidget {
   }
 }
 
+/// Warning banner shown on detail and seat map screens when the trip cannot be booked (D185).
+class TripBlockedBanner extends StatelessWidget {
+  const TripBlockedBanner({super.key, required this.trip});
+  final Trip trip;
+
+  @override
+  Widget build(BuildContext context) {
+    if (trip.bookableNow) return const SizedBox.shrink();
+    final message = trip.effectiveBlockMessage;
+    return Container(
+      width: double.infinity,
+      color: PTokens.warnSoft,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.warning_amber_rounded, size: 20, color: PTokens.warnInk),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(trip.blockLabel, style: sans(size: 14, weight: FontWeight.w600, color: PTokens.warnInk)),
+                if (message != null && message.isNotEmpty) ...[
+                  gap(2),
+                  Text(message, style: sans(size: 13, color: PTokens.warnInk, height: 1.3)),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Illustration of a QR code; the real payload comes from the server (PAX-013, PAX-017).
 class QrView extends StatelessWidget {
   const QrView({super.key, required this.seed, this.size = 232, this.cells = 25, this.label});
@@ -392,6 +517,8 @@ Future<T?> showAppSheet<T>(BuildContext context, {required Widget Function(Build
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
+    sheetAnimationStyle: Motion.sheetStyle,
     isDismissible: dismissible,
     enableDrag: dismissible,
     backgroundColor: PTokens.surface,
@@ -406,7 +533,8 @@ Future<T?> showAppSheet<T>(BuildContext context, {required Widget Function(Build
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: PTokens.lineStrong, borderRadius: BorderRadius.circular(999)))),
             const SizedBox(height: 14),
-            builder(ctx),
+            // A long sheet (policy, bank fields, keyboard up) scrolls under its handle instead of overflowing.
+            Flexible(child: SingleChildScrollView(child: builder(ctx))),
           ]),
         ),
       ),
@@ -420,7 +548,40 @@ void showToast(BuildContext context, String message) {
     ..showSnackBar(SnackBar(content: Text(message, style: sans(size: 14, color: Colors.white)), duration: const Duration(seconds: 3)));
 }
 
+/// When holdSeats or createOrder fails with a code in bookingClosedCodes (D185).
+Future<void> showBookingClosedDialog(BuildContext context, PassengerStore store, String message) async {
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Không đặt được chuyến này'),
+      content: Text(message),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('Chọn chuyến khác'),
+        ),
+      ],
+    ),
+  );
+  store.stopHold();
+  if (!context.mounted) return;
+  Navigator.of(context).popUntil((route) => route.settings.name == 'search_results' || route.isFirst);
+  store.loadTrips();
+}
+
+/// Dials the company's hotline from the server profile; never a number baked into the app.
+Future<void> callHotline(BuildContext context, String hotline) async {
+  final digits = hotline.replaceAll(RegExp(r'[^0-9+]'), '');
+  if (digits.isEmpty || !await launchUrl(Uri(scheme: 'tel', path: digits))) {
+    if (context.mounted) showToast(context, 'Không gọi được tổng đài ${hotline.isEmpty ? 'nhà xe' : hotline}.');
+  }
+}
+
 Widget gap(double h) => SizedBox(height: h);
+
+/// A tap anywhere outside the field being typed in closes the keyboard, as on iOS (D182).
+void dismissKeyboard(PointerDownEvent _) => FocusManager.instance.primaryFocus?.unfocus();
 
 /// Text field with its label above (design: label above input).
 class LabeledField extends StatelessWidget {
@@ -462,6 +623,7 @@ class LabeledField extends StatelessWidget {
         Text(label, style: sans(size: 13, color: const Color(0xFF334155))),
         const SizedBox(height: 4),
         TextField(
+          onTapOutside: dismissKeyboard,
           controller: controller,
           keyboardType: keyboardType,
           autofocus: autofocus,

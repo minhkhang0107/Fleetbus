@@ -21,13 +21,22 @@ class PassengerWalletScreen extends StatefulWidget {
 class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
   bool _history = false;
 
+  String _formatVnHhmm(DateTime dt) {
+    final vn = dt.toUtc().add(const Duration(hours: 7));
+    final hh = vn.hour.toString().padLeft(2, '0');
+    final mm = vn.minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
+  }
+
   /// What the passenger sees with no ticket: sign in first, else how to get one (or what history keeps).
   Widget _empty(BuildContext context, PassengerStore store) {
     if (store.userPhone == null) {
       return EmptyState(
         icon: Icons.lock_person_outlined,
-        title: 'Đăng nhập để xem vé',
-        message: 'Vé đã đặt, mã QR lên xe và vé đã hủy được lưu theo số điện thoại của bạn.',
+        title: store.sessionExpired ? 'Phiên đăng nhập đã hết hạn' : 'Đăng nhập để xem vé',
+        message: store.sessionExpired
+            ? 'Đăng nhập lại để xem vé. Vé của bạn vẫn còn, lưu theo số điện thoại.'
+            : 'Vé đã đặt, mã QR lên xe và vé đã hủy được lưu theo số điện thoại của bạn.',
         actionLabel: 'Đăng nhập',
         actionIcon: Icons.login,
         onAction: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerLoginScreen())),
@@ -52,11 +61,66 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
     );
   }
 
+  List<Ticket> _groupTickets(List<Ticket> tickets) {
+    final map = <String, List<Ticket>>{};
+    for (final t in tickets) {
+      final key = '${t.pnr}_${t.tripId}';
+      map.putIfAbsent(key, () => []).add(t);
+    }
+    return map.values.map((group) {
+      if (group.length == 1) return group.first;
+      final first = group.first;
+      final seats = group.map((t) => t.seat).join(', ');
+      final totalPaid = group.fold<int>(0, (sum, t) => sum + t.paid);
+      final hasRefund = group.any((t) => t.refund != null);
+      final totalRefund = hasRefund ? group.fold<int>(0, (sum, t) => sum + (t.refund ?? 0)) : null;
+      return Ticket(
+        id: first.id,
+        pnr: first.pnr,
+        orderId: first.orderId,
+        ticketIds: group.expand((t) => t.ticketIds.isNotEmpty ? t.ticketIds : [t.id]).toList(),
+        tripId: first.tripId,
+        route: first.route,
+        date: first.date,
+        dep: first.dep,
+        departureTime: first.departureTime,
+        seat: seats,
+        pickup: first.pickup,
+        dropoff: first.dropoff,
+        paid: totalPaid,
+        name: first.name,
+        status: first.status,
+        plate: first.plate,
+        homePickup: first.homePickup,
+        homeDropoff: first.homeDropoff,
+        pickupWindow: first.pickupWindow,
+        pickupNotice: first.pickupNotice,
+        homePickupStatus: first.homePickupStatus,
+        homeDropoffStatus: first.homeDropoffStatus,
+        homePickupReason: first.homePickupReason,
+        homeDropoffReason: first.homeDropoffReason,
+        past: first.past,
+        pickupTime: first.pickupTime,
+        pickupTimeEstimated: first.pickupTimeEstimated,
+        paymentStatus: first.paymentStatus,
+        paymentMethod: first.paymentMethod,
+        codDue: group.fold<int>(0, (sum, t) => sum + t.codDue),
+        refundInfo: group.map((t) => t.refundInfo).whereType<TicketRefund>().firstOrNull,
+      )
+        ..delay = first.delay
+        ..qrVersion = first.qrVersion
+        ..qrValue = first.qrValue
+        ..pin = first.pin
+        ..refund = totalRefund;
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = PassengerScope.of(context);
-    final upcoming = store.tickets.where((t) => !t.past).toList();
-    final past = store.tickets.where((t) => t.past).toList();
+    final offlineSince = store.walletOfflineSince;
+    final upcoming = _groupTickets(store.tickets.where((t) => !t.past).toList());
+    final past = _groupTickets(store.tickets.where((t) => t.past).toList());
     final list = _history ? past : upcoming;
     return Column(children: [
       Container(
@@ -68,64 +132,70 @@ class _PassengerWalletScreenState extends State<PassengerWalletScreen> {
             child: PMaxWidth(maxWidth: 720, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Text('Vé của tôi', style: sans(size: 22, weight: FontWeight.w700)),
               gap(14),
-              Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
-                child: Row(children: [
-                  _tab('Sắp đi · ${upcoming.length}', !_history, () => setState(() => _history = false)),
-                  _tab('Lịch sử', _history, () => setState(() => _history = true)),
-                ]),
+              SegmentedSwitch<bool>(
+                segments: [(false, 'Sắp đi · ${upcoming.length}'), (true, 'Lịch sử')],
+                value: _history,
+                onChanged: (history) => setState(() => _history = history),
               ),
             ])),
           ),
         ),
       ),
       const Divider(height: 1, color: PTokens.line),
-      Expanded(
-        child: store.loadingTickets && list.isEmpty
-            ? const Center(child: CircularProgressIndicator())
-            : list.isEmpty
-            ? _empty(context, store)
-            : RefreshIndicator(
-                onRefresh: store.loadTickets,
-                child: pWide(context)
-                    // Two tickets per row on wide screens.
-                    ? LayoutBuilder(builder: (context, box) {
-                        final w = (box.maxWidth - 48 - 16) / 2;
-                        return ListView(padding: const EdgeInsets.all(24), children: [
-                          Wrap(spacing: 16, runSpacing: 12, children: [for (final t in list) SizedBox(width: w, child: TicketCard(ticket: t))]),
-                        ]);
-                      })
-                    : ListView.separated(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: list.length,
-                        separatorBuilder: (_, __) => gap(12),
-                        itemBuilder: (_, i) => TicketCard(ticket: list[i]),
-                      ),
+      Reveal(
+        visible: offlineSince != null,
+        child: Container(
+          width: double.infinity,
+          color: PTokens.warnSoft,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(children: [
+            const Icon(Icons.wifi_off_rounded, size: 18, color: PTokens.warnInk),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Không có mạng — vé đã lưu lúc ${offlineSince == null ? '' : _formatVnHhmm(offlineSince)}',
+                style: sans(size: 13, color: PTokens.warnInk),
               ),
+            ),
+          ]),
+        ),
+      ),
+      Expanded(
+        child: AnimatedSwitcher(
+          duration: Motion.reduced(context) ? Duration.zero : Motion.base,
+          switchInCurve: Motion.settle,
+          transitionBuilder: (child, animation) => FadeTransition(
+            opacity: animation,
+            child: SlideTransition(position: Tween<Offset>(begin: Offset(_history ? 0.06 : -0.06, 0), end: Offset.zero).animate(animation), child: child),
+          ),
+          child: KeyedSubtree(
+            key: ValueKey(_history),
+            child: store.loadingTickets && list.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : list.isEmpty
+                ? _empty(context, store)
+                : RefreshIndicator(
+                    onRefresh: store.loadTickets,
+                    child: pWide(context)
+                        // Two tickets per row on wide screens.
+                        ? LayoutBuilder(builder: (context, box) {
+                            final w = (box.maxWidth - 48 - 16) / 2;
+                            return ListView(padding: const EdgeInsets.all(24), children: [
+                              Wrap(spacing: 16, runSpacing: 12, children: [for (final (i, t) in list.indexed) SizedBox(width: w, child: FadeSlideIn(index: i, child: TicketCard(ticket: t)))]),
+                            ]);
+                          })
+                        : ListView.separated(
+                            padding: const EdgeInsets.all(16),
+                            itemCount: list.length,
+                            separatorBuilder: (_, __) => gap(12),
+                            itemBuilder: (_, i) => FadeSlideIn(index: i, child: TicketCard(ticket: list[i])),
+                          ),
+                  ),
+          ),
+        ),
       ),
     ]);
   }
-
-  Widget _tab(String label, bool selected, VoidCallback onTap) => Expanded(
-        child: Semantics(
-          selected: selected,
-          button: true,
-          child: GestureDetector(
-            onTap: onTap,
-            child: Container(
-              height: 40,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: selected ? PTokens.surface : Colors.transparent,
-                borderRadius: BorderRadius.circular(6),
-                boxShadow: selected ? const [BoxShadow(color: Color(0x140F172A), blurRadius: 2, offset: Offset(0, 1))] : null,
-              ),
-              child: Text(label, style: sans(size: 14, weight: FontWeight.w600, color: selected ? PTokens.primaryDark : PTokens.muted)),
-            ),
-          ),
-        ),
-      );
 }
 
 class TicketCard extends StatelessWidget {
@@ -136,12 +206,13 @@ class TicketCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = ticket;
     final active = !t.past && t.active;
+    final platePart = t.plate.isNotEmpty ? ' · Xe ${t.plate}' : (active ? ' · Xe: Nhà xe sẽ báo' : '');
     final status = switch (t.status) {
-      TicketStatus.active => const Pill('Đã thanh toán', PillKind.ok),
-      TicketStatus.boarded => t.past ? const Pill('Đã đi', PillKind.mute) : const Pill('Đã lên xe', PillKind.ok),
-      TicketStatus.refunding => const Pill('Đang hoàn tiền', PillKind.info),
-      TicketStatus.noShow => const Pill('Vắng mặt', PillKind.mute),
       TicketStatus.cancelled => const Pill('Đã hủy', PillKind.mute),
+      TicketStatus.active => t.unpaidCash ? const Pill('Trả khi lên xe', PillKind.warn) : const Pill('Đã thanh toán', PillKind.ok),
+      TicketStatus.boarded => t.past ? const Pill('Đã đi', PillKind.mute) : const Pill('Đã lên xe', PillKind.ok),
+      TicketStatus.refunding => const Pill('Đang chờ hoàn tiền', PillKind.info),
+      TicketStatus.noShow => const Pill('Vắng mặt', PillKind.mute),
     };
     return Container(
       decoration: BoxDecoration(color: PTokens.surface, borderRadius: BorderRadius.circular(PTokens.radius), border: Border.all(color: PTokens.line)),
@@ -166,7 +237,7 @@ class TicketCard extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Row(children: [PnrTag(t.pnr), const Spacer(), status]),
+            Row(children: [PnrTag(t.pnr), const Spacer(), Flexible(child: status)]),
             gap(10),
             Wrap(crossAxisAlignment: WrapCrossAlignment.end, spacing: 8, children: [
               if (t.delay > 0) Text(t.dep, style: mono(size: 20, weight: FontWeight.w700, color: const Color(0xFF94A3B8), decoration: TextDecoration.lineThrough)),
@@ -174,7 +245,31 @@ class TicketCard extends StatelessWidget {
               Text(t.route, style: sans(size: 15, weight: FontWeight.w600)),
             ]),
             gap(6),
-            Text(active ? '${t.date} · Ghế ${t.seat} · ${_pickupLine(t)}' : '${t.date} · Ghế ${t.seat}${t.refund != null ? ' · hoàn ${vnd(t.refund!)}' : ''}', style: sans(size: 13, color: PTokens.muted)),
+            Text(active ? '${t.date} · Ghế ${t.seat} · ${_pickupLine(t)}$platePart' : '${t.date} · Ghế ${t.seat}$platePart${t.refund != null ? ' · hoàn ${vnd(t.refund!)}' : ''}', style: sans(size: 13, color: PTokens.muted)),
+            if (active) ...[
+              gap(4),
+              // Paid or not, and how (D187): a cash ticket still owes the fare at boarding.
+              Row(children: [
+                Icon(t.unpaidCash ? Icons.payments_outlined : Icons.check_circle_outline, size: 15, color: t.unpaidCash ? PTokens.warnInk : PTokens.success),
+                const SizedBox(width: 4),
+                Expanded(child: Text(t.paymentLabel, style: sans(size: 13, weight: FontWeight.w600, color: t.unpaidCash ? PTokens.warnInk : PTokens.success))),
+              ]),
+            ],
+            if (t.refundInfo != null) ...[
+              gap(6),
+              Row(children: [
+                Expanded(
+                  child: Text(
+                    '${t.refundInfo!.statusLabel} · ${vnd(t.refundInfo!.amountVnd)}',
+                    style: sans(size: 13, weight: FontWeight.w600, color: t.refundInfo!.isPending ? PTokens.primaryDark : (t.refundInfo!.isRefunded ? PTokens.success : PTokens.danger)),
+                  ),
+                ),
+                if (t.refundInfo!.account != null) ...[
+                  const SizedBox(width: 8),
+                  Text('(${t.refundInfo!.account!.accountNumber})', style: mono(size: 13, color: PTokens.muted)),
+                ],
+              ]),
+            ],
             if (active && t.status == TicketStatus.active) _BusComing(ticket: t),
             if (active) ...[
               gap(10),
@@ -188,6 +283,20 @@ class TicketCard extends StatelessWidget {
                   final store = PassengerScope.read(context);
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerLiveRadarScreen(ticket: t))).then((_) => store.loadTickets());
                 })),
+              ]),
+            ] else ...[
+              gap(10),
+              Row(children: [
+                Expanded(child: GhostButton(label: 'Chi tiết vé', onPressed: () {
+                  final store = PassengerScope.read(context);
+                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerTicketQrScreen(ticket: t))).then((_) => store.loadTickets());
+                })),
+                if (t.refundInfo?.isPending == true) ...[
+                  const SizedBox(width: 8),
+                  Expanded(child: GhostButton(label: t.refundInfo?.account == null ? 'Thêm tài khoản nhận hoàn' : 'Sửa tài khoản nhận hoàn', onPressed: () {
+                    showEditRefundAccountSheet(context, t);
+                  })),
+                ],
               ]),
             ],
           ]),

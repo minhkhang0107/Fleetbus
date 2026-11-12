@@ -2,7 +2,7 @@
  * Phase C: cross-app flows FLOW-01 to FLOW-07 played over HTTP with real logins.
  * Each test follows one flow across the passenger, driver and manager sides and checks what every side sees.
  */
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert';
 import crypto from 'node:crypto';
 import http from 'node:http';
@@ -45,6 +45,13 @@ describe('Cross-app flows (FLOW-01 to FLOW-07)', () => {
   });
 
   after(() => new Promise((resolve) => server.close(resolve)));
+
+  beforeEach(() => {
+    const mgr = services.managerService?.findTrip(TRIP);
+    if (mgr) mgr.status = 'SCHEDULED';
+    const drv = services.driverService?.activeTrips?.get(TRIP);
+    if (drv) drv.status = 'SCHEDULED';
+  });
 
   function api(path, { method = 'GET', body, token } = {}) {
     return new Promise((resolve, reject) => {
@@ -220,6 +227,8 @@ describe('Cross-app flows (FLOW-01 to FLOW-07)', () => {
       assert.strictEqual((await api('/api/v1/passenger/tickets?tab=UPCOMING', { token: pax.token })).body.data.length, 0);
       const history = (await api('/api/v1/passenger/tickets?tab=HISTORY', { token: pax.token })).body.data;
       assert.deepStrictEqual(history.map((t) => t.ticket_id), [ticketId]);
+      services.managerService.findTrip(TRIP).status = 'SCHEDULED';
+      services.driverService.activeTrips.get(TRIP).status = 'SCHEDULED';
     });
 
     it('TC-FLOW-C05: a no-show reaches the passenger ticket, the wallet history and the manager count (DRI-011, FLOW-02 mode 3)', async () => {
@@ -239,6 +248,8 @@ describe('Cross-app flows (FLOW-01 to FLOW-07)', () => {
       assert.strictEqual((await mgrTrip()).no_show_passengers, before + 1);
       const notes = (await api('/api/v1/passenger/notifications', { token: pax.token })).body.data;
       assert.ok(notes.some((n) => n.type === 'NO_SHOW'), 'the passenger is told');
+      services.managerService.findTrip(TRIP).status = 'SCHEDULED';
+      services.driverService.activeTrips.get(TRIP).status = 'SCHEDULED';
     });
   });
 
@@ -437,7 +448,18 @@ describe('Cross-app flows (FLOW-01 to FLOW-07)', () => {
       const dly = await api(`/api/v1/ops/trips/${TRIP}/delay`, { method: 'POST', token: dispatcher, body: { delayMinutes: 45, reason: 'Sự cố kỹ thuật' } });
       assert.strictEqual(dly.status, 200);
 
-      const cancel = await api(`/api/v1/passenger/tickets/${ticketId}/cancel`, { method: 'POST', token: pax.token, body: { reason: 'Chậm quá' } });
+      const cancel = await api(`/api/v1/passenger/tickets/${ticketId}/cancel`, {
+        method: 'POST',
+        token: pax.token,
+        body: {
+          reason: 'Chậm quá',
+          refund_account: {
+            bank_bin: '970415',
+            account_number: '1088219999',
+            account_name: 'NGUYEN VAN A'
+          }
+        }
+      });
       assert.strictEqual(cancel.status, 200, JSON.stringify(cancel.body));
       assert.strictEqual(cancel.body.data.refund_percentage, 100);
       assert.strictEqual(cancel.body.data.refund_amount_vnd, cancel.body.data.total_price_vnd);
@@ -449,7 +471,17 @@ describe('Cross-app flows (FLOW-01 to FLOW-07)', () => {
       const pax = await newPassenger();
       const { tickets } = await buyTickets(pax, ['A02']);
       await api(`/api/v1/ops/trips/${TRIP}/delay`, { method: 'POST', token: dispatcher, body: { delayMinutes: 30, reason: 'Kẹt xe' } });
-      const cancel = await api(`/api/v1/passenger/tickets/${tickets[0].ticket_id}/cancel`, { method: 'POST', token: pax.token, body: {} });
+      const cancel = await api(`/api/v1/passenger/tickets/${tickets[0].ticket_id}/cancel`, {
+        method: 'POST',
+        token: pax.token,
+        body: {
+          refund_account: {
+            bank_bin: '970415',
+            account_number: '1088219999',
+            account_name: 'NGUYEN VAN A'
+          }
+        }
+      });
       assert.strictEqual(cancel.status, 200);
       assert.notStrictEqual(cancel.body.data.tier, 'DELAY_WAIVER');
       await api(`/api/v1/ops/trips/${TRIP}/delay`, { method: 'POST', token: dispatcher, body: { delayMinutes: 0, reason: 'Hết chậm' } });

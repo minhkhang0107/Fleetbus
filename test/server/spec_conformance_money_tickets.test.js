@@ -14,7 +14,7 @@ const TRIP = 'trp_hn_th_01';
 const HOUR = 3600 * 1000;
 
 function startServer(options = {}) {
-  const { server, services } = createFleetBusServer({ authMode: 'off', ...options });
+  const { server, services } = createFleetBusServer({ authMode: 'off', webhookSecret: 'off', ...options });
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => {
       resolve({ server, services, baseUrl: `http://127.0.0.1:${server.address().port}` });
@@ -80,7 +80,7 @@ describe('Spec conformance: money, tickets and boarding', () => {
   async function settle(order, amountVnd = order.payment.amount_vnd) {
     return api('/api/v1/webhooks/vietqr/ipn', {
       method: 'POST',
-      body: { transferMemo: order.payment.payment_details.transfer_memo, amountVnd, bankRef: `bank_${Date.now()}` }
+      body: { transferMemo: order.payment.payment_details.transfer_memo, amountVnd, bankRef: `bank_${crypto.randomUUID()}` }
     });
   }
 
@@ -148,12 +148,14 @@ describe('Spec conformance: money, tickets and boarding', () => {
     const created = await book(['A06'], 'u_amount');
     const order = created.body.data;
     const underpaid = await settle(order, 1000);
-    assert.strictEqual(underpaid.status, 400);
-    assert.strictEqual(underpaid.body.code, 'AMOUNT_MISMATCH');
+    assert.strictEqual(underpaid.status, 200);
+    assert.strictEqual(underpaid.body.data.settled, false);
+    assert.strictEqual(underpaid.body.data.status, 'PARTIAL');
     const status = await api(`/api/v1/passenger/payments/${order.payment.order_id}/verify-status`, { method: 'POST', body: {} });
     assert.strictEqual(status.body.data.payment_status, 'PENDING_PAYMENT');
-    const exact = await settle(order);
+    const exact = await settle(order, order.payment.amount_vnd - 1000);
     assert.strictEqual(exact.status, 200);
+    assert.strictEqual(exact.body.data.settled, true);
     assert.strictEqual(exact.body.data.issued_tickets.length, 1);
   });
 
@@ -248,7 +250,7 @@ describe('Spec conformance: money, tickets and boarding', () => {
     const farFuture = new Date(dep + 400 * HOUR).toISOString();
 
     const eightHours = await api(`/api/v1/passenger/tickets/${ticket.ticket_id}/cancel`, {
-      method: 'POST', body: { now: dep - 8 * HOUR, departureTime: farFuture }
+      method: 'POST', body: { now: dep - 8 * HOUR, departureTime: farFuture, refund_account: { bank_bin: '970415', account_number: '1088219999', account_name: 'NGUYEN VAN A' } }
     });
     assert.strictEqual(eightHours.status, 200, JSON.stringify(eightHours.body));
     assert.strictEqual(eightHours.body.data.refund_percentage, 80);
@@ -265,7 +267,7 @@ describe('Spec conformance: money, tickets and boarding', () => {
   it('TC-SPEC-A18b: 14h before departure refunds 100% and under 6h refunds nothing (PAX-021 AC-001)', async () => {
     const a = await buyTicket('A11', 'u_cancel_a', '0987000778');
     const dep = Date.parse(a.ticket.departure_time);
-    const full = await api(`/api/v1/passenger/tickets/${a.ticket.ticket_id}/cancel`, { method: 'POST', body: { now: dep - 14 * HOUR } });
+    const full = await api(`/api/v1/passenger/tickets/${a.ticket.ticket_id}/cancel`, { method: 'POST', body: { now: dep - 14 * HOUR, refund_account: { bank_bin: '970415', account_number: '1088219999', account_name: 'NGUYEN VAN A' } } });
     assert.strictEqual(full.body.data.refund_percentage, 100);
     assert.strictEqual(full.body.data.refund_amount_vnd, 220000);
 
@@ -278,7 +280,7 @@ describe('Spec conformance: money, tickets and boarding', () => {
   it('TC-SPEC-A48: refund approval acts on a real request exactly once (MGR-022)', async () => {
     const { ticket } = await buyTicket('B03', 'u_refund', '0987000888');
     const dep = Date.parse(ticket.departure_time);
-    const cancel = await api(`/api/v1/passenger/tickets/${ticket.ticket_id}/cancel`, { method: 'POST', body: { now: dep - 14 * HOUR } });
+    const cancel = await api(`/api/v1/passenger/tickets/${ticket.ticket_id}/cancel`, { method: 'POST', body: { now: dep - 14 * HOUR, refund_account: { bank_bin: '970415', account_number: '1088219999', account_name: 'NGUYEN VAN A' } } });
     const refundId = cancel.body.data.refund_id;
     assert.ok(refundId, 'cancellation must create a refund request');
 

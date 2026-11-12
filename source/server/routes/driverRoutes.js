@@ -3,8 +3,10 @@
  * Covers all specifications DRI-001 through DRI-019 and API Screen Map matrix.
  */
 
-import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { sendSuccess, sendError, parseJsonBody, clientNow } from '../middleware/httpUtils.js';
 import { isProduction } from '../config.js';
+import { refundEarlyEnd } from '../core/tripSales.js';
+import { vnDate, addDays } from '../core/serviceDate.js';
 
 
 // An unpaid COD ticket is a 409 that tells the app which fare to collect (DRI-010, DRI-012).
@@ -46,6 +48,9 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
 
   // POST /api/v1/driver/auth/login or /api/v1/auth/driver/login (DRI-001)
   if ((pathname === '/api/v1/driver/auth/login' || pathname === '/api/v1/auth/driver/login') && req.method === 'POST') {
+    if (services.rateLimits?.driverLogin && !services.rateLimits.driverLogin.enforce(req, res, services.env)) {
+      return true;
+    }
     parseJsonBody(req).then(body => {
       const result = driverService.authenticateDriver(body.staffIdOrPhone || body.staff_id || body.username, body.pin || body.password, {}, Date.now(), req.operatorId);
       if (result.success) {
@@ -69,7 +74,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
       const newPin = body?.new_pin ?? body?.newPin;
       const result = driverService.changePin(driverId, { currentPin, newPin }, req.operatorId);
       if (result.success) {
-        sendSuccess(res, { success: true });
+        sendSuccess(res, { success: true, token: result.token });
       } else {
         sendError(res, result.error, result.code, result.status || 400);
       }
@@ -79,10 +84,48 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
 
   // GET /api/v1/driver/trips/today (DRI-002)
   if (pathname === '/api/v1/driver/trips/today' && req.method === 'GET') {
+    // Materialize today and tomorrow runs so the driver sees scheduled trips before dispatch opens
+    try {
+      const today = vnDate();
+      services.eventBridge?.runsForDate?.(today, req.operatorId);
+      services.eventBridge?.runsForDate?.(addDays(today, 1), req.operatorId);
+    } catch (_) {}
     // The token decides who the driver is; the header is only a development fallback
     const driverId = req.identity?.sub || req.headers['x-driver-id'] || 'drv_8821a';
     const result = driverService.getTodayTrips(driverId);
     sendSuccess(res, { ...result.data, trips: (result.data.trips || []).map(t => withStopTimes(t, services)) });
+    return true;
+  }
+
+  // POST /api/v1/driver/devices (D192): the driver app's push token, none when the driver signs out
+  if (pathname === '/api/v1/driver/devices' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const driverId = req.identity?.sub;
+      if (!driverId) {
+        sendError(res, 'Cần đăng nhập', 'UNAUTHORIZED', 401);
+        return;
+      }
+      const token = typeof body.token === 'string' && body.token.length <= 4096 ? body.token : null;
+      const platform = ['android', 'ios'].includes(body.platform) ? body.platform : null;
+      sendSuccess(res, services.messenger.registerDriverDevice(driverId, { token, platform, operatorId: req.operatorId }));
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/driver/schedule (DRI-021)
+  if (pathname === '/api/v1/driver/schedule' && req.method === 'GET') {
+    const driverId = req.identity?.sub || req.headers['x-driver-id'] || 'drv_8821a';
+    const month = parsedUrl.searchParams.get('month');
+    const result = driverService.getMonthlySchedule(driverId, {
+      month,
+      operatorId: req.operatorId,
+      managerService: services.managerService
+    });
+    if (result.success) {
+      sendSuccess(res, result.data);
+    } else {
+      sendError(res, result.error, result.code, result.status || 400);
+    }
     return true;
   }
 
@@ -101,6 +144,18 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   if (req.method === 'POST' && /^\/api\/v1\/driver\/trips\/[^/]+\/stops\/[^/]+\/arrive$/.test(pathname)) {
     const parts = pathname.split('/');
     const result = driverService.arriveAtStop(parts[5], parts[7]);
+    if (result.success) {
+      sendSuccess(res, result.data);
+    } else {
+      sendError(res, result.error, result.code, ['TRIP_NOT_FOUND', 'STOP_NOT_FOUND'].includes(result.code) ? 404 : (result.code === 'STOP_OUT_OF_ORDER' ? 409 : 400));
+    }
+    return true;
+  }
+
+  // POST /api/v1/driver/trips/:tripId/stops/:stopId/depart (DRI-008)
+  if (req.method === 'POST' && /^\/api\/v1\/driver\/trips\/[^/]+\/stops\/[^/]+\/depart$/.test(pathname)) {
+    const parts = pathname.split('/');
+    const result = driverService.departStop(parts[5], parts[7]);
     if (result.success) {
       sendSuccess(res, result.data);
     } else {
@@ -128,12 +183,14 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
   if (pathname.startsWith('/api/v1/driver/trips/') && pathname.endsWith('/start') && req.method === 'POST') {
     const parts = pathname.split('/');
     const tripId = parts[5];
-    const result = driverService.startTrip(tripId);
-    if (result.success) {
-      sendSuccess(res, result.data || result);
-    } else {
-      sendError(res, result.error, result.code, 400);
-    }
+    parseJsonBody(req).then(body => {
+      const result = driverService.startTrip(tripId, { now: clientNow(body) });
+      if (result.success) {
+        sendSuccess(res, result.data || result);
+      } else {
+        sendError(res, result.error, result.code, 400);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 
@@ -190,7 +247,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
       const qrPayload = body.qrString || body.qrPayload || body.qr_code;
-      const result = driverService.boardPassengerByQR(tripId, qrPayload, body.now);
+      const result = driverService.boardPassengerByQR(tripId, qrPayload, clientNow(body));
       if (result.success) {
         sendSuccess(res, result.data || result);
       } else {
@@ -221,7 +278,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
         qrOrPin = `PIN:${body.ticket_id || body.ticketId}:${body.pin}`;
       }
       if (qrOrPin) {
-        const result = driverService.boardPassengerByQR(tripId, qrOrPin, body.now);
+        const result = driverService.boardPassengerByQR(tripId, qrOrPin, clientNow(body));
         if (result.success) {
           sendSuccess(res, result.data || result);
         } else {
@@ -231,7 +288,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
         const result = driverService.boardPassengerManually(
           tripId,
           { ticketId: body.ticket_id || body.ticketId, seatCode: body.seat_code },
-          body.now
+          clientNow(body)
         );
         if (result.success) {
           sendSuccess(res, result.data);
@@ -253,7 +310,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
       const tId = ticketId || body.ticketId || body.ticket_id;
       const result = driverService.markNoShow(tripId, tId, body.reason, {
         // The grace period runs on the server clock; a client time is honoured in tests only.
-        mockNow: (!isProduction() && body.now) || Date.now(),
+        mockNow: clientNow(body),
         passengerRequestedCancel: Boolean(body.passenger_requested_cancel)
       });
       if (result.success) {
@@ -323,7 +380,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     const parts = pathname.split('/');
     const tripId = parts[5];
     parseJsonBody(req).then(body => {
-      const result = driverService.onboardHailPassenger(tripId, body, body.now);
+      const result = driverService.onboardHailPassenger(tripId, body, clientNow(body));
       if (result.success) {
         sendSuccess(res, result.data || result, 201);
       } else {
@@ -375,6 +432,7 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     parseJsonBody(req).then(body => {
       const result = driverService.endTrip(tripId, { earlyEndReason: body.early_end_reason ?? body.earlyEndReason });
       if (result.success) {
+        if (result.data.early_end_reason) refundEarlyEnd(services, tripId, result.data.early_end_reason, { now: clientNow(body) });
         sendSuccess(res, result.data || result);
       } else {
         sendError(res, result.error, result.code, result.code === 'TRIP_NOT_FOUND' ? 404 : 400);
@@ -383,30 +441,26 @@ export function handleDriverRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
-  // GET /api/v1/driver/system/gps-health (DRI-014)
+  // GET /api/v1/driver/system/gps-health (DRI-014): what the server received from this driver's bus, not device
+  // readings it cannot know. GOOD within a minute of the last position, WEAK within five, else LOST.
   if (pathname === '/api/v1/driver/system/gps-health' && req.method === 'GET') {
+    const trip = [...driverService.activeTrips.values()].find(t => t.driver_id === req.identity?.sub && ['IN_TRANSIT', 'BOARDING'].includes(t.status));
+    const last = trip ? services.trackingService.busPositions.get(trip.trip_id) : null;
+    const ageSeconds = last ? Math.max(0, Math.round((Date.now() - Date.parse(last.timestamp)) / 1000)) : null;
     sendSuccess(res, {
-      gps_signal: 'GOOD',
-      satellites_locked: 14,
-      accuracy_meters: 4.2,
-      foreground_service_active: true,
-      battery_optimization_whitelisted: true,
-      mqtt_connection_status: 'ONLINE',
-      mqtt_rtt_ms: 42,
-      mock_location_detected: false,
-      buffered_offline_count: driverService.offlineQueue.length
+      trip_id: trip?.trip_id || null,
+      gps_signal: ageSeconds === null ? 'NO_TRIP' : ageSeconds <= 60 ? 'GOOD' : ageSeconds <= 300 ? 'WEAK' : 'LOST',
+      last_position_at: last?.timestamp || null,
+      last_position_age_seconds: ageSeconds,
+      accuracy_meters: last?.accuracy_m ?? null,
+      buffered_offline_count: driverService.offlineQueue.filter(p => p.trip_id === trip?.trip_id).length
     });
     return true;
   }
 
-  // GET /api/v1/driver/system/diagnostics-ping (DRI-016)
+  // GET /api/v1/driver/system/diagnostics-ping (DRI-016): the app measures the round trip itself.
   if (pathname === '/api/v1/driver/system/diagnostics-ping' && req.method === 'GET') {
-    sendSuccess(res, {
-      gateway_status: 'HEALTHY',
-      api_latency_ms: 18,
-      mqtt_broker_status: 'CONNECTED',
-      timestamp: new Date().toISOString()
-    });
+    sendSuccess(res, { gateway_status: 'HEALTHY', timestamp: new Date().toISOString() });
     return true;
   }
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'passenger_date_picker.dart';
@@ -13,24 +15,50 @@ class PassengerSearchResultsScreen extends StatefulWidget {
   State<PassengerSearchResultsScreen> createState() => _PassengerSearchResultsScreenState();
 }
 
-class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScreen> {
+class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScreen> with WidgetsBindingObserver {
+  /// The day, sort and state the list on screen shows; it changes only once the new answer is in (D180).
+  String? _shownKey;
+  /// Which way the list slides when the day changes: a later day comes in from the right, an earlier from the left.
+  double _direction = 1;
+  Timer? _timer;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => PassengerScope.read(context).loadTrips());
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _timer = null;
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      PassengerScope.read(context).loadTrips();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final store = PassengerScope.of(context);
     final all = store.trips;
-    final open = all.where((t) => t.seatsLeft > 0).toList()
+    final open = all.where((t) => t.bookableNow && t.seatsLeft > 0).toList()
       ..sort((a, b) => switch (store.sort) {
             'price' => a.price.compareTo(b.price),
             'seats' => b.seatsLeft.compareTo(a.seatsLeft),
             _ => a.dep.compareTo(b.dep),
           });
-    final full = all.where((t) => t.seatsLeft == 0).toList();
+    final full = all.where((t) => t.bookableNow && t.seatsLeft == 0).toList();
+    final blocked = all.where((t) => !t.bookableNow).toList();
     return Scaffold(
       appBar: TopBar(
         title: '${store.originPlace.city} → ${store.destPlace.city}',
@@ -46,18 +74,17 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
               store.loadTrips();
             }),
             gap(10),
-            Row(children: [
-              _Choice(label: 'Sớm nhất', selected: store.sort == 'time', onTap: () => store.setSort('time'), pill: true),
-              const SizedBox(width: 8),
-              _Choice(label: 'Giá thấp', selected: store.sort == 'price', onTap: () => store.setSort('price'), pill: true),
-              const SizedBox(width: 8),
-              _Choice(label: 'Nhiều chỗ', selected: store.sort == 'seats', onTap: () => store.setSort('seats'), pill: true),
-            ]),
+            // One control for the order of the list, the same as the tabs of the wallet (D181).
+            SegmentedSwitch<String>(
+              segments: const [('time', 'Sớm nhất'), ('price', 'Giá thấp nhất'), ('seats', 'Nhiều chỗ nhất')],
+              value: store.sort,
+              onChanged: store.setSort,
+            ),
           ])),
         ),
         const Divider(height: 1, color: PTokens.line),
         Expanded(
-          child: store.loadingTrips
+          child: _animated(store, store.loadingTrips && all.isEmpty && store.tripsError == null
               ? const Center(child: CircularProgressIndicator())
               : store.tripsError != null
               ? Padding(
@@ -100,7 +127,7 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
                   final cardWidth = (box.maxWidth - pad * 2 - 16 * (cols - 1)) / cols;
                   return ListView(padding: EdgeInsets.all(pad), children: [
                     Wrap(spacing: 16, runSpacing: 12, children: [
-                      for (final t in open) SizedBox(width: cardWidth, child: _TripCard(trip: t)),
+                      for (final (i, t) in open.indexed) SizedBox(width: cardWidth, child: FadeSlideIn(index: i, child: _TripCard(trip: t))),
                       for (final t in full)
                         SizedBox(
                           width: cardWidth,
@@ -114,43 +141,64 @@ class _PassengerSearchResultsScreenState extends State<PassengerSearchResultsScr
                             ]),
                           ),
                         ),
+                      for (final t in blocked)
+                        SizedBox(
+                          width: cardWidth,
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(borderRadius: BorderRadius.circular(PTokens.radius), border: Border.all(color: PTokens.lineStrong)),
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text('${t.dep} · ${t.type} · ${t.blockLabel}', style: sans(size: 14, weight: FontWeight.w600, color: PTokens.muted)),
+                              gap(4),
+                              Text('Bến xe ${t.from} → ${t.to}', style: sans(size: 13, color: PTokens.muted)),
+                              if (t.effectiveBlockMessage != null && t.effectiveBlockMessage!.isNotEmpty) ...[
+                                gap(4),
+                                Text(t.effectiveBlockMessage!, style: sans(size: 13, color: PTokens.muted)),
+                              ],
+                            ]),
+                          ),
+                        ),
                     ]),
                   ]);
                 }),
-        ),
+        )),
       ]),
     );
   }
-}
 
-class _Choice extends StatelessWidget {
-  const _Choice({required this.label, required this.selected, required this.onTap, this.pill = false});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  final bool pill;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      selected: selected,
-      button: true,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(pill ? 999 : PTokens.radiusControl),
-        child: Container(
-          height: 36,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: selected ? PTokens.primarySoft : PTokens.surface,
-            borderRadius: BorderRadius.circular(pill ? 999 : PTokens.radiusControl),
-            border: Border.all(color: selected ? PTokens.primary : PTokens.line),
+  /// While a new day loads, the previous list stays, dimmed under a thin progress bar, instead of blinking to a
+  /// spinner; then the new list slides in. A change of sort only cross-fades.
+  Widget _animated(PassengerStore store, Widget content) {
+    final reduced = Motion.reduced(context);
+    if (!store.loadingTrips) {
+      final key = '${store.date}|${store.sort}|${store.tripsError ?? ''}';
+      final previousDay = _shownKey?.split('|').first;
+      if (previousDay != null && previousDay != store.date) _direction = store.date.compareTo(previousDay) > 0 ? 1 : -1;
+      if (previousDay == store.date) _direction = 0;
+      _shownKey = key;
+    }
+    final busy = store.loadingTrips && _shownKey != null;
+    return Stack(children: [
+      AnimatedSwitcher(
+        duration: reduced ? Duration.zero : Motion.base,
+        switchInCurve: Motion.settle,
+        switchOutCurve: Curves.easeIn,
+        layoutBuilder: (current, previous) => Stack(alignment: Alignment.topCenter, children: [...previous, if (current != null) current]),
+        transitionBuilder: (child, animation) => FadeTransition(
+          opacity: animation,
+          child: SlideTransition(position: Tween<Offset>(begin: Offset(0.08 * _direction, 0), end: Offset.zero).animate(animation), child: child),
+        ),
+        child: KeyedSubtree(
+          key: ValueKey(_shownKey ?? 'first'),
+          child: AnimatedOpacity(
+            opacity: busy ? 0.4 : 1,
+            duration: reduced ? Duration.zero : Motion.fast,
+            child: IgnorePointer(ignoring: busy, child: content),
           ),
-          child: Text(label, style: sans(size: 13, weight: selected ? FontWeight.w600 : FontWeight.w500, color: selected ? PTokens.primaryDark : PTokens.ink)),
         ),
       ),
-    );
+      if (busy) const Positioned(top: 0, left: 0, right: 0, child: LinearProgressIndicator(minHeight: 2)),
+    ]);
   }
 }
 
@@ -162,28 +210,43 @@ class _TripCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final few = trip.seatsLeft <= 3;
     // The passenger's own ride on this trip: where they get on and off, at what time.
-    final ride = PassengerScope.of(context).rideFor(trip);
+    final store = PassengerScope.of(context);
+    final ride = store.rideFor(trip);
     final i = trip.stops.indexOf(ride.on);
     final j = trip.stops.indexOf(ride.off);
     final between = j > i ? j - i - 1 : 0;
     int toMin(String hhmm) => int.parse(hhmm.substring(0, 2)) * 60 + int.parse(hhmm.substring(3, 5));
     final mins = (toMin(ride.off.time) - toMin(ride.on.time) + 24 * 60) % (24 * 60);
     final rideDuration = '${mins ~/ 60} giờ${mins % 60 == 0 ? '' : ' ${mins % 60} phút'}';
+    // Search is by province (D190): a trip that skips the station picked on the home screen says where it stops instead.
+    final missed = [
+      if (store.originPlace.station.isNotEmpty && ride.on.name != store.originPlace.station) 'Không đón ở ${store.originPlace.station}: lên xe tại ${ride.on.name}',
+      if (store.destPlace.station.isNotEmpty && ride.off.name != store.destPlace.station) 'Không dừng ở ${store.destPlace.station}: xuống tại ${ride.off.name}',
+    ];
     return AppCard(
       padding: const EdgeInsets.all(16),
       onTap: () {
         PassengerScope.read(context).chooseTrip(trip);
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerTripDetailScreen()));
+        Navigator.of(context).push(MaterialPageRoute(
+          settings: const RouteSettings(name: 'trip_detail'),
+          builder: (_) => const PassengerTripDetailScreen(),
+        ));
       },
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(color: trip.vip ? PTokens.primarySoft : const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(4)),
-            child: Text(trip.type, style: sans(size: 12, weight: FontWeight.w600, color: trip.vip ? PTokens.primaryDark : const Color(0xFF334155))),
+          // The vehicle type takes all the room the fare leaves (a Spacer beside it took half and cut the name).
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: trip.vip ? PTokens.primarySoft : const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(4)),
+                child: Text(trip.type, overflow: TextOverflow.ellipsis, maxLines: 1, style: sans(size: 12, weight: FontWeight.w600, color: trip.vip ? PTokens.primaryDark : const Color(0xFF334155))),
+              ),
+            ),
           ),
-          const Spacer(),
-          Text(vnd(trip.price), style: mono(size: 17, weight: FontWeight.w700)),
+          const SizedBox(width: 8),
+          Text(vnd(store.fareOf(trip)), style: mono(size: 17, weight: FontWeight.w700)),
         ]),
         gap(12),
         Row(children: [
@@ -200,6 +263,10 @@ class _TripCard extends StatelessWidget {
           ),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [Text(ride.off.time, style: mono(size: 20, weight: FontWeight.w700)), Text(ride.off.short, style: sans(size: 12, color: PTokens.muted))]),
         ]),
+        for (final m in missed) ...[
+          gap(8),
+          Text(m, key: const Key('trip_card_other_stop'), style: sans(size: 12, weight: FontWeight.w600, color: const Color(0xFFB45309))),
+        ],
         const Divider(height: 20, color: Color(0xFFF1F5F9)),
         Row(children: [
           Text(few ? 'Sắp hết: còn ${trip.seatsLeft} chỗ' : 'Còn ${trip.seatsLeft} chỗ', style: sans(size: 13, weight: FontWeight.w600, color: few ? const Color(0xFFB45309) : PTokens.success)),

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../../resources/lib/src/theme/app_colors.dart';
+import 'package:resources/resources.dart';
 
 class ManagerReportsScreen extends StatelessWidget {
   const ManagerReportsScreen({super.key});

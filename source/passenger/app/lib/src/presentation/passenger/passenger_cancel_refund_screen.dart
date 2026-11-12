@@ -1,47 +1,387 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'passenger_main_shell.dart';
 import 'passenger_store.dart';
 import 'passenger_ticket_qr_screen.dart';
 import 'passenger_widgets.dart';
 
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    return TextEditingValue(
+      text: newValue.text.toUpperCase(),
+      selection: newValue.selection,
+    );
+  }
+}
+
 /// PAX-021: confirm a cancellation with the refund the policy gives (tiers, or 100 % after an
-/// official delay over 30 minutes).
+/// official delay). The company's policy is shown in full and the passenger ticks that they read it before the
+/// red button works (D184).
 Future<void> confirmCancelTicket(BuildContext context, Ticket t) async {
   final store = PassengerScope.read(context);
+  await store.loadCancelPolicy();
   final r = store.refundFor(t);
   final known = r.percent >= 0;
+  // A multi-seat order (the success screen) cancels the seats the passenger picks, one ticket each (D190).
+  final ids = t.ticketIds.isNotEmpty ? t.ticketIds : [t.id];
+  final seatCodes = t.seat.split(',').map((s) => s.trim()).toList();
+  final seats = [
+    for (var i = 0; i < ids.length; i++)
+      (
+        id: ids[i],
+        seat: store.tickets.where((x) => x.id == ids[i]).firstOrNull?.seat ?? (seatCodes.length == ids.length ? seatCodes[i] : ids[i]),
+        paid: store.tickets.where((x) => x.id == ids[i]).firstOrNull?.paid ?? t.paid ~/ ids.length,
+      ),
+  ];
+  final chosen = {...ids};
+  int paidOf() => ids.length == 1 ? t.paid : seats.where((s) => chosen.contains(s.id)).fold(0, (sum, s) => sum + s.paid);
   final amount = known ? t.paid * r.percent ~/ 100 : 0;
-  final yes = await showAppSheet<bool>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Hủy vé ${t.pnr}?', style: sans(size: 18, weight: FontWeight.w700)),
-        gap(12),
-        AppCard(
-          child: Column(children: [
-            Row(children: [Text('Đã trả', style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(vnd(t.paid), style: mono(size: 14))]),
-            if (known) ...[
-              gap(4),
-              Row(children: [Text('Được hoàn', style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(vnd(amount), style: mono(size: 14, weight: FontWeight.w700))]),
-            ],
-            gap(6),
-            Align(alignment: Alignment.centerLeft, child: Text(r.tier, style: sans(size: 13, color: PTokens.muted, height: 1.4))),
-          ]),
-        ),
-        gap(10),
-        Text('Ghế ${t.seat} được nhả ngay cho người khác và không lấy lại được.', style: sans(size: 13, color: PTokens.muted, height: 1.5)),
-        gap(14),
-        PrimaryButton(label: known && amount > 0 ? 'Hủy vé, hoàn ${vnd(amount)}' : 'Hủy vé', color: PTokens.danger, onPressed: () => Navigator.of(ctx).pop(true)),
-        gap(8),
-        GhostButton(label: 'Giữ vé', onPressed: () => Navigator.of(ctx).pop(false)),
-      ]));
-  if (yes != true || !context.mounted) return;
-  final result = await store.cancelTicket(t);
+  final needsRefundAccount = !t.unpaidCash && t.paymentMethod != 'CASH' && (amount > 0 || r.percent > 0 || r.percent == -1);
+
+  final savedAccount = needsRefundAccount ? await store.getLastRefundAccount() : null;
+
+  String selectedBin = savedAccount?.bankBin.isNotEmpty == true ? savedAccount!.bankBin : vietQrBanks.first.bin;
+  final accNumCtrl = TextEditingController(text: savedAccount?.accountNumber ?? '');
+  final accNameCtrl = TextEditingController(text: savedAccount?.accountName ?? '');
+  String? validationError;
+  bool cancelling = false;
+  bool agreed = false;
+
   if (!context.mounted) return;
-  if (!result.ok) {
-    showToast(context, result.error!);
-    return;
-  }
-  PassengerMainShell.openTab(context, 1);
-  showToast(context, (result.value ?? 0) > 0 ? 'Đã gửi yêu cầu hoàn ${vnd(result.value!)}' : 'Đã hủy vé, không hoàn tiền theo chính sách');
+  final yes = await showAppSheet<bool>(
+    context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setSheetState) {
+        final paid = paidOf();
+        final refund = known ? paid * r.percent ~/ 100 : 0;
+        final chosenSeats = seats.where((s) => chosen.contains(s.id)).map((s) => s.seat).join(', ');
+        return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Hủy vé ${t.pnr}?', style: sans(size: 18, weight: FontWeight.w700)),
+          gap(12),
+          if (seats.length > 1) ...[
+            Text('Chọn ghế muốn hủy', style: sans(size: 14, weight: FontWeight.w700)),
+            gap(6),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final s in seats)
+                FilterChip(
+                  key: Key('cancel_seat_${s.seat}'),
+                  label: Text(s.seat, style: mono(size: 13, weight: FontWeight.w600)),
+                  selected: chosen.contains(s.id),
+                  onSelected: cancelling ? null : (on) => setSheetState(() => on ? chosen.add(s.id) : chosen.remove(s.id)),
+                ),
+            ]),
+            gap(4),
+            Text('Ghế không chọn vẫn giữ nguyên, đi bình thường.', style: sans(size: 12, color: PTokens.muted)),
+            gap(12),
+          ],
+          AppCard(
+            child: t.unpaidCash
+                ? Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Vé tiền mặt chưa thanh toán nên không phát sinh hoàn tiền.', style: sans(size: 13, color: PTokens.muted, height: 1.4)),
+                  )
+                : Column(children: [
+                    Row(children: [Text('Đã trả', style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(vnd(paid), style: mono(size: 14))]),
+                    if (known) ...[
+                      gap(4),
+                      Row(children: [Text('Được hoàn', style: sans(size: 14, color: PTokens.muted)), const Spacer(), Text(vnd(refund), style: mono(size: 14, weight: FontWeight.w700))]),
+                    ],
+                    gap(6),
+                    Align(alignment: Alignment.centerLeft, child: Text(r.tier, style: sans(size: 13, color: PTokens.muted, height: 1.4))),
+                  ]),
+          ),
+          gap(14),
+          Text('Chính sách hủy vé của nhà xe', style: sans(size: 14, weight: FontWeight.w700)),
+          gap(6),
+          for (final rule in store.cancelPolicy.rules)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('•  ', style: sans(size: 13, color: PTokens.muted, height: 1.4)),
+                Expanded(child: Text(rule, style: sans(size: 13, color: PTokens.muted, height: 1.4))),
+              ]),
+            ),
+          if (needsRefundAccount) ...[
+            gap(14),
+            Text('Tài khoản nhận tiền hoàn', style: sans(size: 14, weight: FontWeight.w700)),
+            gap(8),
+            DropdownButtonFormField<String>(
+              key: const Key('cancel_bank_picker'),
+              isExpanded: true,
+              initialValue: selectedBin,
+              decoration: InputDecoration(
+                labelText: 'Ngân hàng',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+              items: [
+                for (final b in vietQrBanks)
+                  DropdownMenuItem(
+                    value: b.bin,
+                    child: Text(b.shortName, style: sans(size: 14)),
+                  ),
+              ],
+              onChanged: (val) {
+                if (val != null) {
+                  setSheetState(() {
+                    selectedBin = val;
+                    validationError = null;
+                  });
+                }
+              },
+            ),
+            gap(10),
+            TextField(
+              onTapOutside: dismissKeyboard,
+              key: const Key('cancel_account_number'),
+              controller: accNumCtrl,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: InputDecoration(
+                labelText: 'Số tài khoản',
+                hintText: 'Nhập số tài khoản (6-19 số)',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+              onChanged: (_) {
+                if (validationError != null) setSheetState(() => validationError = null);
+              },
+            ),
+            gap(10),
+            TextField(
+              onTapOutside: dismissKeyboard,
+              key: const Key('cancel_account_name'),
+              controller: accNameCtrl,
+              textCapitalization: TextCapitalization.characters,
+              inputFormatters: [UpperCaseTextFormatter()],
+              decoration: InputDecoration(
+                labelText: 'Tên chủ tài khoản',
+                hintText: 'NGUYEN VAN A',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+              onChanged: (_) {
+                if (validationError != null) setSheetState(() => validationError = null);
+              },
+            ),
+          ],
+          if (validationError != null) ...[
+            gap(8),
+            Text(validationError!, style: sans(size: 13, weight: FontWeight.w500, color: PTokens.danger)),
+          ],
+          gap(10),
+          Text('Ghế $chosenSeats được nhả ngay cho người khác và không lấy lại được.', style: sans(size: 13, color: PTokens.muted, height: 1.5)),
+          gap(6),
+          CheckboxListTile(
+            key: const Key('cancel_policy_agree'),
+            value: agreed,
+            onChanged: cancelling ? null : (v) => setSheetState(() => agreed = v ?? false),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            activeColor: PTokens.danger,
+            title: Text('Tôi đã đọc và đồng ý với chính sách hủy vé', style: sans(size: 14, weight: FontWeight.w600)),
+          ),
+          gap(8),
+          PrimaryButton(
+            label: cancelling
+                ? 'Đang hủy vé…'
+                : (!t.unpaidCash && known && refund > 0 ? 'Hủy vé, hoàn ${vnd(refund)}' : 'Hủy vé'),
+            color: PTokens.danger,
+            onPressed: cancelling || !agreed || chosen.isEmpty
+                ? null
+                : () async {
+                    Map<String, dynamic>? refundAccount;
+                    if (needsRefundAccount) {
+                      final accNum = accNumCtrl.text.trim();
+                      final accName = accNameCtrl.text.trim().toUpperCase();
+                      if (selectedBin.isEmpty) {
+                        setSheetState(() => validationError = 'Vui lòng chọn ngân hàng');
+                        return;
+                      }
+                      if (!RegExp(r'^\d{6,19}$').hasMatch(accNum)) {
+                        setSheetState(() => validationError = 'Số tài khoản chỉ gồm 6-19 chữ số');
+                        return;
+                      }
+                      if (accName.length < 2) {
+                        setSheetState(() => validationError = 'Chủ tài khoản không được để trống');
+                        return;
+                      }
+                      refundAccount = {
+                        'bank_bin': selectedBin,
+                        'account_number': accNum,
+                        'account_name': accName,
+                      };
+                    }
+
+                    setSheetState(() => cancelling = true);
+                    final result = await store.cancelTicket(t, ids: ids.where(chosen.contains).toList(), refundAccount: refundAccount);
+                    if (!ctx.mounted) return;
+                    if (!result.ok) {
+                      setSheetState(() {
+                        cancelling = false;
+                        validationError = result.error;
+                      });
+                      showToast(ctx, result.error!);
+                      return;
+                    }
+                    Navigator.of(ctx).pop(true);
+                    if (!context.mounted) return;
+                    PassengerMainShell.openTab(context, 1);
+                    showToast(
+                      context,
+                      (result.value ?? 0) > 0
+                          ? 'Đã gửi yêu cầu hoàn ${vnd(result.value!)}'
+                          : t.unpaidCash
+                              ? 'Đã hủy vé. Vé chưa thanh toán nên không có tiền hoàn'
+                              : 'Đã hủy vé, không hoàn tiền theo chính sách',
+                    );
+                  },
+          ),
+          gap(8),
+          GhostButton(label: 'Giữ vé', onPressed: cancelling ? null : () => Navigator.of(ctx).pop(false)),
+        ],
+      );
+      },
+    ),
+  );
+  if (yes != true) return;
+}
+
+Future<void> showEditRefundAccountSheet(BuildContext context, Ticket ticket) async {
+  final store = PassengerScope.read(context);
+  final saved = await store.getLastRefundAccount();
+  final currentAccount = ticket.refundInfo?.account ?? saved;
+
+  String selectedBin = currentAccount?.bankBin.isNotEmpty == true ? currentAccount!.bankBin : vietQrBanks.first.bin;
+  final accNumCtrl = TextEditingController(text: currentAccount?.accountNumber.replaceAll('*', '') ?? '');
+  final accNameCtrl = TextEditingController(text: currentAccount?.accountName ?? '');
+  String? error;
+  bool saving = false;
+
+  if (!context.mounted) return;
+  await showAppSheet<void>(
+    context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setSheetState) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(ticket.refundInfo?.account == null ? 'Thêm tài khoản nhận hoàn' : 'Sửa tài khoản nhận hoàn', style: sans(size: 18, weight: FontWeight.w700)),
+          gap(12),
+          DropdownButtonFormField<String>(
+            key: const Key('edit_refund_bank_picker'),
+            isExpanded: true,
+            initialValue: selectedBin,
+            decoration: InputDecoration(
+              labelText: 'Ngân hàng',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+            items: [
+              for (final b in vietQrBanks)
+                DropdownMenuItem(
+                  value: b.bin,
+                  child: Text(b.shortName, style: sans(size: 14)),
+                ),
+            ],
+            onChanged: (val) {
+              if (val != null) {
+                setSheetState(() {
+                  selectedBin = val;
+                  error = null;
+                });
+              }
+            },
+          ),
+          gap(10),
+          TextField(
+            onTapOutside: dismissKeyboard,
+            key: const Key('edit_refund_account_number'),
+            controller: accNumCtrl,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: InputDecoration(
+              labelText: 'Số tài khoản',
+              hintText: 'Nhập số tài khoản (6-19 số)',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+            onChanged: (_) {
+              if (error != null) setSheetState(() => error = null);
+            },
+          ),
+          gap(10),
+          TextField(
+            onTapOutside: dismissKeyboard,
+            key: const Key('edit_refund_account_name'),
+            controller: accNameCtrl,
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: [UpperCaseTextFormatter()],
+            decoration: InputDecoration(
+              labelText: 'Tên chủ tài khoản',
+              hintText: 'NGUYEN VAN A',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+            onChanged: (_) {
+              if (error != null) setSheetState(() => error = null);
+            },
+          ),
+          if (error != null) ...[
+            gap(8),
+            Text(error!, style: sans(size: 13, weight: FontWeight.w500, color: PTokens.danger)),
+          ],
+          gap(16),
+          PrimaryButton(
+            label: saving ? 'Đang lưu…' : 'Cập nhật tài khoản',
+            onPressed: saving
+                ? null
+                : () async {
+                    final accNum = accNumCtrl.text.trim();
+                    final accName = accNameCtrl.text.trim().toUpperCase();
+                    if (selectedBin.isEmpty) {
+                      setSheetState(() => error = 'Vui lòng chọn ngân hàng');
+                      return;
+                    }
+                    if (!RegExp(r'^\d{6,19}$').hasMatch(accNum)) {
+                      setSheetState(() => error = 'Số tài khoản chỉ gồm 6-19 chữ số');
+                      return;
+                    }
+                    if (accName.length < 2) {
+                      setSheetState(() => error = 'Chủ tài khoản không được để trống');
+                      return;
+                    }
+
+                    setSheetState(() => saving = true);
+                    final r = await store.updateRefundAccount(ticket, {
+                      'bank_bin': selectedBin,
+                      'account_number': accNum,
+                      'account_name': accName,
+                    });
+                    if (!ctx.mounted) return;
+                    if (!r.ok) {
+                      setSheetState(() {
+                        saving = false;
+                        error = r.error;
+                      });
+                      showToast(ctx, r.error!);
+                      return;
+                    }
+                    Navigator.of(ctx).pop();
+                    if (!context.mounted) return;
+                    showToast(context, 'Đã cập nhật tài khoản nhận hoàn');
+                  },
+          ),
+          gap(8),
+          GhostButton(label: 'Đóng', onPressed: saving ? null : () => Navigator.of(ctx).pop()),
+        ],
+      ),
+    ),
+  );
 }
 
 /// PAX-025: an official delay with the choice to keep the ticket or cancel free of charge.
@@ -85,13 +425,18 @@ class PassengerDelayNoticeScreen extends StatelessWidget {
           decoration: BoxDecoration(color: PTokens.primarySoft, border: Border.all(color: const Color(0xFFBFDBFE)), borderRadius: BorderRadius.circular(PTokens.radius)),
           child: Text.rich(TextSpan(children: [
             TextSpan(text: 'Bạn được hủy vé miễn phí. ', style: sans(size: 13, weight: FontWeight.w700, color: const Color(0xFF1E3A8A))),
-            TextSpan(text: 'Chuyến chậm hơn 30 phút nên hủy lúc này được hoàn đủ ${vnd(t.paid)} về tài khoản đã chuyển, không mất phí.', style: sans(size: 13, color: const Color(0xFF1E40AF), height: 1.5)),
+            TextSpan(
+              text: t.unpaidCash
+                  ? 'Vé tiền mặt chưa thanh toán nên không phát sinh hoàn tiền.'
+                  : 'Chuyến chậm hơn 30 phút nên hủy lúc này được hoàn đủ ${vnd(t.paid)} về tài khoản đã chuyển, không mất phí.',
+              style: sans(size: 13, color: const Color(0xFF1E40AF), height: 1.5),
+            ),
           ])),
         ),
       ])),
       bottomNavigationBar: BottomAction(column: true, children: [
         PrimaryButton(label: 'Giữ vé, đi lúc ${t.departure}', onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => PassengerTicketQrScreen(ticket: t)))),
-        GhostButton(label: 'Hủy vé, hoàn ${vnd(t.paid)}', color: PTokens.danger, borderColor: const Color(0xFFFCA5A5), onPressed: () => confirmCancelTicket(context, t)),
+        GhostButton(label: t.unpaidCash ? 'Hủy vé' : 'Hủy vé, hoàn ${vnd(t.paid)}', color: PTokens.danger, borderColor: const Color(0xFFFCA5A5), onPressed: () => confirmCancelTicket(context, t)),
       ]),
     );
   }

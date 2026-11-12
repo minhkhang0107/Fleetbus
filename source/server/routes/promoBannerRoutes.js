@@ -2,7 +2,7 @@
  * Promotion banners edited by the bus company's director on the operations page (D125).
  * Always the request's company only (its own database, D126); every change is written to the audit log.
  */
-import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { sendSuccess, sendError, parseJsonBody, clientIp } from '../middleware/httpUtils.js';
 import { createBanner, deleteBanner, listOfficeBanners, setBannerActive, updateBanner } from '../core/promoBanners.js';
 
 const ONE_RE = /^\/api\/v1\/ops\/promo-banners\/([^/]+)$/;
@@ -21,7 +21,7 @@ export function handlePromoBannerRoutes(req, res, pathname, parsedUrl, services)
     managerService.recordAudit({
       actor: req.identity?.sub || 'anonymous',
       role: req.identity?.role || null,
-      ip: req.socket?.remoteAddress || null,
+      ip: clientIp(req),
       operator_id: req.operatorId,
       action,
       resource: result.banner?.banner_id || result.before?.banner_id,

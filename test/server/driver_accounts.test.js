@@ -312,6 +312,11 @@ describe('Driver Accounts & Lifecycle (MGR-015, MGR-016, DRI-001)', () => {
     });
     assert.strictEqual(changeRes.status, 200);
     assert.strictEqual(changeRes.data.status, 'success');
+    // The change ends the old session; the app goes on with the token it gets back.
+    const oldSession = await request('GET', '/driver/trips/today', { token: currentDriverToken });
+    assert.strictEqual(oldSession.status, 401);
+    assert.strictEqual(oldSession.data.code, 'TOKEN_REVOKED');
+    currentDriverToken = changeRes.data.data.token;
 
     // After change, driver can access endpoints
     const tripsAllowed = await request('GET', '/driver/trips/today', { token: currentDriverToken });

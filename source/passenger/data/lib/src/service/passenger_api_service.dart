@@ -7,27 +7,57 @@
  * set by the app); the server derives the user and the phone from it, so no identity is sent in a body.
  */
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+const insecureConnectionErrorMessage =
+    'Kết nối tới máy chủ không an toàn. Cập nhật ứng dụng hoặc liên hệ nhà xe.';
+
+class InsecureConnectionException implements Exception {
+  final String message;
+  const InsecureConnectionException([this.message = insecureConnectionErrorMessage]);
+  @override
+  String toString() => message;
+}
+
+/// Helper function to check if a backend URL is permitted.
+/// In release mode, URLs not starting with https:// are rejected.
+/// In debug/profile mode, http:// URLs are permitted.
+bool isSecureApiUrl(String url, {bool releaseMode = kReleaseMode}) {
+  if (releaseMode) {
+    return url.startsWith('https://');
+  }
+  return true;
+}
+
+bool isBaseUrlAllowed(String url, {bool releaseMode = kReleaseMode}) =>
+    isSecureApiUrl(url, releaseMode: releaseMode);
+
 /// Helper function to resolve the target backend URL adaptively across Android & iOS
-String resolvePassengerBaseUrl([String? customUrl]) {
+String resolvePassengerBaseUrl([String? customUrl, bool releaseMode = kReleaseMode]) {
+  String url;
   if (customUrl != null && customUrl.isNotEmpty) {
-    return customUrl;
+    url = customUrl;
+  } else {
+    // Physical device on the LAN: --dart-define=FLEETBUS_API_URL=http://<host-ip>:3000
+    const fromDefine = String.fromEnvironment('FLEETBUS_API_URL');
+    if (fromDefine.isNotEmpty) {
+      url = fromDefine;
+    } else if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      // Android emulator loopback alias to host machine
+      url = 'http://10.0.2.2:3000';
+    } else {
+      // iOS Simulator, macOS/Web, desktop, or default host
+      url = 'http://localhost:3000';
+    }
   }
-  // Physical device on the LAN: --dart-define=FLEETBUS_API_URL=http://<host-ip>:3000
-  const fromDefine = String.fromEnvironment('FLEETBUS_API_URL');
-  if (fromDefine.isNotEmpty) {
-    return fromDefine;
+  if (!isSecureApiUrl(url, releaseMode: releaseMode)) {
+    return '';
   }
-  // Android emulator loopback alias to host machine
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    return 'http://10.0.2.2:3000';
-  }
-  // iOS Simulator, macOS/Web, desktop, or default host
-  return 'http://localhost:3000';
+  return url;
 }
 
 /// A new random key for one logical mutation. Reuse the same key when retrying that mutation.
@@ -38,9 +68,14 @@ String newIdempotencyKey() {
       .join();
 }
 
+/// Shown on the about screen and sent in every request.
+const passengerAppVersion = '3.0.0';
+
 class PassengerApiClientService {
   final String baseUrl;
   final http.Client _client;
+  final Duration timeout;
+  final bool releaseMode;
 
   /// Session token of the signed-in passenger (set by [verifyOtp]).
   String? authToken;
@@ -53,12 +88,22 @@ class PassengerApiClientService {
     http.Client? client,
     this.authToken,
     this.operatorCode,
-  })  : baseUrl = resolvePassengerBaseUrl(baseUrl),
+    this.timeout = const Duration(seconds: 20),
+    this.releaseMode = kReleaseMode,
+  })  : baseUrl = resolvePassengerBaseUrl(baseUrl, releaseMode),
         _client = client ?? http.Client();
+
+  bool get isSecure => baseUrl.isNotEmpty && isSecureApiUrl(baseUrl, releaseMode: releaseMode);
+
+  static const _insecureError = <String, dynamic>{
+    'status': 'error',
+    'message': insecureConnectionErrorMessage,
+    'code': 'INSECURE_CONNECTION',
+  };
 
   Map<String, String> _headers({String? idempotencyKey}) => {
     'Content-Type': 'application/json',
-    'x-app-version': '3.0.0',
+    'x-app-version': passengerAppVersion,
     if (authToken != null) 'Authorization': 'Bearer $authToken',
     if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey,
     if (operatorCode != null) 'X-Operator-Code': operatorCode!,
@@ -69,17 +114,22 @@ class PassengerApiClientService {
   }
 
   Future<Map<String, dynamic>> _get(String path, {Map<String, String>? query}) async {
+    if (!isSecure) return _insecureError;
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
-    return _decode(await _client.get(uri, headers: _headers()));
+    return _decode(await _client.get(uri, headers: _headers()).timeout(timeout));
   }
 
   /// A GET answered with server-sent events: the data of each `tracking` event, until the connection drops.
   Stream<Map<String, dynamic>> _stream(String path, {Map<String, String>? query}) async* {
+    if (!isSecure) {
+      yield _insecureError;
+      return;
+    }
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
     final request = http.Request('GET', uri)
       ..headers.addAll(_headers())
       ..headers['Accept'] = 'text/event-stream';
-    final response = await _client.send(request);
+    final response = await _client.send(request).timeout(timeout);
     if (response.statusCode != 200 || !(response.headers['content-type'] ?? '').startsWith('text/event-stream')) {
       throw http.ClientException('Stream refused (${response.statusCode})', uri);
     }
@@ -104,17 +154,29 @@ class PassengerApiClientService {
     bool idempotent = false,
     String? idempotencyKey,
   }) async {
+    if (!isSecure) return _insecureError;
     final response = await _client.post(
       Uri.parse('$baseUrl$path'),
       headers: _headers(idempotencyKey: idempotent ? (idempotencyKey ?? newIdempotencyKey()) : null),
       body: body == null ? null : jsonEncode(body),
-    );
+    ).timeout(timeout);
+    return _decode(response);
+  }
+
+  Future<Map<String, dynamic>> _patch(String path, {Object? body}) async {
+    if (!isSecure) return _insecureError;
+    final response = await _client.patch(
+      Uri.parse('$baseUrl$path'),
+      headers: _headers(),
+      body: body == null ? null : jsonEncode(body),
+    ).timeout(timeout);
     return _decode(response);
   }
 
   Future<Map<String, dynamic>> _delete(String path, {Map<String, String>? query}) async {
+    if (!isSecure) return _insecureError;
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
-    return _decode(await _client.delete(uri, headers: _headers()));
+    return _decode(await _client.delete(uri, headers: _headers()).timeout(timeout));
   }
 
   /**
@@ -122,6 +184,13 @@ class PassengerApiClientService {
    */
   Future<Map<String, dynamic>> getAppConfig({String? operatorCode}) {
     return _get('/api/v1/app/config', query: operatorCode != null ? {'operator': operatorCode} : null);
+  }
+
+  /**
+   * SH-006: Terms of use and the model and data notice of this app (D157)
+   */
+  Future<Map<String, dynamic>> getLegal() {
+    return _get('/api/v1/legal', query: {'app': 'passenger'});
   }
 
   /**
@@ -169,6 +238,14 @@ class PassengerApiClientService {
    */
   Future<Map<String, dynamic>> getPromoBanner(String bannerId) {
     return _get('/api/v1/passenger/promo-banners/${Uri.encodeComponent(bannerId)}');
+  }
+
+  /**
+   * PAX-012: What a discount code takes off an order of [subtotalVnd] seat fare; the server prices the
+   * order again when it is created. Refusals: VOUCHER_INVALID, VOUCHER_EXPIRED, VOUCHER_USED_UP, VOUCHER_MIN_ORDER...
+   */
+  Future<Map<String, dynamic>> checkVoucher(String code, int subtotalVnd) {
+    return _post('/api/v1/passenger/vouchers/check', body: {'code': code, 'subtotal_vnd': subtotalVnd});
   }
 
   /**
@@ -263,6 +340,11 @@ class PassengerApiClientService {
     return _post('/api/v1/service-areas/check', body: {'kind': kind, 'lat': lat, 'lng': lng, if (tripId != null) 'trip_id': tripId});
   }
 
+  /// Street address of a map point, to fill the home pickup form (D187).
+  Future<Map<String, dynamic>> reverseGeocode(double lat, double lng) {
+    return _get('/api/v1/geocode/reverse', query: {'lat': '$lat', 'lng': '$lng'});
+  }
+
   /// A link the ticket owner sends to relatives so they can follow the bus without the app.
   Future<Map<String, dynamic>> shareTicketTracking(String ticketId) {
     return _post('/api/v1/passenger/tickets/$ticketId/share');
@@ -280,6 +362,7 @@ class PassengerApiClientService {
     Map<String, dynamic>? homePickup,
     Map<String, dynamic>? homeDropoff,
     bool insuranceSelected = false,
+    String paymentMethod = 'VIETQR_NAPAS247',
     String? idempotencyKey,
   }) {
     return _post(
@@ -296,6 +379,7 @@ class PassengerApiClientService {
         if (homePickup != null) 'homePickup': homePickup,
         if (homeDropoff != null) 'homeDropoff': homeDropoff,
         'insuranceSelected': insuranceSelected,
+        'paymentMethod': paymentMethod,
       },
       idempotent: true,
       idempotencyKey: idempotencyKey,
@@ -422,13 +506,39 @@ class PassengerApiClientService {
    * PAX-021: Cancel one ticket and request the tiered refund. The server uses the paid amount and the
    * departure stored on the ticket.
    */
-  Future<Map<String, dynamic>> cancelTicket(String ticketId, {String? idempotencyKey}) {
+  Future<Map<String, dynamic>> cancelTicket(
+    String ticketId, {
+    Map<String, dynamic>? refundAccount,
+    String? idempotencyKey,
+  }) {
     return _post(
       '/api/v1/passenger/tickets/$ticketId/cancel',
-      body: <String, dynamic>{},
+      body: <String, dynamic>{
+        if (refundAccount != null) 'refund_account': refundAccount,
+      },
       idempotent: true,
       idempotencyKey: idempotencyKey,
     );
+  }
+
+  /**
+   * PAX-021: Update the bank account for an open refund request.
+   */
+  Future<Map<String, dynamic>> updateRefundAccount(
+    String ticketId, {
+    required Map<String, dynamic> refundAccount,
+  }) {
+    return _patch(
+      '/api/v1/passenger/tickets/$ticketId/refund-account',
+      body: {'refund_account': refundAccount},
+    );
+  }
+
+  /**
+   * PAX-022: Delete passenger account and erase personal data.
+   */
+  Future<Map<String, dynamic>> deleteAccount() {
+    return _delete('/api/v1/passenger/me');
   }
 
   /**
@@ -468,6 +578,16 @@ class PassengerApiClientService {
   }
 
   /**
+   * PAX-022 (D186): change the name and / or the photo (a data URL, or null to remove it). The phone never changes.
+   */
+  Future<Map<String, dynamic>> updateProfile({String? fullName, Object? avatar = _unset}) {
+    return _patch('/api/v1/passenger/profile', body: {
+      if (fullName != null) 'full_name': fullName,
+      if (avatar != _unset) 'avatar': avatar,
+    });
+  }
+
+  /**
    * PAX-024: Vehicle replacement notice
    */
   Future<Map<String, dynamic>> getReplacementInfo(String tripId) {
@@ -490,3 +610,6 @@ class SearchRefused implements Exception {
   @override
   String toString() => message;
 }
+
+/// Marks an argument the caller did not pass, so `null` can still mean "remove".
+const Object _unset = Object();

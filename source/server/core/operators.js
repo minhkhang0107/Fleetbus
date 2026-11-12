@@ -8,7 +8,7 @@ const SEED_CREATED_AT = '2026-10-01T00:00:00.000Z';
 
 /** Pickup / drop-off offer of a company that only serves its fixed stops (spec 3). */
 export function defaultServiceConfig() {
-  return { pickup_modes: ['FIXED_STOP'], dropoff_modes: ['FIXED_LOCATION'], stop_style: 'STATIONS', route_configs: {}, allow_home_to_home: false, approaching_threshold_minutes: 10, home_wait_minutes: 5, service_areas: [] };
+  return { pickup_modes: ['FIXED_STOP'], dropoff_modes: ['FIXED_LOCATION'], stop_style: 'STATIONS', route_configs: {}, allow_home_to_home: false, allow_cash_payment: true, approaching_threshold_minutes: 10, home_wait_minutes: 5, service_areas: [], insurance_enabled: false, wallet_enabled: false };
 }
 
 export const OPERATORS = [
@@ -18,6 +18,8 @@ export const OPERATORS = [
     name: 'Nhà xe Sao Mai',
     short_name: 'Sao Mai',
     hotline: '1900 6868',
+    support_email: 'cskh@saomai.vn',
+    address: 'Bến xe Giáp Bát, Giải Phóng, Hoàng Mai, Hà Nội',
     primary_color: '#2563EB',
     bank: { bin: '970415', bank_name: 'VietinBank', account_number: '1088219999', account_name: 'NHA XE SAO MAI' },
     memo_prefix: 'SAOMAI',
@@ -29,6 +31,9 @@ export const OPERATORS = [
       pickup_modes: ['FIXED_STOP', 'HOME_PICKUP'],
       dropoff_modes: ['FIXED_LOCATION', 'HOME_DROPOFF'],
       allow_home_to_home: true,
+      allow_cash_payment: true,
+      insurance_enabled: false,
+      wallet_enabled: false,
       // Its Hà Nội — Thanh Hóa line picks passengers up at stations and points along the road.
       stop_style: 'ROUTE_LINE',
       route_configs: {},
@@ -49,6 +54,8 @@ export const OPERATORS = [
     name: 'Xuyên Việt Lines',
     short_name: 'Xuyên Việt',
     hotline: '1900 2468',
+    support_email: 'hotro@xuyenviet.vn',
+    address: 'Bến xe Mỹ Đình, Phạm Hùng, Nam Từ Liêm, Hà Nội',
     primary_color: '#0F766E',
     bank: { bin: '970436', bank_name: 'Vietcombank', account_number: '0071000123456', account_name: 'XUYEN VIET LINES' },
     memo_prefix: 'XUYENVIET',
@@ -65,35 +72,79 @@ export function normalizeOperatorCode(raw) {
   return raw.trim().toUpperCase();
 }
 
-export function findOperatorByCode(code) {
-  const normalized = normalizeOperatorCode(code);
-  if (!normalized) return null;
-  return OPERATORS.find(op => op.code === normalized) || null;
+export function applyPendingBankChangeIfDue(op, now = Date.now()) {
+  if (!op?.bank_pending) return;
+  const effMs = Date.parse(op.bank_pending.effective_at);
+  if (Number.isFinite(effMs) && now >= effMs) {
+    const oldBank = op.bank;
+    const until = new Date(effMs + 7 * 24 * 3600000).toISOString();
+    op.bank_previous = { ...oldBank, until };
+    const { requested_at, effective_at, requested_by, ...newBank } = op.bank_pending;
+    op.bank = newBank;
+    delete op.bank_pending;
+  }
 }
 
-export function findOperatorById(id) {
+export function findOperatorByCode(code, now = Date.now()) {
+  const normalized = normalizeOperatorCode(code);
+  if (!normalized) return null;
+  const op = OPERATORS.find(o => o.code === normalized) || null;
+  if (op) applyPendingBankChangeIfDue(op, now);
+  return op;
+}
+
+export function findOperatorById(id, now = Date.now()) {
   if (!id) return null;
-  return OPERATORS.find(op => op.operator_id === id) || null;
+  const op = OPERATORS.find(o => o.operator_id === id) || null;
+  if (op) applyPendingBankChangeIfDue(op, now);
+  return op;
+}
+
+export function operatorPaymentConfig(op) {
+  const cfg = op?.service_config;
+  const allowCash = cfg?.allow_cash_payment !== false;
+  const defaultMethods = allowCash ? ['BANK_TRANSFER', 'CASH'] : ['BANK_TRANSFER'];
+  const rawMethods = Array.isArray(cfg?.payment?.methods) && cfg.payment.methods.length > 0
+    ? cfg.payment.methods.filter(m => m === 'BANK_TRANSFER' || (m === 'CASH' && allowCash))
+    : defaultMethods;
+  const methods = rawMethods.length > 0 ? [...new Set(rawMethods)] : defaultMethods;
+  const transfer_provider = typeof cfg?.payment?.transfer_provider === 'string' && cfg.payment.transfer_provider
+    ? cfg.payment.transfer_provider.toUpperCase()
+    : 'MANUAL';
+  const rawLimit = cfg?.payment?.manual_confirm_limit_vnd;
+  const manual_confirm_limit_vnd = Number.isInteger(rawLimit) && rawLimit >= 0
+    ? rawLimit
+    : 2000000;
+  return { methods, transfer_provider, manual_confirm_limit_vnd };
 }
 
 export function publicOperatorProfile(op) {
   if (!op) return null;
+  const payment = operatorPaymentConfig(op);
   return {
     operator_id: op.operator_id,
     code: op.code,
     name: op.name,
     short_name: op.short_name,
     hotline: op.hotline,
+    support_email: op.support_email ?? null,
+    address: op.address ?? null,
     primary_color: op.primary_color,
     onboarding_url: `/o/${op.code}`,
     pickup_modes: [...(op.service_config?.pickup_modes || ['FIXED_STOP'])],
-    dropoff_modes: [...(op.service_config?.dropoff_modes || ['FIXED_LOCATION'])]
+    dropoff_modes: [...(op.service_config?.dropoff_modes || ['FIXED_LOCATION'])],
+    allow_cash_payment: payment.methods.includes('CASH'),
+    // Insurance and the BusGo wallet stay off until the company has a partner for them (H-03).
+    insurance_enabled: Boolean(op.service_config?.insurance_enabled),
+    wallet_enabled: Boolean(op.service_config?.wallet_enabled),
+    payment_methods: payment.methods
   };
 }
 
 const CODE_RE = /^[A-Z0-9]{3,16}$/;
 const COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
 const BANK_FIELDS = ['bin', 'bank_name', 'account_number', 'account_name'];
+const EMAIL_RE = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/;
 
 function invalid(message) {
   return { ok: false, status: 400, code: 'VALIDATION_ERROR', message };
@@ -112,6 +163,24 @@ function validateFields(fields) {
   if (!/^\d{6}$/.test(text(bank.bin))) return invalid('Mã BIN ngân hàng gồm 6 chữ số');
   if (!/^\d{6,19}$/.test(text(bank.account_number))) return invalid('Số tài khoản chỉ gồm 6-19 chữ số');
   if (fields.memo_prefix !== undefined && !CODE_RE.test(fields.memo_prefix)) return invalid('Tiền tố nội dung chuyển khoản gồm 3-16 ký tự A-Z, 0-9');
+  if (fields.hotline !== undefined && fields.hotline !== null) {
+    if (typeof fields.hotline !== 'string') return invalid('Số tổng đài không hợp lệ');
+    const h = fields.hotline.trim();
+    if (h !== '') {
+      const digits = (h.match(/\d/g) || []).length;
+      if (!/^[0-9 .+]{8,15}$/.test(h) || digits < 8) return invalid('Số tổng đài không hợp lệ');
+    }
+  }
+  if (fields.support_email !== undefined && fields.support_email !== null) {
+    if (typeof fields.support_email !== 'string') return invalid('Email chăm sóc khách hàng không hợp lệ');
+    const e = fields.support_email.trim();
+    if (e !== '' && !EMAIL_RE.test(e)) return invalid('Email chăm sóc khách hàng không hợp lệ');
+  }
+  if (fields.address !== undefined && fields.address !== null) {
+    if (typeof fields.address !== 'string') return invalid('Địa chỉ tối đa 200 ký tự');
+    const a = fields.address.trim();
+    if (a.length > 200) return invalid('Địa chỉ tối đa 200 ký tự');
+  }
   return null;
 }
 
@@ -119,7 +188,6 @@ function cleanBank(bank) {
   return Object.fromEntries(BANK_FIELDS.map(key => [key, text(bank[key])]));
 }
 
-const EMAIL_RE = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/;
 const TEMPORARY_PW_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
 export function generateTemporaryPassword(length = 12) {
@@ -162,6 +230,8 @@ export function createOperator(input = {}, now = Date.now()) {
     name: text(fields.name),
     short_name: text(fields.short_name) || text(fields.name),
     hotline: text(fields.hotline) || null,
+    support_email: text(fields.support_email) || null,
+    address: text(fields.address) || null,
     primary_color: fields.primary_color || '#2563EB',
     bank: cleanBank(fields.bank),
     memo_prefix: fields.memo_prefix,
@@ -179,8 +249,11 @@ export function createOperator(input = {}, now = Date.now()) {
     role: 'FLEET_DIRECTOR',
     permissions: ['ALL'],
     operator_id: op.operator_id,
+    active: true,
+    token_version: 0,
     must_change_password: true,
-    totp_enrolled: false
+    totp_enrolled: false,
+    created_at: new Date(now).toISOString()
   };
   MOCK_MANAGERS_DB.push(director);
 
@@ -197,22 +270,62 @@ export function createOperator(input = {}, now = Date.now()) {
 }
 
 /** Updates an operator; the code and id never change (they are in tokens, links and memos). */
-export function updateOperator(id, patch = {}) {
-  const op = findOperatorById(id);
+export function updateOperator(id, patch = {}, options = {}) {
+  const op = findOperatorById(id, options.now);
   if (!op) return { ok: false, status: 404, code: 'OPERATOR_NOT_FOUND', message: 'Không tìm thấy nhà xe' };
   if (patch.code !== undefined && normalizeOperatorCode(patch.code) !== op.code) return invalid('Không đổi được mã nhà xe');
   const next = {
     name: patch.name ?? op.name,
     short_name: patch.short_name ?? op.short_name,
-    hotline: patch.hotline ?? op.hotline,
+    hotline: patch.hotline === undefined ? op.hotline : patch.hotline,
+    support_email: patch.support_email === undefined ? op.support_email : patch.support_email,
+    address: patch.address === undefined ? op.address : patch.address,
     primary_color: patch.primary_color ?? op.primary_color,
     memo_prefix: patch.memo_prefix === undefined ? op.memo_prefix : normalizeOperatorCode(patch.memo_prefix),
-    bank: { ...op.bank, ...(patch.bank || {}) }
+    bank: patch.bank ? { ...op.bank, ...patch.bank } : op.bank
   };
   const error = validateFields(next);
   if (error) return error;
-  Object.assign(op, { ...next, name: text(next.name), short_name: text(next.short_name) || text(next.name), hotline: text(next.hotline) || null, bank: cleanBank(next.bank) });
+
+  // S5: Đổi bank không áp dụng ngay: lưu op.bank_pending = { ...bank mới, requested_at, effective_at = requested_at + 24h, requested_by }.
+  // Mã QR tiếp tục dùng tài khoản cũ đến effective_at.
+  if (patch.bank) {
+    const cleanedNewBank = cleanBank(next.bank);
+    const isChanged = ['bin', 'bank_name', 'account_number', 'account_name'].some(
+      k => cleanedNewBank[k] !== op.bank?.[k]
+    );
+    if (isChanged) {
+      const now = options.now || Date.now();
+      const reqAt = new Date(now).toISOString();
+      const effAt = new Date(now + 24 * 3600000).toISOString();
+      op.bank_pending = {
+        ...cleanedNewBank,
+        requested_at: reqAt,
+        effective_at: effAt,
+        requested_by: options.requested_by || 'PLATFORM_ADMIN'
+      };
+    }
+  }
+
+  Object.assign(op, {
+    name: text(next.name),
+    short_name: text(next.short_name) || text(next.name),
+    hotline: text(next.hotline) || null,
+    support_email: text(next.support_email) || null,
+    address: text(next.address) || null,
+    primary_color: next.primary_color,
+    memo_prefix: next.memo_prefix
+  });
   return { ok: true, operator: op };
+}
+
+/** Updates an operator's contact info only (hotline, support_email, address). */
+export function updateOperatorContact(id, patch = {}) {
+  const contactPatch = {};
+  if (patch.hotline !== undefined) contactPatch.hotline = patch.hotline;
+  if (patch.support_email !== undefined) contactPatch.support_email = patch.support_email;
+  if (patch.address !== undefined) contactPatch.address = patch.address;
+  return updateOperator(id, contactPatch);
 }
 
 export function setOperatorActive(id, active) {

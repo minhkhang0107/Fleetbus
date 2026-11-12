@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'driver_store.dart';
 import 'driver_widgets.dart';
@@ -22,6 +23,20 @@ class _DriverIncidentScreenState extends State<DriverIncidentScreen> {
     super.dispose();
   }
 
+  Future<void> _call112() => _dial('112');
+
+  Future<void> _dial(String number) async {
+    var ok = false;
+    try {
+      ok = await launchUrl(Uri.parse('tel:${number.replaceAll(RegExp(r'[^0-9+]'), '')}'));
+    } catch (_) {
+      ok = false;
+    }
+    if (!ok && mounted) {
+      dToast(context, 'Không mở được trình gọi điện, hãy gọi $number trực tiếp');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final what = <Widget>[
@@ -41,15 +56,27 @@ class _DriverIncidentScreenState extends State<DriverIncidentScreen> {
       const SizedBox(height: 20),
       Text('Ước tính chậm bao lâu?', style: dsans(size: 15, weight: FontWeight.w600)),
       const SizedBox(height: 10),
-      Row(children: [
-        for (final d in [15, 30, 45, 60]) ...[
-          if (d != 15) const SizedBox(width: 8),
-          Expanded(child: ChoiceTile(label: d == 60 ? '60+' : '$d', danger: true, center: true, selected: _delay == d, onTap: () => setState(() => _delay = d))),
+      // Two per row, so "15 phút" stays on one line on a narrow phone.
+      GridView.count(
+        crossAxisCount: 2,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 3.2,
+        children: [
+          for (final d in [15, 30, 45, 60])
+            ChoiceTile(label: d == 60 ? 'Hơn 1 giờ' : '$d phút', danger: true, center: true, selected: _delay == d, onTap: () => setState(() => _delay = d)),
         ],
-      ]),
+      ),
     ];
+    final hotline = DriverScope.read(context).operatorHotline;
     final note = <Widget>[
-      TextField(controller: _note, maxLines: 3, maxLength: 200, style: dsans(size: 15), decoration: const InputDecoration(labelText: 'Ghi chú (không bắt buộc)')),
+      if (hotline.isNotEmpty) ...[
+        BigButton(label: 'Gọi điều hành $hotline', icon: Icons.call, outline: true, color: const Color(0xFFE2E8F0), onPressed: () => _dial(hotline)),
+        const SizedBox(height: 16),
+      ],
+      TextField(controller: _note, maxLines: 3, maxLength: 200, style: dsans(size: 15), decoration: const InputDecoration(labelText: 'Ghi chú (không bắt buộc)', counterText: '')),
       const SizedBox(height: 16),
       Text('Điều hành nhận ngay cùng vị trí xe. Khách trên chuyến chỉ thấy giờ mới khi điều hành công bố.', style: dsans(size: 13, color: DTokens.muted, height: 1.5)),
     ];
@@ -58,7 +85,7 @@ class _DriverIncidentScreenState extends State<DriverIncidentScreen> {
       color: DTokens.danger,
       height: 72,
       onPressed: () async {
-        final error = await DriverScope.read(context).reportIncident(_type, _delay);
+        final error = await DriverScope.read(context).reportIncident(_type, _delay, _note.text);
         if (!context.mounted) return;
         if (error != null) {
           dToast(context, error);
@@ -72,7 +99,7 @@ class _DriverIncidentScreenState extends State<DriverIncidentScreen> {
   title: 'Báo sự cố',
   close: true,
   trailing: FilledButton(
-    onPressed: () => dToast(context, 'Đang gọi 112'),
+    onPressed: _call112,
     style: FilledButton.styleFrom(backgroundColor: DTokens.danger, minimumSize: const Size(64, 44), shape: const StadiumBorder()),
     child: Text('Gọi 112', style: dsans(size: 14, weight: FontWeight.w700, color: Colors.white)),
   ),

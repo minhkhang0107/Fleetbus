@@ -19,7 +19,7 @@ class DriverOfflineSyncScreen extends StatelessWidget {
           child: Row(children: [
             Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, color: store.offline ? const Color(0xFFF59E0B) : const Color(0xFF22C55E))),
             const SizedBox(width: 10),
-            Expanded(child: Text(store.offline ? 'Mất mạng · thao tác được lưu trên máy' : 'Đang kết nối', style: dsans(size: 15))),
+            Expanded(child: Text(store.offline ? 'Mất mạng · thao tác được lưu trên máy' : 'Có mạng', style: dsans(size: 15))),
             Text('${store.queue.length} chờ gửi', style: dmono(size: 14, weight: FontWeight.w600)),
           ]),
         ),
@@ -37,6 +37,27 @@ class DriverOfflineSyncScreen extends StatelessWidget {
                 ),
             ]),
           ),
+        if (store.syncErrors.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Panel(
+            color: DTokens.dangerBg,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              for (final e in store.syncErrors)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(children: [
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(e.label, style: dsans(size: 14, weight: FontWeight.w600, color: DTokens.dangerInk)),
+                        Text(e.error, style: dsans(size: 13, color: DTokens.dangerInk)),
+                      ]),
+                    ),
+                    Text(hhmm(e.at), style: dmono(size: 13, weight: FontWeight.w500, color: DTokens.dangerInk)),
+                  ]),
+                ),
+            ]),
+          ),
+        ],
         const SizedBox(height: 16),
         BigButton(
           label: 'Gửi ngay',

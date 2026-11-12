@@ -12,6 +12,8 @@ import { groupedCollection, listCollection, mapCollection, objectCollection, set
 import { MOCK_TRIPS_DATABASE, STATIONS_DATABASE, reloadScheduleTemplates } from '../services/passenger/modules/search.js';
 import { MOCK_MANAGERS_DB } from '../services/manager/modules/managerService.js';
 import { MOCK_DRIVERS_DB } from '../services/driver/modules/driverService.js';
+import { PASSENGER_REVOCATIONS } from '../services/passenger/modules/auth.js';
+import { normalizeStaffAccount } from '../services/manager/modules/staffAccounts.js';
 
 export function stateCollections(services, { idempotency } = {}) {
   const { authService, seatMapService, paymentService, trackingService, driverService, managerService } = services;
@@ -36,7 +38,11 @@ export function stateCollections(services, { idempotency } = {}) {
     listCollection('operators', () => OPERATORS, platform, { platformFirst: true }),
     listCollection('stations', () => STATIONS_DATABASE, platform),
     // Staff accounts: a company's staff in its database, platform admins (no company) in the platform's.
-    listCollection('staff_accounts', () => MOCK_MANAGERS_DB, (u) => u.operator_id || PLATFORM_SCOPE),
+    listCollection('staff_accounts', () => MOCK_MANAGERS_DB, (u) => u.operator_id || PLATFORM_SCOPE, {
+      afterRestore: () => {
+        for (const u of MOCK_MANAGERS_DB) normalizeStaffAccount(u);
+      }
+    }),
     mapCollection('staff_login_guard', () => managerService.loginGuard.entries, platform),
     mapCollection('driver_login_guard', () => driverService.loginGuard.entries, platform),
 
@@ -59,11 +65,15 @@ export function stateCollections(services, { idempotency } = {}) {
     // Passengers
     mapCollection('passenger_sessions', () => authService.sessions, (u) => u.operator_id || u.operator?.operator_id || DEFAULT_OPERATOR_ID),
     mapCollection('passenger_otp', () => authService.otpStore, (_, key) => registered(key.split(':')[0])),
+    mapCollection('passenger_revocations', () => PASSENGER_REVOCATIONS, (_, key) => registered(key.split(':')[0])),
+    mapCollection('passenger_profiles', () => authService.profiles, (p) => p.operator_id || DEFAULT_OPERATOR_ID),
     mapCollection('seat_holds', () => seatMapService.seatHolds, (h) => tripOwner(h.tripId)),
     mapCollection('seat_layouts', () => seatMapService.tripLayouts, (_, tripId) => tripOwner(tripId)),
     mapCollection('orders', () => paymentService.orders, own),
     mapCollection('tickets', () => paymentService.tickets, own),
     mapCollection('pnr_index', () => paymentService.pnrIndex, (orderId) => own(paymentService.orders.get(orderId))),
+    mapCollection('bank_transactions', () => paymentService.bankTransactions, own),
+    mapCollection('payment_gateway_credentials', () => paymentService.gatewayCredentials, (_, key) => registered(key)),
     listCollection('wallet_credits', () => paymentService.walletCredits, own),
     groupedCollection('notifications', () => trackingService.notifications, own),
     listCollection('message_outbox', () => services.messenger?.outbox || [], own),

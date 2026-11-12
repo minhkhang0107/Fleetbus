@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../resources/lib/src/theme/app_colors.dart';
+import 'package:resources/resources.dart';
 import 'src/presentation/manager/manager_login_screen.dart';
 import 'src/presentation/manager/manager_web_shell.dart';
 

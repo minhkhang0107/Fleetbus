@@ -90,6 +90,51 @@ Khởi động máy chủ bằng `make start_server` hoặc `npm start`:
 - 🩺 Kiểm tra sức khỏe hệ thống: [http://localhost:3000/health](http://localhost:3000/health)
 - 📑 Tài liệu OpenAPI Spec: [http://localhost:3000/api/v1/openapi.json](http://localhost:3000/api/v1/openapi.json)
 
+### Tài Khoản Dùng Thử (Môi Trường Phát Triển)
+
+Các tài khoản mẫu cấu hình sẵn trên môi trường phát triển (ngoài production) để đăng nhập và thử nghiệm các phân hệ:
+
+#### Web Điều Hành (Manager & Platform)
+
+| Phân hệ / Nhà xe | Vai trò | Tài khoản | Mật khẩu | 2FA TOTP | Ghi chú |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Nền tảng (Platform) | Quản trị nền tảng (`PLATFORM_ADMIN`) | `root@busgo.vn` | `root123` | Bắt buộc (dev secret) | Toàn quyền quản trị hệ thống, tạo nhà xe |
+| Sao Mai (`SAOMAI`) | Giám đốc điều hành (`FLEET_DIRECTOR`) | `admin@busgo.vn` | `admin123` | Bắt buộc (dev secret) | Toàn quyền quản trị nhà xe Sao Mai |
+| Sao Mai (`SAOMAI`) | Nhân viên (`STAFF`), mẫu quyền Điều độ | `dispatcher@busgo.vn` | `disp123` | Không | Điều độ, hủy chuyến, xem đặt chỗ, đội xe, tài xế, lịch chạy, nhật ký |
+| Sao Mai (`SAOMAI`) | Nhân viên (`STAFF`), mẫu quyền Thu ngân | `cashier@busgo.vn` | `cash123` | Không | Bán vé quầy, giữ chỗ tổng đài, xem đặt chỗ, thu tiền |
+| Xuyên Việt (`XUYENVIET`) | Nhân viên (`STAFF`), mẫu quyền Điều độ | `dispatcher@xuyenviet.vn` | `xv123` | Không | Như điều độ Sao Mai |
+| Xuyên Việt (`XUYENVIET`) | Nhân viên (`STAFF`), mẫu quyền Thu ngân | `cashier@xuyenviet.vn` | `xv123` | Không | Như thu ngân Sao Mai |
+| Nhà xe tạo mới | Giám đốc điều hành (`FLEET_DIRECTOR`) | Email khi tạo | Mật khẩu tạm | Bắt buộc đổi MK & cài 2FA | Trả về khi gọi `POST /api/v1/platform/operators` |
+
+#### Buồng Lái Tài Xế (Driver App)
+
+| Nhà xe | Mã nhân viên | Mã PIN | Họ tên | Ghi chú |
+| :--- | :--- | :--- | :--- | :--- |
+| Sao Mai (`SAOMAI`) | `TX8821` | `123456` | Trần Văn Bình | Có sẵn chuyến xe gán hôm nay |
+| Xuyên Việt (`XUYENVIET`) | `TX7701` | `246810` | Đỗ Minh Khoa | Có sẵn chuyến xe gán hôm nay |
+| Nhà xe tạo mới (ngoài production) | `TX8821` | `123456` | Tài xế thử nghiệm | Tự động tạo, sẵn sàng đăng nhập, không cần đổi PIN |
+
+#### Ứng Dụng Hành Khách (Passenger App)
+
+| Loại tài khoản | Số điện thoại | Mã OTP | Ghi chú |
+| :--- | :--- | :--- | :--- |
+| Tiêu chuẩn (`SAOMAI`) | `0912345678` | `882199` | Nguyễn Văn An, áp dụng trên mọi nhà xe |
+| Khách VIP (ngoài production) | `0999888777` | `888777` | Hoạt động trên mọi nhà xe, mọi vé 0 đ (ghế, bảo hiểm, đón/trả tận nhà), đơn hàng thanh toán ngay lập tức, không áp dụng mã giảm giá |
+| Khách vãng lai khác | Số bất kỳ (VN) | Mã trong `mock_otp` | Ngoài production server trả mã OTP trực tiếp trong response |
+
+### Dùng từ máy khác qua Tailscale
+
+Máy chạy server và máy (hoặc điện thoại) dùng thử cùng đăng nhập một tailnet; không cần chung mạng Wi-Fi, không mở cổng router.
+
+1. Trên máy chạy server: `make tailscale_url` in địa chỉ cho máy khác (dạng `http://100.x.y.z:3000`).
+2. `make tailscale_server` khởi động server với `FLEETBUS_PUBLIC_URL` là địa chỉ đó, để link theo dõi xe gửi cho người thân mở được từ máy khác.
+3. Web điều hành: máy khác mở `http://100.x.y.z:3000/manager`.
+4. App: `make tailscale_apk` build 2 APK trỏ vào địa chỉ đó, chép ra `dist/tailscale/busgo-passenger.apk` và `dist/tailscale/busgo-driver.apk`; cài lên điện thoại có Tailscale hoặc lên emulator của máy khác (`adb install -r …`).
+
+Đẩy APK lên Google Drive: `make drive_apk FLUTTER=~/development/flutter/bin/flutter` build 2 APK như trên rồi upload vào thư mục Drive của nhóm (ghi đè `busgo-driver.apk`, `busgo-passenger.apk` để link chia sẻ luôn trỏ bản mới nhất, kèm bản có ngày giờ trong `builds/`). Lần đầu cần kết nối Drive: `brew install rclone` rồi `rclone config create gdrive drive scope=drive` (mở trình duyệt để đăng nhập tài khoản Google có quyền sửa thư mục). Đổi thư mục: `DRIVE_FOLDER_ID=<id>`.
+
+Đổi địa chỉ (ví dụ tên MagicDNS): `make tailscale_apk SERVER_URL=http://<tên-máy>:3000`. Server nghe trên mọi địa chỉ nên không cần cấu hình thêm; nếu máy có tường lửa thì cho phép cổng 3000 trên giao diện `tailscale0`. Đây là server dev (tài khoản mẫu, khóa dev): chỉ chia sẻ trong tailnet, không mở ra Internet. Chạy iOS bản debug qua Tailscale cần dùng địa chỉ MagicDNS có HTTPS hoặc thêm ngoại lệ tạm khi dev; Android debug không ảnh hưởng.
+
 ### Lưu trữ và bảo mật dữ liệu (D126, D127)
 
 Mọi dữ liệu nghiệp vụ (nhà xe, nhân viên, tài xế, chuyến, ghế, đơn, vé, ví, thông báo, nhật ký, phiên đăng nhập, bộ đếm đăng nhập sai, idempotency) được lưu vào SQLite (`node:sqlite`, Node ≥ 22.5). Dữ liệu là code (danh mục API, hình học tuyến, trạm dừng nghỉ, luật voucher) vẫn nằm trong code.

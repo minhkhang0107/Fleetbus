@@ -61,6 +61,7 @@ class _PromoSliderState extends State<PromoSlider> {
         height: 148,
         child: PageView.builder(
           controller: _controller,
+          padEnds: false,
           itemCount: banners.length,
           onPageChanged: (i) {
             setState(() => _page = i);

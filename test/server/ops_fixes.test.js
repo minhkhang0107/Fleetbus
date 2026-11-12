@@ -4,12 +4,14 @@ import crypto from 'node:crypto';
 import { createFleetBusServer } from '../../source/server/apiServer.js';
 import { generateTotp } from '../../source/server/core/totp.js';
 import { DEV_TOTP_SECRET } from '../../source/server/config.js';
+import { runId, serviceCalendar } from '../../source/server/core/serviceDate.js';
 
 describe('Phase S1: Operations Fixes Integration', () => {
   let appServer;
   let baseUrl;
   let managerService;
   let driverService;
+  let services;
   const TEST_PORT = 3998;
 
   let dispatcherToken;
@@ -18,6 +20,7 @@ describe('Phase S1: Operations Fixes Integration', () => {
   before(async () => {
     const serverInstance = createFleetBusServer({ authMode: 'on' });
     appServer = serverInstance.server;
+    services = serverInstance.services;
     managerService = serverInstance.services.managerService;
     driverService = serverInstance.services.driverService;
 
@@ -238,5 +241,50 @@ describe('Phase S1: Operations Fixes Integration', () => {
 
     const manifestRes2 = await request('/api/v1/driver/trips/trp_hn_th_01', 'GET', null, driverToken);
     assert.strictEqual(manifestRes2.body.data.on_board_count, onBoard1, 'on_board_count must not change on duplicate arrival');
+  });
+
+  it('6. Hotline hold total and driver manifest COD amount equal trip fare when it differs from route fare', async () => {
+    const today = serviceCalendar().today;
+    const runTripId = runId('trp_hn_th_02', today);
+
+    // Route rt_hn_th base fare is 220000, but catalog trip fare is 180000
+    const route = services.managerService.routes.find(r => r.route_id === 'rt_hn_th');
+    assert.strictEqual(route.base_fare_vnd, 220000);
+
+    const tripDetail = services.searchService.getTripDetail(runTripId);
+    assert.strictEqual(tripDetail.data.base_fare_vnd, 180000);
+
+    // Online seat map prices seats at the trip catalog fare (180.000 đ)
+    const seatMapRes = await request(`/api/v1/trips/${runTripId}/seat-map`, 'GET');
+    assert.strictEqual(seatMapRes.status, 200);
+    const seatB02 = seatMapRes.body.data.seats.find(s => s.seat_code === 'B02');
+    assert.strictEqual(seatB02.price_vnd, 180000, 'Online seat price must equal catalog trip fare (180.000 đ)');
+
+    // Assign run to driver drv_8821a so driver manifest exists
+    const assignRes = await request(`/api/v1/ops/trips/${runTripId}/assign`, 'POST', {
+      vehicleId: 'veh_02',
+      driverId: 'drv_8821a'
+    }, dispatcherToken, { 'x-tenant-id': 'op_saomai' });
+    assert.strictEqual(assignRes.status, 200, JSON.stringify(assignRes.body));
+
+    // Create hotline hold on runTripId
+    const holdRes = await request('/api/v1/ops/pos/hotline-hold', 'POST', {
+      trip_id: runTripId,
+      seat_codes: ['B02'],
+      pickup_stop_id: 'stp_hn_my_dinh',
+      dropoff_stop_id: 'stp_th_pb',
+      phone: '0987654399',
+      passenger_name: 'Nguyen Van Gia Ve'
+    }, dispatcherToken, { 'x-tenant-id': 'op_saomai' });
+
+    assert.ok([200, 201].includes(holdRes.status), JSON.stringify(holdRes.body));
+    assert.strictEqual(holdRes.body.data.total_fare_vnd, 180000, 'Hotline hold total must equal trip fare (180.000 đ), not route fare (220.000 đ)');
+
+    // Driver fetches trip manifest
+    const manifestRes = await request(`/api/v1/driver/trips/${runTripId}`, 'GET', null, driverToken);
+    assert.strictEqual(manifestRes.status, 200, JSON.stringify(manifestRes.body));
+    const passenger = manifestRes.body.data.manifest.find(p => p.seat_code === 'B02');
+    assert.ok(passenger, 'Held passenger should be on driver manifest');
+    assert.strictEqual(passenger.cod_amount_vnd, 180000, 'Driver manifest COD amount must equal trip fare (180.000 đ)');
   });
 });

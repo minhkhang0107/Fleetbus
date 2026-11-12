@@ -9,6 +9,21 @@ export function isProduction() {
   return process.env.NODE_ENV === 'production';
 }
 
+/**
+ * Returns the server clock in production; outside production accepts a caller-supplied timestamp (ms or ISO string).
+ */
+export function clientNow(source) {
+  if (isProduction() || !source) return Date.now();
+  const raw = typeof source?.get === 'function'
+    ? source.get('now')
+    : (typeof source === 'object' ? source.now : source);
+  if (raw === undefined || raw === null || raw === '' || raw === false) return Date.now();
+  const num = Number(raw);
+  if (Number.isFinite(num) && num > 0) return num;
+  const parsed = typeof raw === 'string' ? Date.parse(raw) : NaN;
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
 export function getTicketSecret() {
   const fromEnv = process.env.FLEETBUS_TICKET_SECRET;
   if (fromEnv) return fromEnv;
@@ -20,11 +35,16 @@ export function getTicketSecret() {
 
 export function getWebhookSecret() {
   const fromEnv = process.env.FLEETBUS_WEBHOOK_SECRET;
-  if (fromEnv) return fromEnv;
   if (isProduction()) {
-    throw new Error('FLEETBUS_WEBHOOK_SECRET must be set in production');
+    if (fromEnv === 'off') {
+      throw new Error('FLEETBUS_WEBHOOK_SECRET cannot be "off" in production');
+    }
+    if (!fromEnv) {
+      throw new Error('FLEETBUS_WEBHOOK_SECRET must be set in production');
+    }
+    return fromEnv;
   }
-  return null;
+  return fromEnv || null;
 }
 
 const DEV_TOKEN_SECRET = 'fleetbus_dev_only_token_secret';
@@ -64,3 +84,12 @@ export function getStaffTotpSecret(userId, account = null) {
   return isProduction() ? null : DEV_TOTP_SECRET;
 }
 
+/**
+ * VIP / review passenger account: rides free across all bus companies, dev/staging only. Never active in production.
+ */
+export const VIP_PASSENGER_PHONE = '0999888777';
+export const VIP_PASSENGER_OTP = '888777';
+
+export function isVipPassengerPhone(phone) {
+  return !isProduction() && phone === VIP_PASSENGER_PHONE;
+}

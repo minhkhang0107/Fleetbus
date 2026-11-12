@@ -30,6 +30,11 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // A cancelled or used ticket has no pass to fetch: the screen shows its refund or status instead.
+      if (widget.ticket.status != TicketStatus.active) {
+        setState(() => _loading = false);
+        return;
+      }
       final error = await PassengerScope.read(context).loadPass(widget.ticket);
       if (!mounted) return;
       setState(() {
@@ -83,7 +88,7 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
       await showAppSheet<void>(context, builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('Không đổi được mã lúc này', style: sans(size: 18, weight: FontWeight.w700)),
             gap(8),
-            Text('Chuyến đã xuất bến. Nếu có người dùng mã của bạn, báo tài xế kiểm tra bằng tên và số ghế ${t.seat}, hoặc gọi 1900 6868.', style: sans(size: 14, color: PTokens.muted, height: 1.5)),
+            Text('Chuyến đã xuất bến. Nếu có người dùng mã của bạn, báo tài xế kiểm tra bằng tên và số ghế ${t.seat}${(store.operator?.hotline ?? '').isEmpty ? '' : ', hoặc gọi ${store.operator!.hotline}'}.', style: sans(size: 14, color: PTokens.muted, height: 1.5)),
             gap(14),
             PrimaryButton(label: 'Đã hiểu', onPressed: () => Navigator.of(ctx).pop()),
           ]));
@@ -163,14 +168,23 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
   Widget build(BuildContext context) {
     final store = PassengerScope.of(context);
     final t = widget.ticket;
-    final usable = t.status == TicketStatus.active;
-    final pill = switch (t.status) {
-      TicketStatus.active => const Pill('Hợp lệ', PillKind.ok),
-      TicketStatus.boarded => const Pill('Đã lên xe', PillKind.ok),
-      TicketStatus.noShow => const Pill('Vắng mặt', PillKind.mute),
-      TicketStatus.refunding => const Pill('Đang hoàn tiền', PillKind.info),
-      TicketStatus.cancelled => const Pill('Đã hủy', PillKind.mute),
-    };
+    final walletTicket = store.tickets.where((o) => o.id == t.id).firstOrNull;
+    final refund = t.refundInfo ?? walletTicket?.refundInfo;
+    final isFinished = t.past || walletTicket?.past == true || store.isTripEnded(t.tripId);
+    final usable = t.status == TicketStatus.active && !isFinished;
+    final pill = refund != null
+        ? (refund.isPending
+            ? const Pill('Đang chờ hoàn tiền', PillKind.info)
+            : (refund.isRefunded
+                ? const Pill('Đã hoàn tiền', PillKind.ok)
+                : const Pill('Từ chối', PillKind.danger)))
+        : switch (t.status) {
+            TicketStatus.active => const Pill('Hợp lệ', PillKind.ok),
+            TicketStatus.boarded => isFinished ? const Pill('Đã đi', PillKind.mute) : const Pill('Đã lên xe', PillKind.ok),
+            TicketStatus.noShow => const Pill('Vắng mặt', PillKind.mute),
+            TicketStatus.refunding => const Pill('Đang chờ hoàn tiền', PillKind.info),
+            TicketStatus.cancelled => const Pill('Đã hủy', PillKind.mute),
+          };
     return Scaffold(
       appBar: TopBar(title: 'Vé lên xe', trailing: pill),
       body: PSplit(left: [
@@ -192,6 +206,18 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
           ),
           gap(14),
         ],
+        if (t.unpaidCash) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: PTokens.warnSoft, borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+            child: Text(
+              'Chưa thanh toán — đưa ${vnd(t.codDue)} tiền mặt cho tài xế khi lên xe',
+              style: sans(size: 13, weight: FontWeight.w600, color: PTokens.warnInk, height: 1.4),
+            ),
+          ),
+          gap(14),
+        ],
         if (_loading)
           const Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator()))
         else if (_error != null)
@@ -209,37 +235,66 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
                   child: QrImageView(data: t.qrValue!, size: 232, backgroundColor: Colors.white),
                 ),
               ),
-              gap(12),
-              Text('Dùng được khi mất mạng, khi lưu ảnh hoặc in. Mỗi vé chỉ lên xe một lần · màn hình đã tăng độ sáng', textAlign: TextAlign.center, style: sans(size: 12, color: PTokens.muted, height: 1.5)),
-              if (_showPin && t.pin != null) ...[
-                gap(12),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: PTokens.primarySoft, borderRadius: BorderRadius.circular(PTokens.radiusControl)),
-                  child: Column(children: [
-                    Text('Mã PIN dự phòng', style: sans(size: 13, color: const Color(0xFF1E3A8A))),
-                    Text('${t.pin!.substring(0, 3)} ${t.pin!.substring(3)}', style: mono(size: 20, weight: FontWeight.w700, color: const Color(0xFF1E3A8A))),
-                    Text('Đọc mã này cho tài xế nếu không quét được.', style: sans(size: 12, color: const Color(0xFF1E3A8A))),
-                  ]),
+              if (t.qrFromCache) ...[
+                gap(10),
+                Text(
+                  'Đang không có mạng — đây là mã QR đã lưu trên máy. Mã vẫn dùng được nếu bạn chưa đổi mã.',
+                  textAlign: TextAlign.center,
+                  style: sans(size: 13, color: PTokens.warnInk),
                 ),
               ],
+              gap(12),
+              Text('Dùng được khi mất mạng, khi lưu ảnh hoặc in. Mỗi vé chỉ lên xe một lần · màn hình đã tăng độ sáng', textAlign: TextAlign.center, style: sans(size: 12, color: PTokens.muted, height: 1.5)),
+              // The backup PIN opens below the QR instead of pushing the screen down at once.
+              Reveal(
+                visible: _showPin && t.pin != null,
+                child: t.pin == null
+                    ? const SizedBox.shrink()
+                    : Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(color: PTokens.primarySoft, borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+                          child: Column(children: [
+                            Text('Mã PIN dự phòng', style: sans(size: 13, color: const Color(0xFF1E3A8A))),
+                            Text('${t.pin!.substring(0, 3)} ${t.pin!.substring(3)}', style: mono(size: 20, weight: FontWeight.w700, color: const Color(0xFF1E3A8A))),
+                            Text(
+                              t.seat.contains(',')
+                                  ? 'Đọc mã này cho tài xế nếu không quét được. Mã dùng cho cả ghế ${t.seat}.'
+                                  : 'Đọc mã này cho tài xế nếu không quét được.',
+                              textAlign: TextAlign.center,
+                              style: sans(size: 12, color: const Color(0xFF1E3A8A)),
+                            ),
+                          ]),
+                        ),
+                      ),
+              ),
             ]),
           )
         else if (t.status == TicketStatus.boarded)
-          AppCard(child: Text('Bạn đã lên xe. Vé không còn mã QR để dùng lại hay chia sẻ.', style: sans(size: 14, color: PTokens.muted))),
+          AppCard(child: Text('Bạn đã lên xe. Vé không còn mã QR để dùng lại hay chia sẻ.', style: sans(size: 14, color: PTokens.muted)))
+        else if (refund != null)
+          _RefundCard(ticket: t, refund: refund)
+        else if (t.status == TicketStatus.cancelled)
+          AppCard(child: Text('Vé đã hủy.', style: sans(size: 14, color: PTokens.muted))),
       ], right: [
         if (!pWide(context)) gap(14),
         AppCard(
           padding: const EdgeInsets.all(16),
-          child: Column(children: [
+          // Start-aligned: a block narrower than the card (home pickup) must line up with the other fields.
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Expanded(child: KeyValue('Mã đặt chỗ', t.pnr, isMono: true, valueColor: PTokens.pnr)),
               Expanded(child: KeyValue('Ghế', t.seat, isMono: true)),
             ]),
             gap(12),
             Row(children: [
-              Expanded(child: KeyValue('Đón', '${t.pickup} · ${t.departure}')),
+              Expanded(child: KeyValue('Biển số xe', t.plate.isEmpty ? 'Nhà xe sẽ báo' : t.plate, isMono: t.plate.isNotEmpty)),
+            ]),
+            gap(12),
+            Row(children: [
+              Expanded(child: KeyValue('Đón', '${t.pickup} · ${t.pickupTimeLabel}')),
               Expanded(child: KeyValue('Ngày', t.date)),
             ]),
             if (t.homePickup != null) ...[
@@ -275,7 +330,9 @@ class _PassengerTicketQrScreenState extends State<PassengerTicketQrScreen> {
               ),
             ],
             gap(12),
-            Align(alignment: Alignment.centerLeft, child: KeyValue('Hành khách', t.name)),
+            KeyValue('Hành khách', t.name),
+            gap(12),
+            KeyValue('Thanh toán', t.paymentLabel, valueColor: t.unpaidCash ? PTokens.warnInk : PTokens.success),
           ]),
         ),
         if (t.active) ...[
@@ -340,5 +397,76 @@ class _HomeService extends StatelessWidget {
         if (onWithdraw != null) LinkButton(label: 'Hủy yêu cầu ${pickupSide ? 'đón' : 'trả'} tận nhà', color: PTokens.danger, onPressed: onWithdraw),
       ],
     ]);
+  }
+}
+
+class _RefundCard extends StatelessWidget {
+  const _RefundCard({required this.ticket, required this.refund});
+  final Ticket ticket;
+  final TicketRefund refund;
+
+  @override
+  Widget build(BuildContext context) {
+    final pill = switch (refund.status) {
+      'REFUND_REQUESTED' => const Pill('Đang chờ hoàn tiền', PillKind.info),
+      'REFUNDED' => const Pill('Đã hoàn tiền', PillKind.ok),
+      'REFUND_REJECTED' || 'REJECTED' => const Pill('Từ chối', PillKind.danger),
+      _ => Pill(refund.statusLabel, PillKind.info),
+    };
+
+    return AppCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text('Thông tin hoàn tiền', style: sans(size: 16, weight: FontWeight.w700))),
+              const SizedBox(width: 8),
+              pill,
+            ],
+          ),
+          gap(12),
+          Row(
+            children: [
+              Text('Số tiền hoàn', style: sans(size: 14, color: PTokens.muted)),
+              const Spacer(),
+              Text(vnd(refund.amountVnd), style: mono(size: 16, weight: FontWeight.w700, color: PTokens.primaryDark)),
+            ],
+          ),
+          if (refund.isRejected && refund.rejectNote != null && refund.rejectNote!.isNotEmpty) ...[
+            gap(10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: PTokens.warnSoft, borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+              child: Text(
+                'Lý do từ chối: ${refund.rejectNote!}',
+                style: sans(size: 13, weight: FontWeight.w500, color: PTokens.warnInk),
+              ),
+            ),
+          ],
+          if (refund.account != null) ...[
+            const Divider(height: 20, color: PTokens.line),
+            KeyValue('Ngân hàng nhận hoàn', refund.account!.displayBankName),
+            gap(8),
+            KeyValue('Số tài khoản', refund.account!.accountNumber, isMono: true),
+            gap(8),
+            KeyValue('Tên chủ tài khoản', refund.account!.accountName),
+          ],
+          if (refund.isPending && refund.account == null) ...[
+            gap(10),
+            Text('Nhà xe cần số tài khoản của bạn để chuyển tiền hoàn.', style: sans(size: 13, color: PTokens.warnInk, height: 1.4)),
+          ],
+          if (refund.isPending) ...[
+            gap(14),
+            GhostButton(
+              label: refund.account == null ? 'Thêm tài khoản nhận hoàn' : 'Sửa tài khoản nhận hoàn',
+              onPressed: () => showEditRefundAccountSheet(context, ticket),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }

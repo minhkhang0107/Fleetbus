@@ -85,13 +85,13 @@ describe('The office gives a trip its bus and driver (MGR-017)', () => {
     services.managerService.findTrip(id('trp_hn_th_03')).booked_seats = 0;
   });
 
-  it('changing the bus of a trip with tickets tells each passenger once', async () => {
+  it('changing the bus of a trip with tickets tells each passenger once, naming all their seats (D191)', async () => {
     const tripId = id('trp_hn_th_02');
-    const hold = await request(`/api/v1/passenger/trips/${tripId}/hold-seats`, { method: 'POST', token: pax, body: { seatCodes: ['A04'] } });
+    const hold = await request(`/api/v1/passenger/trips/${tripId}/hold-seats`, { method: 'POST', token: pax, body: { seatCodes: ['A04', 'A05'] } });
     assert.strictEqual(hold.status, 200, JSON.stringify(hold.body));
-    const order = await request('/api/v1/passenger/bookings/create', { method: 'POST', token: pax, body: { tripId, holdId: hold.body.data.hold_id, seatCodes: ['A04'], payer: { full_name: 'Vũ Thị Gán', phone: '0906667788' }, passengers: [{ seat_code: 'A04', full_name: 'Vũ Thị Gán', phone: '0906667788' }] } });
+    const order = await request('/api/v1/passenger/bookings/create', { method: 'POST', token: pax, body: { tripId, holdId: hold.body.data.hold_id, seatCodes: ['A04', 'A05'], payer: { full_name: 'Vũ Thị Gán', phone: '0906667788' }, passengers: [{ seat_code: 'A04', full_name: 'Vũ Thị Gán', phone: '0906667788' }, { seat_code: 'A05', full_name: 'Vũ Thị Gán', phone: '0906667788' }] } });
     services.paymentService.settlePayment(order.body.data.payment.order_id);
-    assert.deepStrictEqual(services.driverService.activeTrips.get(tripId).manifest.map(p => p.seat_code), ['A04'], 'the ticket reaches the assigned driver');
+    assert.deepStrictEqual(services.driverService.activeTrips.get(tripId).manifest.map(p => p.seat_code), ['A04', 'A05'], 'the tickets reach the assigned driver');
 
     assert.strictEqual((await assign(tripId, { vehicleId: 'veh_02', driverId: 'drv_9912b' })).status, 200);
     await assign(tripId, { vehicleId: 'veh_02', driverId: 'drv_9912b' });
@@ -99,8 +99,15 @@ describe('The office gives a trip its bus and driver (MGR-017)', () => {
     const list = (inbox.data?.notifications ?? inbox.data).filter(n => n.type === 'TRIP_REASSIGNED');
     assert.strictEqual(list.length, 1);
     assert.match(list[0].body, /29B-444\.11/);
-    assert.match(list[0].body, /ghế A04/);
+    assert.match(list[0].body, /ghế A04, A05 giữ nguyên/);
     assert.strictEqual(services.driverService.activeTrips.get(tripId).vehicle_plate, '29B-444.11');
+  });
+
+  it('the office board names each run by its schedule, so the Sầm Sơn run does not read as Thanh Hóa (D191)', async () => {
+    const tripId = id('trp_hn_th_03');
+    const day = tripId.slice(-8).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+    const board = await request(`/api/v1/ops/trips?date=${day}`, { token: dispatcher });
+    assert.strictEqual(board.body.data.trips.find(t => t.trip_id === tripId).route_name, 'Hà Nội — Sầm Sơn VIP Limousine');
   });
 
   it('a ticket sold before the run has a driver reaches the driver once the office assigns one', async () => {

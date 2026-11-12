@@ -4,7 +4,7 @@ import { createFleetBusServer } from '../../source/server/apiServer.js';
 
 test('Multi-tenant Payments and Tickets (T2b)', async (t) => {
   try {
-    const { server } = createFleetBusServer({ authMode: 'enforce' });
+    const { server } = createFleetBusServer({ authMode: 'enforce', webhookSecret: 'off' });
     
     await new Promise((resolve) => server.listen(0, resolve));
     const port = server.address().port;
@@ -62,15 +62,16 @@ test('Multi-tenant Payments and Tickets (T2b)', async (t) => {
       assert.ok(order.payment_details.transfer_memo.startsWith('XUYENVIET BG'));
     });
 
-    await t.test('default webhook path with XUYENVIET memo yields ORDER_NOT_MATCHED', async () => {
+    await t.test('default webhook path with XUYENVIET memo yields UNMATCHED with no settlement', async () => {
       const defaultWebhookRes = await request('POST', '/webhooks/vietqr/ipn', { 'Idempotency-Key': `ipn-${Date.now()}` }, {
         transferMemo: order.payment_details.transfer_memo,
         amountVnd: order.amount_vnd,
         bankRef: 'BANKREF_123',
         now: Date.now()
       });
-      assert.strictEqual(defaultWebhookRes.status, 400);
-      assert.strictEqual(defaultWebhookRes.data.code, 'ORDER_NOT_MATCHED');
+      assert.strictEqual(defaultWebhookRes.status, 200);
+      assert.strictEqual(defaultWebhookRes.data.data.settled, false);
+      assert.strictEqual(defaultWebhookRes.data.data.status, 'UNMATCHED');
     });
 
     let issuedTickets = [];

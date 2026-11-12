@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../../resources/lib/src/theme/app_colors.dart';
+import 'package:resources/resources.dart';
 
 class ManagerRadarMapScreen extends StatelessWidget {
   const ManagerRadarMapScreen({super.key});
@@ -59,7 +59,7 @@ class ManagerRadarMapScreen extends StatelessWidget {
                             height: 400,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              border: Border.all(color: ManagerColors.cyanAccent.withOpacity(0.15), width: 1.5),
+                              border: Border.all(color: ManagerColors.cyanAccent.withValues(alpha: 0.15), width: 1.5),
                             ),
                           ),
                         ),
@@ -69,7 +69,7 @@ class ManagerRadarMapScreen extends StatelessWidget {
                             height: 250,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              border: Border.all(color: ManagerColors.cyanAccent.withOpacity(0.25), width: 1.5),
+                              border: Border.all(color: ManagerColors.cyanAccent.withValues(alpha: 0.25), width: 1.5),
                             ),
                           ),
                         ),
@@ -122,13 +122,13 @@ class ManagerRadarMapScreen extends StatelessWidget {
         children: [
           Container(
             padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle, boxShadow: [BoxShadow(color: color.withOpacity(0.6), blurRadius: 12)]),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle, boxShadow: [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 12)]),
             child: const Icon(Icons.directions_bus_filled_rounded, color: Colors.black, size: 16),
           ),
           const SizedBox(height: 4),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(color: Colors.black.withOpacity(0.8), borderRadius: BorderRadius.circular(4), border: Border.all(color: color)),
+            decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(4), border: Border.all(color: color)),
             child: Text('$plate · $speed', style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700)),
           ),
         ],

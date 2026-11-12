@@ -2,6 +2,8 @@
  * FleetBus Passenger Core Formatters & Validators
  */
 
+import { DEFAULT_CANCELLATION_POLICY, refundByPolicy } from '../../../core/cancellationPolicy.js';
+
 export function formatVND(amount) {
   if (typeof amount !== 'number' || isNaN(amount)) return '0 đ';
   return new Intl.NumberFormat('vi-VN').format(amount) + ' đ';
@@ -26,6 +28,7 @@ export function formatCountdown(secondsRemaining) {
 
 export function validateVietnamPhone(phone) {
   if (!phone) return { isValid: false, message: 'Số điện thoại không được để trống' };
+  if (typeof phone !== 'string') return { isValid: false, message: 'Số điện thoại không hợp lệ' };
   const cleaned = phone.replace(/[\s\-\.]/g, '');
   // Matches +84 or 0 followed by 3, 5, 7, 8, 9 and 8 digits
   const vnPhoneRegex = /^(?:\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;
@@ -100,40 +103,7 @@ export function formatDistance(meters) {
   return `${(m / 1000).toFixed(1)} km`;
 }
 
-export function calculateRefundAmount(totalPrice, departureDate, cancelDate = new Date()) {
-  const depTime = new Date(departureDate).getTime();
-  const cancelTime = new Date(cancelDate).getTime();
-  const hoursUntilDeparture = (depTime - cancelTime) / (1000 * 60 * 60);
-
-  // PAX-021 policy: >= 12h before departure 100%, 6h to 12h 80%, under 6h 0%.
-  if (hoursUntilDeparture >= 12) {
-    return {
-      percentage: 100,
-      feePercentage: 0,
-      refundAmount: totalPrice,
-      feeAmount: 0,
-      tier: 'FULL_REFUND',
-      message: 'Hủy từ 12 giờ trở lên trước giờ chạy: Hoàn tiền 100%'
-    };
-  } else if (hoursUntilDeparture >= 6) {
-    const refund = Math.floor(totalPrice * 0.8);
-    const fee = totalPrice - refund;
-    return {
-      percentage: 80,
-      feePercentage: 20,
-      refundAmount: refund,
-      feeAmount: fee,
-      tier: 'PARTIAL_REFUND',
-      message: 'Hủy trước giờ chạy 6-12 giờ: Hoàn tiền 80% (Phí hủy 20%)'
-    };
-  } else {
-    return {
-      percentage: 0,
-      feePercentage: 100,
-      refundAmount: 0,
-      feeAmount: totalPrice,
-      tier: 'NO_REFUND',
-      message: 'Hủy dưới 6 giờ trước giờ chạy: Không hoàn tiền theo quy chế vận tải'
-    };
-  }
+// PAX-021: the refund by the company's cancellation policy (default: >= 12h 100%, 6h to 12h 80%, under 6h 0%).
+export function calculateRefundAmount(totalPrice, departureDate, cancelDate = new Date(), policy = DEFAULT_CANCELLATION_POLICY) {
+  return refundByPolicy(policy, totalPrice, departureDate, cancelDate);
 }

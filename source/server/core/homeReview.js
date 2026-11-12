@@ -12,6 +12,11 @@ const SIDES = { PICKUP: 'home_pickup', DROPOFF: 'home_dropoff' };
 const OPEN_TICKET = ['ACTIVE', 'BOARDED'];
 const STARTED = ['IN_TRANSIT', 'COMPLETED'];
 
+/** Whether an order's seats are sold (paid by transfer or payable in cash on board). */
+function isSold(order) {
+  return order.payment_status === 'PAID' || order.payment_status === 'UNPAID_COD';
+}
+
 function liveTickets(services, order) {
   return (order.ticket_ids || []).map(id => services.paymentService.tickets.get(id)).filter(t => t && OPEN_TICKET.includes(t.status));
 }
@@ -61,7 +66,7 @@ function requestView(services, order, side) {
 export function listHomeRequests(services, operatorId, { status = 'PENDING_REVIEW' } = {}) {
   const out = [];
   for (const order of services.paymentService.orders.values()) {
-    if (order.operator_id !== operatorId || order.payment_status !== 'PAID') continue;
+    if (order.operator_id !== operatorId || !isSold(order)) continue;
     if (!liveTickets(services, order).length && status === 'PENDING_REVIEW') continue;
     for (const side of Object.keys(SIDES)) {
       const home = order[SIDES[side]];
@@ -95,6 +100,17 @@ function refundFee(services, order, side, home, tickets, reason) {
   for (const t of tickets) {
     t.fare_vnd = Math.max(0, t.fare_vnd - share);
     t.home_fee_refunded_vnd = (t.home_fee_refunded_vnd || 0) + share;
+  }
+  if (order.payment_method === 'CASH' && order.payment_status === 'UNPAID_COD') {
+    for (const t of tickets) {
+      if (!t.cod_collected) t.cod_amount_vnd = Math.max(0, (t.cod_amount_vnd || 0) - share);
+    }
+    const manifest = services.driverService?.activeTrips?.get(order.trip_id)?.manifest || [];
+    for (const item of manifest) {
+      if (!tickets.some(t => t.ticket_id === item.ticket_id)) continue;
+      if (!item.cod_collected) item.cod_amount_vnd = Math.max(0, (item.cod_amount_vnd || 0) - share);
+    }
+    return null;
   }
   return services.paymentService.eventBridge?.requestRefund?.({
     pnr: order.pnr,
@@ -159,7 +175,7 @@ export function reviewHomeRequest(services, operatorId, orderId, side, { approve
   const order = findOrder(services, operatorId, orderId);
   const key = SIDES[side];
   const home = order && key ? order[key] : null;
-  if (!home || order.payment_status !== 'PAID') return { ok: false, status: 404, code: 'HOME_REQUEST_NOT_FOUND', message: 'Không tìm thấy yêu cầu đón/trả tận nhà' };
+  if (!home || !isSold(order)) return { ok: false, status: 404, code: 'HOME_REQUEST_NOT_FOUND', message: 'Không tìm thấy yêu cầu đón/trả tận nhà' };
   if ((home.status || 'CONFIRMED') !== 'PENDING_REVIEW') return { ok: false, status: 409, code: 'HOME_REQUEST_ALREADY_REVIEWED', message: 'Yêu cầu đã được xử lý' };
   if (!liveTickets(services, order).length) return { ok: false, status: 409, code: 'TICKET_NOT_ACTIVE', message: 'Các vé của đơn đã hủy' };
   if (tripStarted(services, order.trip_id)) return { ok: false, status: 409, code: 'TRIP_DEPARTED', message: 'Xe đã xuất bến' };
@@ -196,7 +212,7 @@ export function withdrawHomeRequest(services, ticket, side, { now = Date.now() }
 export function expireHomeRequests(services, tripId, now = Date.now()) {
   const expired = [];
   for (const order of services?.paymentService?.orders?.values?.() || []) {
-    if (order.trip_id !== tripId || order.payment_status !== 'PAID') continue;
+    if (order.trip_id !== tripId || !isSold(order)) continue;
     for (const side of Object.keys(SIDES)) {
       const home = order[SIDES[side]];
       if (home?.status !== 'PENDING_REVIEW' || !liveTickets(services, order).length) continue;

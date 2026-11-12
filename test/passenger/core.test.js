@@ -89,6 +89,13 @@ describe('Phase 1: Core Design System & Utilities Test Suite', () => {
     assert.strictEqual(vietQr.length > 50, true);
   });
 
+  it('TC-CORE-05B: generateVietQRPayload throws when bankBin is missing', () => {
+    assert.throws(
+      () => generateVietQRPayload({ accountNumber: '1088219999', amount: 220000 }),
+      /Thiếu tài khoản nhận tiền của nhà xe/
+    );
+  });
+
   it('TC-CORE-06: Should compute Haversine distance and geofencing ETA accurately', () => {
     // Distance between Giap Bat Hanoi (20.9806, 105.8413) and Thanh Hoa Bus Station (19.8067, 105.7852)
     const distMeters = calculateHaversineDistance(20.9806, 105.8413, 19.8067, 105.7852);

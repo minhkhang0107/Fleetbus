@@ -26,6 +26,11 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
   bool _mapReady = false;
   bool _fitted = false;
   LatLng? _pin;
+  /// The pin is the phone's own position and has not been moved since: the address becomes optional (D183).
+  bool _fromGps = false;
+  /// The address the app filled in for the pin; replaced on the next pin unless the passenger edited it (D187).
+  String? _filled;
+  bool _looking = false;
   String? _error;
   bool _busy = false;
 
@@ -39,6 +44,8 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
       _note.text = current.note;
       _pin = LatLng(current.lat, current.lng);
     }
+    // The "filled from the map" hint goes away once the passenger edits the address.
+    _address.addListener(() => setState(() {}));
   }
 
   @override
@@ -63,6 +70,23 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
 
   bool _locating = false;
 
+  /// Fills the address of the new pin when the field is empty or still holds the one filled for the last pin.
+  Future<void> _fillAddress(LatLng point) async {
+    if (_address.text.trim().isNotEmpty && _address.text != _filled) return;
+    setState(() => _looking = true);
+    final found = await PassengerScope.read(context).addressAt(point.latitude, point.longitude);
+    if (!mounted) return;
+    setState(() {
+      _looking = false;
+      // A later pin or the passenger's own typing wins over this answer.
+      if (found != null && _pin == point && (_address.text.trim().isEmpty || _address.text == _filled)) {
+        _address.text = found;
+        _filled = found;
+        _error = null;
+      }
+    });
+  }
+
   Future<void> _useMyLocation() async {
     setState(() => _locating = true);
     final pos = await myLocation(context);
@@ -71,10 +95,12 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
       _locating = false;
       if (pos != null) {
         _pin = LatLng(pos.lat, pos.lng);
+        _fromGps = true;
         _error = null;
       }
     });
     if (pos != null && _mapReady) _map.move(LatLng(pos.lat, pos.lng), 16);
+    if (pos != null) await _fillAddress(_pin!);
   }
 
   Future<void> _confirm() async {
@@ -83,7 +109,9 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
       setState(() => _error = 'Chạm lên bản đồ để chọn vị trí đón');
       return;
     }
-    final addr = _address.text.trim();
+    var addr = _address.text.trim();
+    // A GPS fix is exact enough for the driver to find the passenger; the label still says where it came from.
+    if (addr.isEmpty && _fromGps) addr = 'Vị trí hiện tại của khách (${pin.latitude.toStringAsFixed(5)}, ${pin.longitude.toStringAsFixed(5)})';
     if (addr.length < 5 || addr.length > 200) {
       setState(() => _error = 'Địa chỉ cần 5-200 ký tự');
       return;
@@ -92,7 +120,7 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
       _busy = true;
       _error = null;
     });
-    final error = await PassengerScope.read(context).setHomeAddress(pickupSide: widget.pickupSide, address: _address.text, lat: pin.latitude, lng: pin.longitude, note: _note.text);
+    final error = await PassengerScope.read(context).setHomeAddress(pickupSide: widget.pickupSide, address: addr, lat: pin.latitude, lng: pin.longitude, note: _note.text);
     if (!mounted) return;
     setState(() {
       _busy = false;
@@ -122,11 +150,15 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
               _mapReady = true;
               _fitAreas(points);
             },
-            interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
-            onTap: (_, point) => setState(() {
-              _pin = point;
-              _error = null;
-            }),
+            interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate, keyboardOptions: KeyboardOptions.disabled()),
+            onTap: (_, point) {
+              setState(() {
+                _pin = point;
+                _fromGps = false;
+                _error = null;
+              });
+              _fillAddress(point);
+            },
           ),
           children: [
             if (passengerMapTiles) TileLayer(urlTemplate: passengerMapTileUrl, subdomains: const ['a', 'b', 'c'], userAgentPackageName: 'vn.busgo.passenger', tileProvider: _tiles),
@@ -158,11 +190,15 @@ class _PassengerHomeAddressScreenState extends State<PassengerHomeAddressScreen>
       ], right: [
         if (!pWide(context)) gap(12),
         for (final a in areas) ...[
-          Text('${a.name}: phụ phí ${vnd(a.feeVnd)}${a.leadMinutes > 0 ? ' · đặt trước ${a.leadMinutes} phút' : ''} · ${a.from}–${a.to}', style: sans(size: 13, color: PTokens.muted)),
+          Text('${a.name}: phụ phí ${vnd(store.feeOf(a.feeVnd))}${a.leadMinutes > 0 ? ' · đặt trước ${a.leadMinutes} phút' : ''} · ${a.from}–${a.to}', style: sans(size: 13, color: PTokens.muted)),
           gap(4),
         ],
         gap(8),
-        LabeledField(label: 'Địa chỉ (số nhà, ngõ, đường)', controller: _address, hint: 'VD: 12 ngõ 34 Giải Phóng, Hoàng Mai', maxLength: 200),
+        LabeledField(label: _fromGps ? 'Địa chỉ (không bắt buộc, đã có vị trí của bạn)' : 'Địa chỉ (số nhà, ngõ, đường)', controller: _address, hint: 'VD: 12 ngõ 34 Giải Phóng, Hoàng Mai', maxLength: 200),
+        if (_looking || (_filled != null && _address.text == _filled)) ...[
+          gap(4),
+          Text(_looking ? 'Đang tìm địa chỉ của vị trí này…' : 'Địa chỉ điền theo vị trí trên bản đồ. Thêm số nhà hoặc sửa lại nếu chưa đúng.', style: sans(size: 12, color: PTokens.muted, height: 1.4)),
+        ],
         gap(12),
         LabeledField(label: 'Ghi chú cho tài xế (không bắt buộc)', controller: _note, hint: 'VD: cổng xanh, gọi trước 10 phút', maxLength: 200, showCounter: true),
         gap(12),

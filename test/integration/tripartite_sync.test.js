@@ -316,6 +316,15 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
   });
 
   it('TC-SYNC-08: Passenger ticket cancellation releases seat in seat map & updates Driver manifest', async () => {
+    // D185: under D185, passenger app cannot book an IN_TRANSIT trip (reversing D148).
+    // Temporarily reset status to book B04, then restore IN_TRANSIT.
+    const opsTrip = services.managerService.findTrip('trp_hn_th_01');
+    const drvTrip = services.driverService.activeTrips.get('trp_hn_th_01');
+    const prevOpsStatus = opsTrip?.status;
+    const prevDrvStatus = drvTrip?.status;
+    if (opsTrip) opsTrip.status = 'SCHEDULED';
+    if (drvTrip) drvTrip.status = 'READY';
+
     // A boarded ticket (TC-SYNC-02) can no longer be cancelled, so buy a fresh ticket for seat B04 and cancel it
     const holdRes = await api('/api/v1/passenger/trips/trp_hn_th_01/hold-seats', {
       method: 'POST',
@@ -343,13 +352,20 @@ describe('Phase Integration: Tripartite Cross-System Synchronization Suite', () 
       }
     });
     assert.strictEqual(ipnRes.statusCode, 200);
+    if (opsTrip && prevOpsStatus) opsTrip.status = prevOpsStatus;
+    if (drvTrip && prevDrvStatus) drvTrip.status = prevDrvStatus;
     const cancelTicketId = ipnRes.body.data.issued_tickets[0].ticket_id;
 
     const cancelRes = await api(`/api/v1/passenger/tickets/${cancelTicketId}/cancel`, {
       method: 'POST',
       body: {
         // Departure of trp_hn_th_01 is 2026-08-28T07:00+07:00; cancel two days earlier (PAX-021: 100% refund)
-        now: Date.parse('2026-08-26T07:00:00+07:00')
+        now: Date.parse('2026-08-26T07:00:00+07:00'),
+        refund_account: {
+          bank_bin: '970415',
+          account_number: '1088219999',
+          account_name: 'NGUYEN VAN A'
+        }
       }
     });
     assert.strictEqual(cancelRes.statusCode, 200);

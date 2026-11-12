@@ -62,15 +62,23 @@ class PassengerTripDetailScreen extends StatelessWidget {
     }
     return Scaffold(
       appBar: TopBar(title: 'Điểm đón và điểm trả', subtitle: '${trip.dep} · ${TravelDate.of(trip.day.isEmpty ? store.date : trip.day).long} · ${trip.type.split(' ').first} ${trip.plate}'),
-      body: body,
+      body: Column(children: [
+        if (!trip.bookableNow) TripBlockedBanner(trip: trip),
+        Expanded(child: body),
+      ]),
       bottomNavigationBar: BottomAction(children: [
         Expanded(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('${store.homePickup != null ? 'Tận nhà' : '${p.short} ${p.timeLabel}'} → ${store.homeDropoff != null ? 'Tận nhà' : '${d.short} ${d.timeLabel}'}', style: sans(size: 12, color: PTokens.muted)),
-            Text(store.homeFees > 0 ? '${vnd(trip.price)} + ${vnd(store.homeFees)}' : vnd(trip.price), style: mono(size: 17, weight: FontWeight.w700)),
+            Text(store.homeFees > 0 ? '${vnd(store.fareOf(trip))} + ${vnd(store.homeFees)}' : vnd(store.fareOf(trip)), style: mono(size: 17, weight: FontWeight.w700)),
           ]),
         ),
-        PrimaryButton(label: 'Chọn ghế', onPressed: () => Navigator.of(context).push(MaterialPageRoute(settings: const RouteSettings(name: 'seats'), builder: (_) => const PassengerSeatMapScreen()))),
+        PrimaryButton(
+          label: 'Chọn ghế',
+          onPressed: !trip.bookableNow
+              ? null
+              : () => Navigator.of(context).push(MaterialPageRoute(settings: const RouteSettings(name: 'seats'), builder: (_) => const PassengerSeatMapScreen())),
+        ),
       ]),
     );
   }
@@ -352,6 +360,7 @@ class _HomeOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final store = PassengerScope.of(context);
     final selected = home != null;
     final title = pickupSide ? 'Đón tận nhà' : 'Trả tận nhà';
     return Semantics(
@@ -375,10 +384,10 @@ class _HomeOption extends StatelessWidget {
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(title, style: sans(size: 15, weight: FontWeight.w600)),
-                Text(selected ? home!.address : (PassengerScope.of(context).homeServiceSummary(pickupSide: pickupSide) ?? 'Chọn địa chỉ trong vùng nhà xe phục vụ'), style: sans(size: 12, color: PTokens.muted), maxLines: 2, overflow: TextOverflow.ellipsis),
+                Text(selected ? home!.address : (store.homeServiceSummary(pickupSide: pickupSide) ?? 'Chọn địa chỉ trong vùng nhà xe phục vụ'), style: sans(size: 12, color: PTokens.muted), maxLines: 2, overflow: TextOverflow.ellipsis),
               ]),
             ),
-            if (selected) Text('+${vnd(home!.feeVnd)}', style: mono(size: 14)) else const Icon(Icons.chevron_right, color: PTokens.muted),
+            if (selected) Text('+${vnd(store.feeOf(home!.feeVnd))}', style: mono(size: 14)) else const Icon(Icons.chevron_right, color: PTokens.muted),
           ]),
         ),
       ),

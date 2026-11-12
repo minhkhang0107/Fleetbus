@@ -192,7 +192,7 @@ function services_updatePosition(services) {
 describe('Spec conformance: API shape (authentication enforced)', () => {
   let ctx;
   let api;
-  before(async () => { ctx = await boot({ authMode: 'enforce', webhookSecret: null }); api = client(ctx.baseUrl); });
+  before(async () => { ctx = await boot({ authMode: 'enforce', webhookSecret: 'off' }); api = client(ctx.baseUrl); });
   after(() => new Promise((resolve) => ctx.server.close(resolve)));
 
   it('TC-SPEC-A05b: the audit log records who did what, to what, from where, with before and after (MGR-028)', async () => {
@@ -207,7 +207,7 @@ describe('Spec conformance: API shape (authentication enforced)', () => {
     const entry = logs.body.data.audit_logs.find((l) => l.action === 'TRIP_DELAY');
     assert.ok(entry, 'the delay must be in the audit log');
     assert.strictEqual(entry.actor, 'mgr_02');
-    assert.strictEqual(entry.role, 'DISPATCHER');
+    assert.strictEqual(entry.role, 'STAFF');
     assert.strictEqual(entry.resource, 'trp_991824');
     assert.ok(entry.ip);
     assert.strictEqual(entry.after.delay_minutes, 20);

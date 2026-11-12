@@ -19,7 +19,7 @@ describe('Spec conformance: authentication, authorization and idempotency', () =
   let baseUrl;
 
   before(async () => {
-    ({ server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: null }));
+    ({ server, services } = createFleetBusServer({ authMode: 'enforce', webhookSecret: 'off' }));
     await new Promise((resolve) => {
       server.listen(0, '127.0.0.1', () => {
         baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -202,12 +202,16 @@ describe('Spec conformance: authentication, authorization and idempotency', () =
     const delay = await api('/api/v1/ops/trips/trp_991824/delay', { method: 'POST', token: dispatcher, body: { delayMinutes: 10, reason: 'Ket xe' } });
     assert.strictEqual(delay.status, 200, JSON.stringify(delay.body));
     assert.strictEqual((await api('/api/v1/ops/dashboard/kpis', { token: dispatcher })).status, 200);
-    assert.strictEqual((await api('/api/v1/ops/bookings', { token: dispatcher })).status, 403);
+    const dispView = await api('/api/v1/ops/bookings', { token: dispatcher });
+    assert.strictEqual(dispView.status, 200);
+    // Dispatcher (has DISPATCH) sees unmasked phone to contact passenger
+    assert.strictEqual(dispView.body.data.bookings.find((b) => b.pnr === 'BG-88219').phone, '0981112233');
+    assert.strictEqual((await api('/api/v1/ops/bookings', { method: 'POST', token: dispatcher, body: {} })).status, 403);
 
     const adminView = await api('/api/v1/ops/bookings', { token: director });
     assert.strictEqual(adminView.body.data.bookings.find((b) => b.pnr === 'BG-88219').phone, '0981112233');
     const cashierView = await api('/api/v1/ops/bookings', { token: cashier });
-    assert.strictEqual(cashierView.body.data.bookings.find((b) => b.pnr === 'BG-88219').phone, '098***233');
+    assert.strictEqual(cashierView.body.data.bookings.find((b) => b.pnr === 'BG-88219').phone, '0981112233');
   });
 
   it('TC-SPEC-A02: Idempotency-Key makes a mutation safe to retry (api-screen-map Idempotency column)', async () => {

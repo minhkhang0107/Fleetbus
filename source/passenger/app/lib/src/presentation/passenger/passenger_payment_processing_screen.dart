@@ -6,6 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import 'passenger_permissions.dart';
 import 'passenger_main_shell.dart';
+import 'passenger_qr_saver.dart';
 import 'passenger_store.dart';
 import 'passenger_ticket_qr_screen.dart';
 import 'passenger_widgets.dart';
@@ -13,9 +14,10 @@ import 'passenger_widgets.dart';
 /// PAX-013: VietQR transfer. "Tôi đã chuyển tiền" asks for a check; the ticket is issued when the
 /// bank confirms (BR-PAY-004). There is no simulation button on this screen (D101).
 class PassengerPaymentProcessingScreen extends StatefulWidget {
-  const PassengerPaymentProcessingScreen({super.key, required this.name, required this.phone});
+  const PassengerPaymentProcessingScreen({super.key, required this.name, required this.phone, this.qrSaver});
   final String name;
   final String phone;
+  final QrImageSaver? qrSaver;
 
   @override
   State<PassengerPaymentProcessingScreen> createState() => _PassengerPaymentProcessingScreenState();
@@ -23,6 +25,7 @@ class PassengerPaymentProcessingScreen extends StatefulWidget {
 
 class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProcessingScreen> {
   bool _checking = false;
+  bool _savingQr = false;
   String? _notYet;
   Timer? _poll;
 
@@ -31,6 +34,13 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
     super.initState();
     // BR-PAY-003: ask the server every 3 seconds; the bank webhook is what settles the order.
     _poll = Timer.periodic(const Duration(seconds: 3), (_) => _check(manual: false));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final store = PassengerScope.read(context);
+      if (store.orderAmount == 0) {
+        _check(manual: false);
+      }
+    });
   }
 
   @override
@@ -47,7 +57,15 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
     if (!mounted) return;
     setState(() {
       _checking = false;
-      if (manual && !paid) _notYet = 'Chưa nhận được tiền. Hệ thống vẫn kiểm tra mỗi 3 giây; kiểm tra lại nội dung chuyển khoản.';
+      if (manual && !paid) {
+        if (store.underpaid) {
+          _notYet = store.underpaidNotice;
+        } else if (store.lastPaymentCheckCode == 'NETWORK') {
+          _notYet = 'Không kết nối được máy chủ. Tiền bạn đã chuyển không mất — kiểm tra mạng rồi bấm lại.';
+        } else {
+          _notYet = 'Chưa nhận được tiền. Hệ thống vẫn kiểm tra mỗi 3 giây; kiểm tra lại nội dung chuyển khoản.';
+        }
+      }
     });
     if (!paid || store.lastTicket == null) return;
     _poll?.cancel();
@@ -60,6 +78,22 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
   void _copy(String value) {
     Clipboard.setData(ClipboardData(text: value));
     showToast(context, 'Đã sao chép $value');
+  }
+
+  Future<void> _saveQr(PassengerStore store) async {
+    if (_savingQr) return;
+    setState(() => _savingQr = true);
+    try {
+      final saver = widget.qrSaver ?? defaultQrImageSaver;
+      await saver.savePaymentQr(
+        context: context,
+        qrData: store.vietQrPayload,
+        amount: store.amountDue,
+        memo: store.transferMemo,
+      );
+    } finally {
+      if (mounted) setState(() => _savingQr = false);
+    }
   }
 
   Future<void> _cancel(PassengerStore store) async {
@@ -91,13 +125,37 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
         appBar: TopBar(title: 'Chuyển khoản', showBack: false, trailing: pnr.isEmpty ? null : PnrTag(pnr)),
         body: Column(children: [
           const HoldBanner(),
+          if (store.underpaid)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: PTokens.warnSoft,
+                border: Border.all(color: PTokens.warn),
+                borderRadius: BorderRadius.circular(PTokens.radiusControl),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.warning_amber_rounded, size: 20, color: PTokens.warnInk),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      store.underpaidNotice,
+                      style: sans(size: 13, weight: FontWeight.w600, color: PTokens.warnInk, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: PSplit(left: [
               AppCard(
                 padding: const EdgeInsets.all(16),
                 child: Column(children: [
                   Semantics(
-                    label: 'Mã VietQR cho đơn $pnr, số tiền ${vnd(store.orderAmount)}',
+                    label: 'Mã VietQR cho đơn $pnr, số tiền ${vnd(store.amountDue)}',
                     image: true,
                     child: Container(
                       padding: const EdgeInsets.all(8),
@@ -108,17 +166,41 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
                   gap(10),
                   Text('Quét bằng app ngân hàng bất kỳ', style: sans(size: 13, color: PTokens.muted)),
                   gap(10),
-                  SizedBox(width: 180, child: GhostButton(label: 'Lưu ảnh mã QR', onPressed: () => showToast(context, 'Đã lưu ảnh mã QR vào thư viện'))),
+                  SizedBox(width: 180, child: GhostButton(label: 'Lưu ảnh mã QR', onPressed: _savingQr ? null : () => _saveQr(store))),
                 ]),
               ),
             ], right: [
               if (!pWide(context)) gap(14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: PTokens.warnSoft,
+                  border: Border.all(color: PTokens.warn),
+                  borderRadius: BorderRadius.circular(PTokens.radiusControl),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.shield_outlined, size: 16, color: PTokens.warnInk),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Chỉ chuyển khoản theo mã QR trong app. Nhà xe không bao giờ nhắn số tài khoản khác qua tin nhắn hay điện thoại.',
+                        style: sans(size: 12, weight: FontWeight.w600, color: PTokens.warnInk, height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              gap(10),
               AppCard(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: Column(children: [
                   _row('Ngân hàng', store.bankName),
+                  _row('Chủ tài khoản', store.accountName.trim().isEmpty ? '—' : store.accountName, isBold: true),
                   _row('Số tài khoản', store.accountNumber, copy: store.accountNumber, isMono: true),
-                  _row('Số tiền', vnd(store.orderAmount), copy: '${store.orderAmount}', isMono: true),
+                  _row('Số tiền', vnd(store.amountDue), copy: '${store.amountDue}', isMono: true),
                   _row('Nội dung', memo, copy: memo, isMono: true, color: PTokens.pnr, last: true),
                 ]),
               ),
@@ -128,12 +210,21 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
               Row(children: [
                 Container(width: 8, height: 8, decoration: const BoxDecoration(color: PTokens.primary, shape: BoxShape.circle)),
                 const SizedBox(width: 8),
-                Expanded(child: Text(_checking ? 'Đang kiểm tra với ngân hàng…' : (_notYet ?? 'Đang chờ ngân hàng xác nhận'), style: sans(size: 13, color: _notYet != null && !_checking ? PTokens.warnInk : PTokens.muted))),
+                Expanded(child: Text(_checking ? 'Đang kiểm tra với ngân hàng…' : 'Đang chờ ngân hàng xác nhận', style: sans(size: 13, color: PTokens.muted))),
               ]),
             ]),
           ),
         ]),
         bottomNavigationBar: BottomAction(column: true, children: [
+          if (_notYet != null && !_checking)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                _notYet!,
+                textAlign: TextAlign.center,
+                style: sans(size: 13, color: PTokens.warnInk, weight: FontWeight.w600, height: 1.4),
+              ),
+            ),
           PrimaryButton(label: _checking ? 'Đang kiểm tra…' : 'Tôi đã chuyển tiền, kiểm tra ngay', onPressed: _checking ? null : () => _check(manual: true)),
           LinkButton(label: 'Hủy đơn và nhả ghế', color: PTokens.danger, onPressed: () => _cancel(store)),
         ]),
@@ -141,20 +232,42 @@ class _PassengerPaymentProcessingScreenState extends State<PassengerPaymentProce
     );
   }
 
-  Widget _row(String label, String value, {String? copy, bool isMono = false, Color color = PTokens.ink, bool last = false}) => Container(
-        constraints: const BoxConstraints(minHeight: 48),
-        decoration: BoxDecoration(border: last ? null : const Border(bottom: BorderSide(color: Color(0xFFF1F5F9)))),
-        child: Row(children: [
-          SizedBox(width: 96, child: Text(label, style: sans(size: 13, color: PTokens.muted))),
-          Expanded(child: Text(value, style: isMono ? mono(size: 15, weight: FontWeight.w700, color: color) : sans(size: 14, weight: FontWeight.w600))),
-          if (copy != null)
-            TextButton(
-              onPressed: () => _copy(copy),
-              style: TextButton.styleFrom(backgroundColor: PTokens.primarySoft, foregroundColor: PTokens.primaryDark, minimumSize: const Size(44, 36), textStyle: sans(size: 13, weight: FontWeight.w600)),
-              child: const Text('Sao chép'),
+  Widget _row(
+    String label,
+    String value, {
+    String? copy,
+    bool isMono = false,
+    bool isBold = false,
+    Color color = PTokens.ink,
+    bool last = false,
+  }) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 48),
+      decoration: BoxDecoration(border: last ? null : const Border(bottom: BorderSide(color: Color(0xFFF1F5F9)))),
+      child: Row(children: [
+        SizedBox(width: 96, child: Text(label, style: sans(size: 13, color: PTokens.muted))),
+        Expanded(
+          child: Text(
+            value,
+            style: isMono
+                ? mono(size: 15, weight: FontWeight.w700, color: color)
+                : sans(size: 14, weight: isBold ? FontWeight.w700 : FontWeight.w600),
+          ),
+        ),
+        if (copy != null)
+          TextButton(
+            onPressed: () => _copy(copy),
+            style: TextButton.styleFrom(
+              backgroundColor: PTokens.primarySoft,
+              foregroundColor: PTokens.primaryDark,
+              minimumSize: const Size(44, 36),
+              textStyle: sans(size: 13, weight: FontWeight.w600),
             ),
-        ]),
-      );
+            child: const Text('Sao chép'),
+          ),
+      ]),
+    );
+  }
 }
 
 /// PAX-015: success; going back from here never returns to checkout (BR-SUCCESS-001).
@@ -191,14 +304,7 @@ class _PassengerBookingSuccessScreenState extends State<PassengerBookingSuccessS
           ),
           Expanded(
             child: PMaxWidth(child: ListView(padding: const EdgeInsets.symmetric(horizontal: 24), children: [
-              Center(
-                child: Container(
-                  width: 72,
-                  height: 72,
-                  decoration: const BoxDecoration(color: Color(0xFFDCFCE7), shape: BoxShape.circle),
-                  child: const Icon(Icons.check, size: 36, color: PTokens.success),
-                ),
-              ),
+              const Center(child: _SuccessMark()),
               gap(20),
               Text('Đặt vé thành công', textAlign: TextAlign.center, style: sans(size: 24, weight: FontWeight.w700)),
               gap(6),
@@ -209,26 +315,30 @@ class _PassengerBookingSuccessScreenState extends State<PassengerBookingSuccessS
                 child: Column(children: [
                   Padding(
                     padding: const EdgeInsets.all(16),
-                    child: Row(children: [Text('Mã đặt chỗ', style: sans(size: 13, color: PTokens.muted)), const Spacer(), Text(ticket.pnr, style: mono(size: 18, weight: FontWeight.w700, color: PTokens.pnr))]),
+                    child: Row(children: [Expanded(child: Text('Mã đặt chỗ', style: sans(size: 13, color: PTokens.muted))), Text(ticket.pnr, style: mono(size: 18, weight: FontWeight.w700, color: PTokens.pnr))]),
                   ),
                   const Divider(height: 1, color: PTokens.lineStrong),
                   Padding(
                     padding: const EdgeInsets.all(16),
-                    child: GridView.count(
-                      crossAxisCount: 2,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      childAspectRatio: 3.2,
-                      mainAxisSpacing: 8,
-                      children: [
-                        KeyValue('Chuyến', ticket.route),
-                        KeyValue('Khởi hành', '${ticket.dep} · ${ticket.date.split(' ').last}', isMono: true),
-                        KeyValue(ticket.homePickup != null ? 'Đón tận nhà${ticket.pickupWindow != null ? ' ${ticket.pickupWindow}' : ''}' : 'Điểm đón', ticket.homePickup ?? ticket.pickup),
-                        KeyValue('Ghế', ticket.seat, isMono: true),
-                        KeyValue('Xe', ticket.plate.isEmpty ? 'Nhà xe sẽ báo' : ticket.plate, isMono: ticket.plate.isNotEmpty),
-                        KeyValue('Hành khách', ticket.name),
-                      ],
-                    ),
+                    child: Column(children: [
+                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Expanded(child: KeyValue('Chuyến', ticket.route)),
+                        const SizedBox(width: 12),
+                        Expanded(child: KeyValue('Khởi hành', '${ticket.pickupTimeLabel} · ${ticket.date.split(' ').last}', isMono: true)),
+                      ]),
+                      gap(8),
+                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Expanded(child: KeyValue(ticket.homePickup != null ? 'Đón tận nhà${ticket.pickupWindow != null ? ' ${ticket.pickupWindow}' : ''}' : 'Điểm đón', ticket.homePickup ?? ticket.pickup)),
+                        const SizedBox(width: 12),
+                        Expanded(child: KeyValue('Ghế', ticket.seat, isMono: true)),
+                      ]),
+                      gap(8),
+                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Expanded(child: KeyValue('Xe', ticket.plate.isEmpty ? 'Nhà xe sẽ báo' : ticket.plate, isMono: ticket.plate.isNotEmpty)),
+                        const SizedBox(width: 12),
+                        Expanded(child: KeyValue('Hành khách', ticket.name)),
+                      ]),
+                    ]),
                   ),
                 ]),
               ),
@@ -251,6 +361,42 @@ class _PassengerBookingSuccessScreenState extends State<PassengerBookingSuccessS
             ])),
           ),
         ]),
+      ),
+    );
+  }
+}
+
+/// The green circle pops in and the tick follows, with the light tap of a successful payment on iOS (D180).
+class _SuccessMark extends StatefulWidget {
+  const _SuccessMark();
+
+  @override
+  State<_SuccessMark> createState() => _SuccessMarkState();
+}
+
+class _SuccessMarkState extends State<_SuccessMark> {
+  @override
+  void initState() {
+    super.initState();
+    HapticFeedback.mediumImpact();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reduced = Motion.reduced(context);
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: reduced ? 1 : 0, end: 1),
+      duration: const Duration(milliseconds: 520),
+      curve: Curves.easeOutBack,
+      builder: (context, t, _) => Transform.scale(
+        scale: 0.5 + 0.5 * t,
+        child: Container(
+          width: 72,
+          height: 72,
+          decoration: BoxDecoration(color: const Color(0xFFDCFCE7).withValues(alpha: t.clamp(0, 1)), shape: BoxShape.circle),
+          // The tick starts once the circle is mostly there.
+          child: Transform.scale(scale: ((t - 0.4) / 0.6).clamp(0.0, 1.2), child: const Icon(Icons.check, size: 36, color: PTokens.success)),
+        ),
       ),
     );
   }

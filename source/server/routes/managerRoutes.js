@@ -4,15 +4,20 @@
  */
 
 import crypto from 'crypto';
-import { DEFAULT_OPERATOR_ID } from '../core/operators.js';
-import { sendSuccess, sendError, parseJsonBody } from '../middleware/httpUtils.js';
+import { DEFAULT_OPERATOR_ID, findOperatorById, publicOperatorProfile, operatorPaymentConfig } from '../core/operators.js';
+import { sendSuccess, sendError, parseJsonBody, clientNow, clientIp } from '../middleware/httpUtils.js';
 import { maskPhone, normalizePlate } from '../services/passenger/core/formatters.js';
-import { ADMIN_ROLE } from '../core/gateway.js';
+import { ADMIN_ROLE, isDirector, hasStaffPermission } from '../core/gateway.js';
 import { tripVisibleTo } from '../core/tenancy.js';
-import { parseServiceDate } from '../core/serviceDate.js';
+import { parseServiceDate, scheduleChangeFrom, vnDate } from '../core/serviceDate.js';
+import { missedDepartureAlerts } from '../core/missedDepartures.js';
 import { isProduction } from '../config.js';
 import { resolveHomeBooking, routeServiceConfig } from '../core/serviceAreas.js';
 import { BUILTIN_LAYOUTS, validateLayout, findLayout } from '../core/seatLayouts.js';
+import { STATIONS_DATABASE, MOCK_TRIPS_DATABASE, scheduleView } from '../services/passenger/modules/search.js';
+import { setStopCoords } from '../core/geo.js';
+import { MOCK_MANAGERS_DB } from '../services/manager/modules/managerService.js';
+import { normalizeStaffAccount, ALLOWED_PERMISSIONS } from '../services/manager/modules/staffAccounts.js';
 
 // Seat conflicts and reservation mismatches are conflicts (409); a missing trip or reservation is 404.
 function inventoryErrorStatus(code) {
@@ -22,17 +27,87 @@ function inventoryErrorStatus(code) {
   return 400;
 }
 
-// OQ-007: only the admin role sees full phone numbers of passengers.
+// OQ-007: director, dispatchers, and ticket agents see full phone numbers of passengers.
 function visibleBooking(req, booking) {
-  if (!req.identity || req.identity.role === ADMIN_ROLE) return booking;
+  if (!req.identity || isDirector(req) || hasStaffPermission(req, 'DISPATCH') || hasStaffPermission(req, 'TICKETING')) return booking;
   return { ...booking, phone: booking.phone ? maskPhone(booking.phone) : booking.phone };
+}
+
+/** The trip a booking belongs to, named as the dispatch board names it (schedule name, else route name). */
+function bookingTrip(managerService, tripId) {
+  const trip = managerService.findTrip(tripId);
+  if (!trip) return null;
+  const routeName = trip.route_name || managerService._scheduleName?.(trip.schedule_id) || managerService.routes?.find(r => r.route_id === trip.route_id)?.name;
+  return { ...trip, route_name: routeName || trip.route_id };
+}
+
+export function enrichBookingForOps(booking, trip, tickets = []) {
+  if (!booking) return null;
+  const cancelledSet = new Set(Array.isArray(booking.cancelled_seat_codes) ? booking.cancelled_seat_codes : []);
+  for (const t of tickets) {
+    if (t.pnr === booking.pnr && t.status === 'CANCELLED' && t.seat_code) {
+      cancelledSet.add(t.seat_code);
+    }
+  }
+  const cancelled_seat_codes = Array.from(cancelledSet);
+  const seatCodes = Array.isArray(booking.seat_codes) ? booking.seat_codes : [];
+  const totalSeats = seatCodes.length || 1;
+  const activeSeats = seatCodes.filter(s => !cancelledSet.has(s));
+  const activeCount = activeSeats.length;
+
+  let status = booking.status || 'CONFIRMED';
+  if (seatCodes.length > 0) {
+    if (activeCount === 0) {
+      status = 'CANCELLED';
+    } else if (cancelled_seat_codes.length > 0) {
+      status = 'PARTIALLY_CANCELLED';
+    }
+  }
+
+  let cod_amount_vnd = booking.cod_amount_vnd;
+  const isCodUnpaid = (booking.payment_method === 'CASH' && booking.payment_status !== 'PAID') || booking.payment_status === 'UNPAID_COD';
+  if (isCodUnpaid && cancelled_seat_codes.length > 0) {
+    const totalFare = Number(booking.total_fare_vnd) || 0;
+    const perSeat = totalFare / totalSeats;
+    cod_amount_vnd = Math.round(perSeat * activeCount);
+  }
+
+  const tripInfo = trip ? {
+    route_name: trip.route_name || trip.route_id || '',
+    departure_time: trip.departure_time || null,
+    vehicle_plate: trip.vehicle_plate || null
+  } : null;
+
+  return {
+    ...booking,
+    status,
+    cancelled_seat_codes,
+    ...(cod_amount_vnd !== undefined ? { cod_amount_vnd } : {}),
+    trip: tripInfo
+  };
+}
+
+function getTicketsForPnr(pnr, paymentService) {
+  if (!paymentService?.tickets) return [];
+  const tickets = paymentService.tickets;
+  const list = [];
+  if (tickets instanceof Map) {
+    for (const t of tickets.values()) {
+      if (t && t.pnr === pnr) list.push(t);
+    }
+  } else if (Array.isArray(tickets)) {
+    for (const t of tickets) {
+      if (t && t.pnr === pnr) list.push(t);
+    }
+  }
+  return list;
 }
 
 function audit(req, managerService, entry) {
   managerService.recordAudit({
     actor: req.identity?.sub || 'anonymous',
     role: req.identity?.role || null,
-    ip: req.socket?.remoteAddress || null,
+    ip: clientIp(req),
     operator_id: req.operatorId || null,
     ...entry
   });
@@ -72,15 +147,20 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
 
   // POST /api/v1/ops/auth/login or /api/v1/auth/staff/login (MGR-001, MGR-029)
   if ((pathname === '/api/v1/ops/auth/login' || pathname === '/api/v1/auth/staff/login') && req.method === 'POST') {
+    if (services.rateLimits?.staffLogin && !services.rateLimits.staffLogin.enforce(req, res, services.env)) {
+      return true;
+    }
     parseJsonBody(req).then(body => {
       const username = String(body.username || body.email || '').trim().toLowerCase();
       const result = managerService.authenticateStaff(username, body.password, body.totp ?? body.totpCode ?? null);
       if (result.success) {
-        managerService.recordAudit({ actor: result.data.user.user_id, role: result.data.user.role, action: 'LOGIN', resource: username, ip: req.socket?.remoteAddress || null, operator_id: result.data.operator?.operator_id ?? null });
+        managerService.recordAudit({ actor: result.data.user.user_id, role: result.data.user.role, action: 'LOGIN', resource: username, ip: clientIp(req, services.env), operator_id: result.data.operator?.operator_id ?? null });
         sendSuccess(res, result.data || result);
       } else {
-        managerService.recordAudit({ action: result.code === 'ACCOUNT_LOCKED' ? 'LOGIN_LOCKED' : 'LOGIN_FAILED', resource: username, ip: req.socket?.remoteAddress || null });
-        const status = result.code === 'ACCOUNT_LOCKED' ? 429 : result.code === 'OPERATOR_INACTIVE' ? 403 : 401;
+        // A failed sign-in goes to the company of the account tried, so its director sees guessing; none if unknown.
+        const tried = MOCK_MANAGERS_DB.find(u => u.username === username);
+        managerService.recordAudit({ action: result.code === 'ACCOUNT_LOCKED' ? 'LOGIN_LOCKED' : 'LOGIN_FAILED', resource: username, ip: clientIp(req, services.env), operator_id: tried ? tried.operator_id ?? null : null });
+        const status = result.code === 'ACCOUNT_LOCKED' ? 429 : (result.code === 'OPERATOR_INACTIVE' || result.code === 'ACCOUNT_DISABLED') ? 403 : (result.status || 401);
         sendError(res, result.error, result.code, status, result);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
@@ -93,7 +173,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       const result = managerService.changePassword(req.identity?.sub, body);
       if (result.success) {
         audit(req, managerService, { action: 'PASSWORD_CHANGE', resource: result.username });
-        sendSuccess(res, { message: 'Đổi mật khẩu thành công' });
+        sendSuccess(res, { message: 'Đổi mật khẩu thành công', token: result.token });
       } else {
         sendError(res, result.error, result.code, result.status || 400);
       }
@@ -126,10 +206,51 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/ops/auth/me (Current staff profile and permissions)
+  if (pathname === '/api/v1/ops/auth/me' && req.method === 'GET') {
+    const userId = req.identity?.sub;
+    const isPlatform = req.identity?.role === 'PLATFORM_ADMIN';
+    let staff = MOCK_MANAGERS_DB.find(u => u.user_id === userId);
+    if (!staff && !isPlatform) {
+      sendError(res, 'Không tìm thấy tài khoản', 'USER_NOT_FOUND', 404);
+      return true;
+    }
+    if (staff) {
+      staff = normalizeStaffAccount(staff);
+    }
+    const isDirectorUser = staff?.role === 'FLEET_DIRECTOR';
+    const role = isPlatform ? 'PLATFORM_ADMIN' : (isDirectorUser ? 'FLEET_DIRECTOR' : 'STAFF');
+    const permissions = (isDirectorUser || isPlatform)
+      ? [...ALLOWED_PERMISSIONS]
+      : (Array.isArray(staff?.permissions) ? [...staff.permissions] : []);
+    const totp_required = Boolean(isDirectorUser || staff?.totp_required || isPlatform);
+    const op = staff?.operator_id ? findOperatorById(staff.operator_id) : (req.operatorId ? findOperatorById(req.operatorId) : null);
+    const operator = op ? publicOperatorProfile(op) : null;
+
+    sendSuccess(res, {
+      user_id: staff?.user_id || userId,
+      full_name: staff?.full_name || (isPlatform ? 'Platform Admin' : ''),
+      role,
+      permissions,
+      totp_required,
+      operator
+    });
+    return true;
+  }
+
   // GET /api/v1/ops/dashboard/kpis (MGR-002)
   if (pathname === '/api/v1/ops/dashboard/kpis' && req.method === 'GET') {
-    const kpis = managerService.getOperationsDashboardKPIs(req.operatorId);
-    sendSuccess(res, kpis.data || kpis);
+    const now = clientNow(parsedUrl.searchParams);
+    const derived = missedDepartureAlerts(managerService, req.operatorId, now);
+    const kpis = managerService.getOperationsDashboardKPIs(req.operatorId, now);
+    const data = kpis.data || kpis;
+    if (data?.kpi_metrics) {
+      data.kpi_metrics.active_alerts_count = (data.kpi_metrics.active_alerts_count || 0) + derived.length;
+    }
+    if (Array.isArray(data?.recent_alerts)) {
+      data.recent_alerts = [...derived, ...data.recent_alerts];
+    }
+    sendSuccess(res, data);
     return true;
   }
 
@@ -416,7 +537,8 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       sendError(res, result.error, result.code, result.status || 400);
       return true;
     }
-    audit(req, managerService, { action: 'DRIVER_PIN_RESET', resource: driverId, before: null, after: null });
+    const drv = managerService.drivers.find(d => d.driver_id === driverId);
+    audit(req, managerService, { action: 'DRIVER_PIN_RESET', resource: driverId, before: null, after: drv ? { driver_id: driverId, staff_id: drv.staff_id, full_name: drv.full_name } : null });
     sendSuccess(res, { temporary_pin: result.data.temporary_pin });
     return true;
   }
@@ -446,10 +568,159 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
-  // GET /api/v1/ops/routes (MGR-011, MGR-012, MGR-013)
+  // GET /api/v1/ops/stations (MGR-011)
+  if (pathname === '/api/v1/ops/stations' && req.method === 'GET') {
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const stations = STATIONS_DATABASE.filter(s => s.operator_ids && s.operator_ids.includes(operatorId));
+    sendSuccess(res, stations);
+    return true;
+  }
+
+  // POST /api/v1/ops/stations (MGR-011)
+  if (pathname === '/api/v1/ops/stations' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+      const name = typeof body?.name === 'string' ? body.name.trim() : '';
+      const city = typeof body?.city === 'string' ? body.city.trim() : '';
+      const address = typeof body?.address === 'string' ? body.address.trim() : '';
+      const lat = Number(body?.lat);
+      const lng = Number(body?.lng);
+      const kind = body?.kind || 'STATION';
+
+      if (name.length < 3) {
+        sendError(res, 'Tên bến/điểm đón phải từ 3 ký tự trở lên', 'VALIDATION_ERROR', 400);
+        return;
+      }
+      if (!city) {
+        sendError(res, 'Tỉnh/thành phố là bắt buộc', 'VALIDATION_ERROR', 400);
+        return;
+      }
+      if (!Number.isFinite(lat) || lat < 8 || lat > 23.5 || !Number.isFinite(lng) || lng < 102 || lng > 110) {
+        sendError(res, 'Tọa độ không hợp lệ (Việt Nam: vĩ độ 8-23.5, kinh độ 102-110)', 'VALIDATION_ERROR', 400);
+        return;
+      }
+      if (!['STATION', 'ROADSIDE'].includes(kind)) {
+        sendError(res, 'Loại điểm đón phải là STATION hoặc ROADSIDE', 'VALIDATION_ERROR', 400);
+        return;
+      }
+
+      const norm = (s) => (s || '').trim().toLowerCase();
+      const duplicate = STATIONS_DATABASE.some(s =>
+        s.operator_ids && s.operator_ids.includes(operatorId) &&
+        norm(s.name) === norm(name) &&
+        norm(s.city) === norm(city)
+      );
+      if (duplicate) {
+        sendError(res, 'Bến hoặc điểm đón đã tồn tại trong cùng tỉnh/thành', 'STATION_EXISTS', 409);
+        return;
+      }
+
+      const opCode = (req.operator?.code || operatorId).toLowerCase().replace(/^op_/, '');
+      const stationId = `stp_${opCode}_${crypto.randomBytes(3).toString('hex')}`;
+      const newStation = {
+        station_id: stationId,
+        name,
+        city,
+        address,
+        lat,
+        lng,
+        kind,
+        popular: false,
+        operator_ids: [operatorId]
+      };
+
+      STATIONS_DATABASE.push(newStation);
+      setStopCoords(stationId, { lat, lng });
+      audit(req, managerService, { action: 'STATION_CREATE', resource: stationId, before: null, after: newStation });
+      sendSuccess(res, newStation, 201);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/ops/routes (MGR-008, MGR-011)
   if (pathname === '/api/v1/ops/routes' && req.method === 'GET') {
     const routes = managerService.getRoutes(req.operatorId);
     sendSuccess(res, routes.data || routes);
+    return true;
+  }
+
+  // POST /api/v1/ops/routes (MGR-011)
+  if (pathname === '/api/v1/ops/routes' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+      const when = { today: vnDate(), changeFrom: scheduleChangeFrom() };
+      const customLayouts = (managerService.seatLayouts || []).filter(l => (l.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
+      const result = services.searchService.createRoute(operatorId, body, {
+        changeFrom: when.changeFrom,
+        today: when.today,
+        operatorCode: req.operator?.code,
+        customLayouts
+      });
+      if (!result.ok) {
+        sendError(res, result.message, result.code, result.status || 400);
+        return;
+      }
+      const routeEntry = {
+        route_id: result.route_id,
+        name: body.name.trim(),
+        distance_km: body.distance_km ?? null,
+        base_fare_vnd: result.fields.base_fare_vnd,
+        stops_count: result.stops.length,
+        operator_id: operatorId,
+        active: true
+      };
+      managerService.routes.push(routeEntry);
+      const after = {
+        ...routeEntry,
+        schedule_id: result.schedule_id,
+        schedule: scheduleView(result.template, when)
+      };
+      audit(req, managerService, { action: 'ROUTE_CREATE', resource: result.route_id, before: null, after });
+      sendSuccess(res, after, 201);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // PATCH /api/v1/ops/routes/:routeId (MGR-011)
+  const routeOneMatch = pathname.match(/^\/api\/v1\/ops\/routes\/([^/]+)$/);
+  if (routeOneMatch && req.method === 'PATCH') {
+    const routeId = decodeURIComponent(routeOneMatch[1]);
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const route = managerService.routes.find(r => r.route_id === routeId && r.operator_id === operatorId);
+    if (!route) {
+      sendError(res, 'Không tìm thấy tuyến đường', 'ROUTE_NOT_FOUND', 404);
+      return true;
+    }
+    parseJsonBody(req).then(body => {
+      const before = structuredClone(route);
+      if (body.name !== undefined) {
+        if (typeof body.name !== 'string' || body.name.trim().length < 3) {
+          sendError(res, 'Tên tuyến từ 3 ký tự trở lên', 'VALIDATION_ERROR', 400);
+          return;
+        }
+        route.name = body.name.trim();
+        for (const t of MOCK_TRIPS_DATABASE) {
+          if (t.route_id === routeId && t.operator_id === operatorId) {
+            t.route_name = route.name;
+          }
+        }
+      }
+      if (body.active !== undefined) {
+        if (typeof body.active !== 'boolean') {
+          sendError(res, 'Trạng thái active phải là boolean', 'VALIDATION_ERROR', 400);
+          return;
+        }
+        route.active = body.active;
+        if (req.operator) {
+          if (!req.operator.service_config) req.operator.service_config = {};
+          if (!req.operator.service_config.route_configs) req.operator.service_config.route_configs = {};
+          if (!req.operator.service_config.route_configs[routeId]) req.operator.service_config.route_configs[routeId] = {};
+          req.operator.service_config.route_configs[routeId].sales_suspended = !body.active;
+        }
+      }
+      audit(req, managerService, { action: 'ROUTE_UPDATE', resource: routeId, before, after: route });
+      sendSuccess(res, route);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 
@@ -486,7 +757,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         dropoffStopId: body.dropoffStopId || body.dropoff_stop_id || null,
         homePickup: home.home,
         homeFeeVnd: home.fee,
-        mockNow: body.now || Date.now(),
+        mockNow: clientNow(body),
         operatorId: req.operatorId
       });
 
@@ -529,17 +800,41 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         dropoffStopId: body.dropoffStopId || body.dropoff_stop_id || null,
         homePickup: home.home,
         homeFeeVnd: home.fee,
-        mockNow: body.now || Date.now(),
+        mockNow: clientNow(body),
         operatorId: req.operatorId
       });
 
       if (result.success) {
-        audit(req, managerService, { action: 'HOTLINE_HOLD', resource: result.data.reservation_id, after: { trip_id: result.data.trip_id, seats: result.data.seat_codes, hold_until: result.data.hold_until } });
+        audit(req, managerService, { action: 'HOTLINE_HOLD', resource: result.data.pnr || result.data.reservation_id, after: { pnr: result.data.pnr, reservation_id: result.data.reservation_id, trip_id: result.data.trip_id, seats: result.data.seat_codes, total_fare_vnd: result.data.total_fare_vnd, hold_until: result.data.hold_until } });
         sendSuccess(res, result.data || result, 201);
       } else {
         sendError(res, result.error, result.code, inventoryErrorStatus(result.code));
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // POST /api/v1/ops/pos/hotline-holds/:reservationId/cancel (MGR-020)
+  const cancelHoldMatch = pathname.match(/^\/api\/v1\/ops\/pos\/hotline-holds\/([^/]+)\/cancel$/);
+  if (cancelHoldMatch && req.method === 'POST') {
+    const reservationId = decodeURIComponent(cancelHoldMatch[1]);
+    const result = managerService.cancelHotlineHold(reservationId, 'Hủy bởi nhân viên điều hành');
+    if (!result.success) {
+      sendError(res, result.error, result.code || 'RESERVATION_NOT_FOUND', result.code === 'RESERVATION_NOT_FOUND' ? 404 : 400);
+      return true;
+    }
+    audit(req, managerService, {
+      action: 'HOTLINE_HOLD_CANCELLED',
+      resource: result.data.pnr || `hotline:${reservationId}`,
+      after: {
+        pnr: result.data.pnr,
+        reservation_id: reservationId,
+        trip_id: result.data.trip_id,
+        seats: result.data.seat_codes,
+        hold_status: 'CANCELLED_BY_STAFF'
+      }
+    });
+    sendSuccess(res, result.data);
     return true;
   }
 
@@ -591,12 +886,42 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       const before = { delay_minutes: managerService.findTrip(tripId)?.delay_minutes ?? null };
       const result = managerService.broadcastTripDelay(tripId, rawMinutes, reason, req.operatorId);
       if (result.success) {
-        audit(req, managerService, { action: 'TRIP_DELAY', resource: tripId, before, after: { delay_minutes: result.data.delay_minutes } });
+        const tripObj = managerService.findTrip(tripId);
+        audit(req, managerService, {
+          action: 'TRIP_DELAY',
+          resource: tripId,
+          before,
+          after: {
+            delay_minutes: result.data.delay_minutes,
+            trip_id: tripId,
+            departure_time: tripObj?.departure_time,
+            route_name: tripObj?.route_name
+          }
+        });
         sendSuccess(res, result.data || result);
       } else {
         sendError(res, result.error, result.code, (result.code === "TRIP_NOT_FOUND" || result.code === "REFUND_NOT_FOUND") ? 404 : 400);
       }
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/ops/refunds?status=ALL (MGR-022): open refund requests by default, newest first
+  if (pathname === '/api/v1/ops/refunds' && req.method === 'GET') {
+    const status = parsedUrl.searchParams.get('status') || 'REFUND_REQUESTED';
+    const orders = [...(services.paymentService?.orders?.values() || [])];
+    const refunds = managerService.listRefundRequests({ operatorId: req.operatorId || DEFAULT_OPERATOR_ID, status })
+      .map(r => {
+        const order = orders.find(o => o.pnr === r.pnr);
+        const payer = visibleBooking(req, { phone: order?.payer?.phone || '' });
+        return {
+          ...r,
+          payer_name: order?.payer?.full_name || order?.payer?.name || '',
+          payer_phone: payer.phone || '',
+          payment_method: order?.payment_method || null
+        };
+      });
+    sendSuccess(res, { total: refunds.length, refunds });
     return true;
   }
 
@@ -610,7 +935,7 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         sendError(res, 'Cần chỉ rõ approved: true hoặc false', 'APPROVED_REQUIRED', 400);
         return;
       }
-      const result = managerService.processRefundApproval(refundId, body.approved, body.notes, req.operatorId);
+      const result = managerService.processRefundApproval(refundId, body.approved, body.notes, req.operatorId, req.identity?.sub || null);
       if (result.success) {
         audit(req, managerService, { action: body.approved ? 'REFUND_APPROVED' : 'REFUND_REJECTED', resource: refundId, before: { status: 'REFUND_REQUESTED' }, after: { status: result.data.status, amount_vnd: result.data.amount_vnd } });
         sendSuccess(res, result.data || result);
@@ -630,11 +955,52 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/ops/reports/payments.csv?from=&to= (MGR-025): money in (paid orders) and out (refunds paid) of
+  // the company for its accountant, one line each, days in Vietnam time. Opens in Excel (UTF-8 with BOM).
+  if (pathname === '/api/v1/ops/reports/payments.csv' && req.method === 'GET') {
+    const from = parsedUrl.searchParams.get('from') || vnDate();
+    const to = parsedUrl.searchParams.get('to') || from;
+    if (!parseServiceDate(from) || !parseServiceDate(to) || from > to) {
+      sendError(res, 'Khoảng ngày dạng YYYY-MM-DD, từ ngày không sau đến ngày', 'VALIDATION_ERROR', 400);
+      return true;
+    }
+    const inRange = (iso) => Boolean(iso) && vnDate(Date.parse(iso)) >= from && vnDate(Date.parse(iso)) <= to;
+    const rows = [];
+    for (const o of services.paymentService.orders.values()) {
+      if (o.operator_id !== req.operatorId || !inRange(o.paid_at)) continue;
+      rows.push([o.paid_at, 'THU', o.pnr, o.channel || 'APP', o.payment_method, o.payer?.full_name || o.payer?.name || '', o.amount_vnd, o.payment_ref || '', o.route_name || '']);
+    }
+    for (const r of managerService.refundRequests) {
+      if ((r.operator_id || DEFAULT_OPERATOR_ID) !== req.operatorId || r.status !== 'REFUNDED' || !inRange(r.processed_at)) continue;
+      const account = r.refund_account ? `${r.refund_account.bank_name || r.refund_account.bank_bin} ${r.refund_account.account_number}` : '';
+      rows.push([r.processed_at, 'HOAN', r.pnr, r.source || '', 'CHUYEN_KHOAN', '', -r.amount_vnd, account, r.reason || '']);
+    }
+    rows.sort((a, b) => a[0].localeCompare(b[0]));
+    const cell = (v) => {
+      const text = String(v ?? '');
+      return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+    };
+    const header = ['Thời điểm', 'Loại', 'Mã đặt chỗ', 'Kênh', 'Hình thức', 'Khách', 'Số tiền (đ)', 'Giao dịch / Tài khoản', 'Ghi chú'];
+    const csv = '\ufeff' + [header, ...rows].map(r => r.map(cell).join(',')).join('\r\n') + '\r\n';
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="thu-chi-${from}_${to}.csv"`
+    });
+    res.end(csv);
+    return true;
+  }
+
   // GET /api/v1/ops/bookings (MGR-017)
   if (pathname === '/api/v1/ops/bookings' && req.method === 'GET') {
+    const filtered = managerService.bookings.filter(b => !req.operatorId || managerService.findTrip(b.trip_id)?.operator_id === req.operatorId);
     sendSuccess(res, {
-      total: managerService.bookings.filter(b => !req.operatorId || managerService.findTrip(b.trip_id)?.operator_id === req.operatorId).length,
-      bookings: managerService.bookings.filter(b => !req.operatorId || managerService.findTrip(b.trip_id)?.operator_id === req.operatorId).map(b => visibleBooking(req, b))
+      total: filtered.length,
+      bookings: filtered.map(b => {
+        const trip = bookingTrip(managerService, b.trip_id);
+        const pnrTickets = getTicketsForPnr(b.pnr, services.paymentService);
+        const enriched = enrichBookingForOps(b, trip, pnrTickets);
+        return visibleBooking(req, enriched);
+      })
     });
     return true;
   }
@@ -644,7 +1010,14 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     const bookingId = pathname.split('/')[5];
     const booking = managerService.bookings.find(b => b.pnr === bookingId && (!req.operatorId || managerService.findTrip(b.trip_id)?.operator_id === req.operatorId));
     if (booking) {
-      sendSuccess(res, visibleBooking(req, booking));
+      const trip = bookingTrip(managerService, booking.trip_id);
+      const pnrTickets = getTicketsForPnr(booking.pnr, services.paymentService);
+      const enriched = enrichBookingForOps(booking, trip, pnrTickets);
+      // What was paid stays total_fare_vnd; what goes back (a refused home fee, a cancellation) is listed beside it.
+      const refunds = managerService.refundRequests.filter(r => r.pnr === booking.pnr)
+        .map(({ refund_id, amount_vnd, status, reason, source, requested_at, processed_at }) => ({ refund_id, amount_vnd, status, reason, source, requested_at, processed_at: processed_at || null }));
+      const sum = (status) => refunds.filter(r => r.status === status).reduce((n, r) => n + (r.amount_vnd || 0), 0);
+      sendSuccess(res, { ...visibleBooking(req, enriched), refunds, refund_pending_vnd: sum('REFUND_REQUESTED'), refunded_vnd: sum('REFUNDED') });
     } else {
       sendError(res, 'Không tìm thấy thông tin đơn đặt vé', 'BOOKING_NOT_FOUND', 404);
     }
@@ -705,6 +1078,52 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/ops/cash-handovers (H-02)
+  if (pathname === '/api/v1/ops/cash-handovers' && req.method === 'GET') {
+    const status = parsedUrl.searchParams.get('status') || 'PENDING';
+    const date = parsedUrl.searchParams.get('date') || null;
+    const handovers = services.driverService.listCashHandovers({
+      operatorId: req.operatorId || DEFAULT_OPERATOR_ID,
+      status,
+      date
+    });
+    sendSuccess(res, { total: handovers.length, handovers });
+    return true;
+  }
+
+  // POST /api/v1/ops/cash-handovers/:tripId/confirm (H-02)
+  const cashConfirmMatch = pathname.match(/^\/api\/v1\/ops\/cash-handovers\/([^/]+)\/confirm$/);
+  if (cashConfirmMatch && req.method === 'POST') {
+    const tripId = decodeURIComponent(cashConfirmMatch[1]);
+    parseJsonBody(req).then(body => {
+      const result = services.driverService.confirmCashHandover(tripId, {
+        receivedVnd: body.received_vnd !== undefined ? body.received_vnd : body.receivedAmount,
+        note: body.note,
+        staffId: req.identity?.sub || null,
+        operatorId: req.operatorId || DEFAULT_OPERATOR_ID
+      });
+      if (result.success) {
+        audit(req, managerService, {
+          action: 'CASH_HANDOVER_CONFIRMED',
+          resource: tripId,
+          before: { financial_reconciliation_status: 'PENDING_DEPOT_SETTLEMENT' },
+          after: {
+            financial_reconciliation_status: result.data.financial_reconciliation_status,
+            expected_cash_vnd: result.data.expected_cash_vnd,
+            received_vnd: result.data.received_vnd,
+            difference_vnd: result.data.difference_vnd,
+            note: result.data.note
+          }
+        });
+        sendSuccess(res, result.data);
+      } else {
+        const status = result.code === 'TRIP_NOT_FOUND' ? 404 : (result.code === 'ALREADY_SETTLED' ? 409 : 400);
+        sendError(res, result.error, result.code, status);
+      }
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
   // GET /api/v1/ops/trips/:tripId (MGR-012)
   // GET /api/v1/ops/trips/:tripId/assign-options and POST /api/v1/ops/trips/:tripId/assign (MGR-017)
   const assign = pathname.match(/^\/api\/v1\/ops\/trips\/([^/]+)\/(assign|assign-options)$/);
@@ -725,7 +1144,20 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
         sendError(res, result.error, result.code, status(result.code), result.conflict_trip_id ? { conflict_trip_id: result.conflict_trip_id } : null);
         return;
       }
-      audit(req, managerService, { action: 'TRIP_ASSIGN', resource: tripId, before: snapshot, after: { vehicle_id: result.data.vehicle_id, driver_id: result.data.driver_id, scope: result.data.scope } });
+      const tripObj = managerService.findTrip(tripId);
+      audit(req, managerService, {
+        action: 'TRIP_ASSIGN',
+        resource: tripId,
+        before: snapshot,
+        after: {
+          vehicle_id: result.data.vehicle_id,
+          driver_id: result.data.driver_id,
+          scope: result.data.scope,
+          trip_id: tripId,
+          departure_time: tripObj?.departure_time,
+          route_name: tripObj?.route_name
+        }
+      });
       sendSuccess(res, result.data);
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
@@ -744,6 +1176,92 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+  // GET /api/v1/ops/trips/:tripId/hotline-holds (MGR-014)
+  const tripHoldsMatch = pathname.match(/^\/api\/v1\/ops\/trips\/([^/]+)\/hotline-holds$/);
+  if (tripHoldsMatch && req.method === 'GET') {
+    const tripId = decodeURIComponent(tripHoldsMatch[1]);
+    if (!tripVisibleTo(services, tripId, req.operatorId)) {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+      return true;
+    }
+    managerService.releaseExpiredHotlineHolds();
+    const trip = managerService.findTrip(tripId);
+    const detail = services.searchService?.getTripDetail?.(tripId, req.operatorId);
+    const tripStops = trip?.stops || detail?.data?.stops || [];
+    const holds = managerService.hotlineReservations
+      .filter(r => r.trip_id === tripId && (!req.operatorId || r.operator_id === req.operatorId))
+      .map(r => {
+        const stop = tripStops.find(s => s.stop_id === r.pickup_stop_id);
+        const stopName = stop?.name || r.pickup_stop || (r.pickup_stop_id ? `Trạm ${r.pickup_stop_id}` : 'Điểm đón');
+        return {
+          reservation_id: r.reservation_id,
+          pnr: r.pnr,
+          name: r.passenger_name,
+          passenger_name: r.passenger_name,
+          phone: maskPhone(r.phone),
+          seats: r.seat_codes,
+          seat_codes: r.seat_codes,
+          total_fare_vnd: r.total_fare_vnd,
+          pickup_stop_name: stopName,
+          hold_until: r.hold_until,
+          status: r.hold_status
+        };
+      });
+    sendSuccess(res, { trip_id: tripId, holds });
+    return true;
+  }
+
+  // GET /api/v1/ops/trips/:tripId/manifest (D195): who rides, for the office answering a passenger's call
+  const tripManifestMatch = pathname.match(/^\/api\/v1\/ops\/trips\/([^/]+)\/manifest$/);
+  if (tripManifestMatch && req.method === 'GET') {
+    const tripId = decodeURIComponent(tripManifestMatch[1]);
+    if (!tripVisibleTo(services, tripId, req.operatorId)) {
+      sendError(res, 'Không tìm thấy chuyến xe', 'TRIP_NOT_FOUND', 404);
+      return true;
+    }
+    let driverTrip = services.driverService?.activeTrips?.get(tripId);
+    if (!driverTrip) {
+      services.eventBridge?.ensureRunOperations?.(tripId);
+      driverTrip = services.driverService?.activeTrips?.get(tripId);
+    }
+    const stops = driverTrip?.stops || services.searchService?.getTripDetail?.(tripId, req.operatorId)?.data?.stops || [];
+    const stopsMap = Object.fromEntries(stops.map(s => [s.stop_id, s.name]));
+
+    const manifestItems = (driverTrip?.manifest || []).map(m => {
+      const pickupName = m.pickup_stop || stopsMap[m.pickup_stop_id] || (m.pickup_stop_id ? `Trạm ${m.pickup_stop_id}` : null);
+      const dropoffName = m.dropoff_stop || stopsMap[m.dropoff_stop_id] || (m.dropoff_stop_id ? `Trạm ${m.dropoff_stop_id}` : null);
+      const rawPhone = m.passenger_phone || m.phone || null;
+      const phone = visibleBooking(req, { phone: rawPhone }).phone;
+
+      return {
+        ticket_id: m.ticket_id,
+        seat_code: m.seat_code,
+        passenger_name: m.passenger_name,
+        phone,
+        pnr: m.pnr,
+        pickup_stop_id: m.pickup_stop_id || null,
+        pickup_stop_name: pickupName,
+        dropoff_stop_id: m.dropoff_stop_id || null,
+        dropoff_stop_name: dropoffName,
+        home_pickup: m.home_pickup ? { address: m.home_pickup.address } : null,
+        home_pickup_address: m.home_pickup?.address || null,
+        home_dropoff: m.home_dropoff ? { address: m.home_dropoff.address } : null,
+        home_dropoff_address: m.home_dropoff?.address || null,
+        payment_method: m.payment_method || 'CASH',
+        cod_amount_vnd: m.cod_amount_vnd ?? 0,
+        cod_collected: m.cod_collected ?? (m.payment_method === 'COD' && m.boarding_status === 'BOARDED'),
+        boarding_status: m.boarding_status || 'NOT_BOARDED'
+      };
+    });
+
+    sendSuccess(res, {
+      trip_id: tripId,
+      total_passengers: manifestItems.length,
+      manifest: manifestItems
+    });
+    return true;
+  }
+
   if (TRIP_DETAIL_RE.test(pathname) && req.method === 'GET') {
     const tripId = pathname.match(TRIP_DETAIL_RE)[1];
     const trip = managerService.findTrip(tripId);
@@ -755,9 +1273,43 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
     return true;
   }
 
+function formatVnDateTime(isoStr) {
+  const ms = Date.parse(isoStr);
+  if (!Number.isFinite(ms)) return isoStr;
+  const vn = new Date(ms + 7 * 3600000);
+  const hh = String(vn.getUTCHours()).padStart(2, '0');
+  const mm = String(vn.getUTCMinutes()).padStart(2, '0');
+  const dd = String(vn.getUTCDate()).padStart(2, '0');
+  const MM = String(vn.getUTCMonth() + 1).padStart(2, '0');
+  const yyyy = vn.getUTCFullYear();
+  return `${hh}:${mm} ${dd}/${MM}/${yyyy}`;
+}
+
   // GET /api/v1/ops/alerts (MGR-025)
   if (pathname === '/api/v1/ops/alerts' && req.method === 'GET') {
-    const alerts = req.operatorId ? managerService.alerts.filter(a => (a.operator_id || DEFAULT_OPERATOR_ID) === req.operatorId) : managerService.alerts;
+    const now = clientNow(parsedUrl.searchParams);
+    const derived = missedDepartureAlerts(managerService, req.operatorId, now);
+    const stored = req.operatorId ? managerService.alerts.filter(a => (a.operator_id || DEFAULT_OPERATOR_ID) === req.operatorId) : managerService.alerts;
+    const alerts = [...derived, ...stored];
+
+    // S5: Giám đốc nhà xe nhận cảnh báo đỏ về đổi tài khoản nhận tiền
+    if (isDirector(req)) {
+      const op = req.operator || findOperatorById(req.operatorId, now);
+      if (op?.bank_pending) {
+        const bp = op.bank_pending;
+        const last4 = (bp.account_number || '').slice(-4);
+        const timeStr = formatVnDateTime(bp.effective_at);
+        alerts.unshift({
+          alert_id: `alt_bank_change_${req.operatorId}`,
+          type: 'BANK_CHANGE_PENDING',
+          severity: 'RED',
+          message: `Tài khoản nhận tiền sẽ đổi sang ${bp.bank_name || ''} ****${last4} lúc ${timeStr}. Nếu không phải bạn yêu cầu, gọi BusGo ngay.`,
+          created_at: bp.requested_at,
+          operator_id: req.operatorId
+        });
+      }
+    }
+
     sendSuccess(res, { total: alerts.length, alerts });
     return true;
   }
@@ -769,6 +1321,154 @@ export function handleManagerRoutes(req, res, pathname, parsedUrl, services) {
       audit_logs: [...managerService.auditLog].filter(a => (a.operator_id || DEFAULT_OPERATOR_ID) === req.operatorId).reverse(),
       chain: managerService.verifyAuditChain(req.operatorId)
     });
+    return true;
+  }
+
+  // GET /api/v1/ops/pending-payments (MGR-037)
+  if (pathname === '/api/v1/ops/pending-payments' && req.method === 'GET') {
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const now = clientNow(parsedUrl.searchParams);
+    const cutoff = now - 3 * 86400000;
+    const ALLOWED_STATUSES = ['PENDING_PAYMENT', 'EXPIRED', 'UNMATCHED_OVERDUE'];
+
+    const orders = [];
+    if (services.paymentService?.orders) {
+      for (const order of services.paymentService.orders.values()) {
+        if ((order.operator_id || DEFAULT_OPERATOR_ID) !== operatorId) continue;
+        if (!ALLOWED_STATUSES.includes(order.payment_status)) continue;
+        if (order.payment_method === 'CASH') continue;
+        const createdMs = Date.parse(order.created_at || '') || 0;
+        if (createdMs < cutoff) continue;
+
+        const payer_phone = visibleBooking(req, { phone: order.payer?.phone || '' }).phone || '';
+        const paid = order.paid_amount_vnd ?? 0;
+        const remaining = order.remaining_vnd !== undefined
+          ? order.remaining_vnd
+          : Math.max(0, (order.amount_vnd || 0) - paid);
+
+        orders.push({
+          order_id: order.order_id,
+          pnr: order.pnr,
+          trip_id: order.trip_id,
+          amount_vnd: order.amount_vnd,
+          paid_amount_vnd: paid,
+          remaining_vnd: remaining,
+          payment_status: order.payment_status,
+          expires_at: order.expires_at,
+          created_at: order.created_at,
+          payer_name: order.payer?.full_name || order.payer?.name || '',
+          payer_phone,
+          transfer_memo: order.transfer_memo || order.payment_details?.transfer_memo || ''
+        });
+      }
+    }
+
+    orders.sort((a, b) => (Date.parse(b.created_at || '') || 0) - (Date.parse(a.created_at || '') || 0));
+    sendSuccess(res, { total: orders.length, orders });
+    return true;
+  }
+
+  // POST /api/v1/ops/orders/:orderId/confirm-payment (MGR-037)
+  const confirmPaymentMatch = pathname.match(/^\/api\/v1\/ops\/orders\/([^/]+)\/confirm-payment$/);
+  if (confirmPaymentMatch && req.method === 'POST') {
+    const orderId = decodeURIComponent(confirmPaymentMatch[1]);
+    parseJsonBody(req).then(body => {
+      const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+      const op = req.operator || findOperatorById(operatorId);
+      const paymentCfg = operatorPaymentConfig(op);
+      const amount = Number(body?.amount_vnd ?? body?.amountVnd);
+
+      // S4: Ngưỡng xác nhận tay: số tiền > manual_confirm_limit_vnd thì chỉ giám đốc làm được
+      if (!isDirector(req) && Number.isFinite(amount) && amount > paymentCfg.manual_confirm_limit_vnd) {
+        const formatted = paymentCfg.manual_confirm_limit_vnd.toLocaleString('vi-VN');
+        sendError(res, `Số tiền trên ${formatted} đ cần giám đốc xác nhận`, 'MANUAL_CONFIRM_LIMIT', 403);
+        return;
+      }
+
+      const now = clientNow(body);
+      const result = services.paymentService.confirmPaymentManually(orderId, {
+        operatorId,
+        amountVnd: body?.amount_vnd ?? body?.amountVnd,
+        note: body?.note,
+        staff: req.identity?.sub || null
+      }, now);
+      if (!result.success) {
+        sendError(res, result.error, result.code, result.status || 400);
+        return;
+      }
+      audit(req, managerService, {
+        action: 'PAYMENT_MANUAL_CONFIRM',
+        resource: result.order_id || orderId,
+        operator_id: operatorId,
+        staff: req.identity?.sub || null,
+        after: {
+          staff: req.identity?.sub || null,
+          order_id: result.order_id,
+          pnr: result.pnr,
+          outcome: result.outcome,
+          amount_vnd: Number(body?.amount_vnd ?? body?.amountVnd),
+          note: String(body?.note || '').trim()
+        }
+      });
+      sendSuccess(res, result);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
+    return true;
+  }
+
+  // GET /api/v1/ops/payments/manual-confirmations?date=YYYY-MM-DD (S4 / DIRECTOR_ONLY)
+  if (pathname === '/api/v1/ops/payments/manual-confirmations' && req.method === 'GET') {
+    if (req.identity && !isDirector(req)) {
+      sendError(res, 'Chức năng này chỉ dành cho Giám đốc điều hành', 'FORBIDDEN', 403);
+      return true;
+    }
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const date = parsedUrl.searchParams.get('date');
+    const result = services.paymentService.listManualConfirmations({
+      operatorId,
+      date
+    });
+    sendSuccess(res, result);
+    return true;
+  }
+
+  // GET /api/v1/ops/bank-transactions?outcome=UNMATCHED (MGR-037)
+  if (pathname === '/api/v1/ops/bank-transactions' && req.method === 'GET') {
+    const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+    const outcome = parsedUrl.searchParams.get('outcome') || null;
+    const transactions = services.paymentService.listBankTransactions({ operatorId, outcome });
+    sendSuccess(res, { total: transactions.length, transactions });
+    return true;
+  }
+
+  // POST /api/v1/ops/bank-transactions/:txId/assign (MGR-037)
+  const assignBankTxMatch = pathname.match(/^\/api\/v1\/ops\/bank-transactions\/([^/]+)\/assign$/);
+  if (assignBankTxMatch && req.method === 'POST') {
+    const txId = decodeURIComponent(assignBankTxMatch[1]);
+    parseJsonBody(req).then(body => {
+      const operatorId = req.operatorId || DEFAULT_OPERATOR_ID;
+      const now = clientNow(body);
+      const result = services.paymentService.assignBankTransaction(txId, body?.pnr, {
+        operatorId,
+        staff: req.identity?.sub || null
+      }, now);
+      if (!result.success) {
+        sendError(res, result.error, result.code, result.status || 400);
+        return;
+      }
+      audit(req, managerService, {
+        action: 'BANK_TX_ASSIGN',
+        resource: result.tx_id || txId,
+        before: { outcome: 'UNMATCHED' },
+        after: {
+          tx_id: result.tx_id || txId,
+          order_id: result.order_id,
+          pnr: result.pnr,
+          outcome: result.outcome,
+          assigned_by: result.assigned_by
+        }
+      });
+      sendSuccess(res, result);
+    }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
     return true;
   }
 

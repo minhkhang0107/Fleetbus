@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'driver_about_screen.dart';
 import 'driver_change_pin_screen.dart';
 import 'driver_store.dart';
 import 'driver_widgets.dart';
 import 'main_shell_screen.dart';
+import '../service/driver_api_service.dart';
 
 /// DRI-001: staff id and 6-digit PIN. No GPS or device status before the shift starts (D101).
 class DriverLoginScreen extends StatefulWidget {
-  const DriverLoginScreen({super.key});
+  const DriverLoginScreen({super.key, this.restoreSession = false});
+
+  /// On app start: go straight to the shift when a saved session is still valid.
+  final bool restoreSession;
 
   @override
   State<DriverLoginScreen> createState() => _DriverLoginScreenState();
@@ -20,12 +25,28 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
   final _pin = TextEditingController();
   String? _error;
 
+  late bool _restoring = widget.restoreSession;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final store = DriverScope.read(context);
+      if (!store.api.isSecure) {
+        setState(() => _error = insecureConnectionErrorMessage);
+      }
+    });
+    if (_restoring) _restore();
     DriverStore.savedOperatorCode().then((code) {
-      if (mounted && code.isNotEmpty) {
+      if (mounted && code.isNotEmpty && _operator.text.isEmpty) {
         setState(() => _operator.text = code);
+      }
+    });
+    // The driver who signed in last on this phone types only the PIN (D188).
+    DriverStore.savedStaffId().then((id) {
+      if (mounted && id.isNotEmpty && _id.text.isEmpty) {
+        setState(() => _id.text = id);
       }
     });
   }
@@ -40,6 +61,16 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
 
   bool _busy = false;
 
+  Future<void> _restore() async {
+    final ok = await DriverScope.read(context).restoreSession();
+    if (!mounted) return;
+    if (ok) {
+      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const MainShellScreen()));
+    } else {
+      setState(() => _restoring = false);
+    }
+  }
+
   Future<void> _submit() async {
     setState(() => _busy = true);
     final error = await DriverScope.read(context).login(_operator.text, _id.text, _pin.text);
@@ -50,7 +81,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
       return;
     }
     final store = DriverScope.read(context);
-    final target = store.mustChangePin ? const DriverChangePinScreen() : const MainShellScreen();
+    final target = store.mustChangePin ? DriverChangePinScreen(initialCurrentPin: _pin.text.trim()) : const MainShellScreen();
     Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => target));
   }
 
@@ -63,7 +94,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
       SizedBox(width: large ? 16 : 12),
       Flexible(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('BusGo Driver', style: dsans(size: large ? 30 : 20, weight: FontWeight.w700)),
+          Text('BusGo Tài xế', style: dsans(size: large ? 30 : 20, weight: FontWeight.w700)),
           Text(subtitle, style: dsans(size: large ? 16 : 13, color: DTokens.muted)),
         ]),
       ),
@@ -72,7 +103,9 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
 
   Widget _hotline() {
     final store = DriverScope.of(context);
-    final number = store.operatorHotline.isNotEmpty ? store.operatorHotline : '1900 6868';
+    final number = store.operatorHotline;
+    // Before the first login the app does not know the company yet, so it names no number.
+    if (number.isEmpty) return Text('Quên PIN? Gọi điều độ nhà xe của bạn', style: dsans(size: 13, color: DTokens.muted), textAlign: TextAlign.center);
     return Text.rich(
       TextSpan(children: [
         TextSpan(text: 'Quên PIN? Gọi điều độ ', style: dsans(size: 13, color: DTokens.muted)),
@@ -88,8 +121,11 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
         TextField(
           controller: _operator,
           style: dmono(size: 18, weight: FontWeight.w600),
-          decoration: const InputDecoration(hintText: 'Ví dụ SAOMAI'),
+          decoration: const InputDecoration(hintText: 'Ví dụ SAOMAI', counterText: ''),
           textCapitalization: TextCapitalization.characters,
+          autocorrect: false,
+          enableSuggestions: false,
+          textInputAction: TextInputAction.next,
           maxLength: 20,
           inputFormatters: [
             FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
@@ -102,6 +138,9 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
         TextField(
           controller: _id,
           style: dmono(size: 18, weight: FontWeight.w600),
+          decoration: const InputDecoration(counterText: ''),
+          autocorrect: false,
+          enableSuggestions: false,
           maxLength: 20,
           textInputAction: TextInputAction.next,
         ),
@@ -127,20 +166,29 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_restoring) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     if (dWide(context)) {
       // Tablet: brand on the left, a 440 dp form on the right with the button right under the PIN.
       return Scaffold(
         body: SafeArea(
           child: Row(children: [
             Expanded(
+              // A phone on its side with the keyboard up leaves little height: the brand side scrolls instead of overflowing.
               child: Container(
                 color: DTokens.panel2,
-                padding: const EdgeInsets.all(48),
-                child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  _brand(large: true),
-                  const SizedBox(height: 24),
-                  Text('Vào ca bằng mã nhân viên và mã PIN do nhà xe cấp.', style: dsans(size: 16, color: DTokens.sub, height: 1.5)),
-                ]),
+                child: LayoutBuilder(
+                  builder: (context, box) => SingleChildScrollView(
+                    padding: EdgeInsets.all(box.maxHeight < 360 ? 20 : 48),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: (box.maxHeight - (box.maxHeight < 360 ? 40 : 96)).clamp(0, double.infinity)),
+                      child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        _brand(large: box.maxHeight >= 360),
+                        const SizedBox(height: 24),
+                        Text('Vào ca bằng mã nhân viên và mã PIN do nhà xe cấp.', style: dsans(size: 16, color: DTokens.sub, height: 1.5)),
+                      ]),
+                    ),
+                  ),
+                ),
               ),
             ),
             Expanded(
@@ -154,6 +202,8 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                       const SizedBox(height: 24),
                       _submitButton(),
                       const SizedBox(height: 12),
+                      const DriverConsentLine(),
+                      const SizedBox(height: 12),
                       _hotline(),
                     ]),
                   ),
@@ -166,19 +216,87 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
     }
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 32, 16, 24),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            _brand(),
-            const SizedBox(height: 28),
-            ..._fields(),
-            const Spacer(),
-            _submitButton(),
-            const SizedBox(height: 10),
-            _hotline(),
-          ]),
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 32, 16, 24),
+                child: IntrinsicHeight(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    _brand(),
+                    const SizedBox(height: 28),
+                    ..._fields(),
+                    const Spacer(),
+                    _submitButton(),
+                    const SizedBox(height: 10),
+                    const DriverConsentLine(),
+                    const SizedBox(height: 10),
+                    _hotline(),
+                  ]),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
+    );
+  }
+}
+
+/// Small consent text under the driver login button linking to terms and privacy policy.
+class DriverConsentLine extends StatelessWidget {
+  const DriverConsentLine({super.key});
+
+  Future<void> _openDoc(BuildContext context, LegalDoc Function(LegalInfo) pick) async {
+    final store = DriverScope.read(context);
+    var info = store.legalInfo;
+    if (info == null) {
+      final res = await store.loadLegal();
+      info = res.info;
+    }
+    if (!context.mounted) return;
+    if (info == null) {
+      dToast(context, 'Chưa tải được, thử lại sau');
+      return;
+    }
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => DriverLegalDocScreen(doc: pick(info!), info: info)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text.rich(
+      TextSpan(
+        style: dsans(size: 12, color: DTokens.muted, height: 1.4),
+        children: [
+          const TextSpan(text: 'Bằng việc tiếp tục, bạn đồng ý với '),
+          WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: GestureDetector(
+              onTap: () => _openDoc(context, (i) => i.terms),
+              child: Text(
+                'Điều khoản sử dụng',
+                style: dsans(size: 12, color: DTokens.primaryInk, weight: FontWeight.w600).copyWith(decoration: TextDecoration.underline),
+              ),
+            ),
+          ),
+          const TextSpan(text: ' và '),
+          WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: GestureDetector(
+              onTap: () => _openDoc(context, (i) => i.privacy),
+              child: Text(
+                'Chính sách quyền riêng tư',
+                style: dsans(size: 12, color: DTokens.primaryInk, weight: FontWeight.w600).copyWith(decoration: TextDecoration.underline),
+              ),
+            ),
+          ),
+          const TextSpan(text: '.'),
+        ],
+      ),
+      textAlign: TextAlign.center,
     );
   }
 }

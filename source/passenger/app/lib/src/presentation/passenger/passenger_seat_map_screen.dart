@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'passenger_checkout_screen.dart';
 import 'passenger_login_screen.dart';
@@ -31,10 +32,12 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final error = await PassengerScope.read(context).loadSeatMap();
-      if (mounted) setState(() => _error = error);
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  Future<void> _load() async {
+    final error = await PassengerScope.read(context).loadSeatMap();
+    if (mounted) setState(() => _error = error);
   }
 
   Future<void> _hold() async {
@@ -48,6 +51,10 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
     if (!mounted) return;
     setState(() => _holding = false);
     if (error != null) {
+      if (bookingClosedCodes.contains(store.lastErrorCode)) {
+        await showBookingClosedDialog(context, store, error);
+        return;
+      }
       showToast(context, error);
       return;
     }
@@ -98,6 +105,7 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
     return Scaffold(
       appBar: TopBar(title: 'Chọn ghế', subtitle: '${p.short} → ${d.short} · tối đa ${PassengerStore.maxSeats} ghế'),
       body: Column(children: [
+        if (store.trip != null && !store.trip!.bookableNow) TripBlockedBanner(trip: store.trip!),
         Container(
           width: double.infinity,
           color: PTokens.surface,
@@ -126,7 +134,18 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
           child: store.loadingSeats
               ? const Center(child: CircularProgressIndicator())
               : _error != null
-              ? Padding(padding: const EdgeInsets.all(16), child: Text(_error!, style: sans(size: 15, color: PTokens.danger)))
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_error!, style: sans(size: 15, color: PTokens.danger)),
+                      gap(12),
+                      PrimaryButton(label: 'Thử lại', onPressed: _load),
+                    ],
+                  ),
+                )
               : wide
               ? SingleChildScrollView(
                   padding: const EdgeInsets.all(24),
@@ -159,11 +178,14 @@ class _PassengerSeatMapScreenState extends State<PassengerSeatMapScreen> {
       bottomNavigationBar: BottomAction(children: [
         Expanded(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(store.seats.isEmpty ? 'Chưa chọn ghế' : 'Ghế ${store.seats.join(', ')}', style: sans(size: 12, color: PTokens.muted), overflow: TextOverflow.ellipsis),
-            Text(vnd(store.baseFare), style: mono(size: 17, weight: FontWeight.w700)),
+            TextChange(store.seats.isEmpty ? 'Chưa chọn ghế' : 'Ghế ${store.seats.join(', ')}', style: sans(size: 12, color: PTokens.muted), overflow: TextOverflow.ellipsis),
+            TextChange(vnd(store.baseFare), style: mono(size: 17, weight: FontWeight.w700)),
           ]),
         ),
-        PrimaryButton(label: _holding ? 'Đang giữ ghế…' : (store.seats.isEmpty ? 'Chọn ít nhất 1 ghế' : 'Giữ ghế 10 phút'), onPressed: store.seats.isEmpty || _holding ? null : _hold),
+        PrimaryButton(
+          label: _holding ? 'Đang giữ ghế…' : (store.seats.isEmpty ? 'Chọn ít nhất 1 ghế' : 'Giữ ghế 10 phút'),
+          onPressed: (store.trip != null && !store.trip!.bookableNow) || store.seats.isEmpty || _holding ? null : _hold,
+        ),
       ]),
     );
   }
@@ -227,7 +249,7 @@ class _SeatButton extends StatelessWidget {
             SeatState.held => (PTokens.warnSoft, PTokens.warn, const Color(0xFF92400E), 'Đang giữ', false),
             SeatState.booked => (PTokens.line, PTokens.line, const Color(0xFF64748B), 'Đã bán', false),
             SeatState.blocked => (PTokens.dangerSoft, const Color(0xFFFCA5A5), const Color(0xFF991B1B), 'Khóa', false),
-            SeatState.free => (PTokens.surface, const Color(0xFF94A3B8), PTokens.ink, '${(store.trip?.price ?? 0) ~/ 1000}k', true),
+            SeatState.free => (PTokens.surface, const Color(0xFF94A3B8), PTokens.ink, '${(store.trip != null ? store.fareOf(store.trip!) : 0) ~/ 1000}k', true),
           };
     final semantic = selected ? 'bạn đang chọn' : switch (state) { SeatState.held => 'người khác đang giữ', SeatState.booked => 'đã bán', SeatState.blocked => 'khóa kỹ thuật', SeatState.free => 'trống' };
     return Padding(
@@ -241,18 +263,30 @@ class _SeatButton extends StatelessWidget {
         child: InkWell(
           onTap: enabled
               ? () {
-                  if (!store.toggleSeat(code)) onLimit();
+                  if (store.toggleSeat(code)) {
+                    HapticFeedback.selectionClick();
+                  } else {
+                    onLimit();
+                  }
                 }
               : null,
           borderRadius: BorderRadius.circular(PTokens.radiusControl),
-          child: Container(
-            height: 60,
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            decoration: BoxDecoration(color: bg, border: Border.all(color: border, width: 1.5), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              FittedBox(fit: BoxFit.scaleDown, child: Text(code, style: mono(size: 15, color: fg))),
-              FittedBox(fit: BoxFit.scaleDown, child: Text(sub, style: sans(size: 11, weight: FontWeight.w500, color: fg))),
-            ]),
+          // A picked seat fills with colour and gives a small pop; a released one fades back.
+          child: AnimatedScale(
+            scale: selected ? 1.0 : 0.97,
+            duration: Motion.base,
+            curve: Curves.easeOutBack,
+            child: AnimatedContainer(
+              duration: Motion.base,
+              curve: Motion.ease,
+              height: 60,
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              decoration: BoxDecoration(color: bg, border: Border.all(color: border, width: 1.5), borderRadius: BorderRadius.circular(PTokens.radiusControl)),
+              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                FittedBox(fit: BoxFit.scaleDown, child: Text(code, style: mono(size: 15, color: fg))),
+                FittedBox(fit: BoxFit.scaleDown, child: Text(sub, style: sans(size: 11, weight: FontWeight.w500, color: fg))),
+              ]),
+            ),
           ),
         ),
       ),

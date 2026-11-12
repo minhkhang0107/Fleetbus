@@ -10,7 +10,7 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
 
   before(async () => {
     // These tests exercise business behaviour through HTTP without tokens; authentication has its own suites
-    const { server } = createFleetBusServer({ authMode: 'off' });
+    const { server } = createFleetBusServer({ authMode: 'off', webhookSecret: 'off' });
     await new Promise((resolve) => {
       appServer = server.listen(TEST_PORT, () => {
         baseUrl = `http://127.0.0.1:${TEST_PORT}`;
@@ -327,8 +327,11 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     });
     assert.strictEqual(delegateRes.statusCode, 200);
     assert.match(delegateRes.body.data.offline_pin, /^\d{6}$/);
-    assert.ok(delegateRes.body.data.share_link.startsWith('https://busgo.vn/pass/'));
+    assert.match(delegateRes.body.data.share_link, /\/t\/[A-Za-z0-9_-]{24}$/);
     assert.ok(!delegateRes.body.data.share_link.includes(delegateRes.body.data.offline_pin), 'the PIN never goes in a URL');
+    // The companion's link opens the public tracking page of the trip.
+    const page = await fetch(`${baseUrl}${new URL(delegateRes.body.data.share_link).pathname}`);
+    assert.strictEqual(page.status, 200);
   });
 
   it('TC-SRV-07: Diagnostic, Manual Boarding, No-show & Manager Ops Queries', async () => {
@@ -354,7 +357,9 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
     // 3. Driver Diagnostics & Profile (DRI-014, DRI-016, DRI-018)
     const gpsHealthRes = await makeRequest('/api/v1/driver/system/gps-health');
     assert.strictEqual(gpsHealthRes.statusCode, 200);
-    assert.strictEqual(gpsHealthRes.body.data.gps_signal, 'GOOD');
+    // Answers from the positions the server received, not fixed device readings.
+    assert.ok(['GOOD', 'WEAK', 'LOST', 'NO_TRIP'].includes(gpsHealthRes.body.data.gps_signal));
+    assert.strictEqual('satellites_locked' in gpsHealthRes.body.data, false);
 
     const diagPingRes = await makeRequest('/api/v1/driver/system/diagnostics-ping');
     assert.strictEqual(diagPingRes.statusCode, 200);
@@ -362,7 +367,7 @@ describe('Phase Server: Unified Node.js API Gateway Integration Suite', () => {
 
     const drvProfileRes = await makeRequest('/api/v1/driver/profile');
     assert.strictEqual(drvProfileRes.statusCode, 200);
-    assert.strictEqual(drvProfileRes.body.data.license_class, 'FC');
+    assert.strictEqual(drvProfileRes.body.data.license_class, 'E');
 
     // 4. Manager Bookings & Audit Logs (MGR-017, MGR-018, MGR-028)
     const mgrBookingsRes = await makeRequest('/api/v1/ops/bookings');

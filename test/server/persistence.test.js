@@ -11,6 +11,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createFleetBusServer } from '../../source/server/apiServer.js';
 import { loadMasterKey } from '../../source/server/core/dbCrypto.js';
+import { FROZEN_DIGESTS } from '../../source/server/core/stateStore.js';
 
 const PHONE = '0987650001';
 
@@ -22,7 +23,7 @@ describe('TC-DB-PERSIST: data kept in sealed company databases', () => {
   let ticketId;
 
   const start = async (options = {}) => {
-    ({ server } = createFleetBusServer({ dataDir: dir, ...options }));
+    ({ server } = createFleetBusServer({ dataDir: dir, webhookSecret: 'off', ...options }));
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     baseUrl = `http://127.0.0.1:${server.address().port}`;
   };
@@ -126,6 +127,61 @@ describe('TC-DB-PERSIST: data kept in sealed company databases', () => {
   it('production needs FLEETBUS_DB_KEY', () => {
     assert.throws(() => loadMasterKey({ dataDir: dir, production: true, env: {} }), { code: 'DB_KEY_REQUIRED' });
     assert.throws(() => loadMasterKey({ dataDir: dir, production: true, env: { FLEETBUS_DB_KEY: 'ngan' } }), { code: 'DB_KEY_INVALID' });
+  });
+
+  it('OPTIONS and static routes bypass storage flush', async () => {
+    let flushed = false;
+    const { server, services } = createFleetBusServer({ dataDir: null });
+    const originalFlush = services.store.flush.bind(services.store);
+    services.store.flush = () => { flushed = true; return originalFlush(); };
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const testUrl = `http://127.0.0.1:${server.address().port}`;
+
+    flushed = false;
+    const optRes = await fetch(`${testUrl}/api/v1/trips`, { method: 'OPTIONS' });
+    assert.strictEqual(optRes.status, 204);
+    assert.strictEqual(flushed, false, 'OPTIONS must bypass flush');
+
+    flushed = false;
+    const staticRes = await fetch(`${testUrl}/passenger`, { method: 'GET' });
+    assert.strictEqual(staticRes.status, 200);
+    assert.strictEqual(flushed, false, 'static GET must bypass flush');
+
+    const headRes = await fetch(`${testUrl}/manager`, { method: 'HEAD' });
+    assert.strictEqual(headRes.status, 200);
+    assert.strictEqual(flushed, false, 'static HEAD must bypass flush');
+
+    await new Promise(resolve => server.close(resolve));
+  });
+
+  it('caching digest via WeakMap works for frozen audit_log entries', () => {
+    const { services } = createFleetBusServer({ dataDir: null });
+    const audit = services.managerService;
+    audit.recordAudit({ action: 'TEST_WEAKMAP', operator_id: 'op_saomai' });
+    const latest = audit.auditLog.at(-1);
+    assert.ok(latest, 'audit entry created');
+    services.store.flush();
+    assert.strictEqual(FROZEN_DIGESTS.has(latest), true, 'FROZEN_DIGESTS must hold the digest for frozen audit entry');
+  });
+
+  it('retry on transient SQLite lock recovers without failing store', () => {
+    const { services } = createFleetBusServer({ dataDir: null });
+    const db = services.store.db('op_saomai');
+    let failOnce = true;
+    const origExec = db.exec.bind(db);
+    db.exec = (sql) => {
+      if (sql === 'BEGIN IMMEDIATE' && failOnce) {
+        failOnce = false;
+        const err = new Error('database is locked');
+        err.errcode = 5; // SQLITE_BUSY
+        throw err;
+      }
+      return origExec(sql);
+    };
+
+    services.managerService.recordAudit({ action: 'TEST_RETRY', operator_id: 'op_saomai' });
+    assert.doesNotThrow(() => services.store.flush());
+    assert.strictEqual(services.store.failed, null, 'transient lock retry must not fail store');
   });
 });
 

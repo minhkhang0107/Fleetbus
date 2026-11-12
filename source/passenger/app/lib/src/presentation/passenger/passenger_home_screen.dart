@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import 'passenger_edit_profile_screen.dart' show ProfileAvatar;
 import 'passenger_location_picker_screen.dart';
+import 'passenger_main_shell.dart';
 import 'passenger_promo_screen.dart';
 import 'passenger_search_results_screen.dart';
 import 'passenger_date_picker.dart';
@@ -13,6 +16,18 @@ import 'passenger_widgets.dart';
 /// slider, which is left out when the server has no slide. Side by side on wide screens.
 class PassengerHomeScreen extends StatelessWidget {
   const PassengerHomeScreen({super.key});
+
+  void _search(BuildContext context) {
+    final store = PassengerScope.read(context);
+    if (store.origin == store.dest) {
+      showToast(context, 'Điểm đi và điểm đến phải khác nhau.');
+      return;
+    }
+    Navigator.of(context).push(MaterialPageRoute(
+      settings: const RouteSettings(name: 'search_results'),
+      builder: (_) => const PassengerSearchResultsScreen(),
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,13 +46,28 @@ class PassengerHomeScreen extends StatelessWidget {
               Text('Bạn muốn đi đâu?', style: sans(size: 22, weight: FontWeight.w700)),
             ]),
           ),
-          CircleAvatar(
-            radius: 20,
-            backgroundColor: PTokens.primarySoft,
-            child: Text(name == null ? '?' : 'NA', style: sans(size: 14, weight: FontWeight.w600, color: PTokens.primaryDark)),
+          // The same photo or initials as the settings tab, which it opens (D186).
+          Semantics(
+            button: true,
+            label: 'Mở trang cá nhân',
+            excludeSemantics: true,
+            child: Pressable(child: GestureDetector(onTap: () => PassengerMainShell.openTab(context, 3), child: ProfileAvatar(size: 40, photo: store.userAvatar, name: name))),
           ),
         ]),
         gap(20),
+        if (store.placesError != null) ...[
+          AppCard(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text(store.placesError!, style: sans(size: 14, color: PTokens.danger)),
+              gap(10),
+              PrimaryButton(
+                label: 'Thử lại',
+                onPressed: store.loadPlaces,
+              ),
+            ]),
+          ),
+          gap(16),
+        ],
         AppCard(
           padding: const EdgeInsets.all(16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -51,43 +81,16 @@ class PassengerHomeScreen extends StatelessWidget {
                   const Divider(height: 1, color: PTokens.line),
                   _PlaceField(label: 'Điểm đến', place: store.destPlace, isOrigin: false, fixed: store.fixedRoute),
                 ]),
-                Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: Tooltip(
-                    message: store.canSwap ? 'Đổi chiều điểm đi và điểm đến' : 'Nhà xe chỉ chạy một chiều',
-                    child: Material(
-                      color: PTokens.surface,
-                      shape: const CircleBorder(side: BorderSide(color: PTokens.line)),
-                      clipBehavior: Clip.antiAlias,
-                      child: InkWell(
-                        onTap: store.canSwap ? store.swapPlaces : null,
-                        child: SizedBox(
-                          width: 44,
-                          height: 44,
-                          child: Icon(Icons.swap_vert, size: 22, color: store.canSwap ? PTokens.primary : PTokens.line),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+                const Padding(padding: EdgeInsets.only(right: 12), child: _SwapButton()),
               ]),
             ),
             gap(12),
             Text('Ngày đi', style: sans(size: 12, color: PTokens.muted)),
             gap(4),
-            const TravelDateField(),
+            // A quick day tile is a search for that day, one tap instead of two (D184).
+            TravelDateField(onQuickDay: (_) => _search(context)),
             gap(12),
-            PrimaryButton(
-              label: 'Tìm chuyến',
-              icon: Icons.search,
-              onPressed: () {
-                if (store.origin == store.dest) {
-                  showToast(context, 'Điểm đi và điểm đến phải khác nhau.');
-                  return;
-                }
-                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerSearchResultsScreen()));
-              },
-            ),
+            PrimaryButton(label: 'Tìm chuyến', icon: Icons.search, onPressed: () => _search(context)),
           ]),
         ),
         if (recent.isNotEmpty) ...[
@@ -107,7 +110,7 @@ class PassengerHomeScreen extends StatelessWidget {
           gap(20),
           Text('Chuyến sắp đi', style: sans(size: 15, weight: FontWeight.w600)),
           gap(10),
-          _UpcomingCard(ticket: upcoming.last),
+          _UpcomingCard(tickets: nextBooking(upcoming)),
         ],
       ], right: [
         if (store.banners.isNotEmpty) ...[
@@ -115,6 +118,54 @@ class PassengerHomeScreen extends StatelessWidget {
           PromoSlider(banners: store.banners),
         ],
       ]),
+    );
+  }
+}
+
+/// Turns half a circle on each swap while the two places cross over (D180).
+class _SwapButton extends StatefulWidget {
+  const _SwapButton();
+
+  @override
+  State<_SwapButton> createState() => _SwapButtonState();
+}
+
+class _SwapButtonState extends State<_SwapButton> {
+  double _turns = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = PassengerScope.of(context);
+    return Tooltip(
+      message: store.canSwap ? 'Đổi chiều điểm đi và điểm đến' : 'Nhà xe chỉ chạy một chiều',
+      child: Pressable(
+        enabled: store.canSwap,
+        scale: 0.9,
+        child: Material(
+          color: PTokens.surface,
+          shape: const CircleBorder(side: BorderSide(color: PTokens.line)),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: store.canSwap
+                ? () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _turns += 0.5);
+                    store.swapPlaces();
+                  }
+                : null,
+            child: SizedBox(
+              width: 44,
+              height: 44,
+              child: AnimatedRotation(
+                turns: _turns,
+                duration: Motion.reduced(context) ? Duration.zero : Motion.base,
+                curve: Motion.settle,
+                child: Icon(Icons.swap_vert, size: 22, color: store.canSwap ? PTokens.primary : PTokens.line),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -136,24 +187,55 @@ class _PlaceField extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label, style: sans(size: 12, color: PTokens.muted)),
           const SizedBox(height: 2),
-          Text(place.city, maxLines: 1, overflow: TextOverflow.ellipsis, style: sans(size: 15, weight: FontWeight.w600)),
-          Text(place.station, maxLines: 1, overflow: TextOverflow.ellipsis, style: sans(size: 13, color: PTokens.muted)),
+          // A new place slides in from where it came from: on a swap the origin rises from below and the
+          // destination drops from above, so the two cross like on iOS.
+          ClipRect(
+            child: AnimatedSwitcher(
+              duration: Motion.reduced(context) ? Duration.zero : Motion.base,
+              switchInCurve: Motion.settle,
+              switchOutCurve: Curves.easeIn,
+              layoutBuilder: (current, previous) => Stack(alignment: Alignment.topLeft, children: [...previous, if (current != null) current]),
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(begin: Offset(0, isOrigin ? 0.9 : -0.9), end: Offset.zero).animate(animation),
+                  child: child,
+                ),
+              ),
+              child: Column(
+                key: ValueKey('${place.code}|${place.station}'),
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(place.city, maxLines: 1, overflow: TextOverflow.ellipsis, style: sans(size: 15, weight: FontWeight.w600)),
+                  Text(place.station, maxLines: 1, overflow: TextOverflow.ellipsis, style: sans(size: 13, color: PTokens.muted)),
+                ],
+              ),
+            ),
+          ),
         ]),
       ),
     );
   }
 }
 
+/// D191: the booking that leaves first, with all its seats (the wallet keeps one ticket per seat).
+List<Ticket> nextBooking(List<Ticket> upcoming) {
+  final sorted = [...upcoming]..sort((a, b) => (a.departureTime ?? '').compareTo(b.departureTime ?? ''));
+  final first = sorted.first;
+  return sorted.where((t) => t.pnr == first.pnr && t.tripId == first.tripId).toList();
+}
+
 class _UpcomingCard extends StatelessWidget {
-  const _UpcomingCard({required this.ticket});
-  final Ticket ticket;
+  const _UpcomingCard({required this.tickets});
+  final List<Ticket> tickets;
 
   @override
   Widget build(BuildContext context) {
+    final ticket = tickets.first;
     return AppCard(
       onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PassengerTicketQrScreen(ticket: ticket))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Row(children: [PnrTag(ticket.pnr), const Spacer(), const Pill('Đã thanh toán', PillKind.ok)]),
+        Row(children: [PnrTag(ticket.pnr), const Spacer(), ticket.unpaidCash ? const Pill('Trả khi lên xe', PillKind.warn) : const Pill('Đã thanh toán', PillKind.ok)]),
         gap(10),
         Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
           Text(ticket.departure, style: mono(size: 20, weight: FontWeight.w700)),
@@ -162,7 +244,7 @@ class _UpcomingCard extends StatelessWidget {
         ]),
         gap(10),
         Row(children: [
-          Expanded(child: Text('${ticket.date} · Ghế ${ticket.seat}', style: sans(size: 13, color: PTokens.muted))),
+          Expanded(child: Text('${ticket.date} · Ghế ${tickets.map((t) => t.seat).join(', ')}', style: sans(size: 13, color: PTokens.muted))),
           Text('Mở vé', style: sans(size: 13, weight: FontWeight.w600, color: PTokens.primaryDark)),
         ]),
       ]),
@@ -188,7 +270,7 @@ class _RecentChip extends StatelessWidget {
         final store = PassengerScope.read(context);
         store.setPlace(isOrigin: true, code: origin);
         store.setPlace(isOrigin: false, code: dest);
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PassengerSearchResultsScreen()));
+        Navigator.of(context).push(MaterialPageRoute(settings: const RouteSettings(name: 'search_results'), builder: (_) => const PassengerSearchResultsScreen()));
       },
     );
   }

@@ -1,8 +1,9 @@
 /**
  * Keeps the server's working data in the company databases (D127).
  *
- * The services keep their objects in memory; this store loads them from the databases at start and, after
- * every request, writes what changed before the response leaves (`flush`). A record goes to the database of
+ * The services keep their objects in memory; this store loads them from the databases at start.
+ * Writes that change business data are stored before their answer leaves (`flush`); reads and GPS pings
+ * are marked dirty and stored within a second by a background timer. A record goes to the database of
  * the company it belongs to (`scope`), or to the platform database for data that is no single company's.
  * Each record is sealed (core/dbCrypto.js) and stored under an HMAC of its id.
  *
@@ -15,6 +16,12 @@ import { hashId, open, seal } from './dbCrypto.js';
 import { PLATFORM_SCOPE } from './tenantDb.js';
 
 const MARKER = (name) => `collection:${name}`;
+
+export const FROZEN_DIGESTS = new WeakMap();
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
 export class StateStore {
   /**
@@ -30,6 +37,23 @@ export class StateStore {
     this.stored = new Map(); // collection -> Map(scope|idHash -> digest)
     this.idCache = new Map();
     this.failed = null;
+    this.dirty = false;
+  }
+
+  markDirty() {
+    this.dirty = true;
+  }
+
+  /** Flushes only when marked dirty; errors are logged and never throw. A failed store stays quiet. */
+  flushIfDirty() {
+    if (!this.dirty || this.failed) return false;
+    try {
+      this.flush();
+      return true;
+    } catch (err) {
+      console.error(`[storage] ${err.message}`);
+      return false;
+    }
   }
 
   db(scope) {
@@ -97,7 +121,7 @@ export class StateStore {
         const scope = rec.scope || PLATFORM_SCOPE;
         const idHash = this.idHash(scope, c.name, rec.key);
         const payload = { k: rec.key, o: rec.order, v: rec.value };
-        const d = digest(c.name, payload);
+        const d = digest(c.name, payload, c.freeze);
         const slot = `${scope}|${idHash}`;
         now.set(slot, d);
         if (before?.get(slot) !== d) plan(scope).upserts.push({ name: c.name, idHash, payload });
@@ -122,15 +146,31 @@ export class StateStore {
         const upsert = db.prepare('INSERT INTO records (collection, id_hash, data, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (collection, id_hash) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at');
         const remove = db.prepare('DELETE FROM records WHERE collection = ? AND id_hash = ?');
         const mark = db.prepare("INSERT OR IGNORE INTO tenant_meta (key, value) VALUES (?, '1')");
-        db.exec('BEGIN IMMEDIATE');
-        try {
-          for (const u of w.upserts) upsert.run(u.name, u.idHash, seal(keys, u.name, u.idHash, u.payload), at);
-          for (const d of w.deletes) remove.run(d.name, d.idHash);
-          for (const name of w.markers) mark.run(MARKER(name));
-          db.exec('COMMIT');
-        } catch (err) {
-          db.exec('ROLLBACK');
-          throw err;
+
+        let attempts = 0;
+        const maxAttempts = 2; // single retry if transient busy/locked (busy_timeout is already 3000ms)
+        while (true) {
+          try {
+            db.exec('BEGIN IMMEDIATE');
+            try {
+              for (const u of w.upserts) upsert.run(u.name, u.idHash, seal(keys, u.name, u.idHash, u.payload), at);
+              for (const d of w.deletes) remove.run(d.name, d.idHash);
+              for (const name of w.markers) mark.run(MARKER(name));
+              db.exec('COMMIT');
+              break;
+            } catch (err) {
+              db.exec('ROLLBACK');
+              throw err;
+            }
+          } catch (err) {
+            attempts++;
+            const isTransient = err?.errcode === 5 || err?.errcode === 6 || err?.code === 'SQLITE_BUSY' || err?.code === 'SQLITE_LOCKED';
+            if (isTransient && attempts < maxAttempts) {
+              sleepSync(25);
+              continue;
+            }
+            throw err;
+          }
         }
       }
     } catch (err) {
@@ -138,10 +178,18 @@ export class StateStore {
       throw this.failed;
     }
     for (const [name, now] of pending) this.stored.set(name, now);
+    this.dirty = false;
   }
 }
 
-function digest(name, payload) {
+function digest(name, payload, freeze = false) {
+  if (freeze && payload?.v && typeof payload.v === 'object') {
+    const cached = FROZEN_DIGESTS.get(payload.v);
+    if (cached) return cached;
+    const d = crypto.createHash('sha256').update(name).update('\0').update(JSON.stringify(payload)).digest('base64');
+    FROZEN_DIGESTS.set(payload.v, d);
+    return d;
+  }
   return crypto.createHash('sha256').update(name).update('\0').update(JSON.stringify(payload)).digest('base64');
 }
 
@@ -162,6 +210,7 @@ export function mapCollection(name, getMap, scopeOf) {
 export function listCollection(name, getList, scopeOf, { freeze = false, platformFirst = false, afterRestore = null } = {}) {
   return {
     name,
+    freeze,
     platformFirst,
     dump: () => getList().map((value, order) => ({ key: String(order), order, value, scope: scopeOf(value) })),
     restore: (recs) => {

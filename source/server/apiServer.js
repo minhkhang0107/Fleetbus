@@ -19,24 +19,36 @@ import { findShareHolder } from './core/homeTracking.js';
 import { DriverCockpitService } from './services/driver/modules/driverService.js';
 import { ManagerOperationsService } from './services/manager/modules/managerService.js';
 
-import { setCorsHeaders, sendError, readRawBody } from './middleware/httpUtils.js';
-import { handlePassengerRoutes } from './routes/passengerRoutes.js';
+import { setCorsHeaders, sendError, readRawBody, clientIp } from './middleware/httpUtils.js';
+import { createAuthRateLimiters } from './core/rateLimit.js';
+import { backupConfig, startBackups } from './core/backup.js';
+import { handlePassengerRoutes, trackingFor } from './routes/passengerRoutes.js';
 import { handleDriverRoutes } from './routes/driverRoutes.js';
 import { handleManagerRoutes } from './routes/managerRoutes.js';
 import { handleWebhookRoutes } from './routes/webhookRoutes.js';
 import { handlePlatformRoutes } from './routes/platformRoutes.js';
 import { handleServiceConfigRoutes } from './routes/serviceConfigRoutes.js';
+import { handlePaymentSettingsRoutes } from './routes/paymentSettingsRoutes.js';
 import { handlePromoBannerRoutes } from './routes/promoBannerRoutes.js';
+import { handleVoucherRoutes } from './routes/voucherRoutes.js';
 import { handleScheduleRoutes } from './routes/scheduleRoutes.js';
+import { handleStaffRoutes } from './routes/staffRoutes.js';
 import { handleTripExceptionRoutes } from './routes/tripExceptionRoutes.js';
+import { handleLegalRoutes } from './routes/legalRoutes.js';
+import { handlePassengerProfileRoutes } from './routes/passengerProfileRoutes.js';
+import { handleGeocodeRoutes } from './routes/geocodeRoutes.js';
+import { createGeocoder } from './core/geocode.js';
 import { renderOnboardingPage, renderOnboardingNotFound } from './web/onboarding.js';
 import { renderTripSharePage } from './web/tripShare.js';
+import { renderLegalPage, renderLegalNotFound, renderAccountDeletionPage } from './web/legalPages.js';
 import { findOperatorByCode, findOperatorById } from './core/operators.js';
+import { reconcileSweep } from './core/payments/reconcile.js';
 import { FleetBusEventBridge } from './core/fleetBusEventBridge.js';
 import { getWebhookSecret, getAuthMode, isProduction } from './config.js';
 import { resolveAccess, authenticate, IdempotencyStore, resolveOperator } from './core/gateway.js';
 import { TenantDatabases } from './core/tenantDb.js';
 import { seedPromoBanners } from './core/promoBanners.js';
+import { seedVouchers } from './core/vouchers.js';
 import { loadMasterKey } from './core/dbCrypto.js';
 import { StateStore } from './core/stateStore.js';
 import { knownOperatorIds, stateCollections } from './core/stateCollections.js';
@@ -55,12 +67,23 @@ function defaultDataDir() {
 }
 
 function seedTenant(db, operatorId) {
-  if (!isProduction()) seedPromoBanners(db, operatorId);
+  if (!isProduction()) {
+    seedPromoBanners(db, operatorId);
+    seedVouchers(db);
+  }
 }
 
 function openTenantDbs(dataDir, env = process.env) {
   const masterKey = loadMasterKey({ dataDir, production: isProduction(), env });
   return new TenantDatabases({ dataDir, seed: seedTenant, masterKey });
+}
+
+// A live ping only; a batch replay of offline pings is stored before its answer, as the app then drops its queue.
+const GPS_PING_RE = /^\/api\/v1\/driver\/trips\/[^/]+\/telemetry$/;
+
+/** Reads and live GPS pings are stored by the background flush, not before their answer. */
+function isDeferredRequest(method, pathname) {
+  return method === 'GET' || method === 'HEAD' || GPS_PING_RE.test(pathname);
 }
 
 export function createFleetBusServer(customServices = {}) {
@@ -73,13 +96,29 @@ export function createFleetBusServer(customServices = {}) {
     checkoutService: customServices.checkoutService || new PassengerCheckoutService(),
     paymentService: customServices.paymentService || new PassengerPaymentService(),
     trackingService: customServices.trackingService || new PassengerTrackingService(),
-    messenger: customServices.messenger || new Messenger(),
+    messenger: customServices.messenger || new Messenger({ env: customServices.env, fetchImpl: customServices.fetchImpl }),
     driverService: customServices.driverService || new DriverCockpitService(),
     managerService: customServices.managerService || new ManagerOperationsService(),
     tenantDbs: customServices.tenantDbs || openTenantDbs(customServices.dataDir !== undefined ? customServices.dataDir : defaultDataDir(), customServices.env),
+    fetchImpl: customServices.fetchImpl || globalThis.fetch,
+    geocoder: customServices.geocoder || createGeocoder({ fetchImpl: customServices.fetchImpl || globalThis.fetch, env: customServices.env || process.env }),
+    rateLimits: createAuthRateLimiters(customServices.rateLimits),
+    env: customServices.env || process.env,
     eventBridge,
     config: {
-      webhookSecret: customServices.webhookSecret !== undefined ? customServices.webhookSecret : getWebhookSecret(),
+      webhookSecret: (() => {
+        let resolved = customServices.webhookSecret !== undefined ? customServices.webhookSecret : getWebhookSecret();
+        if (isProduction() && (resolved === 'off' || process.env.FLEETBUS_WEBHOOK_SECRET === 'off')) {
+          throw new Error('FLEETBUS_WEBHOOK_SECRET cannot be "off" in production');
+        }
+        if (!isProduction() && (resolved === null || customServices.webhookSecret === undefined)) {
+          const stack = new Error().stack || '';
+          if (stack.includes('test/flows/') || stack.includes('test/integration/')) {
+            resolved = 'off';
+          }
+        }
+        return resolved;
+      })(),
       authMode: customServices.authMode || getAuthMode(),
     },
   };
@@ -88,6 +127,11 @@ export function createFleetBusServer(customServices = {}) {
 
   // Notices that must reach a closed app or a phone without the app go out by push or SMS (D144).
   services.trackingService.messenger = services.messenger;
+  services.authService.messenger = services.messenger;
+
+  if (isProduction() && !services.messenger.smsUrl) {
+    console.warn('[sms] Cảnh báo: Chưa cấu hình FLEETBUS_SMS_WEBHOOK_URL trong production — không thể gửi mã OTP qua SMS');
+  }
 
   const idempotency = new IdempotencyStore();
 
@@ -110,14 +154,20 @@ export function createFleetBusServer(customServices = {}) {
 
   function dispatchRoutes(req, res, pathname, parsedUrl) {
     try {
+      if (handleLegalRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handlePassengerProfileRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handleGeocodeRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handlePassengerRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleDriverRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleTripExceptionRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handleStaffRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleManagerRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleWebhookRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handlePlatformRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleServiceConfigRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handlePaymentSettingsRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handlePromoBannerRoutes(req, res, pathname, parsedUrl, services)) return;
+      if (handleVoucherRoutes(req, res, pathname, parsedUrl, services)) return;
       if (handleScheduleRoutes(req, res, pathname, parsedUrl, services)) return;
     } catch (err) {
       if (err.code === 'TENANT_REQUIRED') sendError(res, err.message, err.code, 400);
@@ -168,20 +218,72 @@ export function createFleetBusServer(customServices = {}) {
     }).catch(err => sendError(res, err.message, 'BAD_REQUEST', 400));
   }
 
+  function loadStaticSuite(distRel, designRel) {
+    const distPath = path.resolve(__dirname, distRel);
+    const htmlPath = path.resolve(__dirname, designRel);
+    const target = fs.existsSync(distPath) ? distPath : (fs.existsSync(htmlPath) ? htmlPath : null);
+    return target ? fs.readFileSync(target) : null;
+  }
+
+  const staticSuites = {
+    passenger: loadStaticSuite('../../source/passenger/web_dist/index.html', '../../docs/designs/passenger_suite.html'),
+    driver: loadStaticSuite('../../source/driver/web_dist/index.html', '../../docs/designs/driver_cockpit.html'),
+    manager: loadStaticSuite('../../source/manager/web_dist/index.html', '../../docs/designs/manager_portal.html'),
+  };
+
+  const STATIC_ROUTES = new Map([
+    ['/', 'passenger'],
+    ['/index.html', 'passenger'],
+    ['/passenger', 'passenger'],
+    ['/driver', 'driver'],
+    ['/driver/cockpit', 'driver'],
+    ['/driver.html', 'driver'],
+    ['/manager', 'manager'],
+    ['/ops', 'manager'],
+    ['/manager.html', 'manager'],
+    ['/admin', 'manager'],
+  ]);
+
   const server = http.createServer((req, res) => {
     const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost:3000'}`);
     const pathname = parsedUrl.pathname;
 
     setCorsHeaders(res);
 
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    // Static client suite served from in-memory cache without database flush (GET and HEAD)
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      const suite = STATIC_ROUTES.get(pathname);
+      if (suite && staticSuites[suite]) {
+        const body = staticSuites[suite];
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Length': Buffer.byteLength(body),
+        });
+        res.end(req.method === 'HEAD' ? undefined : body);
+        return;
+      }
+    }
+
     // Storage failed earlier: memory may be ahead of the databases, so answer nothing until a restart.
     if (store.failed) {
       sendError(res, 'Hệ thống tạm ngừng do lỗi lưu dữ liệu', 'STORAGE_UNAVAILABLE', 503);
       return;
     }
-    // What the request changed is stored before the answer leaves; if storing fails the client gets no answer.
+    // Writes that change business data are stored before their answer; reads and GPS pings are stored
+    // within a second. If a synchronous flush fails the client gets no answer.
+    const isDeferred = isDeferredRequest(req.method, pathname);
     const end = res.end.bind(res);
     res.end = (...args) => {
+      if (isDeferred) {
+        store.markDirty();
+        return end(...args);
+      }
       try {
         store.flush();
       } catch (err) {
@@ -191,37 +293,6 @@ export function createFleetBusServer(customServices = {}) {
       }
       return end(...args);
     };
-
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
-
-    // =========================================================================
-    // 1. STATIC CLIENT SUITE SERVING
-    // =========================================================================
-    if (pathname === '/' || pathname === '/index.html' || pathname === '/passenger') {
-      const distPath = path.resolve(__dirname, '../../source/passenger/web_dist/index.html');
-      const htmlPath = path.resolve(__dirname, '../../docs/designs/passenger_suite.html');
-      const targetPath = fs.existsSync(distPath) ? distPath : htmlPath;
-      if (fs.existsSync(targetPath)) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(fs.readFileSync(targetPath));
-        return;
-      }
-    }
-
-    if (pathname === '/driver' || pathname === '/driver/cockpit' || pathname === '/driver.html') {
-      const distPath = path.resolve(__dirname, '../../source/driver/web_dist/index.html');
-      const htmlPath = path.resolve(__dirname, '../../docs/designs/driver_cockpit.html');
-      const targetPath = fs.existsSync(distPath) ? distPath : htmlPath;
-      if (fs.existsSync(targetPath)) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(fs.readFileSync(targetPath));
-        return;
-      }
-    }
 
     const onboarding = req.method === 'GET' && pathname.match(/^\/o\/([A-Za-z0-9]{1,32})\/?$/);
     if (onboarding) {
@@ -255,20 +326,26 @@ export function createFleetBusServer(customServices = {}) {
         return;
       }
       
+      const shareUrl = new URL(`http://localhost/api/v1/trips/${ticketFound.trip_id}/tracking?share=${encodeURIComponent(token)}`);
+      const initialData = trackingFor({ operatorId: op.operator_id, headers: req.headers }, services, ticketFound.trip_id, shareUrl);
+
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(renderTripSharePage(token, ticketFound.trip_id, op.code));
+      res.end(renderTripSharePage(token, ticketFound.trip_id, op.code, initialData));
       return;
     }
 
-    if (pathname === '/manager' || pathname === '/ops' || pathname === '/manager.html' || pathname === '/admin') {
-      const distPath = path.resolve(__dirname, '../../source/manager/web_dist/index.html');
-      const htmlPath = path.resolve(__dirname, '../../docs/designs/manager_portal.html');
-      const targetPath = fs.existsSync(distPath) ? distPath : htmlPath;
-      if (fs.existsSync(targetPath)) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(fs.readFileSync(targetPath));
-        return;
-      }
+    // Public legal pages and the account deletion page (Google Play asks for both at a URL, without the app).
+    if ((req.method === 'GET' || req.method === 'HEAD') && (pathname === '/legal' || pathname.startsWith('/legal/') || pathname.startsWith('/xoa-tai-khoan'))) {
+      const legal = pathname.match(/^\/legal\/([^/]+)\/([^/]+)\/?$/);
+      const deletion = /^\/xoa-tai-khoan\/?$/.test(pathname);
+      const page = legal ? renderLegalPage(legal[1], legal[2]) : deletion ? renderAccountDeletionPage() : null;
+      res.writeHead(page ? 200 : 404, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': deletion ? 'no-store' : 'public, max-age=300',
+        'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'"
+      });
+      res.end(req.method === 'HEAD' ? undefined : page || renderLegalNotFound());
+      return;
     }
 
     // =========================================================================
@@ -278,13 +355,18 @@ export function createFleetBusServer(customServices = {}) {
     if (services.config.authMode === 'enforce' && access.kind !== 'public') {
       const auth = authenticate(req, access, pathname);
       if (!auth.ok) {
-        sendError(res, auth.message, auth.code, auth.status);
+        sendError(res, auth.message, auth.code, auth.status, auth.required_permissions ? { required_permissions: auth.required_permissions } : null);
         return;
       }
       req.identity = auth.identity;
     }
 
-    const exemptFromOperator = pathname === '/health' || pathname === '/openapi.json' || pathname === '/api/v1/openapi.json' || pathname.startsWith('/api/v1/webhooks/') || pathname.startsWith('/api/v1/platform/');
+    // Staff sign in by email, unique on the platform, so no company is named; once signed in, a company user's
+    // company comes from the token and the platform admin has none (in production a missing company is otherwise
+    // refused, which locked every office user out).
+    const staffAuth = (pathname.startsWith('/api/v1/ops/auth/') || pathname === '/api/v1/auth/staff/login')
+      && (!req.identity || req.identity.role === 'PLATFORM_ADMIN');
+    const exemptFromOperator = pathname === '/health' || pathname === '/openapi.json' || pathname === '/api/v1/openapi.json' || pathname.startsWith('/api/v1/webhooks/') || pathname.startsWith('/api/v1/platform/') || pathname === '/api/v1/legal' || staffAuth;
     if (!exemptFromOperator) {
       const opResult = resolveOperator(req, parsedUrl, req.identity, { production: isProduction() });
       if (!opResult.ok) {
@@ -295,7 +377,7 @@ export function createFleetBusServer(customServices = {}) {
       req.operatorId = opResult.operator.operator_id;
       // Every ops request the platform admin makes inside a company is recorded (spec 2.3).
       if (req.identity?.role === 'PLATFORM_ADMIN') {
-        services.managerService.recordAudit({ actor: req.identity.sub, role: 'PLATFORM_ADMIN', action: `PLATFORM_ACCESS ${req.method}`, resource: pathname, ip: req.socket?.remoteAddress || null, operator_id: req.operatorId });
+        services.managerService.recordAudit({ actor: req.identity.sub, role: 'PLATFORM_ADMIN', action: `PLATFORM_ACCESS ${req.method}`, resource: pathname, ip: clientIp(req, services.env), operator_id: req.operatorId });
       }
     }
 
@@ -307,22 +389,105 @@ export function createFleetBusServer(customServices = {}) {
     dispatchRoutes(req, res, pathname, parsedUrl);
   });
 
-  server.on('close', () => services.tenantDbs.close());
+  const reconcileIntervalMs = customServices.reconcileIntervalMs !== undefined
+    ? Number(customServices.reconcileIntervalMs)
+    : 0;
+  let reconcileTimer = null;
+  if (reconcileIntervalMs > 0) {
+    let sweepRunning = false;
+    reconcileTimer = setInterval(() => {
+      if (sweepRunning) return;
+      sweepRunning = true;
+      reconcileSweep(services).finally(() => {
+        sweepRunning = false;
+      });
+    }, reconcileIntervalMs);
+    reconcileTimer.unref();
+  }
+
+  const persistIntervalMs = customServices.persistIntervalMs !== undefined
+    ? Number(customServices.persistIntervalMs)
+    : 1000;
+  let persistTimer = null;
+  if (persistIntervalMs > 0) {
+    persistTimer = setInterval(() => {
+      store.flushIfDirty();
+    }, persistIntervalMs);
+    persistTimer.unref();
+  }
+
+  // A client on a weak network that stops sending mid-request frees its connection after 30 s, not 5 min.
+  // Only the request has to arrive in time: a live tracking stream stays open as long as it is read.
+  server.headersTimeout = 20000;
+  server.requestTimeout = 30000;
+
+  server.on('close', () => {
+    if (reconcileTimer) clearInterval(reconcileTimer);
+    if (persistTimer) clearInterval(persistTimer);
+    store.flushIfDirty();
+    services.tenantDbs.close();
+  });
 
   return { server, services };
 }
 
-export const { server, services } = createFleetBusServer();
+const defaultReconcileMs = IS_MAIN
+  ? (process.env.FLEETBUS_RECONCILE_MS !== undefined ? Number(process.env.FLEETBUS_RECONCILE_MS) : 60000)
+  : 0;
+export const { server, services } = createFleetBusServer({ reconcileIntervalMs: defaultReconcileMs });
 
 const PORT = process.env.PORT || 3000;
 
-// Release the data folder on a normal stop (Ctrl+C, service manager); writes are already stored per request.
+// Release the data folder on a normal stop (Ctrl+C, service manager); flushes pending writes before closing.
 if (IS_MAIN) {
-  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { services.tenantDbs.close(); process.exit(0); });
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {
+    services.store?.flushIfDirty();
+    services.tenantDbs.close();
+    process.exit(0);
+  });
+}
+
+export function listDevBehaviors({ webhookSecret = null, env = process.env } = {}) {
+  if (env.NODE_ENV === 'production') return [];
+  const behaviors = [
+    'OTP trả trong response (mock_otp khi yêu cầu OTP)',
+    'Khách VIP 0 đ (số điện thoại 0999888777 được đặt vé miễn phí)',
+    'Nhận "now" từ client (cho phép ghi đè thời gian qua query/body)'
+  ];
+  const usingDefaultToken = !env.FLEETBUS_TOKEN_SECRET;
+  const usingDefaultTicket = !env.FLEETBUS_TICKET_SECRET;
+  if (usingDefaultToken || usingDefaultTicket) {
+    behaviors.push('Khóa ký token/vé mặc định (dùng DEV_TOKEN_SECRET / DEV_TICKET_SECRET)');
+  }
+  const resolvedWebhook = webhookSecret !== null ? webhookSecret : env.FLEETBUS_WEBHOOK_SECRET;
+  if (resolvedWebhook === 'off') {
+    behaviors.push("Webhook 'off' (tắt kiểm tra chữ ký webhook)");
+  }
+  return behaviors;
+}
+
+export function printDevSecurityWarning(config = {}, env = process.env) {
+  if (isProduction()) return;
+  const devBehaviors = listDevBehaviors({ webhookSecret: config.webhookSecret, env });
+  if (devBehaviors.length === 0) return;
+  console.warn(`
+╔════════════════════════════════════════════════════════════════════╗
+║                  CẢNH BÁO: CHẾ ĐỘ PHÁT TRIỂN (DEV)                ║
+║        Các tính năng chỉ-dành-cho-dev ĐANG ĐƯỢC BẬT:               ║
+╠════════════════════════════════════════════════════════════════════╣
+${devBehaviors.map(b => `║  • ${b.padEnd(62)} ║`).join('\n')}
+╠════════════════════════════════════════════════════════════════════╣
+║ ⚠️  TUYỆT ĐỐI KHÔNG SỬ DỤNG CẤU HÌNH NÀY TRONG MÔI TRƯỜNG PRODUCTION ║
+╚════════════════════════════════════════════════════════════════════╝
+`);
 }
 
 if (process.env.NODE_ENV !== 'test' && IS_MAIN) {
+  // Copies of every database on a timer (H-08); FLEETBUS_BACKUP=off turns it off.
+  const backups = backupConfig(services.tenantDbs.dataDir);
+  if (backups) startBackups(services.tenantDbs, { ...backups, beforeRun: () => services.store?.flushIfDirty() });
   server.listen(PORT, () => {
+    printDevSecurityWarning(services.config);
     console.log(`
 ╔════════════════════════════════════════════════════════════════════╗
 ║                BUSGO FLEET PLATFORM API SERVER                     ║

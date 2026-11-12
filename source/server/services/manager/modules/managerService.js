@@ -8,6 +8,7 @@ import { createShareToken } from '../../passenger/core/cryptoEngine.js';
 import { DEMO_DATE, vnDate, parseServiceDate } from '../../../core/serviceDate.js';
 import { validateVietnamPhone, validatePersonName } from '../../passenger/core/formatters.js';
 import { signToken, TOKEN_PREFIXES } from '../../../core/tokens.js';
+import { PLATFORM_SCOPE } from '../../../core/tenantDb.js';
 import { hashSecret, verifySecret, LoginGuard } from '../../../core/passwords.js';
 import { verifyTotp, generateSecret } from '../../../core/totp.js';
 import { getStaffTotpSecret } from '../../../config.js';
@@ -17,7 +18,7 @@ import { MOCK_DRIVERS_DB } from '../../driver/modules/driverService.js';
 
 const POS_PAYMENT_METHODS = ['CASH_POS', 'CARD_POS', 'BANK_TRANSFER'];
 // BR-MGR-AUTH-001: these roles need a TOTP code on every login (ROLE_OPS_ADMIN and ROLE_FINANCE of the spec)
-export const TOTP_ROLES = ['FLEET_DIRECTOR', 'FINANCIAL_CONTROLLER', 'PLATFORM_ADMIN'];
+export const TOTP_ROLES = ['FLEET_DIRECTOR', 'PLATFORM_ADMIN'];
 const HOLD_POLICIES = ['UNTIL_DEPARTURE_OFFSET', 'CUSTOM_EXPIRY_MINUTES'];
 // BR-POS-006: one phone number holds at most this many seats at once across all trips
 const HOTLINE_MAX_SEATS_PER_PHONE = 4;
@@ -25,8 +26,42 @@ const HOTLINE_MAX_SEATS_PER_PHONE = 4;
 const GPS_STALE_AFTER_MS = 60 * 1000;
 const GPS_OFFLINE_AFTER_MS = 180 * 1000;
 
+export const LICENSE_MAX_CAPACITY = {
+  B2: 9,
+  C: 0,
+  FC: 0,
+  D: 30,
+  E: null
+};
+
+export function driverLicenseCapacityReason(licenseClass, capacity, plateNumber = '') {
+  const max = LICENSE_MAX_CAPACITY[licenseClass];
+  if (max === undefined || max === null) return null;
+  const vehicleText = plateNumber ? `xe ${plateNumber} ` : '';
+  if (max === 0) {
+    return `Bằng ${licenseClass} không được lái xe chở khách; ${vehicleText}có ${capacity} chỗ (gồm lái)`;
+  }
+  if (capacity > max) {
+    return `Bằng ${licenseClass} chỉ lái xe tối đa ${max} chỗ; ${vehicleText}có ${capacity} chỗ (gồm lái)`;
+  }
+  return null;
+}
+
 function auditHash(body) {
   return crypto.createHash('sha256').update(JSON.stringify(body)).digest('hex');
+}
+
+/** Revenue counted for a booking: cash bookings count only what the driver has collected. */
+function bookingRevenue(b) {
+  return b.payment_method === 'CASH' ? (b.cod_collected_vnd || 0) : b.total_fare_vnd;
+}
+
+/** A staff session token; `tv` ties it to the account's token version so it can be revoked (H-06). */
+function staffToken(user, now = Date.now()) {
+  return signToken(
+    { sub: user.user_id, role: user.role, permissions: user.permissions, kind: 'staff', operator_id: user.operator_id, tv: user.token_version || 0 },
+    { prefix: TOKEN_PREFIXES.staff, ttlSeconds: 8 * 3600, now }
+  );
 }
 
 export const MOCK_MANAGERS_DB = [
@@ -35,9 +70,13 @@ export const MOCK_MANAGERS_DB = [
     username: 'admin@busgo.vn',
     password_hash: hashSecret('admin123'),
     full_name: 'Nguyễn Tiến Dũng',
-    role: 'FLEET_DIRECTOR', // FLEET_DIRECTOR | DISPATCHER | CASHIER | FINANCIAL_CONTROLLER
+    role: 'FLEET_DIRECTOR',
     permissions: ['ALL'],
     operator_id: 'op_saomai',
+    totp_required: false,
+    active: true,
+    token_version: 0,
+    created_at: '2026-10-01T00:00:00.000Z',
     must_change_password: false
   },
   {
@@ -45,9 +84,13 @@ export const MOCK_MANAGERS_DB = [
     username: 'dispatcher@busgo.vn',
     password_hash: hashSecret('disp123'),
     full_name: 'Phạm Hồng Quân',
-    role: 'DISPATCHER',
-    permissions: ['DISPATCH_MANAGE', 'TRIP_EDIT', 'INCIDENT_BROADCAST', 'RADAR_VIEW'],
+    role: 'STAFF',
+    permissions: ['DISPATCH', 'TRIP_CANCEL', 'BOOKINGS_VIEW', 'FLEET', 'DRIVERS', 'SCHEDULES', 'AUDIT_VIEW'],
     operator_id: 'op_saomai',
+    totp_required: false,
+    active: true,
+    token_version: 0,
+    created_at: '2026-10-01T00:00:00.000Z',
     must_change_password: false
   },
   {
@@ -55,9 +98,13 @@ export const MOCK_MANAGERS_DB = [
     username: 'cashier@busgo.vn',
     password_hash: hashSecret('cash123'),
     full_name: 'Đỗ Thu Hà',
-    role: 'CASHIER',
-    permissions: ['POS_ISSUE', 'BOOKING_SEARCH'],
+    role: 'STAFF',
+    permissions: ['TICKETING', 'BOOKINGS_VIEW', 'PAYMENTS'],
     operator_id: 'op_saomai',
+    totp_required: false,
+    active: true,
+    token_version: 0,
+    created_at: '2026-10-01T00:00:00.000Z',
     must_change_password: false
   },
   {
@@ -65,9 +112,13 @@ export const MOCK_MANAGERS_DB = [
     username: 'dispatcher@xuyenviet.vn',
     password_hash: hashSecret('xv123'),
     full_name: 'Vũ Thị Lan',
-    role: 'DISPATCHER',
-    permissions: ['DISPATCH_MANAGE', 'TRIP_EDIT', 'INCIDENT_BROADCAST', 'RADAR_VIEW'],
+    role: 'STAFF',
+    permissions: ['DISPATCH', 'TRIP_CANCEL', 'BOOKINGS_VIEW', 'FLEET', 'DRIVERS', 'SCHEDULES', 'AUDIT_VIEW'],
     operator_id: 'op_xuyenviet',
+    totp_required: false,
+    active: true,
+    token_version: 0,
+    created_at: '2026-10-01T00:00:00.000Z',
     must_change_password: false
   },
   {
@@ -75,9 +126,13 @@ export const MOCK_MANAGERS_DB = [
     username: 'cashier@xuyenviet.vn',
     password_hash: hashSecret('xv123'),
     full_name: 'Hoàng Văn Tú',
-    role: 'CASHIER',
-    permissions: ['POS_ISSUE', 'BOOKING_SEARCH'],
+    role: 'STAFF',
+    permissions: ['TICKETING', 'BOOKINGS_VIEW', 'PAYMENTS'],
     operator_id: 'op_xuyenviet',
+    totp_required: false,
+    active: true,
+    token_version: 0,
+    created_at: '2026-10-01T00:00:00.000Z',
     must_change_password: false
   },
   {
@@ -89,6 +144,10 @@ export const MOCK_MANAGERS_DB = [
     role: 'PLATFORM_ADMIN',
     permissions: ['PLATFORM_ALL'],
     operator_id: null,
+    totp_required: false,
+    active: true,
+    token_version: 0,
+    created_at: '2026-10-01T00:00:00.000Z',
     must_change_password: false
   }
 ];
@@ -107,10 +166,10 @@ export class ManagerOperationsService {
 
     this.drivers = [
       // Same people, ids and licences as the driver app (DRI-001), so a driver named here can sign in and see the trip
-      { driver_id: 'drv_8821a', staff_id: 'TX8821', full_name: 'Trần Văn Bình', phone: '0912348821', license_class: 'FC', license_expiry: '2028-12-31', safety_score: 98.5, status: 'ACTIVE', operator_id: 'op_saomai' },
-      { driver_id: 'drv_9912b', staff_id: 'TX9912', full_name: 'Phạm Quốc Huy', phone: '0988776655', license_class: 'FC', license_expiry: '2028-06-30', safety_score: 96.0, status: 'ACTIVE', operator_id: 'op_saomai' },
-      { driver_id: 'drv_9902b', staff_id: 'TX9902', full_name: 'Lê Hoàng Nam', phone: '0987654321', license_class: 'FC', license_expiry: '2025-01-01', safety_score: 91.0, status: 'ACTIVE', operator_id: 'op_saomai' },
-      { driver_id: 'drv_xv_7701', staff_id: 'TX7701', full_name: 'Đỗ Minh Khoa', phone: '0901777001', license_class: 'FC', license_expiry: '2029-03-31', safety_score: 100, status: 'ACTIVE', operator_id: 'op_xuyenviet' }
+      { driver_id: 'drv_8821a', staff_id: 'TX8821', full_name: 'Trần Văn Bình', phone: '0912348821', license_class: 'E', license_expiry: '2028-12-31', safety_score: 98.5, status: 'ACTIVE', operator_id: 'op_saomai' },
+      { driver_id: 'drv_9912b', staff_id: 'TX9912', full_name: 'Phạm Quốc Huy', phone: '0988776655', license_class: 'E', license_expiry: '2028-06-30', safety_score: 96.0, status: 'ACTIVE', operator_id: 'op_saomai' },
+      { driver_id: 'drv_9902b', staff_id: 'TX9902', full_name: 'Lê Hoàng Nam', phone: '0987654321', license_class: 'E', license_expiry: '2025-01-01', safety_score: 91.0, status: 'ACTIVE', operator_id: 'op_saomai' },
+      { driver_id: 'drv_xv_7701', staff_id: 'TX7701', full_name: 'Đỗ Minh Khoa', phone: '0901777001', license_class: 'E', license_expiry: '2029-03-31', safety_score: 100, status: 'ACTIVE', operator_id: 'op_xuyenviet' }
     ];
 
     this.routes = [
@@ -147,7 +206,9 @@ export class ManagerOperationsService {
    * Entries are frozen and never edited; secrets are never written to it.
    */
   recordAudit({ actor = 'anonymous', role = null, action, resource = null, ip = null, before = null, after = null, now = Date.now(), operator_id = DEFAULT_OPERATOR_ID }) {
-    // Each company's entries form a hash chain (D127): removing or inserting an entry breaks it.
+    // Each company's entries form a hash chain (D127): removing or inserting an entry breaks it. What belongs to
+    // no company (the platform admin's own login, a login with an unknown name) has its own chain on the platform.
+    if (operator_id === null) operator_id = PLATFORM_SCOPE;
     const prev = this.auditLog.findLast(a => (a.operator_id || DEFAULT_OPERATOR_ID) === operator_id);
     const body = {
       audit_id: `aud_${now}_${this.auditLog.length + 1}`,
@@ -203,9 +264,14 @@ export class ManagerOperationsService {
       return { success: false, error: 'Tên đăng nhập hoặc mật khẩu không chính xác', code: 'INVALID_CREDENTIALS' };
     }
 
+    if (user.active === false) {
+      return { success: false, error: 'Tài khoản đã bị khóa. Liên hệ giám đốc nhà xe.', code: 'ACCOUNT_DISABLED', status: 403 };
+    }
+
     // Second factor: asked only after the password is right, so it never tells whether a password is valid.
     // An account not enrolled yet is let in with password alone because it can only reach the enrollment endpoints.
-    if (TOTP_ROLES.includes(user.role) && user.totp_enrolled !== false) {
+    const isTotpRequired = TOTP_ROLES.includes(user.role) || Boolean(user.totp_required);
+    if (isTotpRequired && user.totp_enrolled !== false) {
       if (totp === null || totp === undefined || totp === '') {
         return { success: false, error: 'Cần mã xác thực 2 bước (6 số) từ ứng dụng Authenticator', code: 'TOTP_REQUIRED' };
       }
@@ -231,10 +297,9 @@ export class ManagerOperationsService {
       return { success: false, error: OPERATOR_INACTIVE.message, code: OPERATOR_INACTIVE.code };
     }
 
-    const token = signToken(
-      { sub: user.user_id, role: user.role, permissions: user.permissions, kind: 'staff', operator_id: user.operator_id },
-      { prefix: TOKEN_PREFIXES.staff, ttlSeconds: 8 * 3600, now: mockNow }
-    );
+    user.last_login_at = new Date(mockNow).toISOString();
+
+    const token = staffToken(user, mockNow);
 
     return {
       success: true,
@@ -244,9 +309,10 @@ export class ManagerOperationsService {
           username: user.username,
           full_name: user.full_name,
           role: user.role,
-          permissions: user.permissions,
+          permissions: user.permissions || [],
+          totp_required: Boolean(user.totp_required),
           must_change_password: Boolean(user.must_change_password),
-          must_enroll_totp: Boolean(TOTP_ROLES.includes(user.role) && user.totp_enrolled === false)
+          must_enroll_totp: Boolean(isTotpRequired && user.totp_enrolled === false)
         },
         operator: publicOperatorProfile(operator),
         token
@@ -310,9 +376,12 @@ export class ManagerOperationsService {
     user.password_hash = hashSecret(new_password);
     user.must_change_password = false;
     user.totp_last_step = -1;
+    // Every other session ends (H-06); the page that changed it carries on with a new token.
+    user.token_version = (user.token_version || 0) + 1;
     return {
       success: true,
-      username: user.username
+      username: user.username,
+      token: staffToken(user)
     };
   }
 
@@ -331,6 +400,7 @@ export class ManagerOperationsService {
     delete director.totp_secret;
     delete director.pending_totp_secret;
     director.totp_last_step = -1;
+    director.token_version = (director.token_version || 0) + 1;
     this.loginGuard.succeed((director.username || '').trim().toLowerCase());
     return {
       success: true,
@@ -421,13 +491,15 @@ export class ManagerOperationsService {
    * Money figures over a set of bookings: gross fares, refunds paid back, and what is left.
    */
   _moneyFigures(bookings) {
-    const gross = bookings.reduce((sum, b) => sum + b.total_fare_vnd, 0);
+    const gross = bookings.reduce((sum, b) => sum + bookingRevenue(b), 0);
     const refunded = bookings.reduce((sum, b) => sum + (b.refund_amount_vnd || 0), 0);
     return { gross_revenue_vnd: gross, refunded_vnd: refunded, net_revenue_vnd: gross - refunded };
   }
 
-  getDashboardKPIs(operatorId = DEFAULT_OPERATOR_ID) {
+  getDashboardKPIs(operatorId = DEFAULT_OPERATOR_ID, mockNow = Date.now()) {
     this.releaseExpiredHotlineHolds();
+    const today = vnDate(mockNow);
+    this.runsForDate?.(today, operatorId);
     const round1 = (n) => parseFloat(n.toFixed(1));
     const trips = this.trips.filter(t => t.operator_id === operatorId);
     const vehicles = this.vehicles.filter(v => v.operator_id === operatorId);
@@ -439,6 +511,14 @@ export class ManagerOperationsService {
     const activeVehicles = vehicles.filter(v => v.status === 'IN_TRANSIT').length;
     const totalBookedSeats = trips.reduce((acc, t) => acc + t.booked_seats, 0);
     const totalCapacity = trips.reduce((acc, t) => acc + t.total_seats, 0);
+
+    // Today's trips and their money, by the day the trips run (D195)
+    const todayTrips = trips.filter(t => vnDate(Date.parse(t.departure_time)) === today);
+    const todayTripCount = todayTrips.length;
+    const todayTripIds = new Set(todayTrips.map(t => t.trip_id));
+    const todayBookings = bookings.filter(b => todayTripIds.has(b.trip_id));
+    const todayMoney = this._moneyFigures(todayBookings);
+    const todayRevenueVnd = todayMoney.net_revenue_vnd;
 
     // A trip leaves on time when its delay is at most 15 minutes (MGR-002)
     const onTimeTrips = trips.filter(t => (t.delay_minutes || 0) <= 15).length;
@@ -462,12 +542,14 @@ export class ManagerOperationsService {
     return {
       success: true,
       data: {
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(mockNow).toISOString(),
         kpi_metrics: {
           active_vehicles_count: activeVehicles,
           total_fleet_count: totalVehicles,
           overall_load_factor_pct: totalCapacity > 0 ? round1((totalBookedSeats / totalCapacity) * 100) : 0,
           ...this._moneyFigures(bookings),
+          today_revenue_vnd: todayRevenueVnd,
+          today_trip_count: todayTripCount,
           on_time_departure_rate_pct: trips.length > 0 ? round1((onTimeTrips / trips.length) * 100) : 100,
           active_alerts_count: alerts.length,
           fleet_average_speed_kmh: moving.length > 0 ? round1(moving.reduce((acc, v) => acc + v.speed_kmh, 0) / moving.length) : 0
@@ -478,8 +560,8 @@ export class ManagerOperationsService {
     };
   }
 
-  getOperationsDashboardKPIs(operatorId = DEFAULT_OPERATOR_ID) {
-    return this.getDashboardKPIs(operatorId);
+  getOperationsDashboardKPIs(operatorId = DEFAULT_OPERATOR_ID, mockNow = Date.now()) {
+    return this.getDashboardKPIs(operatorId, mockNow);
   }
 
   /**
@@ -726,6 +808,30 @@ export class ManagerOperationsService {
     return { success: true, data };
   }
 
+  /** Test/review account, outside production only (the caller decides). */
+  addTestDriver(operatorId = DEFAULT_OPERATOR_ID) {
+    const res = this.addDriver({
+      full_name: 'Tài xế thử nghiệm',
+      phone: '0909998821',
+      staff_id: 'TX8821',
+      license_class: 'E',
+      license_expiry: '2030-12-31'
+    }, operatorId);
+    if (!res.success) {
+      return res;
+    }
+    const driverId = res.data?.driver?.driver_id;
+    const acc = MOCK_DRIVERS_DB.find(d => d.driver_id === driverId);
+    if (acc) {
+      acc.pin = hashSecret('123456');
+      acc.must_change_pin = false;
+    }
+    if (res.data?.driver) {
+      res.data.driver.must_change_pin = false;
+    }
+    return { staff_id: 'TX8821', pin: '123456' };
+  }
+
   updateDriver(driverId, updates = {}, operatorId = DEFAULT_OPERATOR_ID) {
     const driver = this.drivers.find(d => d.driver_id === driverId && (d.operator_id || DEFAULT_OPERATOR_ID) === operatorId);
     if (!driver) {
@@ -823,7 +929,11 @@ export class ManagerOperationsService {
       const oldStatus = driver.status;
       driver.status = newStatus;
       if (acc) acc.status = newStatus;
-      if (oldStatus !== 'LOCKED' && newStatus === 'LOCKED') lockChanged = 'LOCK';
+      if (oldStatus !== 'LOCKED' && newStatus === 'LOCKED') {
+        lockChanged = 'LOCK';
+        if (acc) acc.token_version = (acc.token_version || 0) + 1;
+        driver.token_version = (driver.token_version || 0) + 1;
+      }
       else if (oldStatus === 'LOCKED' && newStatus === 'ACTIVE') lockChanged = 'UNLOCK';
     }
 
@@ -861,6 +971,10 @@ export class ManagerOperationsService {
     if (acc) {
       acc.pin = hashSecret(temporary_pin);
       acc.must_change_pin = true;
+      acc.token_version = (acc.token_version || 0) + 1;
+    }
+    if (driver) {
+      driver.token_version = (driver.token_version || 0) + 1;
     }
 
     const staffId = acc?.staff_id || driver?.staff_id;
@@ -888,14 +1002,15 @@ export class ManagerOperationsService {
     };
   }
 
-  addRoute({ name, distance_km, base_fare_vnd, stops_count = 4 }, operatorId = DEFAULT_OPERATOR_ID) {
+  addRoute({ route_id, name, distance_km, base_fare_vnd, stops_count = 4, active = true }, operatorId = DEFAULT_OPERATOR_ID) {
     const newRoute = {
-      route_id: `rt_${Date.now()}`,
+      route_id: route_id || `rt_${Date.now()}`,
       name,
       distance_km,
       base_fare_vnd,
       stops_count,
-      operator_id: operatorId
+      operator_id: operatorId,
+      active
     };
     this.routes.push(newRoute);
     return { success: true, data: newRoute };
@@ -926,7 +1041,7 @@ export class ManagerOperationsService {
           const vehicle = this.vehicles.find(v => v.vehicle_id === t.vehicle_id);
           return {
             ...t,
-            route_name: route ? route.name : t.route_id,
+            route_name: t.route_name || this._scheduleName(t.schedule_id) || (route ? route.name : t.route_id),
             driver_name: this.drivers.find(d => d.driver_id === t.driver_id)?.full_name || 'Chưa gán',
             booked_seats: t.booked_seats || 0,
             held_seats: t.held_seats || 0,
@@ -941,6 +1056,37 @@ export class ManagerOperationsService {
   /** A trip of the board; a schedule's run on another day is set up on first use (see runResolver). */
   findTrip(tripId) {
     return this.trips.find(t => t.trip_id === tripId) || this.runResolver?.(tripId) || undefined;
+  }
+
+  _resolveFareForSeats(tripId, trip, seatCodes = []) {
+    const catalogTrip = this.eventBridge?.services?.searchService?.getTripDetail?.(tripId)?.data;
+    const route = this.routes.find(r => r.route_id === (trip?.route_id || catalogTrip?.route_id));
+    const routeFare = route ? route.base_fare_vnd : 220000;
+    const catalogFare = (catalogTrip?.base_fare_vnd !== undefined && Number.isFinite(catalogTrip.base_fare_vnd))
+      ? catalogTrip.base_fare_vnd
+      : ((trip?.base_fare_vnd !== undefined && Number.isFinite(trip.base_fare_vnd)) ? trip.base_fare_vnd : routeFare);
+
+    const inventory = this._inventory();
+    const seatFares = {};
+    let totalSeatsFare = 0;
+
+    for (const code of seatCodes) {
+      const seatInfo = inventory?.getSeatInfo?.(tripId, code);
+      const price = (seatInfo && typeof seatInfo.price_vnd === 'number' && Number.isFinite(seatInfo.price_vnd))
+        ? seatInfo.price_vnd
+        : catalogFare;
+      seatFares[code] = price;
+      totalSeatsFare += price;
+    }
+
+    const farePerSeat = seatCodes.length > 0 ? seatFares[seatCodes[0]] : catalogFare;
+
+    return {
+      farePerSeat,
+      unitPrice: farePerSeat,
+      seatFares,
+      totalSeatsFare
+    };
   }
 
   /** Start and end (ms) of a trip, from the passenger catalog when it is there, else 3 h from departure. */
@@ -981,7 +1127,7 @@ export class ManagerOperationsService {
         : seatCount < sold ? `Xe ${seatCount} chỗ, chuyến đã bán ${sold} ghế`
           : missing.length > 0 ? `Xe thiếu ghế đã bán: ${missing.join(', ')}`
             : busy ? `Đang chạy chuyến ${busy.trip_id} trùng giờ` : null;
-      return { vehicle_id: v.vehicle_id, plate_number: v.plate_number, model: v.model, total_seats: seatCount, assigned: v.vehicle_id === trip.vehicle_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
+      return { vehicle_id: v.vehicle_id, plate_number: v.plate_number, model: v.model, total_seats: seatCount, capacity: seatCount + 1, assigned: v.vehicle_id === trip.vehicle_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
     });
     const drivers = this.drivers.filter(d => d.operator_id === operatorId).map(d => {
       const busy = clash('driver_id', d.driver_id);
@@ -989,7 +1135,7 @@ export class ManagerOperationsService {
         : d.status === 'LICENSE_EXPIRED' || (d.license_expiry && d.license_expiry < day) ? 'Bằng lái hết hạn vào ngày chạy'
         : d.status === 'OFF_DUTY' || d.status === 'SUSPENDED' ? 'Tài xế không làm việc'
           : busy ? `Đang chạy chuyến ${busy.trip_id} trùng giờ` : null;
-      return { driver_id: d.driver_id, staff_id: d.staff_id, full_name: d.full_name, license_expiry: d.license_expiry, assigned: d.driver_id === trip.driver_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
+      return { driver_id: d.driver_id, staff_id: d.staff_id, full_name: d.full_name, license_class: d.license_class, license_expiry: d.license_expiry, max_capacity: LICENSE_MAX_CAPACITY[d.license_class] !== undefined ? LICENSE_MAX_CAPACITY[d.license_class] : null, assigned: d.driver_id === trip.driver_id, available: !reason, reason, conflict_trip_id: busy?.trip_id || null };
     });
     return { success: true, data: { trip_id: tripId, departure_time: trip.departure_time, status: trip.status, sold_seats: sold, vehicle_id: trip.vehicle_id || null, driver_id: trip.driver_id || null, vehicles, drivers } };
   }
@@ -1029,6 +1175,26 @@ export class ManagerOperationsService {
     if (!vehicle.available && !vehicle.assigned) return { success: false, error: vehicle.reason, code: 'VEHICLE_UNAVAILABLE', conflict_trip_id: vehicle.conflict_trip_id };
     if (!driver.available && !driver.assigned) return { success: false, error: driver.reason, code: 'DRIVER_UNAVAILABLE', conflict_trip_id: driver.conflict_trip_id };
 
+    // D151: Licence validity and capacity check
+    const own = this._tripWindow(trip);
+    const day = vnDate(own.start);
+    const fullDriver = this.drivers.find(d => d.driver_id === driverId) || driver;
+    if (fullDriver.status === 'LICENSE_EXPIRED' || (fullDriver.license_expiry && fullDriver.license_expiry < day)) {
+      return { success: false, error: 'Bằng lái hết hạn vào ngày chạy', code: 'DRIVER_UNAVAILABLE' };
+    }
+
+    const vTemplate = this.layoutOfVehicle(vehicle.vehicle_id);
+    const passengerSeats = vTemplate?.seats?.length || vehicle.total_seats || 0;
+    const capacity = passengerSeats + 1;
+    const licReason = driverLicenseCapacityReason(fullDriver.license_class, capacity, vehicle.plate_number);
+    if (licReason) {
+      return {
+        success: false,
+        error: licReason,
+        code: 'DRIVER_LICENSE_INVALID'
+      };
+    }
+
     const previous = { vehicle_id: trip.vehicle_id || null, vehicle_plate: trip.vehicle_plate || null, driver_id: trip.driver_id || null };
     trip.vehicle_id = vehicle.vehicle_id;
     trip.vehicle_plate = vehicle.plate_number;
@@ -1062,6 +1228,12 @@ export class ManagerOperationsService {
    * The ops record of a schedule's run: the schedule's bus and driver (the office's default for the schedule
    * first, else the seed trip's), nothing sold yet.
    */
+  /** The name of a schedule as passengers see it (D191), for runs set up before they kept their own. */
+  _scheduleName(scheduleId) {
+    if (!scheduleId) return null;
+    return this.eventBridge?.services?.searchService?.getTripDetail?.(scheduleId)?.data?.route_name || null;
+  }
+
   createRunTrip(templateId, runTripId, trip) {
     const existing = this.trips.find(t => t.trip_id === runTripId);
     if (existing) return existing;
@@ -1073,6 +1245,8 @@ export class ManagerOperationsService {
       schedule_id: templateId,
       driver_id: preset?.driver_id || template?.driver_id || null,
       route_id: trip.route_id || template?.route_id || null,
+      // The schedule's own name: two schedules of one route can end at different places (Sầm Sơn, D191).
+      route_name: trip.route_name || template?.route_name || null,
       vehicle_id: preset?.vehicle_id || template?.vehicle_id || null,
       // No bus yet means no plate: the catalog's sample plate is not a bus the office gave.
       vehicle_plate: presetVehicle?.plate_number || template?.vehicle_plate || null,
@@ -1201,9 +1375,8 @@ export class ManagerOperationsService {
       return { success: false, error: 'Chuyến xe đã hết chỗ', code: 'TRIP_FULL' };
     }
 
-    const route = this.routes.find(r => r.route_id === trip.route_id);
-    const unitPrice = route ? route.base_fare_vnd : 220000;
-    const totalFare = seatCodes.length * unitPrice + (homePickup ? homeFeeVnd : 0);
+    const { totalSeatsFare, unitPrice } = this._resolveFareForSeats(tripId, trip, seatCodes);
+    const totalFare = totalSeatsFare + (homePickup ? homeFeeVnd : 0);
 
     const pnr = `BG-POS${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -1340,6 +1513,9 @@ export class ManagerOperationsService {
     const holdUntil = new Date(holdUntilMs).toISOString();
     const reservationId = `rsv_pos_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`;
 
+    const { farePerSeat, totalSeatsFare, seatFares } = this._resolveFareForSeats(tripId, trip, seatCodes);
+    const totalFare = totalSeatsFare + (homePickup ? homeFeeVnd : 0);
+
     const reservation = {
       reservation_id: reservationId,
       pnr: `BG-RSV-${Math.floor(100 + Math.random() * 900)}`,
@@ -1358,6 +1534,9 @@ export class ManagerOperationsService {
       notes,
       home_pickup: homePickup || null,
       home_fee_vnd: homePickup ? homeFeeVnd : 0,
+      total_fare_vnd: totalFare,
+      fare_per_seat_vnd: farePerSeat,
+      seat_fares: seatFares,
       // The SMS link to follow the bus and answer "ready" (D144).
       share_token: createShareToken(),
       operator_id: operatorId
@@ -1368,8 +1547,6 @@ export class ManagerOperationsService {
     trip.held_seats = (trip.held_seats || 0) + seatCodes.length;
 
     if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
-      const route = this.routes.find(r => r.route_id === trip.route_id);
-      const farePerSeat = route ? route.base_fare_vnd : 220000;
       this.eventBridge.emit('HOTLINE_HOLD_CREATED', {
         tripId,
         reservation,
@@ -1397,17 +1574,22 @@ export class ManagerOperationsService {
         let shouldRelease = false;
         let releaseStatus = 'EXPIRED_RELEASED';
 
+        let driverTrip = this.eventBridge?.services?.driverService?.activeTrips?.get(rsv.trip_id);
+        if (!driverTrip && this.driverService?.activeTrips) {
+          driverTrip = this.driverService.activeTrips.get(rsv.trip_id);
+        }
+
         if (trip && trip.status === 'IN_TRANSIT') {
-          const driverTrip = this.eventBridge?.services?.driverService?.activeTrips?.get(rsv.trip_id);
           if (driverTrip) {
             const pickupIndex = driverTrip.stops.findIndex(s => s.stop_id === rsv.pickup_stop_id);
-            if (pickupIndex !== -1 && driverTrip.current_stop_index > pickupIndex) {
+            if (pickupIndex !== -1 && (driverTrip.current_stop_index > pickupIndex || driverTrip.stops[pickupIndex]?.departed_at)) {
               shouldRelease = true;
               releaseStatus = 'NO_SHOW_RELEASED';
             }
           }
         } else if (mockNow > new Date(rsv.hold_until).getTime()) {
           shouldRelease = true;
+          releaseStatus = 'EXPIRED_RELEASED';
         }
 
         if (shouldRelease) {
@@ -1418,9 +1600,63 @@ export class ManagerOperationsService {
           if (trip) {
             trip.held_seats = Math.max(0, (trip.held_seats || 0) - rsv.seat_codes.length);
           }
-          
+
+          const seatStr = rsv.seat_codes.join(', ');
+          const driverSvc = this.eventBridge?.services?.driverService || this.driverService;
+          const stop = (trip?.stops || driverTrip?.stops || []).find(s => s.stop_id === rsv.pickup_stop_id);
+          const stopName = stop?.name || rsv.pickup_stop || (rsv.pickup_stop_id ? `Trạm ${rsv.pickup_stop_id}` : 'điểm đón');
+          const readable = releaseStatus === 'NO_SHOW_RELEASED'
+            ? `Nhả ghế ${seatStr} giữ qua tổng đài (khách không lên xe tại ${stopName})`
+            : `Nhả ghế ${seatStr} giữ qua tổng đài (hết hạn giữ chỗ)`;
+
+          const eventData = {
+            reservation_id: rsv.reservation_id,
+            seat_code: seatStr,
+            stop_id: rsv.pickup_stop_id || null,
+            stop_name: stopName,
+            status: releaseStatus,
+            message: readable,
+            description: readable,
+            actor: 'system'
+          };
+
+          if (driverSvc && typeof driverSvc._event === 'function') {
+            if (driverTrip) {
+              driverSvc._event(driverTrip, 'HOTLINE_HOLD_RELEASED', eventData, mockNow);
+            }
+            if (trip && trip !== driverTrip) {
+              driverSvc._event(trip, 'HOTLINE_HOLD_RELEASED', eventData, mockNow);
+            }
+          } else {
+            const eventEntry = {
+              type: 'HOTLINE_HOLD_RELEASED',
+              trip_id: rsv.trip_id,
+              at: new Date(mockNow).toISOString(),
+              ...eventData
+            };
+            if (driverTrip) {
+              if (!driverTrip.events) driverTrip.events = [];
+              driverTrip.events.push(eventEntry);
+            }
+            if (trip && trip !== driverTrip) {
+              if (!trip.events) trip.events = [];
+              trip.events.push(eventEntry);
+            }
+          }
+
+          this.recordAudit({
+            actor: 'system',
+            role: 'SYSTEM',
+            action: releaseStatus === 'NO_SHOW_RELEASED' ? 'HOTLINE_HOLD_NO_SHOW_RELEASED' : 'HOTLINE_HOLD_EXPIRED_RELEASED',
+            resource: `hotline:${rsv.reservation_id}`,
+            before: { hold_status: 'HELD_HOTLINE' },
+            after: { hold_status: releaseStatus, released_at: rsv.released_at, message: readable, seat_codes: rsv.seat_codes },
+            operator_id: rsv.operator_id || DEFAULT_OPERATOR_ID,
+            now: mockNow
+          });
+
           if (this.eventBridge && typeof this.eventBridge.emit === 'function') {
-            this.eventBridge.emit('HOTLINE_HOLD_RELEASED', { tripId: rsv.trip_id, reservationId: rsv.reservation_id });
+            this.eventBridge.emit('HOTLINE_HOLD_RELEASED', { tripId: rsv.trip_id, reservationId: rsv.reservation_id, releaseStatus, readable });
           }
 
           releasedList.push(rsv);
@@ -1440,10 +1676,10 @@ export class ManagerOperationsService {
    */
   cancelHotlineHold(reservationId, reason = 'Khách hủy yêu cầu qua điện thoại', mockNow = Date.now()) {
     const rsv = this.hotlineReservations.find(r => r.reservation_id === reservationId);
-    if (!rsv) return { success: false, error: 'Không tìm thấy thông tin giữ chỗ' };
+    if (!rsv) return { success: false, error: 'Không tìm thấy thông tin giữ chỗ', code: 'RESERVATION_NOT_FOUND' };
 
     if (rsv.hold_status === 'HELD_HOTLINE') {
-      rsv.hold_status = 'CANCELLED';
+      rsv.hold_status = 'CANCELLED_BY_STAFF';
       rsv.cancel_reason = reason;
       rsv.cancelled_at = new Date(mockNow).toISOString();
       this._inventory()?.unlockSeats(rsv.trip_id, rsv.seat_codes, `hotline:${rsv.reservation_id}`);
@@ -1590,7 +1826,7 @@ export class ManagerOperationsService {
   /**
    * MGR-022: A refund request opened by a cancellation (PAX-021) or an overdue payment (OQ-008).
    */
-  createRefundRequest({ pnr, ticket_id = null, trip_id = null, amount_vnd, reason, source = 'PASSENGER_CANCEL', policy = null, operator_id = DEFAULT_OPERATOR_ID }) {
+  createRefundRequest({ pnr, ticket_id = null, trip_id = null, amount_vnd, reason, source = 'PASSENGER_CANCEL', policy = null, operator_id = DEFAULT_OPERATOR_ID, refund_account = null }) {
     const request = {
       refund_id: `ref_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`,
       pnr,
@@ -1600,6 +1836,7 @@ export class ManagerOperationsService {
       reason,
       source,
       policy,
+      refund_account,
       status: 'REFUND_REQUESTED',
       requested_at: new Date().toISOString(),
       operator_id
@@ -1609,9 +1846,18 @@ export class ManagerOperationsService {
   }
 
   /**
+   * MGR-022: Refund requests of one company, newest first. status 'ALL' lists every request.
+   */
+  listRefundRequests({ operatorId = DEFAULT_OPERATOR_ID, status = 'REFUND_REQUESTED' } = {}) {
+    return this.refundRequests
+      .filter(r => (r.operator_id || DEFAULT_OPERATOR_ID) === operatorId && (status === 'ALL' || r.status === status))
+      .sort((a, b) => (Date.parse(b.requested_at || '') || 0) - (Date.parse(a.requested_at || '') || 0));
+  }
+
+  /**
    * MGR-022: Approve or reject an open refund request, exactly once.
    */
-  processRefundApproval(refundId, approved, notes = '', operatorId = DEFAULT_OPERATOR_ID) {
+  processRefundApproval(refundId, approved, notes = '', operatorId = DEFAULT_OPERATOR_ID, staff = null) {
     const request = this.refundRequests.find(r => r.refund_id === refundId && (!operatorId || r.operator_id === operatorId));
     if (!request) {
       return { success: false, error: 'Không tìm thấy yêu cầu hoàn tiền', code: 'REFUND_NOT_FOUND' };
@@ -1619,10 +1865,14 @@ export class ManagerOperationsService {
     if (request.status !== 'REFUND_REQUESTED') {
       return { success: false, error: `Yêu cầu hoàn tiền đã được xử lý (${request.status})`, code: 'REFUND_ALREADY_PROCESSED' };
     }
+    if (!approved && String(notes || '').trim().length < 3) {
+      return { success: false, error: 'Từ chối hoàn tiền cần ghi lý do (ít nhất 3 ký tự)', code: 'REASON_REQUIRED' };
+    }
 
     request.status = approved ? 'REFUNDED' : 'REFUND_REJECTED';
     request.notes = notes;
     request.processed_at = new Date().toISOString();
+    request.processed_by = staff;
 
     if (approved) {
       const booking = this.bookings.find(b => b.pnr === request.pnr);
@@ -1652,7 +1902,7 @@ export class ManagerOperationsService {
     const bookings = this.bookings.filter(b => trips.some(t => t.trip_id === b.trip_id) && inPeriod(b));
     const money = this._moneyFigures(bookings);
     const share = (channels) => money.gross_revenue_vnd > 0
-      ? round1((bookings.filter(b => channels.includes(b.channel)).reduce((sum, b) => sum + b.total_fare_vnd, 0) / money.gross_revenue_vnd) * 100)
+      ? round1((bookings.filter(b => channels.includes(b.channel)).reduce((sum, b) => sum + bookingRevenue(b), 0) / money.gross_revenue_vnd) * 100)
       : 0;
 
     const delays = trips.map(t => t.delay_minutes || 0);

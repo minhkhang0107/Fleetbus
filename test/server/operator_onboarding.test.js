@@ -104,7 +104,7 @@ describe('Operator onboarding: company creation, director account, password chan
     assert.strictEqual(loginRes.status, 200, JSON.stringify(loginRes.body));
     assert.strictEqual(loginRes.body.data.user.must_change_password, true);
     assert.strictEqual(loginRes.body.data.user.must_enroll_totp, true);
-    const directorToken = loginRes.body.data.token;
+    let directorToken = loginRes.body.data.token;
 
     // 4. Director gets 403 PASSWORD_CHANGE_REQUIRED on /ops/drivers
     const blockedRes = await request('/api/v1/ops/drivers', { token: directorToken });
@@ -151,6 +151,7 @@ describe('Operator onboarding: company creation, director account, password chan
       body: { current_password: tempPassword, new_password: 'NewStrongPassword123' }
     });
     assert.strictEqual(changeRes.status, 200, JSON.stringify(changeRes.body));
+    directorToken = changeRes.body.data.token;
 
     // Audit check for PASSWORD_CHANGE
     const changeAudit = services.managerService.auditLog.find(a => a.action === 'PASSWORD_CHANGE' && a.resource === 'director@baonga.vn');
@@ -287,7 +288,7 @@ describe('Operator onboarding: company creation, director account, password chan
     assert.strictEqual(resetLogin.status, 200);
     assert.strictEqual(resetLogin.body.data.user.must_change_password, true);
     assert.strictEqual(resetLogin.body.data.user.must_enroll_totp, true);
-    const resetToken = resetLogin.body.data.token;
+    let resetToken = resetLogin.body.data.token;
 
     // Password change required first
     const resetBlockedPass = await request('/api/v1/ops/drivers', { token: resetToken });
@@ -301,6 +302,7 @@ describe('Operator onboarding: company creation, director account, password chan
       body: { current_password: newTempPassword, new_password: 'AfterResetStrongPass456' }
     });
     assert.strictEqual(afterResetChange.status, 200);
+    resetToken = afterResetChange.body.data.token;
 
     // After password change, TOTP enrollment is required again
     const resetBlockedTotp = await request('/api/v1/ops/drivers', { token: resetToken });

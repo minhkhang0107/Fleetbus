@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:http/http.dart' as http;
@@ -18,6 +19,7 @@ String newManagerIdempotencyKey() {
 class ManagerApiService {
   final String baseUrl;
   final http.Client _client;
+  final Duration timeout;
 
   /// Session token of the signed-in staff member (set by [login]).
   String? authToken;
@@ -26,6 +28,7 @@ class ManagerApiService {
     String? baseUrl,
     http.Client? client,
     this.authToken,
+    this.timeout = const Duration(seconds: 20),
   })  : baseUrl = baseUrl ?? const String.fromEnvironment('API_BASE_URL', defaultValue: 'http://localhost:3000/api/v1'),
         _client = client ?? http.Client();
 
@@ -42,7 +45,13 @@ class ManagerApiService {
 
   Future<Map<String, dynamic>> _get(String path, {Map<String, String>? query}) async {
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
-    return _decode(await _client.get(uri, headers: _headers()));
+    return _decode(await _client.get(uri, headers: _headers()).timeout(timeout));
+  }
+
+  /// A GET answered with a file (CSV), returned as text.
+  Future<String> _getText(String path, {Map<String, String>? query}) async {
+    final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
+    return utf8.decode((await _client.get(uri, headers: _headers()).timeout(timeout)).bodyBytes);
   }
 
   Future<Map<String, dynamic>> _post(
@@ -55,17 +64,22 @@ class ManagerApiService {
       Uri.parse('$baseUrl$path'),
       headers: _headers(idempotencyKey: idempotent ? (idempotencyKey ?? newManagerIdempotencyKey()) : null),
       body: body == null ? null : jsonEncode(body),
-    );
+    ).timeout(timeout);
+    return _decode(response);
+  }
+
+  Future<Map<String, dynamic>> _put(String path, {Object? body}) async {
+    final response = await _client.put(Uri.parse('$baseUrl$path'), headers: _headers(), body: body == null ? null : jsonEncode(body)).timeout(timeout);
     return _decode(response);
   }
 
   Future<Map<String, dynamic>> _patch(String path, {Object? body}) async {
-    final response = await _client.patch(Uri.parse('$baseUrl$path'), headers: _headers(), body: body == null ? null : jsonEncode(body));
+    final response = await _client.patch(Uri.parse('$baseUrl$path'), headers: _headers(), body: body == null ? null : jsonEncode(body)).timeout(timeout);
     return _decode(response);
   }
 
   Future<Map<String, dynamic>> _delete(String path) async {
-    return _decode(await _client.delete(Uri.parse('$baseUrl$path'), headers: _headers()));
+    return _decode(await _client.delete(Uri.parse('$baseUrl$path'), headers: _headers()).timeout(timeout));
   }
 
   // MGR-001 / MGR-029: RBAC Login. Five wrong passwords lock the account (429 ACCOUNT_LOCKED).
@@ -242,6 +256,48 @@ class ManagerApiService {
     return _get('/ops/routes');
   }
 
+  // MGR-011: Usable stations of the company
+  Future<Map<String, dynamic>> getStations() {
+    return _get('/ops/stations');
+  }
+
+  // MGR-011: Add a station or roadside stop
+  Future<Map<String, dynamic>> addStation(
+    Map<String, dynamic> station, {
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/stations',
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+      body: station,
+    );
+  }
+
+  // MGR-011: Create a new route with its first schedule
+  Future<Map<String, dynamic>> addRoute(
+    Map<String, dynamic> route, {
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/routes',
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+      body: route,
+    );
+  }
+
+  // MGR-011: Rename or close a route
+  Future<Map<String, dynamic>> updateRoute(
+    String routeId,
+    Map<String, dynamic> changes,
+  ) {
+    return _patch(
+      '/ops/routes/${Uri.encodeComponent(routeId)}',
+      body: changes,
+    );
+  }
+
   // MGR-010: Trip list
   Future<Map<String, dynamic>> getTrips() {
     return _get('/ops/trips');
@@ -260,6 +316,11 @@ class ManagerApiService {
   // MGR-014: Dispatch Board
   Future<Map<String, dynamic>> getDispatchBoard() {
     return _get('/ops/dispatch/matrix');
+  }
+
+  // MGR-014: Holds of a trip kept through the hotline
+  Future<Map<String, dynamic>> getHotlineHolds(String tripId) {
+    return _get('/ops/trips/$tripId/hotline-holds');
   }
 
   // MGR-017: Booking search (phones are masked unless the role is the admin)
@@ -326,6 +387,15 @@ class ManagerApiService {
     );
   }
 
+  // MGR-020: Cancel a hotline seat hold, releasing its seats
+  Future<Map<String, dynamic>> cancelHotlineHold(String reservationId, {String? idempotencyKey}) {
+    return _post(
+      '/ops/pos/hotline-holds/$reservationId/cancel',
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
   // MGR-013: Block seats for a technical reason (a reason is required) or open them again
   Future<Map<String, dynamic>> setSeatLock(
     String tripId, {
@@ -352,11 +422,42 @@ class ManagerApiService {
     );
   }
 
+  // MGR-022: Refund requests of the company, newest first (open ones by default, status ALL for every one)
+  Future<Map<String, dynamic>> getRefunds({String? status}) {
+    return _get('/ops/refunds', query: status == null ? null : {'status': status});
+  }
+
   // MGR-022: Approve or reject a refund request, once
   Future<Map<String, dynamic>> processRefund(String refundId, {required bool approved, String? notes, String? idempotencyKey}) {
     return _post(
       '/ops/refunds/$refundId/process',
       body: {'approved': approved, if (notes != null) 'notes': notes},
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  // MGR-022: Completed trips cash handovers for depot/cashier settlement
+  Future<Map<String, dynamic>> getCashHandovers({String status = 'PENDING', String? date}) {
+    return _get('/ops/cash-handovers', query: {
+      'status': status,
+      if (date != null) 'date': date,
+    });
+  }
+
+  // MGR-022: Confirm driver's cash handover
+  Future<Map<String, dynamic>> confirmCashHandover(
+    String tripId, {
+    required int receivedVnd,
+    String? note,
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/cash-handovers/$tripId/confirm',
+      body: {
+        'received_vnd': receivedVnd,
+        if (note != null) 'note': note,
+      },
       idempotent: true,
       idempotencyKey: idempotencyKey,
     );
@@ -420,6 +521,11 @@ class ManagerApiService {
     });
   }
 
+  // MGR-025: money in and out of a period as CSV text for the accountant (UTF-8 with BOM)
+  Future<String> getPaymentsCsv({required String from, required String to}) {
+    return _getText('/ops/reports/payments.csv', query: {'from': from, 'to': to});
+  }
+
   // MGR-028: Audit log (who did what, to what, from where, before and after)
   Future<Map<String, dynamic>> getAuditLogs() {
     return _get('/ops/audit-logs');
@@ -452,6 +558,43 @@ class ManagerApiService {
     return _delete('/ops/promo-banners/${Uri.encodeComponent(bannerId)}');
   }
 
+  // MGR-035: Discount codes of the company, with uses so far and status LIVE / SCHEDULED / ENDED / USED_UP / OFF (director only)
+  Future<Map<String, dynamic>> getVouchers() {
+    return _get('/ops/vouchers');
+  }
+
+  // MGR-035: New code { code, discount_type FIXED|PERCENT, discount_value, max_discount_vnd, min_order_vnd, starts_at, ends_at, usage_limit, per_customer_limit }
+  Future<Map<String, dynamic>> createVoucher(Map<String, dynamic> voucher, {String? idempotencyKey}) {
+    return _post('/ops/vouchers', body: voucher, idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-035: Edit some fields of a code; fields left out are kept, the code itself never changes
+  Future<Map<String, dynamic>> updateVoucher(String code, Map<String, dynamic> fields) {
+    return _patch('/ops/vouchers/${Uri.encodeComponent(code)}', body: fields);
+  }
+
+  // MGR-035: Switch a code on or off for passengers
+  Future<Map<String, dynamic>> setVoucherActive(String code, {required bool active, String? idempotencyKey}) {
+    final id = Uri.encodeComponent(code);
+    if (active) return _post('/ops/vouchers/$id/activate', idempotent: true, idempotencyKey: idempotencyKey);
+    return _post('/ops/vouchers/$id/deactivate', idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-036: The company's own profile: name, code and payee are read-only, contact info is editable
+  Future<Map<String, dynamic>> getCompany() {
+    return _get('/ops/company');
+  }
+
+  // MGR-036: Change the company's hotline, support_email or address (director only)
+  Future<Map<String, dynamic>> updateCompanyContact(Map<String, dynamic> fields) {
+    return _patch('/ops/company', body: fields);
+  }
+
+  // MGR-035: Delete a code nobody has used (409 VOUCHER_IN_USE otherwise: switch it off instead)
+  Future<Map<String, dynamic>> deleteVoucher(String code) {
+    return _delete('/ops/vouchers/${Uri.encodeComponent(code)}');
+  }
+
   // MGR-032: Fixed timetable (schedules) and the routes a new one may run on
   Future<Map<String, dynamic>> getSchedules() {
     return _get('/ops/schedules');
@@ -475,6 +618,11 @@ class ManagerApiService {
   // MGR-014 (D131): Cancel one day's departure; every ticket is refunded in full and its passenger told
   Future<Map<String, dynamic>> cancelTrip(String tripId, {required String reason, String? idempotencyKey}) {
     return _post('/ops/trips/${Uri.encodeComponent(tripId)}/cancel', body: {'reason': reason}, idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-014 (D189): End a trip the driver left running; passengers not picked up are refunded
+  Future<Map<String, dynamic>> endTrip(String tripId, {required String reason, String? idempotencyKey}) {
+    return _post('/ops/trips/${Uri.encodeComponent(tripId)}/end', body: {'reason': reason}, idempotent: true, idempotencyKey: idempotencyKey);
   }
 
   // MGR-014 (D131): Stop (open: false) or resume (open: true) online sales of a departure
@@ -515,5 +663,79 @@ class ManagerApiService {
   // MGR-007: Delete seat layout template
   Future<Map<String, dynamic>> deleteSeatLayout(String layoutId) {
     return _delete('/ops/seat-layouts/${Uri.encodeComponent(layoutId)}');
+  }
+
+  // MGR-037: Online orders waiting for money (director, cashier, finance controller)
+  Future<Map<String, dynamic>> getPendingPayments() {
+    return _get('/ops/pending-payments');
+  }
+
+  // MGR-037: Manually confirm payment for a pending order (director, cashier, finance controller)
+  Future<Map<String, dynamic>> confirmOrderPayment(
+    String orderId, {
+    required int amountVnd,
+    required String note,
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/orders/${Uri.encodeComponent(orderId)}/confirm-payment',
+      body: {'amount_vnd': amountVnd, 'note': note},
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  // MGR-037: Bank transfer records of the company, newest first (optional outcome filter, e.g. UNMATCHED)
+  Future<Map<String, dynamic>> getBankTransactions({String? outcome}) {
+    return _get('/ops/bank-transactions', query: outcome == null ? null : {'outcome': outcome});
+  }
+
+  // MGR-037: Assign an unmatched bank transfer to a booking PNR (director, finance controller)
+  Future<Map<String, dynamic>> assignBankTransaction(
+    String txId, {
+    required String pnr,
+    String? idempotencyKey,
+  }) {
+    return _post(
+      '/ops/bank-transactions/${Uri.encodeComponent(txId)}/assign',
+      body: {'pnr': pnr},
+      idempotent: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  // MGR-038: Payment methods and transfer provider configuration (director, finance controller)
+  Future<Map<String, dynamic>> getPaymentSettings() {
+    return _get('/ops/payment-settings');
+  }
+
+  // MGR-038: Update payment methods, transfer provider and gateway credentials (director only)
+  Future<Map<String, dynamic>> updatePaymentSettings(Map<String, dynamic> settings) {
+    return _put('/ops/payment-settings', body: settings);
+  }
+
+  // MGR-038: Test connection to the configured payment gateway (director only)
+  Future<Map<String, dynamic>> testPaymentSettings({Map<String, dynamic>? body}) {
+    return _post('/ops/payment-settings/test', body: body);
+  }
+
+  // MGR-038: Staff accounts (director only)
+  Future<Map<String, dynamic>> getStaff() {
+    return _get('/ops/staff');
+  }
+
+  // MGR-038: Create a staff account (director only)
+  Future<Map<String, dynamic>> createStaff(Map<String, dynamic> staff, {String? idempotencyKey}) {
+    return _post('/ops/staff', body: staff, idempotent: true, idempotencyKey: idempotencyKey);
+  }
+
+  // MGR-038: Update staff account details or status (director only)
+  Future<Map<String, dynamic>> updateStaff(String userId, Map<String, dynamic> patch) {
+    return _patch('/ops/staff/${Uri.encodeComponent(userId)}', body: patch);
+  }
+
+  // MGR-038: Reset staff temporary password (director only)
+  Future<Map<String, dynamic>> resetStaffPassword(String userId, {String? idempotencyKey}) {
+    return _post('/ops/staff/${Uri.encodeComponent(userId)}/reset-password', body: {}, idempotent: true, idempotencyKey: idempotencyKey);
   }
 }
